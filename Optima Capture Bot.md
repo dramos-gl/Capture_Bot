@@ -1,560 +1,158 @@
 # 🚀 Optima Capture Bot — Plan Maestro Operativo (MVP v1.1)
 
-## 📌 Visión del Producto
+## 1. Visión del Producto
 
 ### Objetivo Estratégico
 
-Desarrollar una plataforma local de automatización operativa capaz de:
+Crear una herramienta local que automatice consultas SATQ, timbrado CFDI y descarga de documentos desde un archivo de control.
 
-* capturar referencias,
-* consultar información en SATQ,
-* descargar facturas automáticamente,
-* organizar archivos por lotes,
-* mantener trazabilidad total,
-* recuperar procesos interrumpidos,
-* y ofrecer monitoreo visual en tiempo real mediante una interfaz gráfica moderna.
-
----
-
-# 🎯 Objetivo del MVP
-
-El MVP NO busca:
-
-* escalamiento masivo,
-* multiusuario,
-* procesamiento distribuido,
-* arquitectura enterprise.
-
-El MVP busca:
-
-> Automatización estable, auditable y controlada para un único operador local.
-
----
-
-# 🧠 Principios del Producto
-
-## 1. Resiliencia Operativa
-
-El sistema debe poder:
-
-* recuperarse de errores,
-* continuar tras apagones,
+El producto está diseñado para:
+* reducir intervención manual,
+* conservar trazabilidad,
 * evitar duplicados,
-* registrar evidencia.
+* permitir control de pausas y detenciones seguras.
 
 ---
 
-## 2. Observabilidad Total
+## 2. Estado actual del MVP
 
-El operador nunca debe quedarse “a ciegas”.
+### Funcionalidades implementadas
+* Carga de Excel configurable.
+* Validación de RFC y referencias.
+* Detección de duplicados internos en el lote.
+* Automatización de navegador con Playwright.
+* Consulta de referencias en SATQ.
+* Timbrado de CFDI y descarga de PDFs.
+* Persistencia de estados en Excel.
+* Logs y auditoría en CSV.
 
-El sistema mostrará:
-
-* avance,
-* estado actual,
-* logs,
-* errores,
-* screenshots,
-* métricas básicas.
-
----
-
-## 3. Control Humano
-
-El operador conserva control operativo:
-
-* pausar,
-* reanudar,
-* detener,
-* revisar errores.
+### Funcionalidades previstas en desarrollo
+* Gestión de errores en UI con efecto real en el flujo.
+* Capturas automáticas de evidencia en fallos.
+* Login manual real como control de inicio de sesión.
+* Exportación integrada de carpetas de lote.
 
 ---
 
-## 4. Arquitectura Evolutiva
-
-Aunque el MVP será local:
-
-* la arquitectura se diseñará preparada para crecer.
-
----
-
-# 🏗️ Arquitectura General MVP
+## 3. Arquitectura actual
 
 ```plaintext
-┌──────────────────────────────┐
-│      CustomTkinter UI        │
-└──────────────┬───────────────┘
-               │
-┌──────────────▼───────────────┐
-│      Orquestador Bot         │
-└──────────────┬───────────────┘
-               │
-     ┌─────────┴─────────┐
-     │                   │
-┌────▼─────┐      ┌──────▼──────┐
-│ Validator│      │ Playwright  │
-└────┬─────┘      └──────┬──────┘
-     │                   │
-┌────▼─────────┐  ┌──────▼──────┐
-│ SQLite/Excel │  │ Descargador │
-└────┬─────────┘  └──────┬──────┘
-     │                   │
-┌────▼───────────────────▼──────┐
-│ Logs + Screenshots + Auditoría│
-└───────────────────────────────┘
+main.py
+  └─ inicializa entorno y logging
+  └─ carga settings y Excel
+  └─ crea cola de eventos
+  └─ inicia UI
+
+app/
+  ├─ gui.py             # Interface operativa del bot
+  ├─ orchestrator.py    # Flujo de procesamiento y coordinación
+  ├─ scraper.py         # Interacción con portal SATQ via Playwright
+  ├─ excel_handler.py   # Lectura/escritura segura de Excel
+  ├─ validator.py       # Validación de RFC, referencia y duplicados
+  ├─ settings.py        # Configuración persistente en JSON
+  ├─ paths.py           # Rutas de carpetas y directorios de soporte
 ```
 
 ---
 
-# 🖥️ Interfaz Gráfica (CustomTkinter)
+## 4. Flujo funcional principal
 
-## Objetivo de la UI
-
-La interfaz NO será decorativa.
-
-Su propósito será:
-
-* control operativo,
-* monitoreo,
-* diagnóstico,
-* confianza operacional.
-
----
-
-# 🎛️ Componentes Principales UI
-
----
-
-## 1. Panel Estado General
-
-### Mostrará:
-
-* Estado sistema
-* SATQ conectado/desconectado
-* Sesión activa
-* Operador actual
-* Tiempo ejecución
-
-### Ejemplo:
-
-```plaintext
-Estado Sistema: EN EJECUCIÓN
-Sesión SATQ: ACTIVA
-Tiempo Total: 00:21:33
-```
+1. `main.py` crea carpetas y configura logging.
+2. Se carga la ruta de Excel desde `settings.json` o `Optima_Capture_Bot.xlsx`.
+3. Se crea un hilo de trabajo para mantener la UI responsiva.
+4. `BotOrchestrator` carga el catálogo y los registros del Excel.
+5. Se ejecuta la validación previa:
+   * RFC de la empresa,
+   * formato de referencia,
+   * duplicados internos.
+6. Se abre un navegador visible con perfil persistente.
+7. Se procesa cada referencia:
+   * busca en SATQ,
+   * detecta si está generada,
+   * genera CFDI si es necesario,
+   * descarga PDFs,
+   * actualiza Excel.
+8. El estado final de cada fila se escribe en el archivo Excel.
 
 ---
 
-## 2. Panel Métricas Operativas
+## 5. Componentes clave
 
-### KPIs visibles:
+### 5.1 `app/gui.py`
+* Construye la UI con CustomTkinter.
+* Envía comandos de usuario al orquestador.
+* Consume eventos de la cola para actualizar métricas, logs y estado.
+* Permite seleccionar Excel, carpeta de descargas y cambiar la URL SATQ.
 
-| Métrica     | Descripción            |
-| ----------- | ---------------------- |
-| Pendientes  | Registros sin procesar |
-| Procesados  | Total completados      |
-| Exitosos    | Descargas correctas    |
-| Errores     | Registros fallidos     |
-| Reintentos  | Intentos automáticos   |
-| Lote Actual | Carpeta activa         |
+### 5.2 `app/orchestrator.py`
+* Coordina el proceso completo.
+* Gestiona estados de ejecución, pausar, reanudar y detener.
+* Ejecuta validaciones previas y la lógica por fila.
+* Usa un callback para decidir timbrado en modo asistido.
 
----
+### 5.3 `app/scraper.py`
+* Inicializa Playwright con Chrome o Edge real.
+* Navega al portal SATQ.
+* Rellena referencias, RFC, razón social y código postal.
+* Decide los escenarios: no generada, ya generada, inválida o desconocida.
+* Descarga los PDFs generados.
 
-## 3. Panel Registro Actual
+### 5.4 `app/excel_handler.py`
+* Lee hojas `Catalogo_RFC` y `Control_Referencias`.
+* Actualiza filas de Excel de forma atómica.
+* Crea copias de seguridad temporales antes de guardar.
 
-### Información:
+### 5.5 `app/validator.py`
+* Valida formato de RFC.
+* Valida sintaxis de referencia.
+* Detecta duplicados locales en el lote.
 
-* referencia actual,
-* RFC,
-* estado,
-* tiempo individual,
-* acción actual.
-
-### Ejemplo:
-
-```plaintext
-Referencia: REF-000245
-RFC: XAXX010101000
-Estado: EN_PROCESO
-Acción: Descargando PDF
-```
-
----
-
-## 4. Consola Log Tiempo Real
-
-## Objetivo
-
-Mostrar trazabilidad operativa viva.
-
-### Ejemplo:
-
-```plaintext
-[10:31:02] Sistema iniciado
-[10:31:05] SATQ disponible
-[10:31:08] Procesando REF-000245
-[10:31:15] Factura localizada
-[10:31:18] PDF descargado
-[10:31:19] Estado EXITOSO
-```
+### 5.6 `app/settings.py`
+* Persiste configuración en `settings.json`.
+* Devuelve rutas y modo de operación.
 
 ---
 
-# ⚠️ Gestión Visual de Errores
+## 6. Limitaciones actuales (QA)
 
-## Reglas
+### 6.1 Inconsistencias entre UI y flujo real
+* El bot muestra controles de gestión de errores avanzados, pero esas acciones no están completamente enlazadas al proceso.
+* Los botones `Reintentar Registro`, `Omitir Registro` y `Revisión Manual` no realizan cambios automáticos en Excel.
 
-Los errores:
+### 6.2 Funcionalidad de captura de pantalla
+* La clase `SatqScraper` define `capturar_pantalla()`.
+* Sin embargo, no existe una llamada a esa función en el flujo principal de `procesar_registro()`.
 
-* NO se ocultan,
-* NO se silencian,
-* NO se resumen ambiguamente.
+### 6.3 Login manual no utilizado
+* El código contiene lógica para esperar login manual.
+* En el flujo actual, el orquestador asume que no se requiere autenticación y continúa directamente.
 
----
-
-## Ejemplo:
-
-```plaintext
-ERROR_VALIDACION
-Referencia: REF-000381
-Motivo: RFC inválido
-```
+### 6.4 Dependencias técnicas
+* Playwright requiere Chrome o Edge instalados en Windows.
+* El archivo Excel debe permanecer cerrado durante los guardados.
 
 ---
 
-## Funcionalidades:
+## 7. Principales mejoras recomendadas
 
-* abrir screenshot,
-* abrir log detallado,
-* reintentar registro,
-* marcar revisión manual.
-
----
-
-# 🧩 Controles Operativos
-
-| Acción             | Obligatorio |
-| ------------------ | ----------- |
-| Iniciar            | Sí          |
-| Pausar             | Sí          |
-| Reanudar           | Sí          |
-| Detener seguro     | Sí          |
-| Reintentar errores | Sí          |
-| Abrir carpeta lote | Sí          |
-| Exportar logs      | Sí          |
+1. Vincular las acciones de error de la UI a cambios concretos en el Excel.
+2. Activar capturas de pantalla automáticas en cada fallo crítico.
+3. Implementar un flujo de login/manual cuando el portal lo demande.
+4. Añadir un botón para abrir la carpeta de lote activa directamente desde la UI.
+5. Mejorar la documentación de la estructura de Excel con ejemplos de plantilla.
 
 ---
 
-# 🛡️ Máquina de Estados Oficial
+## 8. Recomendaciones de operación para el Product Owner
 
-| Estado             | Descripción         |
-| ------------------ | ------------------- |
-| PENDIENTE          | Sin procesar        |
-| VALIDADO           | Validación correcta |
-| EN_PROCESO         | Ejecutándose        |
-| EXITOSO            | Descarga correcta   |
-| ERROR_REINTENTABLE | Timeout/red         |
-| ERROR_VALIDACION   | Datos inválidos     |
-| ERROR_PORTAL       | Fallo SATQ          |
-| DUPLICADO          | Ya existente        |
-| REQUIERE_REVISION  | Ambiguo/manual      |
-| OMITIDO            | Ignorado            |
+* Mantener `Modo Autónomo` para lotes grandes cuando los datos sean confiables.
+* Usar `Modo Asistido` para pruebas o lotes nuevos.
+* Revisar `logs/optima_capture_bot.log` antes de ejecutar el bot en producción.
+* No editar manualmente los archivos de configuración sin respaldo.
 
 ---
 
-# 🔎 Módulo Validación Previa
+## 9. Estado de despliegue
 
-## Objetivo
-
-Evitar automatizar datos defectuosos.
-
----
-
-## Validaciones Obligatorias
-
-| Validación           | Prioridad |
-| -------------------- | --------- |
-| RFC válido           | Alta      |
-| Referencia vacía     | Alta      |
-| Longitud referencia  | Alta      |
-| Caracteres inválidos | Alta      |
-| Duplicados internos  | Alta      |
-| CP válido            | Media     |
-
----
-
-# 🧠 Sistema Anti-Duplicados
-
-## Estrategia
-
-Generar hash:
-
-```plaintext
-RFC + REFERENCIA + FECHA
-```
-
----
-
-## Validaciones:
-
-* antes procesamiento,
-* antes descarga,
-* antes escritura.
-
----
-
-# 📂 Estructura Directorios
-
-```plaintext
-Optima_Capture_Bot/
-│
-├── app/
-├── data/
-├── logs/
-├── screenshots/
-├── downloads/
-│    ├── Lote_1/
-│    ├── Lote_2/
-│
-├── config/
-├── exports/
-└── temp/
-```
-
----
-
-# 📸 Evidencia Automática
-
-## Capturas automáticas:
-
-| Evento           | Screenshot |
-| ---------------- | ---------- |
-| Error SATQ       | Sí         |
-| Timeout          | Sí         |
-| Error descarga   | Sí         |
-| Error validación | Sí         |
-
----
-
-# 🧾 Sistema Logs
-
-## Formato:
-
-```plaintext
-[Timestamp] [Nivel] [Referencia] Mensaje
-```
-
-## Ejemplo:
-
-```plaintext
-[10:31:18] [INFO] [REF-000245] PDF descargado
-```
-
----
-
-# 🧱 Persistencia de Datos
-
-# MVP Inicial
-
-## Recomendación:
-
-SQLite + exportación Excel.
-
----
-
-# Razón
-
-Excel:
-
-* NO es transaccional,
-* puede corromperse,
-* tiene locking deficiente.
-
-SQLite:
-
-* ligero,
-* local,
-* estable,
-* idempotente.
-
----
-
-# 📦 Gestión de Lotes
-
-## Regla Operativa
-
-Máximo:
-
-* 50 registros por lote.
-
----
-
-## Resultado:
-
-```plaintext
-downloads/
- ├── Lote_1/
- ├── Lote_2/
- ├── Lote_3/
-```
-
----
-
-# 🔄 Recuperación Automática
-
-## Objetivo
-
-Recuperar operación tras:
-
-* apagón,
-* cierre,
-* error red,
-* crash.
-
----
-
-## Estrategia
-
-Al iniciar:
-
-* ignorar EXITOSOS,
-* reanudar PENDIENTES,
-* detectar EN_PROCESO interrumpidos.
-
----
-
-# 🌐 Motor Automatización
-
-## Tecnología:
-
-### Python + Playwright
-
----
-
-# Estrategias:
-
-| Función    | Estrategia   |
-| ---------- | ------------ |
-| Login      | Humano       |
-| Captcha    | Humano       |
-| Navegación | Automatizada |
-| Delays     | Aleatorios   |
-| Selectores | Robustos     |
-| Reintentos | Inteligentes |
-
----
-
-# ⚙️ Estrategia Anti-Bloqueo
-
-## Implementar:
-
-* delays aleatorios,
-* navegación humana parcial,
-* perfiles persistentes,
-* viewport dinámico.
-
----
-
-# 📈 KPIs MVP
-
-| KPI                 | Objetivo |
-| ------------------- | -------- |
-| Éxito automático    | >95%     |
-| Tiempo promedio     | <20s     |
-| Recuperación fallos | 100%     |
-| Duplicados          | 0        |
-| Errores críticos    | <2%      |
-
----
-
-# 📅 Roadmap Oficial
-
-# Sprint 1 — Base Operativa
-
-## Objetivo
-
-Infraestructura mínima estable.
-
-### Entregables
-
-* estructura carpetas,
-* SQLite,
-* UI base,
-* logs,
-* validaciones.
-
----
-
-# Sprint 2 — Automatización SATQ
-
-## Entregables
-
-* Playwright,
-* login manual,
-* navegación,
-* procesamiento secuencial.
-
----
-
-# Sprint 3 — Descargas y Lotes
-
-## Entregables
-
-* PDFs,
-* batching,
-* screenshots,
-* control errores.
-
----
-
-# Sprint 4 — Resiliencia
-
-## Entregables
-
-* recuperación automática,
-* chaos testing,
-* métricas,
-* estabilización.
-
----
-
-# 🚫 Fuera del Alcance MVP
-
-## NO incluir inicialmente:
-
-* multiusuario,
-* PostgreSQL,
-* cloud,
-* OCR,
-* IA,
-* dashboards ejecutivos,
-* paralelismo masivo.
-
----
-
-# ✅ Criterios Go-Live
-
-El sistema se considerará listo cuando:
-
-* procese lotes completos sin duplicados,
-* recupere interrupciones,
-* mantenga logs auditables,
-* genere lotes correctamente,
-* muestre trazabilidad completa en UI.
-
----
-
-# 🎯 Conclusión Estratégica
-
-El éxito del proyecto NO dependerá únicamente de Playwright.
-
-Dependerá de:
-
-* resiliencia,
-* observabilidad,
-* control operativo,
-* y confianza del operador.
-
-El MVP debe priorizar:
-
-> estabilidad operativa antes que sofisticación tecnológica.
+La aplicación está en estado de **MVP funcional**, con el núcleo de automatización operativo y una interfaz usable.
+Faltan mejoras de robustez en la gestión de errores y soporte pleno para intervenciones manuales.

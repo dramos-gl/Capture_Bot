@@ -224,20 +224,29 @@ class SatqScraper:
                 escenario = self._detectar_escenario()
                 if escenario == self.Escenario.NO_GENERADA:
                     self._generar_cfdi(razon_social, cp, callback_validar_timbrar)
-                    estado_final = "OK-GENERADA"
                 elif escenario == self.Escenario.YA_GENERADA:
                     if solo_no_generadas:
                         # Modo empresarial: omitir las ya generadas inmediatamente
                         logger.info(f"Referencia {referencia} ya generada. Omitiendo por configuración del operador.")
                         return "OMITIDO-YA GENERADA", carpeta_lote, None, None
-                    estado_final = "OK-YA GENERADA"
                 elif escenario == self.Escenario.INVALIDA:
                     raise Exception("Referencia o RFC no válidos según portal")
-                else:
-                    estado_final = "EXITOSO"
 
                 # Descargar PDFs generados y devolver rutas
                 pdf_paths = self._descargar_pdfs(referencia, rfc, ruta_lote)
+                
+                # VALIDACIÓN POST-DESCARGA: Asegurar la existencia de los archivos físicos
+                if not pdf_paths:
+                    raise Exception("No se descargó ningún PDF de CFDI tras el timbrado / consulta.")
+
+                # Una vez garantizada la descarga, asignar estado definitivo
+                if escenario == self.Escenario.NO_GENERADA:
+                    estado_final = "OK-GENERADA"
+                elif escenario == self.Escenario.YA_GENERADA:
+                    estado_final = "OK-YA GENERADA"
+                else:
+                    estado_final = "EXITOSO"
+
                 return estado_final, carpeta_lote, None, pdf_paths
 
             except Exception as e:
@@ -394,7 +403,58 @@ class SatqScraper:
             logger.error(f"Botón Timbrar no encontrado o no clickeable (timeout): {e}")
             raise Exception("Botón Timbrar no encontrado o no clickeable en el portal")
 
-        # Esperar a que regrese a la pantalla de resultados con los botones PDF
+        # --- DETECCIÓN DE CONGELAMIENTO O HTTP ERROR 500 POST-TIMBRADO ---
+        logger.info("Esperando confirmación de timbrado o botones PDF...")
+        inicio_espera = time.time()
+        timbrado_ok = False
+        
+        while time.time() - inicio_espera < 35:
+            # 1. ¿Apareció el botón de PDF o descarga? (Éxito)
+            if self.main_frame.query_selector("button:has-text('PDF'), a:has-text('PDF')"):
+                timbrado_ok = True
+                break
+                
+            # 2. ¿Apareció un error HTTP 500 del servidor / IIS / FastCGI?
+            error_html = self.page.content()
+            if "HTTP Error 500.0" in error_html or "FastCGI" in error_html or "Internal Server Error" in error_html:
+                logger.error("[PORTAL] Servidor SATQ reportó error HTTP 500 / FastCGI Timeout.")
+                self.capturar_pantalla("HTTP500_Error")
+                # Estrategia B: Forzar recarga total de la pestaña
+                logger.info("Ejecutando recarga total de página como mitigación...")
+                try:
+                    self.page.goto(self.satq_url, timeout=30000)
+                    self.page.wait_for_load_state('networkidle')
+                except Exception as reload_err:
+                    logger.error(f"No se pudo recargar la página tras error 500: {reload_err}")
+                raise Exception("Error 500.0 de FastCGI en servidor SATQ tras timbrado")
+
+            # 3. ¿El proceso sigue colgado en "Esperar..." pero el botón de Salir está visible?
+            if time.time() - inicio_espera > 15:
+                btn_salir = self.main_frame.query_selector("a.btn.btn-default[href='./'], a:has-text('Salir')")
+                if btn_salir:
+                    logger.warning("[PORTAL] Timbrado colgado en 'Esperar...'. Utilizando botón Salir para reiniciar transacción...")
+                    self.capturar_pantalla("Cuelgue_Esperar")
+                    try:
+                        btn_salir.click()
+                        self.page.wait_for_load_state('networkidle')
+                    except Exception as click_err:
+                        logger.error(f"Error al hacer clic en Salir: {click_err}")
+                    raise Exception("Transacción colgada en portal (Esperar...). Se reintentó vía botón Salir.")
+
+            time.sleep(1.0)
+            
+        if not timbrado_ok:
+            logger.error("[PORTAL] Tiempo de espera agotado sin obtener respuesta de timbrado exitoso.")
+            # Si el botón de salir sigue ahí, hacer clic como último recurso antes de lanzar excepción
+            btn_salir = self.main_frame.query_selector("a.btn.btn-default[href='./'], a:has-text('Salir')")
+            if btn_salir:
+                try:
+                    btn_salir.click()
+                    self.page.wait_for_load_state('networkidle')
+                except Exception:
+                    pass
+            raise Exception("Timeout esperando respuesta de timbrado del portal SATQ")
+
         self.page.wait_for_load_state('networkidle')
         self.emular_espera_humana(2.0, 4.0)
 
