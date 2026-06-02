@@ -1,0 +1,38 @@
+# Python compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+build/
+dist/
+
+# PyInstaller and build artifacts
+*.pyz
+*.exe
+*.manifest
+
+# Logs and runtime data
+logs/
+*.log
+*.csv
+
+# Temporary files
+temp/
+downloads/
+*.bak
+*.tmp
+
+# OS generated files
+Thumbs.db
+.DS_Store
+
+# Editor/IDE files
+.vscode/
+.idea/
