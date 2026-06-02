@@ -1,0 +1,9 @@
+{
+    "excel_path": "C:\\Users\\dramos\\Documents\\Proyecto_CapturaBot\\Optima_Capture_Bot.xlsx",
+    "download_dir": "C:\\Users\\dramos\\Downloads\\Facturas_Referencias",
+    "last_used": "download",
+    "satq_url": "https://satq.qroo.gob.mx/paperless/timbrador.html",
+    "max_timbrado_retries": 2,
+    "reintento_automatico": true,
+    "modo_timbrado": "autonomo"
+}
