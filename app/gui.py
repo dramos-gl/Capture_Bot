@@ -16,6 +16,7 @@ logger = logging.getLogger("OptimaCaptureBot.GUI")
 # Importar gestión de configuración
 from app import settings
 from app.excel_handler import cargar_catalog_rfc
+from app.validator import es_rfc_permitido
 from app.paths import SCREENSHOTS_DIR
 
 
@@ -898,20 +899,36 @@ class OptimaCaptureApp(ctk.CTk):
             filetypes=[("Archivos Excel", "*.xlsx *.xls")]
         )
         if archivo:
-            self.excel_path = os.path.abspath(archivo)
-            settings.set_excel_path(self.excel_path)
-            if self.orchestrator:
-                self.orchestrator.excel_path = self.excel_path
-            self._agregar_log_consola(f"[SISTEMA] Ruta de Excel seleccionada: {self.excel_path}", "INFO")
+            ruta_temporal = os.path.abspath(archivo)
             try:
-                catalog = cargar_catalog_rfc(self.excel_path)
+                # Validar el RFC del catálogo antes de guardar de forma permanente
+                catalog = cargar_catalog_rfc(ruta_temporal)
+                rfc_valido, msg_err = es_rfc_permitido(catalog.get("rfc"))
+                if not rfc_valido:
+                    messagebox.showerror(
+                        "RFC No Autorizado",
+                        f"El archivo seleccionado contiene un RFC no válido:\n\n{msg_err}\n\nPor favor, seleccione un archivo autorizado."
+                    )
+                    self._agregar_log_consola(f"[SISTEMA] [ERROR] Selección cancelada: {msg_err}", "ERROR")
+                    return
+
+                self.excel_path = ruta_temporal
+                settings.set_excel_path(self.excel_path)
+                if self.orchestrator:
+                    self.orchestrator.excel_path = self.excel_path
+                self._agregar_log_consola(f"[SISTEMA] Ruta de Excel seleccionada: {self.excel_path}", "INFO")
+                
                 self.temp_catalog = catalog
                 self.lbl_catalog_info.configure(
                     text=f"RFC: {catalog.get('rfc','')} | Razón Social: {catalog.get('razon_social','')[:18]}...\nCP: {catalog.get('cp','')}",
                     text_color="#64748B"
                 )
-                self._agregar_log_consola("[SISTEMA] Datos de catálogo cargados correctamente.", "INFO")
+                self._agregar_log_consola("[SISTEMA] Datos de catálogo cargados y validados correctamente.", "INFO")
             except Exception as e:
+                messagebox.showerror(
+                    "Error de Estructura",
+                    f"No se pudo leer la estructura del catálogo del Excel:\n{e}"
+                )
                 self._agregar_log_consola(f"[SISTEMA] Error al cargar catálogo: {e}", "ERROR")
             self._validar_rutas()
 
@@ -934,7 +951,7 @@ class OptimaCaptureApp(ctk.CTk):
             self._agregar_log_consola("[SISTEMA] Reinicie el bot para cargar la nueva URL.", "WARNING")
 
     def _validar_rutas(self):
-        """Habilita el botón 'Iniciar Bot' sólo si Excel y carpeta de descargas están configurados."""
+        """Habilita el botón 'Iniciar Bot' sólo si Excel y carpeta de descargas están configurados y el RFC es válido."""
         ruta_excel = getattr(self, 'excel_path', '') or settings.get_excel_path()
         ruta_descarga = settings.get_download_dir()
         
@@ -942,17 +959,34 @@ class OptimaCaptureApp(ctk.CTk):
         descarga_ok = bool(ruta_descarga and os.path.isdir(ruta_descarga))
         
         if excel_ok and descarga_ok:
-            if hasattr(self, 'btn_iniciar'):
-                self.btn_iniciar.configure(state="normal", text="▶  Iniciar Bot", fg_color="#1E3E62")
             try:
                 catalog = cargar_catalog_rfc(ruta_excel)
+                rfc_valido, msg_err = es_rfc_permitido(catalog.get("rfc"))
+                
+                if rfc_valido:
+                    if hasattr(self, 'btn_iniciar'):
+                        self.btn_iniciar.configure(state="normal", text="▶  Iniciar Bot", fg_color="#1E3E62")
+                    if hasattr(self, 'lbl_catalog_info'):
+                        self.lbl_catalog_info.configure(
+                            text=f"RFC: {catalog.get('rfc','')} | Razón Social: {catalog.get('razon_social','')[:18]}...\nCP: {catalog.get('cp','')}",
+                            text_color="#64748B"
+                        )
+                else:
+                    if hasattr(self, 'btn_iniciar'):
+                        self.btn_iniciar.configure(state="disabled", text="▶  Iniciar Bot (RFC No Autorizado)")
+                    if hasattr(self, 'lbl_catalog_info'):
+                        self.lbl_catalog_info.configure(
+                            text=f"⚠️ {msg_err}\nSeleccione un archivo autorizado para comenzar.",
+                            text_color="#E11D48"
+                        )
+            except Exception as ex:
+                if hasattr(self, 'btn_iniciar'):
+                    self.btn_iniciar.configure(state="disabled", text="▶  Iniciar Bot (Error Catálogo)")
                 if hasattr(self, 'lbl_catalog_info'):
                     self.lbl_catalog_info.configure(
-                        text=f"RFC: {catalog.get('rfc','')} | Razón Social: {catalog.get('razon_social','')[:18]}...\nCP: {catalog.get('cp','')}",
-                        text_color="#64748B"
+                        text=f"⚠️ Error al leer catálogo: {ex}",
+                        text_color="#E11D48"
                     )
-            except Exception:
-                pass
         else:
             if hasattr(self, 'btn_iniciar'):
                 self.btn_iniciar.configure(state="disabled")

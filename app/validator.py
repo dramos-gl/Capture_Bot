@@ -63,3 +63,28 @@ def validar_duplicados_locales(registros):
         logger.warning(f"Se detectaron {len(duplicados)} registros con referencias duplicadas en este lote.")
         
     return duplicados
+
+# Catálogo oficial de RFCs permitidos de la organización para evitar error humano
+# Se incluyen líneas comentadas para adición futura si es requerido
+RFCS_PERMITIDOS = {
+    "CIN010904D31",  # CADU INMOBILIARIA
+    "CAD1001263P4",  # CADURMA
+    "CRE1207258C3",  # CADU RESIDENCIAS
+    "INM1309035E8",  # INMOCCIDENTE
+    # "RFC_FUTURO_1", 
+    # "RFC_FUTURO_2",
+}
+
+def es_rfc_permitido(rfc):
+    """
+    Compara el RFC contra el catálogo de RFCs permitidos.
+    Retorna (True, "") si es válido, o (False, mensaje_error) si no está permitido.
+    """
+    if not rfc:
+        return False, "El RFC no puede estar vacío."
+    
+    rfc_clean = str(rfc).strip().upper()
+    if rfc_clean in RFCS_PERMITIDOS:
+        return True, ""
+        
+    return False, f"El RFC '{rfc_clean}' no pertenece a los RFCs autorizados por la organización."
