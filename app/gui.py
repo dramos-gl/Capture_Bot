@@ -592,11 +592,31 @@ class OptimaCaptureApp(ctk.CTk):
         
         self.lbl_version_info = ctk.CTkLabel(
             self.statusbar_frame,
-            text="OPTIMA CAPTURE BOT   |   Versión: 1.1.0   |   DR 2026",
+            text="OPTIMA CAPTURE BOT  v1.1.0",
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
             text_color="#94A3B8"
         )
-        self.lbl_version_info.pack(side="left")
+        self.lbl_version_info.pack(side="left", padx=(0, 15))
+        
+        # Etiqueta de ruta de Excel
+        self.lbl_ruta_excel_visual = ctk.CTkLabel(
+            self.statusbar_frame,
+            text="📊 Excel: --",
+            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            text_color="#64748B"
+        )
+        self.lbl_ruta_excel_visual.pack(side="left", padx=10)
+        self.tooltip_excel = ToolTip(self.lbl_ruta_excel_visual)
+        
+        # Etiqueta de ruta de descargas
+        self.lbl_ruta_descarga_visual = ctk.CTkLabel(
+            self.statusbar_frame,
+            text="📁 Descargas: --",
+            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            text_color="#64748B"
+        )
+        self.lbl_ruta_descarga_visual.pack(side="left", padx=10)
+        self.tooltip_descarga = ToolTip(self.lbl_ruta_descarga_visual)
         
         # LED y mensaje de sistema listo
         self.lbl_system_led = ctk.CTkLabel(
@@ -812,6 +832,17 @@ class OptimaCaptureApp(ctk.CTk):
     # --- ACCIONES DE LOS BOTONES DE CONTROL GENERAL ---
 
     def action_iniciar(self):
+        ruta_excel = getattr(self, 'excel_path', '') or settings.get_excel_path()
+        ruta_descarga = settings.get_download_dir()
+
+        # Validaciones de seguridad de rutas
+        if not ruta_excel or not os.path.isfile(ruta_excel) or not ruta_descarga or not os.path.isdir(ruta_descarga):
+            messagebox.showinfo(
+                "Selección Requerida",
+                "Por favor, seleccione el archivo de referencias (Excel) y la carpeta donde se guardarán los archivos antes de continuar."
+            )
+            return
+
         self.btn_iniciar.configure(state="disabled", fg_color="#F1F5F9", text_color="#94A3B8")
         self.btn_pausar.configure(state="normal", text="⏸  Pausar", fg_color="#FFFFFF", text_color="#1E293B")
         self.btn_detener.configure(state="normal", fg_color="#FFFFFF", text_color="#DC2626", border_color="#FCA5A5")
@@ -968,11 +999,11 @@ class OptimaCaptureApp(ctk.CTk):
         ruta_excel = getattr(self, 'excel_path', '') or settings.get_excel_path()
         ruta_descarga = settings.get_download_dir()
 
-        if not ruta_excel or not os.path.isfile(ruta_excel):
-            messagebox.showerror("Error", "Debe seleccionar un archivo Excel válido primero.")
-            return
-        if not ruta_descarga or not os.path.isdir(ruta_descarga):
-            messagebox.showerror("Error", "Debe seleccionar una carpeta de descargas válida primero.")
+        if not ruta_excel or not os.path.isfile(ruta_excel) or not ruta_descarga or not os.path.isdir(ruta_descarga):
+            messagebox.showinfo(
+                "Selección Requerida",
+                "Por favor, seleccione el archivo de referencias (Excel) y la carpeta donde se guardarán los archivos antes de continuar."
+            )
             return
 
         self._agregar_log_consola("[SISTEMA] [VALIDACIÓN-PDF] Iniciando validación de PDFs...", "INFO")
@@ -1081,6 +1112,25 @@ class OptimaCaptureApp(ctk.CTk):
         
         excel_ok = bool(ruta_excel and os.path.isfile(ruta_excel))
         descarga_ok = bool(ruta_descarga and os.path.isdir(ruta_descarga))
+
+        # Helper para acortar rutas largas
+        def acortar_path(p, max_len=30):
+            if not p:
+                return "--"
+            p_str = str(p)
+            if len(p_str) <= max_len:
+                return p_str
+            return p_str[:12] + "..." + p_str[-15:]
+
+        # Actualizar labels visuales en la barra de estado
+        if hasattr(self, 'lbl_ruta_excel_visual'):
+            self.lbl_ruta_excel_visual.configure(text=f"📊 Excel: {acortar_path(ruta_excel)}")
+            if hasattr(self, 'tooltip_excel'):
+                self.tooltip_excel.set_text(str(ruta_excel) if ruta_excel else "")
+        if hasattr(self, 'lbl_ruta_descarga_visual'):
+            self.lbl_ruta_descarga_visual.configure(text=f"📁 Descargas: {acortar_path(ruta_descarga)}")
+            if hasattr(self, 'tooltip_descarga'):
+                self.tooltip_descarga.set_text(str(ruta_descarga) if ruta_descarga else "")
         
         if excel_ok and descarga_ok:
             try:
@@ -1189,4 +1239,45 @@ class OptimaCaptureApp(ctk.CTk):
                 logger.warning(f"No se encontró el icono en la ruta: {icon_path}")
         except Exception as icon_err:
             logger.warning(f"No se pudo cargar el icono de la ventana: {icon_err}")
+
+
+class ToolTip:
+    """
+    Clase utilitaria para crear tooltips (etiquetas flotantes) en widgets de Tkinter / CustomTkinter.
+    Muestra la ruta completa al pasar el puntero del mouse sobre las etiquetas de la barra de estado.
+    """
+    def __init__(self, widget):
+        self.widget = widget
+        self.tip_window = None
+        self.text = ""
+        self.widget.bind("<Enter>", self.show_tip)
+        self.widget.bind("<Leave>", self.hide_tip)
+
+    def set_text(self, text):
+        self.text = text
+
+    def show_tip(self, event=None):
+        if not self.text:
+            return
+        x, y, cx, cy = self.widget.bbox("insert")
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + 20
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        
+        # Estilo limpio, claro y premium para el tooltip
+        label = tk.Label(
+            tw, text=self.text, justify="left",
+            background="#1E1E1E", foreground="#FFFFFF", relief="flat",
+            borderwidth=0, font=("Segoe UI", 9, "bold"), padx=8, pady=4
+        )
+        label.pack(ipadx=1)
+
+    def hide_tip(self, event=None):
+        tw = self.tip_window
+        self.tip_window = None
+        if tw:
+            tw.destroy()
+
 
