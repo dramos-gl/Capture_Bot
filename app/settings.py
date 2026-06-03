@@ -11,7 +11,24 @@ DEFAULT_CONFIG = {
     "satq_url": "https://satq.qroo.gob.mx/paperless/timbrador.html",
     "max_timbrado_retries": 2,
     "reintento_automatico": True,
-    "modo_timbrado": "asistido"
+    "modo_timbrado": "asistido",
+    "rfcs_permitidos": [
+        "CIN010904D31",
+        "CAD1001263P4",
+        "CRE1207258C3",
+        "INM1309035E8"
+    ],
+    "selectores_satq": {
+        "input_referencia": "input#Referencia",
+        "input_rfc": "input#RFC",
+        "btn_buscar": "button[type='submit']",
+        "btn_generar_cfdi": "button:has-text('Generar CFDI'), a:has-text('Generar CFDI')",
+        "input_nombre_receptor": "input#NombreReceptor",
+        "input_domicilio_fiscal_receptor": "input#DomicilioFiscalReceptor",
+        "btn_timbrar": "button#btnTimbrar",
+        "btn_pdf": "button:has-text('PDF'), a:has-text('PDF')",
+        "btn_salir": "a.btn.btn-default[href='./'], a:has-text('Salir')"
+    }
 }
 
 def _load_config() -> dict:
@@ -86,3 +103,11 @@ def set_modo_timbrado(modo: str) -> None:
     cfg = _load_config()
     cfg["modo_timbrado"] = modo
     _save_config(cfg)
+
+def get_rfcs_permitidos() -> list:
+    """Devuelve la lista blanca de RFCs autorizados para la empresa."""
+    return _load_config().get("rfcs_permitidos", DEFAULT_CONFIG["rfcs_permitidos"])
+
+def get_selectores_satq() -> dict:
+    """Devuelve el mapeo de selectores HTML/DOM del portal SATQ."""
+    return _load_config().get("selectores_satq", DEFAULT_CONFIG["selectores_satq"])

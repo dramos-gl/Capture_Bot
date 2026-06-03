@@ -64,27 +64,20 @@ def validar_duplicados_locales(registros):
         
     return duplicados
 
-# Catálogo oficial de RFCs permitidos de la organización para evitar error humano
-# Se incluyen líneas comentadas para adición futura si es requerido
-RFCS_PERMITIDOS = {
-    "CIN010904D31",  # CADU INMOBILIARIA
-    "CAD1001263P4",  # CADURMA
-    "CRE1207258C3",  # CADU RESIDENCIAS
-    "INM1309035E8",  # INMOCCIDENTE
-    # "RFC_FUTURO_1", 
-    # "RFC_FUTURO_2",
-}
-
 def es_rfc_permitido(rfc):
     """
-    Compara el RFC contra el catálogo de RFCs permitidos.
+    Compara el RFC contra el catálogo de RFCs permitidos configurado dinámicamente en settings.json.
     Retorna (True, "") si es válido, o (False, mensaje_error) si no está permitido.
     """
     if not rfc:
         return False, "El RFC no puede estar vacío."
     
+    from app import settings
+    rfcs_permitidos = settings.get_rfcs_permitidos()
+    rfcs_permitidos_upper = {str(item).strip().upper() for item in rfcs_permitidos}
+    
     rfc_clean = str(rfc).strip().upper()
-    if rfc_clean in RFCS_PERMITIDOS:
+    if rfc_clean in rfcs_permitidos_upper:
         return True, ""
         
     return False, f"El RFC '{rfc_clean}' no pertenece a los RFCs autorizados por la organización."

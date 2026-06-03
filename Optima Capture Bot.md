@@ -18,7 +18,7 @@ El producto está diseñado para:
 
 ### Funcionalidades implementadas
 * Carga de Excel con validación de estructura de hojas.
-* Validación de RFC contra una **lista blanca corporativa** y referencias.
+* Validación de RFC contra una **lista blanca corporativa** configurada dinámicamente.
 * Detección de duplicados internos en el lote.
 * Automatización de navegador con Playwright.
 * Consulta de referencias en SATQ.
@@ -28,6 +28,7 @@ El producto está diseñado para:
 * Persistencia de estados en Excel.
 * Logs técnicos rotativos a 5 MB y auditoría de decisiones en CSV.
 * Visualización persistente y interactiva de rutas completas en la barra de estado mediante Tooltips.
+* **Configuración Externa (settings.json):** Parametrización de RFCs permitidos y selectores DOM de Playwright para facilitar el mantenimiento del bot ante cambios en el portal SATQ.
 
 ---
 
@@ -43,10 +44,10 @@ main.py
 app/
   ├─ gui.py             # Interface operativa y tooltips interactivos
   ├─ orchestrator.py    # Flujo de procesamiento y callback de timbrado
-  ├─ scraper.py         # Playwright headed, timeouts y mitigaciones 500
+  ├─ scraper.py         # Playwright headed, timeouts, mitigaciones 500 y selectores dinámicos
   ├─ excel_handler.py   # openpyxl, guardados atómicos y coloreado de celdas
-  ├─ validator.py       # Expresiones regulares SAT, duplicados y Allowlist RFC
-  ├─ settings.py        # Configuración persistente en JSON
+  ├─ validator.py       # Expresiones regulares SAT, duplicados y validación dinámica de RFC
+  ├─ settings.py        # Configuración persistente en JSON (RFCs y selectores)
   ├─ paths.py           # Rutas absolutas del proyecto
   ├─ pdf_validator.py   # Utilidad de validación asíncrona de PDFs
 ```
@@ -60,12 +61,12 @@ app/
 3. Se crea un hilo de trabajo para mantener la UI responsiva.
 4. `BotOrchestrator` carga el catálogo y los registros del Excel.
 5. Se ejecuta la validación previa:
-   * RFC de la empresa (Allowlist),
+   * RFC de la empresa (validado contra la lista dinámica en settings.json),
    * formato de referencia,
    * duplicados internos.
 6. Se abre un navegador visible con perfil persistente.
 7. Se procesa cada referencia:
-   * busca en SATQ,
+   * busca en SATQ usando los selectores configurados dinámicamente,
    * detecta si está generada,
    * genera CFDI si es necesario (con mitigación de cuelgues),
    * descarga PDFs,
@@ -93,6 +94,7 @@ app/
 * Inicializa Playwright con Chrome o Edge real.
 * Navega al portal SATQ.
 * Monitorea cuelgues y errores de servidor de forma proactiva.
+* Carga dinámicamente los selectores DOM de SATQ desde la configuración.
 * Descarga los PDFs generados.
 
 ### 5.4 `app/excel_handler.py`
@@ -101,7 +103,7 @@ app/
 * Crea copias de seguridad temporales antes de guardar.
 
 ### 5.5 `app/validator.py`
-* Valida formato de RFC y pertenencia a la lista blanca corporativa.
+* Valida formato de RFC y pertenencia a la lista blanca autorizada en `settings.json`.
 * Valida sintaxis de referencia.
 * Detecta duplicados locales en el lote.
 
@@ -129,6 +131,4 @@ app/
 
 ## 8. Estado de despliegue
 
-La aplicación se encuentra en estado **Estable de Producción (v1.1.0)**, con todas las características de mitigación, robustez y herramientas de control completamente enlazadas al proceso.
-le.
-Faltan mejoras de robustez en la gestión de errores y soporte pleno para intervenciones manuales.
+La aplicación se encuentra en estado **Estable de Producción (v1.1.0)**, con todas las características de mitigación, robustez, herramientas de control y configuración dinámica de selectores/RFCs completamente enlazadas al proceso.

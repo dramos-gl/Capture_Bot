@@ -32,6 +32,11 @@ class SatqScraper:
         os.makedirs(self.download_root, exist_ok=True)
         os.makedirs(self.screenshot_dir, exist_ok=True)
 
+    @property
+    def selectores(self):
+        from app import settings
+        return settings.get_selectores_satq()
+
     def iniciar_navegador(self):
         """
         Inicia el navegador en modo visible (headed) usando el canal de Chrome de tu sistema
@@ -191,9 +196,10 @@ class SatqScraper:
 
                 # --- 2. Rellenar inputs de referencia y RFC ---
                 # Referencia
-                input_ref = self.main_frame.wait_for_selector("input#Referencia", timeout=10000)
+                sel_ref = self.selectores.get("input_referencia", "input#Referencia")
+                input_ref = self.main_frame.wait_for_selector(sel_ref, timeout=10000)
                 if not input_ref:
-                    raise Exception("No se localizó el campo de entrada 'Referencia' (input#Referencia) en el iframe.")
+                    raise Exception(f"No se localizó el campo de entrada 'Referencia' ({sel_ref}) en el iframe.")
                 input_ref.click()
                 self.page.keyboard.press("Control+A")
                 self.page.keyboard.press("Backspace")
@@ -203,9 +209,10 @@ class SatqScraper:
                 self.emular_espera_humana(0.8, 1.5)
 
                 # RFC
-                input_rfc = self.main_frame.wait_for_selector("input#RFC", timeout=5000)
+                sel_rfc = self.selectores.get("input_rfc", "input#RFC")
+                input_rfc = self.main_frame.wait_for_selector(sel_rfc, timeout=5000)
                 if not input_rfc:
-                    raise Exception("No se localizó el campo de entrada 'RFC' (input#RFC) en el iframe.")
+                    raise Exception(f"No se localizó el campo de entrada 'RFC' ({sel_rfc}) en el iframe.")
                 input_rfc.click()
                 self.page.keyboard.press("Control+A")
                 self.page.keyboard.press("Backspace")
@@ -215,7 +222,8 @@ class SatqScraper:
                 self.emular_espera_humana(1.0, 2.0)
 
                 # Botón Buscar
-                btn_buscar = self.main_frame.wait_for_selector("button[type='submit']", timeout=5000)
+                sel_buscar = self.selectores.get("btn_buscar", "button[type='submit']")
+                btn_buscar = self.main_frame.wait_for_selector(sel_buscar, timeout=5000)
                 btn_buscar.click()
                 logger.info("Botón Buscar pulsado, esperando resultados...")
                 self.page.wait_for_load_state('networkidle')
@@ -255,10 +263,10 @@ class SatqScraper:
                     intento += 1
                     logger.warning(f"[REINTENTO] Error del portal detectado ({e}), reintentando {intento}/{max_retries}...")
                     try:
-                        self.page.reload()
-                        self.page.wait_for_load_state('networkidle')
-                    except Exception as reload_err:
-                        logger.error(f"Fallo al recargar la página: {reload_err}")
+                        # En lugar de solo recargar (que puede colgarse con timeout), cerramos y volvemos a abrir la sesión del navegador
+                        self.reiniciar_sesion_navegador()
+                    except Exception as restart_err:
+                        logger.error(f"Fallo al reiniciar la sesión del navegador durante reintento: {restart_err}")
                     continue
                 else:
                     logger.error(f"Error crítico del portal sin posibilidad de reintento: {e}")
@@ -272,7 +280,8 @@ class SatqScraper:
         # Esperar que algún elemento clave aparezca
         time.sleep(2)  # pequeña pausa para que el DOM se actualice
         # Caso: botón Generar CFDI presente
-        btn_generar = self.main_frame.query_selector("button:has-text('Generar CFDI'), a:has-text('Generar CFDI')")
+        sel_generar = self.selectores.get("btn_generar_cfdi", "button:has-text('Generar CFDI'), a:has-text('Generar CFDI')")
+        btn_generar = self.main_frame.query_selector(sel_generar)
         if btn_generar:
             # En HTML el atributo disabled puede ser un boolean o un string
             disabled = btn_generar.get_attribute('disabled')
@@ -286,7 +295,8 @@ class SatqScraper:
         if alerta:
             return self.Escenario.INVALIDA
         # Si hay un botón de PDF, entonces ya está generada y quizá no había botón "Generar CFDI"
-        if self.main_frame.query_selector("button:has-text('PDF'), a:has-text('PDF')"):
+        sel_pdf = self.selectores.get("btn_pdf", "button:has-text('PDF'), a:has-text('PDF')")
+        if self.main_frame.query_selector(sel_pdf):
             return self.Escenario.YA_GENERADA
             
         # Si no se detecta nada, devolver desconocido
@@ -295,10 +305,11 @@ class SatqScraper:
     def _generar_cfdi(self, razon_social, cp, callback_validar_timbrar=None):
         """Realiza los pasos de generación de CFDI: clic en Generar, rellenar datos y timbrar."""
         # Click en Generar CFDI con espera explícita
+        sel_generar = self.selectores.get("btn_generar_cfdi", "button:has-text('Generar CFDI'), a:has-text('Generar CFDI')")
         try:
-            btn_generar = self.main_frame.wait_for_selector("button:has-text('Generar CFDI'), a:has-text('Generar CFDI')", timeout=10000)
+            btn_generar = self.main_frame.wait_for_selector(sel_generar, timeout=10000)
         except Exception:
-            raise Exception('Botón Generar CFDI no encontrado en escenario NO_GENERADA (timeout)')
+            raise Exception(f'Botón Generar CFDI ({sel_generar}) no encontrado en escenario NO_GENERADA (timeout)')
         btn_generar.click()
         logger.info("Clic en Generar CFDI ejecutado.")
         
@@ -307,14 +318,16 @@ class SatqScraper:
         self.emular_espera_humana(1.5, 2.5)
         
         # Rellenar Razón Social y Código Postal
-        # Selectores exactos del portal SATQ con espera explícita
+        # Selectores del portal SATQ con espera explícita
+        sel_nombre = self.selectores.get("input_nombre_receptor", "input#NombreReceptor")
         try:
-            input_razon = self.main_frame.wait_for_selector("input#NombreReceptor", timeout=10000)
+            input_razon = self.main_frame.wait_for_selector(sel_nombre, timeout=10000)
         except Exception:
             input_razon = None
             
+        sel_domicilio = self.selectores.get("input_domicilio_fiscal_receptor", "input#DomicilioFiscalReceptor")
         try:
-            input_cp = self.main_frame.wait_for_selector("input#DomicilioFiscalReceptor", timeout=10000)
+            input_cp = self.main_frame.wait_for_selector(sel_domicilio, timeout=10000)
         except Exception:
             input_cp = None
         
@@ -395,58 +408,77 @@ class SatqScraper:
             logger.info("[VALIDACIÓN] Aprobado por el operador. Procediendo a timbrar...")
         
         # Click en botón Timbrar con espera explícita
+        sel_timbrar = self.selectores.get("btn_timbrar", "button#btnTimbrar")
         try:
-            btn_timbrar = self.main_frame.wait_for_selector("button#btnTimbrar", timeout=10000)
+            btn_timbrar = self.main_frame.wait_for_selector(sel_timbrar, timeout=10000)
             btn_timbrar.click()
             logger.info("Clic en Timbrar ejecutado.")
         except Exception as e:
-            logger.error(f"Botón Timbrar no encontrado o no clickeable (timeout): {e}")
-            raise Exception("Botón Timbrar no encontrado o no clickeable en el portal")
+            logger.error(f"Botón Timbrar ({sel_timbrar}) no encontrado o no clickeable (timeout): {e}")
+            raise Exception(f"Botón Timbrar ({sel_timbrar}) no encontrado o no clickeable en el portal")
 
         # --- DETECCIÓN DE CONGELAMIENTO O HTTP ERROR 500 POST-TIMBRADO ---
         logger.info("Esperando confirmación de timbrado o botones PDF...")
         inicio_espera = time.time()
         timbrado_ok = False
+        sel_pdf = self.selectores.get("btn_pdf", "button:has-text('PDF'), a:has-text('PDF')")
+        sel_salir = self.selectores.get("btn_salir", "a.btn.btn-default[href='./'], a:has-text('Salir')")
         
         while time.time() - inicio_espera < 35:
-            # 1. ¿Apareció el botón de PDF o descarga? (Éxito)
-            if self.main_frame.query_selector("button:has-text('PDF'), a:has-text('PDF')"):
-                timbrado_ok = True
-                break
-                
-            # 2. ¿Apareció un error HTTP 500 del servidor / IIS / FastCGI?
-            error_html = self.page.content()
-            if "HTTP Error 500.0" in error_html or "FastCGI" in error_html or "Internal Server Error" in error_html:
-                logger.error("[PORTAL] Servidor SATQ reportó error HTTP 500 / FastCGI Timeout.")
-                self.capturar_pantalla("HTTP500_Error")
-                # Estrategia B: Forzar recarga total de la pestaña
-                logger.info("Ejecutando recarga total de página como mitigación...")
-                try:
-                    self.page.goto(self.satq_url, timeout=30000)
-                    self.page.wait_for_load_state('networkidle')
-                except Exception as reload_err:
-                    logger.error(f"No se pudo recargar la página tras error 500: {reload_err}")
-                raise Exception("Error 500.0 de FastCGI en servidor SATQ tras timbrado")
-
-            # 3. ¿El proceso sigue colgado en "Esperar..." pero el botón de Salir está visible?
-            if time.time() - inicio_espera > 15:
-                btn_salir = self.main_frame.query_selector("a.btn.btn-default[href='./'], a:has-text('Salir')")
-                if btn_salir:
-                    logger.warning("[PORTAL] Timbrado colgado en 'Esperar...'. Utilizando botón Salir para reiniciar transacción...")
-                    self.capturar_pantalla("Cuelgue_Esperar")
+            try:
+                # 1. ¿Apareció el botón de PDF o descarga? (Éxito)
+                if self.main_frame.query_selector(sel_pdf):
+                    timbrado_ok = True
+                    break
+                    
+                # 2. ¿Apareció un error HTTP 500 del servidor / IIS / FastCGI?
+                error_html = self.page.content()
+                if "HTTP Error 500.0" in error_html or "FastCGI" in error_html or "Internal Server Error" in error_html:
+                    logger.error("[PORTAL] Servidor SATQ reportó error HTTP 500 / FastCGI Timeout.")
+                    self.capturar_pantalla("HTTP500_Error")
+                    # Estrategia B: Forzar recarga total de la pestaña
+                    logger.info("Ejecutando recarga total de página como mitigación...")
                     try:
-                        btn_salir.click()
+                        self.page.goto(self.satq_url, timeout=30000)
                         self.page.wait_for_load_state('networkidle')
-                    except Exception as click_err:
-                        logger.error(f"Error al hacer clic en Salir: {click_err}")
-                    raise Exception("Transacción colgada en portal (Esperar...). Se reintentó vía botón Salir.")
+                    except Exception as reload_err:
+                        logger.error(f"No se pudo recargar la página tras error 500: {reload_err}")
+                    raise Exception("Error 500.0 de FastCGI en servidor SATQ tras timbrado")
+
+                # 3. ¿El proceso sigue colgado en "Esperar..." pero el botón de Salir está visible?
+                if time.time() - inicio_espera > 15:
+                    btn_salir = self.main_frame.query_selector(sel_salir)
+                    if btn_salir:
+                        logger.warning("[PORTAL] Timbrado colgado en 'Esperar...'. Utilizando botón Salir para reiniciar transacción...")
+                        self.capturar_pantalla("Cuelgue_Esperar")
+                        try:
+                            btn_salir.click()
+                            self.page.wait_for_load_state('networkidle')
+                        except Exception as click_err:
+                            logger.error(f"Error al hacer clic en Salir: {click_err}")
+                        raise Exception("Transacción colgada en portal (Esperar...). Se reintentó vía botón Salir.")
+            except Exception as loop_err:
+                # Si fue una excepción lanzada por nosotros (nuestras mitigaciones), la propagamos
+                if "Error 500.0" in str(loop_err) or "Transacción colgada" in str(loop_err):
+                    raise loop_err
+                
+                # Para errores de Playwright relacionados con destrucción de contexto o navegación
+                logger.warning(f"Error temporal en el portal (posible navegación/recarga en curso): {loop_err}. Re-localizando iframe...")
+                try:
+                    self.main_frame = self.page
+                    for f in self.page.frames:
+                        if "shacienda.qroo.gob.mx" in f.url:
+                            self.main_frame = f
+                            break
+                except Exception:
+                    pass
 
             time.sleep(1.0)
             
         if not timbrado_ok:
             logger.error("[PORTAL] Tiempo de espera agotado sin obtener respuesta de timbrado exitoso.")
             # Si el botón de salir sigue ahí, hacer clic como último recurso antes de lanzar excepción
-            btn_salir = self.main_frame.query_selector("a.btn.btn-default[href='./'], a:has-text('Salir')")
+            btn_salir = self.main_frame.query_selector(sel_salir)
             if btn_salir:
                 try:
                     btn_salir.click()
@@ -473,6 +505,16 @@ class SatqScraper:
         except Exception as ex:
             logger.error(f"No se pudo tomar la captura de pantalla de evidencia: {ex}")
         return None
+
+    def reiniciar_sesion_navegador(self):
+        """
+        Cierra completamente el navegador y la sesión actual, y los vuelve a iniciar
+        para limpiar cualquier bloqueo de red o pestaña congelada.
+        """
+        logger.info("Reiniciando sesión del navegador por completo como mitigación...")
+        self.cerrar()
+        time.sleep(2.0)
+        return self.iniciar_navegador()
 
     def cerrar(self):
         """Cierra de forma segura el contexto y Playwright si están activos."""
@@ -513,18 +555,17 @@ class SatqScraper:
         os.makedirs(carpeta, exist_ok=True)
         pdf_paths = []
         # Esperar a que los botones PDF aparezcan (portal puede tardar en generarlos)
+        sel_pdf = self.selectores.get("btn_pdf", "button:has-text('PDF'), a:has-text('PDF')")
         try:
             self.main_frame.wait_for_selector(
-                "button:has-text('PDF'), a:has-text('PDF')",
+                sel_pdf,
                 timeout=30000
             )
         except Exception:
-            logger.warning("Tiempo de espera agotado buscando botones PDF.")
+            logger.warning(f"Tiempo de espera agotado buscando botones PDF ({sel_pdf}).")
 
         # Encontrar todos los enlaces o botones que contienen "PDF"
-        botones = self.main_frame.query_selector_all(
-            "a:has-text('PDF'), button:has-text('PDF')"
-        )
+        botones = self.main_frame.query_selector_all(sel_pdf)
         if not botones:
             logger.warning("No se encontraron enlaces PDF después del timbrado.")
             return pdf_paths
