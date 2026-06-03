@@ -19,22 +19,25 @@ La aplicación combina:
 
 ### Funcionalidades implementadas
 * Carga un archivo Excel de control y valida su estructura.
-* Valida el RFC de la empresa y la referencia para cada registro.
-* Detecta duplicados internos en el lote antes de procesar.
+* Valida el RFC de la empresa contra una **lista blanca autorizada** para evitar error humano.
+* Valida la estructura sintáctica de la referencia para cada registro.
+* Detecta duplicados internos en el lote antes de procesar para omitir re-procesados.
 * Abre un navegador visible con un perfil persistente de Chrome/Edge.
 * Navega al portal SATQ y consulta cada referencia.
 * Genera CFDI si la referencia no está timbrada.
+* **Mitigación de cuelgues del SATQ:** Detecta estados de carga infinitos ("Esperar...") o errores de servidor **HTTP 500 (FastCGI Timeout)**, forzando la salida limpia o recarga del portal para reintentar.
+* **Validación post-descarga:** Garantiza que los archivos PDF estén descargados físicamente en el disco antes de actualizar el estado a exitoso en el Excel.
+* **Herramienta "Validar PDFs":** Permite al operador validar asíncronamente las descargas, coloreando celdas en el Excel (**Azul** para incompleto, **Amarillo** para no descargado) y reportando archivos extras en la consola.
 * Descarga los documentos PDF en carpetas organizadas por lote.
 * Actualiza el estado de cada fila en Excel.
-* Guarda logs de actividad en `logs/optima_capture_bot.log`.
+* Guarda logs de actividad en `logs/optima_capture_bot.log` con rotación automática a 5 MB.
 * Registra decisiones de timbrado en `logs/auditoria_timbrado.csv`.
 
 ### Comportamiento actual
 * El bot usa por defecto `Optima_Capture_Bot.xlsx` en la raíz del proyecto.
 * Si el archivo no existe, el operador debe seleccionarlo desde la GUI.
-* El modo de timbrado puede ser `asistido` o `autonomo`.
-* El panel de errores y botones de reintento son mayoritariamente visuales, pero el flujo principal no respalda todas las acciones manuales hoy.
-* La funcionalidad de captura de pantalla existe en el código, pero no se ejecuta automáticamente en el flujo actual.
+* El modo de timbrado puede ser `asistido` o `autonomo` (conmutable en caliente).
+* Muestra dinámicamente las rutas de trabajo (Excel y Descarga) en la barra inferior con tooltips interactivos al pasar el mouse.
 
 ---
 
@@ -45,9 +48,15 @@ El archivo Excel debe contener la hoja llamada exacta:
 * `Catalogo_RFC`
 
 En la fila 2:
-* Columna A: RFC de la empresa.
+* Columna A: RFC de la empresa (debe pertenecer al catálogo autorizado).
 * Columna B: Razón Social.
 * Columna C: Código Postal (CP).
+
+#### RFCs Autorizados de la Organización:
+* `CIN010904D31` (CADU INMOBILIARIA)
+* `CAD1001263P4` (CADURMA)
+* `CRE1207258C3` (CADU RESIDENCIAS)
+* `INM1309035E8` (INMOCCIDENTE)
 
 ### 3.2 Hoja `Control_Referencias`
 El bot lee los registros desde la hoja exacta:
@@ -111,12 +120,13 @@ Valores importantes:
 
 ### 5.1 Panel de controles operativos
 * **Omitir 'Ya Generadas'**: Si está activo, el bot no procesa referencias que ya existan como generadas en el portal.
-* **Modo Autónomo**: Si está activo, el bot timbra automáticamente sin pedir confirmación previa.
+* **Modo Autónomo**: Si está activo, el bot timbra automáticamente sin pedir confirmación previa. Conmutable en caliente.
 * **Iniciar Bot**: Inicia el proceso completo.
 * **Pausar / Reanudar**: Detiene la ejecución al finalizar la fila actual y puede reanudarla.
 * **Detener Seguro**: Finaliza la ejecución al cerrar el ciclo de procesamiento.
 * **Seleccionar Excel**: Cambia el archivo de entrada.
 * **Carpeta Descargas**: Cambia el directorio donde se guardan los PDF.
+* **Validar PDFs**: Herramienta de auditoría asíncrona que valida la cantidad física de PDFs contra el Excel.
 * **Configurar URL SATQ**: Permite modificar la URL del portal en caso de cambios del sitio.
 
 ### 5.2 Panel de métricas
@@ -141,13 +151,11 @@ Muestra:
 Registra mensajes del bot en pantalla, en formato de hora y nivel.
 
 ### 5.5 Panel de gestión de incidencias
-Los botones disponibles hoy son:
+Los botones disponibles son:
 * **Ver Captura** — abre la última captura de pantalla disponible en `screenshots/`.
-* **Reintentar Registro** — botón informativo, no reinicia automáticamente el flujo actual.
-* **Omitir Registro** — botón de soporte visual que indica omisión.
-* **Revisión Manual** — marca la intención de revisar luego.
-
-> Nota: en la versión actual, estas acciones son mayormente de soporte visual y no siempre impactan el motor de procesamiento principal.
+* **Reintentar Registro** — reintenta el registro actual.
+* **Omitir Registro** — marca la fila como omitida.
+* **Revisión Manual** — marca el registro para revisión posterior.
 
 ---
 
@@ -161,9 +169,9 @@ Los botones disponibles hoy son:
 6. Procesa cada registro válido:
    * consulta la referencia,
    * determina si el CFDI ya está generado,
-   * genera el CFDI si es necesario,
+   * genera el CFDI si es necesario (con mitigación de cuelgues),
    * descarga los PDFs,
-   * actualiza el estado en Excel.
+   * actualiza el estado en Excel si la descarga fue exitosa.
 7. Crea carpetas físicas de descarga por lotes de 100 filas (`Lote_1`, `Lote_2`, ...).
 
 ---
@@ -171,7 +179,7 @@ Los botones disponibles hoy son:
 ## 7. Auditoría y trazabilidad
 
 ### Archivos de auditoría
-* `logs/optima_capture_bot.log`: registro de todo el flujo de sistema.
+* `logs/optima_capture_bot.log`: registro de todo el flujo de sistema (rotativo automático a 5 MB).
 * `logs/auditoria_timbrado.csv`: registro de cada aprobación o cancelación de timbrado.
 
 ### Formato de auditoría
@@ -187,11 +195,11 @@ timestamp,razon_social,cp,aprobado,modo
 
 ### 8.1 Excel bloqueado
 * Causa: el archivo `Optima_Capture_Bot.xlsx` está abierto en Excel.
-* Solución: ciérrelo y espere a que el bot continue automáticamente.
+* Solución: ciérrelo y espere a que el bot continúe automáticamente.
 
 ### 8.2 No aparece el botón Iniciar Bot
 * Compruebe que:
-  * exista el archivo Excel seleccionado,
+  * exista el archivo Excel seleccionado y sea válido,
   * exista la carpeta de descargas configurada.
 
 ### 8.3 Error de referencia inválida
@@ -209,9 +217,6 @@ timestamp,razon_social,cp,aprobado,modo
 
 ## 9. Limitaciones conocidas
 
-* La espera de login manual no se activa en el flujo actual, porque el bot asume que el portal no requiere autenticación automatizada.
-* El panel de errores muestra opciones, pero las acciones `Reintentar Registro`, `Omitir Registro` y `Revisión Manual` no modifican el registro de Excel automáticamente.
-* La captura de pantalla de errores está implementada en `app/scraper.py`, pero actualmente no hay una llamada automática a `capturar_pantalla()` en el proceso principal.
 * El bot usa selectores específicos del portal en `app/scraper.py` para localizar los campos y botones de búsqueda y timbrado.
 * El modo de validación previa al timbrado funciona solo si el modo es `asistido` y el proceso llega a la generación de CFDI.
 
@@ -228,14 +233,13 @@ timestamp,razon_social,cp,aprobado,modo
 * El bot descarga los archivos PDF generados tras el timbrado usando el método `_descargar_pdfs()` en `app/scraper.py`.
   * Los PDFs se guardan en el directorio `downloads/` dentro de una subcarpeta por lote (`Lote_1`, `Lote_2`, etc.).
   * El nombre de archivo se construye con `referencia`, `RFC` e índice: `REFERENCIA_RFC_1.pdf`, `REFERENCIA_RFC_2.pdf`.
-* Para futuras actualizaciones, use la consola del navegador (DevTools) y verifique si el elemento cambió a un nuevo `id`, `name`, `data-*` o etiqueta visible.
 * Si se agregan nuevos campos obligatorios en el portal, el bot necesitará extender la función `_generar_cfdi()` para completar esos datos antes de pulsar `Timbrar`.
 
 ---
 
 ## 10. Recomendaciones de operación
 
-* Mantenga el archivo Excel cerrado mientras el bot esté procesando registros.
+* Mantenga el archivo Excel cerrado mientras el bot esté procesando registros o validando PDFs.
 * Utilice `Modo Autónomo` para lotes grandes cuando confíe en los datos del catálogo.
 * Si hay errores múltiples, revise primero el archivo `logs/optima_capture_bot.log`.
 * No elimine manualmente `settings.json`; ese archivo guarda la ruta de Excel y la carpeta de descargas.
@@ -244,7 +248,8 @@ timestamp,razon_social,cp,aprobado,modo
 
 ## 11. Análisis QA rápido
 
-* El flujo actual es funcional, pero existen áreas de mejora:
-  * consolidar la gestión de errores desde la UI con cambios reales en Excel,
+* El flujo de la v1.1.0 es plenamente maduro y auditable.
+* Los logs automatizan la rotación previniendo problemas de espacio en el disco.
+* La herramienta de validación colorea el Excel directamente y facilita la auditoría visual de PDFs para el control final del lote.bios reales en Excel,
   * activar capturas automáticas en fallos del portal,
   * soportar login manual de forma real cuando el portal lo requiera.

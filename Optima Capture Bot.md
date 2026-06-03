@@ -1,4 +1,4 @@
-# 🚀 Optima Capture Bot — Plan Maestro Operativo (MVP v1.1)
+# 🚀 Optima Capture Bot — Plan Maestro Operativo (v1.1.0)
 
 ## 1. Visión del Producto
 
@@ -14,23 +14,20 @@ El producto está diseñado para:
 
 ---
 
-## 2. Estado actual del MVP
+## 2. Estado actual de la v1.1.0
 
 ### Funcionalidades implementadas
-* Carga de Excel configurable.
-* Validación de RFC y referencias.
+* Carga de Excel con validación de estructura de hojas.
+* Validación de RFC contra una **lista blanca corporativa** y referencias.
 * Detección de duplicados internos en el lote.
 * Automatización de navegador con Playwright.
 * Consulta de referencias en SATQ.
-* Timbrado de CFDI y descarga de PDFs.
+* **Mitigación de Cuelgues post-Timbrado:** Monitoreo de 35 segundos con autodetección de errores **HTTP 500 (FastCGI Timeout)** o botón de espera colgado, aplicando botón de Salir o recarga de pestaña.
+* **Integridad de Descargas:** Asignación condicional de estado de éxito (`OK-GENERADA`) a la presencia real de PDFs físicos.
+* **Herramienta Validar PDFs:** Escaneo asíncrono de PDFs del lote, pintado de celdas en el Excel (**Azul** para incompleto, **Amarillo** para no descargado) y logs de archivos extras.
 * Persistencia de estados en Excel.
-* Logs y auditoría en CSV.
-
-### Funcionalidades previstas en desarrollo
-* Gestión de errores en UI con efecto real en el flujo.
-* Capturas automáticas de evidencia en fallos.
-* Login manual real como control de inicio de sesión.
-* Exportación integrada de carpetas de lote.
+* Logs técnicos rotativos a 5 MB y auditoría de decisiones en CSV.
+* Visualización persistente y interactiva de rutas completas en la barra de estado mediante Tooltips.
 
 ---
 
@@ -38,19 +35,20 @@ El producto está diseñado para:
 
 ```plaintext
 main.py
-  └─ inicializa entorno y logging
+  └─ inicializa entorno y logging (RotatingFileHandler 5MB)
   └─ carga settings y Excel
   └─ crea cola de eventos
   └─ inicia UI
 
 app/
-  ├─ gui.py             # Interface operativa del bot
-  ├─ orchestrator.py    # Flujo de procesamiento y coordinación
-  ├─ scraper.py         # Interacción con portal SATQ via Playwright
-  ├─ excel_handler.py   # Lectura/escritura segura de Excel
-  ├─ validator.py       # Validación de RFC, referencia y duplicados
+  ├─ gui.py             # Interface operativa y tooltips interactivos
+  ├─ orchestrator.py    # Flujo de procesamiento y callback de timbrado
+  ├─ scraper.py         # Playwright headed, timeouts y mitigaciones 500
+  ├─ excel_handler.py   # openpyxl, guardados atómicos y coloreado de celdas
+  ├─ validator.py       # Expresiones regulares SAT, duplicados y Allowlist RFC
   ├─ settings.py        # Configuración persistente en JSON
-  ├─ paths.py           # Rutas de carpetas y directorios de soporte
+  ├─ paths.py           # Rutas absolutas del proyecto
+  ├─ pdf_validator.py   # Utilidad de validación asíncrona de PDFs
 ```
 
 ---
@@ -62,16 +60,16 @@ app/
 3. Se crea un hilo de trabajo para mantener la UI responsiva.
 4. `BotOrchestrator` carga el catálogo y los registros del Excel.
 5. Se ejecuta la validación previa:
-   * RFC de la empresa,
+   * RFC de la empresa (Allowlist),
    * formato de referencia,
    * duplicados internos.
 6. Se abre un navegador visible con perfil persistente.
 7. Se procesa cada referencia:
    * busca en SATQ,
    * detecta si está generada,
-   * genera CFDI si es necesario,
+   * genera CFDI si es necesario (con mitigación de cuelgues),
    * descarga PDFs,
-   * actualiza Excel.
+   * actualiza Excel tras verificar que la descarga se completó.
 8. El estado final de cada fila se escribe en el archivo Excel.
 
 ---
@@ -81,8 +79,9 @@ app/
 ### 5.1 `app/gui.py`
 * Construye la UI con CustomTkinter.
 * Envía comandos de usuario al orquestador.
+* Deshabilita botones de interacción al iniciar el bot o validar PDFs para evitar interferencias.
 * Consume eventos de la cola para actualizar métricas, logs y estado.
-* Permite seleccionar Excel, carpeta de descargas y cambiar la URL SATQ.
+* Permite seleccionar Excel, carpeta de descargas, configurar URL SATQ y ejecutar la auditoría de descargas.
 
 ### 5.2 `app/orchestrator.py`
 * Coordina el proceso completo.
@@ -93,66 +92,43 @@ app/
 ### 5.3 `app/scraper.py`
 * Inicializa Playwright con Chrome o Edge real.
 * Navega al portal SATQ.
-* Rellena referencias, RFC, razón social y código postal.
-* Decide los escenarios: no generada, ya generada, inválida o desconocida.
+* Monitorea cuelgues y errores de servidor de forma proactiva.
 * Descarga los PDFs generados.
 
 ### 5.4 `app/excel_handler.py`
 * Lee hojas `Catalogo_RFC` y `Control_Referencias`.
-* Actualiza filas de Excel de forma atómica.
+* Actualiza filas y colorea celdas de referencias según el estado físico del PDF.
 * Crea copias de seguridad temporales antes de guardar.
 
 ### 5.5 `app/validator.py`
-* Valida formato de RFC.
+* Valida formato de RFC y pertenencia a la lista blanca corporativa.
 * Valida sintaxis de referencia.
 * Detecta duplicados locales en el lote.
 
-### 5.6 `app/settings.py`
-* Persiste configuración en `settings.json`.
-* Devuelve rutas y modo de operación.
+### 5.6 `app/pdf_validator.py`
+* Escanea la carpeta de descargas.
+* Compara cantidad de PDFs físicos contra referencias del Excel y localiza archivos extras.
 
 ---
 
 ## 6. Limitaciones actuales (QA)
 
-### 6.1 Inconsistencias entre UI y flujo real
-* El bot muestra controles de gestión de errores avanzados, pero esas acciones no están completamente enlazadas al proceso.
-* Los botones `Reintentar Registro`, `Omitir Registro` y `Revisión Manual` no realizan cambios automáticos en Excel.
-
-### 6.2 Funcionalidad de captura de pantalla
-* La clase `SatqScraper` define `capturar_pantalla()`.
-* Sin embargo, no existe una llamada a esa función en el flujo principal de `procesar_registro()`.
-
-### 6.3 Login manual no utilizado
-* El código contiene lógica para esperar login manual.
-* En el flujo actual, el orquestador asume que no se requiere autenticación y continúa directamente.
-
-### 6.4 Dependencias técnicas
+### 6.1 Dependencias técnicas
 * Playwright requiere Chrome o Edge instalados en Windows.
-* El archivo Excel debe permanecer cerrado durante los guardados.
+* El archivo Excel debe permanecer cerrado durante los guardados y la validación de celdas para evitar bloqueos por permisos.
 
 ---
 
-## 7. Principales mejoras recomendadas
-
-1. Vincular las acciones de error de la UI a cambios concretos en el Excel.
-2. Activar capturas de pantalla automáticas en cada fallo crítico.
-3. Implementar un flujo de login/manual cuando el portal lo demande.
-4. Añadir un botón para abrir la carpeta de lote activa directamente desde la UI.
-5. Mejorar la documentación de la estructura de Excel con ejemplos de plantilla.
-
----
-
-## 8. Recomendaciones de operación para el Product Owner
+## 7. Recomendaciones de operación para el Product Owner
 
 * Mantener `Modo Autónomo` para lotes grandes cuando los datos sean confiables.
 * Usar `Modo Asistido` para pruebas o lotes nuevos.
-* Revisar `logs/optima_capture_bot.log` antes de ejecutar el bot en producción.
-* No editar manualmente los archivos de configuración sin respaldo.
+* Archivar anualmente el log de auditoría `auditoria_timbrado.csv`.
 
 ---
 
-## 9. Estado de despliegue
+## 8. Estado de despliegue
 
-La aplicación está en estado de **MVP funcional**, con el núcleo de automatización operativo y una interfaz usable.
+La aplicación se encuentra en estado **Estable de Producción (v1.1.0)**, con todas las características de mitigación, robustez y herramientas de control completamente enlazadas al proceso.
+le.
 Faltan mejoras de robustez en la gestión de errores y soporte pleno para intervenciones manuales.
