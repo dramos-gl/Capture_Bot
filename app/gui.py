@@ -817,9 +817,12 @@ class OptimaCaptureApp(ctk.CTk):
         self.btn_detener.configure(state="normal", fg_color="#FFFFFF", text_color="#DC2626", border_color="#FCA5A5")
         self.status_satq_label.configure(text="Portal: ACTIVO", fg_color="#16A34A")
 
-        # Desactivar controles de configuración durante la ejecución
-        self.switch_modo_autonomo.configure(state="disabled")
+        # Desactivar controles de configuración y utilidades durante la ejecución del bot
         self.switch_omitir_generadas.configure(state="disabled")
+        self.btn_select_excel.configure(state="disabled")
+        self.btn_select_download.configure(state="disabled")
+        self.btn_change_url.configure(state="disabled")
+        self.btn_validar_pdfs.configure(state="disabled")
 
         # Leer configuración del switch
         solo_no_generadas = bool(self.switch_omitir_generadas.get())
@@ -848,6 +851,15 @@ class OptimaCaptureApp(ctk.CTk):
         self.btn_pausar.configure(state="disabled", text="⏸  Pausar", fg_color="#FFFFFF", text_color="#1E293B", border_color="#CBD5E1")
         self.btn_detener.configure(state="disabled", fg_color="#FFFFFF", text_color="#1E293B", border_color="#CBD5E1")
         self.status_satq_label.configure(text="Portal: INACTIVO", fg_color="#4B6584")
+        
+        # Reactivar controles de configuración y utilidades
+        self.switch_modo_autonomo.configure(state="normal")
+        self.switch_omitir_generadas.configure(state="normal")
+        self.btn_select_excel.configure(state="normal")
+        self.btn_select_download.configure(state="normal")
+        self.btn_change_url.configure(state="normal")
+        self.btn_validar_pdfs.configure(state="normal")
+        self._validar_rutas()
         self.btn_login_continuar.pack_forget()
 
         # Reactivar switches de configuración
@@ -965,6 +977,13 @@ class OptimaCaptureApp(ctk.CTk):
 
         self._agregar_log_consola("[SISTEMA] [VALIDACIÓN-PDF] Iniciando validación de PDFs...", "INFO")
         
+        # Desactivar botones de la interfaz gráfica durante el proceso
+        self.btn_iniciar.configure(state="disabled")
+        self.btn_select_excel.configure(state="disabled")
+        self.btn_select_download.configure(state="disabled")
+        self.btn_change_url.configure(state="disabled")
+        self.btn_validar_pdfs.configure(state="disabled")
+        
         # Ejecutar validación en un hilo separado para mantener la UI responsiva
         def _thread_val():
             try:
@@ -1035,6 +1054,13 @@ class OptimaCaptureApp(ctk.CTk):
             except Exception as thread_err:
                 self._agregar_log_consola(f"[SISTEMA] [ERROR-VALIDACIÓN] Ocurrió un error: {thread_err}", "ERROR")
                 messagebox.showerror("Error de Validación", f"Ocurrió un error durante la validación:\n{thread_err}")
+            finally:
+                # Volver a activar todos los botones e invocar validar_rutas para ajustar estados iniciales
+                self.btn_select_excel.configure(state="normal")
+                self.btn_select_download.configure(state="normal")
+                self.btn_change_url.configure(state="normal")
+                self.btn_validar_pdfs.configure(state="normal")
+                self._validar_rutas()
                 
         threading.Thread(target=_thread_val, daemon=True).start()
 

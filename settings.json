@@ -5,5 +5,5 @@
     "satq_url": "https://satq.qroo.gob.mx/paperless/timbrador.html",
     "max_timbrado_retries": 2,
     "reintento_automatico": true,
-    "modo_timbrado": "autonomo"
+    "modo_timbrado": "asistido"
 }
