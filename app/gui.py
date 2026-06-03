@@ -3,6 +3,7 @@ import os
 import json
 import logging
 import shutil
+import threading
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
@@ -213,6 +214,14 @@ class OptimaCaptureApp(ctk.CTk):
             border_color="#CBD5E1", border_width=1, corner_radius=6, height=32, command=self.action_select_download
         )
         self.btn_select_download.pack(fill="x", padx=15, pady=4)
+
+        # Botón para la nueva herramienta de validación de PDFs
+        self.btn_validar_pdfs = ctk.CTkButton(
+            self.control_frame, text="🔍  Validar PDFs", fg_color="#FFFFFF", hover_color="#F8FAFC",
+            text_color="#1E293B", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            border_color="#CBD5E1", border_width=1, corner_radius=6, height=32, command=self.action_validar_pdfs
+        )
+        self.btn_validar_pdfs.pack(fill="x", padx=15, pady=4)
         
         # Botón Configurar URL con engrane integrado a la derecha
         self.btn_change_url = ctk.CTkButton(
@@ -939,6 +948,95 @@ class OptimaCaptureApp(ctk.CTk):
             settings.set_download_dir(carpeta)
             self._agregar_log_consola(f"[SISTEMA] Carpeta de descargas seleccionada: {carpeta}", "INFO")
             self._validar_rutas()
+
+    def action_validar_pdfs(self):
+        """
+        Ejecuta la validación de archivos PDF contra las referencias en el Excel de forma asíncrona.
+        """
+        ruta_excel = getattr(self, 'excel_path', '') or settings.get_excel_path()
+        ruta_descarga = settings.get_download_dir()
+
+        if not ruta_excel or not os.path.isfile(ruta_excel):
+            messagebox.showerror("Error", "Debe seleccionar un archivo Excel válido primero.")
+            return
+        if not ruta_descarga or not os.path.isdir(ruta_descarga):
+            messagebox.showerror("Error", "Debe seleccionar una carpeta de descargas válida primero.")
+            return
+
+        self._agregar_log_consola("[SISTEMA] [VALIDACIÓN-PDF] Iniciando validación de PDFs...", "INFO")
+        
+        # Ejecutar validación en un hilo separado para mantener la UI responsiva
+        def _thread_val():
+            try:
+                from app.excel_handler import cargar_registros, colorear_celdas_validacion
+                from app.pdf_validator import PDFValidator
+                
+                # Cargar registros desde Excel
+                registros = cargar_registros(ruta_excel)
+                if not registros:
+                    self._agregar_log_consola("[SISTEMA] [VALIDACIÓN-PDF] No se encontraron registros en el Excel.", "WARNING")
+                    return
+                
+                # Extraer referencias y mapear sus filas
+                todas_referencias = [reg["referencia"] for reg in registros]
+                referencias_ok_gen = [reg["referencia"] for reg in registros if reg["estado"] == "OK-GENERADA"]
+                map_filas = {reg["referencia"]: reg["fila_excel"] for reg in registros}
+                
+                self._agregar_log_consola(f"[SISTEMA] [VALIDACIÓN-PDF] Analizando {len(referencias_ok_gen)} referencias en estado 'OK-GENERADA'...", "INFO")
+                
+                # Ejecutar análisis del validador de PDFs
+                validator = PDFValidator(ruta_descarga)
+                resultados, totales, extras = validator.run(referencias_ok_gen)
+                
+                total_refs, completos, incompletos, sin_descarga, cobertura = totales
+                
+                # Mapear colores para las celdas de las referencias procesadas
+                mapeo_colores = {}
+                for ref, estado in resultados.items():
+                    fila = map_filas[ref]
+                    if estado == "INCOMPLETO":
+                        mapeo_colores[fila] = "AZUL"
+                    elif estado == "NO_DESCARGADO":
+                        mapeo_colores[fila] = "AMARILLO"
+                    else:
+                        mapeo_colores[fila] = None # Limpiar relleno
+                
+                # Aplicar colores en el Excel
+                colorear_celdas_validacion(ruta_excel, mapeo_colores)
+                
+                # Reportar resultados en la consola de logs
+                self._agregar_log_consola("\n--- REPORTE DE VALIDACIÓN DE PDFs ---", "INFO")
+                self._agregar_log_consola(f"  · Total referencias 'OK-GENERADA': {len(referencias_ok_gen)}", "INFO")
+                self._agregar_log_consola(f"  · Referencias completas (2 PDFs): {completos}", "INFO")
+                self._agregar_log_consola(f"  · Referencias incompletas (1 PDF) [AZUL]: {incompletos}", "WARNING")
+                self._agregar_log_consola(f"  · Referencias sin archivos (0 PDFs) [AMARILLO]: {sin_descarga}", "ERROR")
+                
+                # Reportar archivos extras
+                if extras:
+                    self._agregar_log_consola("\n[SISTEMA] [VALIDACIÓN-PDF] ARCHIVOS EXTRAS DETECTADOS EN LA CARPETA:", "WARNING")
+                    for extra in extras:
+                        self._agregar_log_consola(f"  · {extra}", "WARNING")
+                else:
+                    self._agregar_log_consola("\n[SISTEMA] [VALIDACIÓN-PDF] No se detectaron archivos extras.", "INFO")
+                
+                self._agregar_log_consola("-------------------------------------\n", "INFO")
+                
+                # Mensaje visual de finalización
+                messagebox.showinfo(
+                    "Validación Finalizada",
+                    f"Validación de PDFs completada.\n\n"
+                    f"Total OK-GENERADA: {len(referencias_ok_gen)}\n"
+                    f"Completas: {completos}\n"
+                    f"Incompletas (Azul): {incompletos}\n"
+                    f"Sin descargas (Amarillo): {sin_descarga}\n"
+                    f"Archivos extras: {len(extras)}"
+                )
+                
+            except Exception as thread_err:
+                self._agregar_log_consola(f"[SISTEMA] [ERROR-VALIDACIÓN] Ocurrió un error: {thread_err}", "ERROR")
+                messagebox.showerror("Error de Validación", f"Ocurrió un error durante la validación:\n{thread_err}")
+                
+        threading.Thread(target=_thread_val, daemon=True).start()
 
     def action_change_url(self):
         """Permite al usuario cambiar la URL del portal SATQ en caso de que haya sido modificada."""

@@ -192,3 +192,49 @@ def actualizar_fila(filepath, fila_excel, estado, lote=None, detalle_error=None,
         logger.error(f"Error crítico al actualizar la fila {fila_excel} en Excel: {e}")
         raise
     return False
+
+def colorear_celdas_validacion(filepath, mapeo_colores):
+    """
+    Colorea de forma atómica y segura las celdas de las referencias en el Excel según el estado de la validación.
+    mapeo_colores es un dict: {fila_excel: color_hex}
+    Colores:
+      - 'AZUL' (incompleto) -> 93C5FD
+      - 'AMARILLO' (no descargado) -> FEF08A
+      - None (completo) -> None (sin relleno)
+    """
+    if verificar_bloqueo(filepath):
+        raise PermissionError(f"El archivo {filepath} está bloqueado. Ciérrelo para poder guardar los colores de validación.")
+        
+    crear_backup(filepath)
+    try:
+        from openpyxl.styles import PatternFill
+        wb = openpyxl.load_workbook(filepath)
+        ws = wb[SHEET_DATA]
+        
+        fill_azul = PatternFill(start_color="93C5FD", end_color="93C5FD", fill_type="solid")
+        fill_amarillo = PatternFill(start_color="FEF08A", end_color="FEF08A", fill_type="solid")
+        
+        for fila, color in mapeo_colores.items():
+            cell = ws.cell(row=fila, column=COL_REFERENCIA)
+            if color == "AZUL":
+                cell.fill = fill_azul
+            elif color == "AMARILLO":
+                cell.fill = fill_amarillo
+            else:
+                cell.fill = PatternFill(fill_type=None)  # Limpiar relleno
+                
+        # Guardado seguro
+        import uuid
+        temp_dir = str(TEMP_DIR)
+        temp_filepath = os.path.join(temp_dir, f"tmp_{uuid.uuid4().hex}.xlsx")
+        wb.save(temp_filepath)
+        wb.close()
+        
+        if os.path.exists(temp_filepath):
+            shutil.move(temp_filepath, filepath)
+            logger.info("Rellenos de celdas de validación de PDF aplicados correctamente en Excel.")
+            return True
+    except Exception as e:
+        logger.error(f"Error al pintar celdas en el Excel: {e}")
+        raise
+    return False

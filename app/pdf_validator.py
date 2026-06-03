@@ -12,6 +12,7 @@ class PDFValidator:
     The public ``run`` method receives a list of reference strings and returns:
         - ``resultados``: dict mapping reference → state ("COMPLETO", "INCOMPLETO", "NO_DESCARGADO")
         - ``totales``: tuple (total_refs, completos, incompletos, sin_descarga, cobertura_percent)
+        - ``archivos_extras``: list of PDF file paths not matching the list of references
     """
 
     def __init__(self, download_dir: str | Path):
@@ -19,20 +20,24 @@ class PDFValidator:
         if not self.root.is_dir():
             raise ValueError(f"Download directory does not exist or is not a folder: {self.root}")
 
-    def _index_files(self) -> dict[str, int]:
-        """Walk the download directory and count PDFs per reference.
+    def _index_files_and_detect_extras(self, referencias_set: set[str]) -> tuple[dict[str, int], list[str]]:
+        """Walk the download directory, count PDFs per reference, and detect extra files.
 
-        Returns a dictionary ``{reference: pdf_count}``.
+        Returns a tuple: (counts dict, list of extra filename paths)
         """
         counts = defaultdict(int)
+        extras = []
         for pdf_path in self.root.rglob("*.pdf"):
-            # Ensure we only work with file names, not full paths
             filename = pdf_path.name
-            # Reference is the substring before the first underscore
             if "_" in filename:
                 ref = filename.split("_", 1)[0]
-                counts[ref] += 1
-        return counts
+                if ref in referencias_set:
+                    counts[ref] += 1
+                else:
+                    extras.append(filename)
+            else:
+                extras.append(filename)
+        return counts, extras
 
     @staticmethod
     def _classify(count: int) -> str:
@@ -54,8 +59,10 @@ class PDFValidator:
         -------
         resultados: dict mapping each reference to its validation state.
         totales: tuple(total, completos, incompletos, sin_descarga, cobertura_percent)
+        extras: list of filenames not matching references
         """
-        index = self._index_files()
+        referencias_set = set(referencias)
+        index, extras = self._index_files_and_detect_extras(referencias_set)
         resultados = {}
         completos = incompletos = sin_descarga = 0
         for ref in referencias:
@@ -69,6 +76,5 @@ class PDFValidator:
             else:
                 sin_descarga += 1
         total = len(referencias)
-        # Each reference should have exactly 2 PDFs to be complete
         cobertura = (completos * 2) / (total * 2) * 100 if total > 0 else 0.0
-        return resultados, (total, completos, incompletos, sin_descarga, cobertura)
+        return resultados, (total, completos, incompletos, sin_descarga, cobertura), extras
