@@ -17,6 +17,7 @@ class SatqScraper:
         YA_GENERADA = 2
         INVALIDA = 3
         DESCONOCIDO = 4
+        RFC_INCORRECTO = 5
     def __init__(self, download_root=None, screenshot_dir=None):
         self.download_root = str(DOWNLOADS_DIR) if download_root is None else download_root
         self.screenshot_dir = str(SCREENSHOTS_DIR) if screenshot_dir is None else screenshot_dir
@@ -237,6 +238,26 @@ class SatqScraper:
                         # Modo empresarial: omitir las ya generadas inmediatamente
                         logger.info(f"Referencia {referencia} ya generada. Omitiendo por configuración del operador.")
                         return "OMITIDO-YA GENERADA", carpeta_lote, None, None
+                elif escenario == self.Escenario.RFC_INCORRECTO:
+                    # Capturar mensaje de error de la alerta
+                    alerta_el = self.main_frame.query_selector("div.alert-danger, .alert-danger")
+                    msg_error = alerta_el.inner_text().strip() if alerta_el else f"No existe {referencia} con el rfc {rfc}"
+                    logger.warning(f"[NEGOCIO] Alerta del portal: '{msg_error}'. Registrando error y continuando...")
+                    
+                    # Captura de pantalla de evidencia
+                    screenshot_path = self.capturar_pantalla(f"RFC_Incorrecto_{referencia}")
+                    
+                    # Clic en botón Salir para volver al inicio del portal y dejarlo limpio
+                    sel_salir = self.selectores.get("btn_salir", "a.btn.btn-default[href='./'], a:has-text('Salir')")
+                    try:
+                        btn_salir = self.main_frame.query_selector(sel_salir)
+                        if btn_salir:
+                            btn_salir.click()
+                            self.page.wait_for_load_state('networkidle')
+                    except Exception as click_err:
+                        logger.error(f"Fallo al hacer clic en Salir tras error de RFC: {click_err}")
+                        
+                    return "ERROR_VALIDACION", carpeta_lote, msg_error, screenshot_path
                 elif escenario == self.Escenario.INVALIDA:
                     raise Exception("Referencia o RFC no válidos según portal")
 
@@ -278,7 +299,15 @@ class SatqScraper:
             Escenario Enum
         """
         # Esperar que algún elemento clave aparezca
-        time.sleep(2)  # pequeña pausa para que el DOM se actualice
+        time.sleep(2)  # pequeña pausa para que el DOM se antes actualice
+        
+        # Caso: Alerta roja de error de RFC incorrecto (div.alert-danger)
+        alerta_danger = self.main_frame.query_selector("div.alert-danger, .alert-danger")
+        if alerta_danger:
+            texto_alerta = alerta_danger.inner_text().strip().lower()
+            if "no existe" in texto_alerta and "con el rfc" in texto_alerta:
+                return self.Escenario.RFC_INCORRECTO
+
         # Caso: botón Generar CFDI presente
         sel_generar = self.selectores.get("btn_generar_cfdi", "button:has-text('Generar CFDI'), a:has-text('Generar CFDI')")
         btn_generar = self.main_frame.query_selector(sel_generar)

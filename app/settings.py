@@ -27,7 +27,7 @@ DEFAULT_CONFIG = {
         "input_domicilio_fiscal_receptor": "input#DomicilioFiscalReceptor",
         "btn_timbrar": "button#btnTimbrar",
         "btn_pdf": "button:has-text('PDF'), a:has-text('PDF')",
-        "btn_salir": "a.btn.btn-default[href='./'], a:has-text('Salir')"
+        "btn_salir": "button:has-text('Salir'), a.btn.btn-default[href='./'], a:has-text('Salir')"
     }
 }
 
