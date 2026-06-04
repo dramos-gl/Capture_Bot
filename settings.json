@@ -22,5 +22,7 @@
         "btn_timbrar": "button#btnTimbrar",
         "btn_pdf": "button:has-text('PDF'), a:has-text('PDF')",
         "btn_salir": "button:has-text('Salir'), a.btn.btn-default[href='./'], a:has-text('Salir')"
-    }
+    },
+    "fase_b_origen_dir": "C:\\Users\\dramos\\Downloads\\Nueva carpeta",
+    "fase_b_destino_dir": "C:\\Users\\dramos\\Downloads\\PruebaB"
 }

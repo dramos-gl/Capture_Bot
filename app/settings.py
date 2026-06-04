@@ -111,3 +111,23 @@ def get_rfcs_permitidos() -> list:
 def get_selectores_satq() -> dict:
     """Devuelve el mapeo de selectores HTML/DOM del portal SATQ."""
     return _load_config().get("selectores_satq", DEFAULT_CONFIG["selectores_satq"])
+
+def get_fase_b_origen_dir() -> str:
+    """Obtiene el directorio origen de PDFs para la Fase B."""
+    return _load_config().get("fase_b_origen_dir", "")
+
+def set_fase_b_origen_dir(path: str) -> None:
+    """Establece el directorio origen de PDFs para la Fase B."""
+    cfg = _load_config()
+    cfg["fase_b_origen_dir"] = os.path.abspath(path)
+    _save_config(cfg)
+
+def get_fase_b_destino_dir() -> str:
+    """Obtiene el directorio destino de PDFs y Excels para la Fase B."""
+    return _load_config().get("fase_b_destino_dir", "")
+
+def set_fase_b_destino_dir(path: str) -> None:
+    """Establece el directorio destino de PDFs y Excels para la Fase B."""
+    cfg = _load_config()
+    cfg["fase_b_destino_dir"] = os.path.abspath(path)
+    _save_config(cfg)

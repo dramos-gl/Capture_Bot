@@ -222,6 +222,14 @@ class OptimaCaptureApp(ctk.CTk):
             border_color="#CBD5E1", border_width=1, corner_radius=6, height=32, command=self.action_validar_pdfs
         )
         self.btn_validar_pdfs.pack(fill="x", padx=15, pady=4)
+
+        # Botón para la preparación de la Fase B (Extracción de PDFs)
+        self.btn_preparar_fase_b = ctk.CTkButton(
+            self.control_frame, text="📥  Preparar Lotes (Fase B)", fg_color="#FFFFFF", hover_color="#F8FAFC",
+            text_color="#1E293B", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            border_color="#CBD5E1", border_width=1, corner_radius=6, height=32, command=self.action_abrir_fase_b_dialog
+        )
+        self.btn_preparar_fase_b.pack(fill="x", padx=15, pady=4)
         
         # Botón Configurar URL con engrane integrado a la derecha
         self.btn_change_url = ctk.CTkButton(
@@ -854,6 +862,7 @@ class OptimaCaptureApp(ctk.CTk):
         self.btn_select_download.configure(state="disabled")
         self.btn_change_url.configure(state="disabled")
         self.btn_validar_pdfs.configure(state="disabled")
+        self.btn_preparar_fase_b.configure(state="disabled")
 
         # Leer configuración del switch
         solo_no_generadas = bool(self.switch_omitir_generadas.get())
@@ -890,6 +899,7 @@ class OptimaCaptureApp(ctk.CTk):
         self.btn_select_download.configure(state="normal")
         self.btn_change_url.configure(state="normal")
         self.btn_validar_pdfs.configure(state="normal")
+        self.btn_preparar_fase_b.configure(state="normal")
         self._validar_rutas()
         self.btn_login_continuar.pack_forget()
 
@@ -1014,6 +1024,7 @@ class OptimaCaptureApp(ctk.CTk):
         self.btn_select_download.configure(state="disabled")
         self.btn_change_url.configure(state="disabled")
         self.btn_validar_pdfs.configure(state="disabled")
+        self.btn_preparar_fase_b.configure(state="disabled")
         
         # Ejecutar validación en un hilo separado para mantener la UI responsiva
         def _thread_val():
@@ -1091,9 +1102,206 @@ class OptimaCaptureApp(ctk.CTk):
                 self.btn_select_download.configure(state="normal")
                 self.btn_change_url.configure(state="normal")
                 self.btn_validar_pdfs.configure(state="normal")
+                self.btn_preparar_fase_b.configure(state="normal")
                 self._validar_rutas()
                 
         threading.Thread(target=_thread_val, daemon=True).start()
+
+    def action_abrir_fase_b_dialog(self):
+        """
+        Abre una ventana emergente (Toplevel) para configurar y ejecutar la Fase B.
+        """
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Fase B — Preparación de Lotes")
+        dialog.geometry("550x380")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Configurar icono del dialog
+        if hasattr(self, '_icono_path') and self._icono_path and os.path.exists(self._icono_path):
+            try:
+                dialog.iconbitmap(self._icono_path)
+            except Exception:
+                pass
+
+        # Centrar respecto a la ventana principal
+        x = self.winfo_x() + (self.winfo_width() // 2) - 275
+        y = self.winfo_y() + (self.winfo_height() // 2) - 190
+        dialog.geometry(f"+{x}+{y}")
+        dialog.configure(fg_color="#F1F5F9")
+
+        # Frame principal con padding
+        main_frame = ctk.CTkFrame(dialog, fg_color="#FFFFFF", corner_radius=8, border_color="#E2E8F0", border_width=1)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Título
+        lbl_titulo = ctk.CTkLabel(
+            main_frame, 
+            text="📥  Extracción de PDFs y Generación de Excel", 
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color="#1E3E62"
+        )
+        lbl_titulo.pack(anchor="w", padx=15, pady=(15, 10))
+
+        # 1. Carpeta Origen
+        origen_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        origen_frame.pack(fill="x", padx=15, pady=4)
+        origen_frame.grid_columnconfigure(0, weight=1)
+        
+        lbl_origen = ctk.CTkLabel(origen_frame, text="Carpeta Origen (PDFs):", font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"), text_color="#1E293B")
+        lbl_origen.grid(row=0, column=0, sticky="w", columnspan=2)
+        
+        ent_origen = ctk.CTkEntry(origen_frame, placeholder_text="Seleccione carpeta...", height=28, font=ctk.CTkFont(size=10))
+        ent_origen.grid(row=1, column=0, sticky="ew", padx=(0, 5))
+        
+        saved_origen = settings.get_fase_b_origen_dir()
+        if saved_origen:
+            ent_origen.insert(0, saved_origen)
+            
+        def select_origen():
+            folder = filedialog.askdirectory(title="Seleccionar Carpeta Origen de PDFs")
+            if folder:
+                ent_origen.delete(0, "end")
+                ent_origen.insert(0, folder)
+                settings.set_fase_b_origen_dir(folder)
+
+        btn_origen = ctk.CTkButton(
+            origen_frame, text="Buscar...", width=80, height=28, fg_color="#FFFFFF", hover_color="#F8FAFC",
+            text_color="#1E293B", border_color="#CBD5E1", border_width=1, corner_radius=5,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"), command=select_origen
+        )
+        btn_origen.grid(row=1, column=1, sticky="e")
+
+        # 2. Carpeta Destino
+        destino_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        destino_frame.pack(fill="x", padx=15, pady=4)
+        destino_frame.grid_columnconfigure(0, weight=1)
+        
+        lbl_destino = ctk.CTkLabel(destino_frame, text="Carpeta Destino (Resultados):", font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"), text_color="#1E293B")
+        lbl_destino.grid(row=0, column=0, sticky="w", columnspan=2)
+        
+        ent_destino = ctk.CTkEntry(destino_frame, placeholder_text="Seleccione carpeta...", height=28, font=ctk.CTkFont(size=10))
+        ent_destino.grid(row=1, column=0, sticky="ew", padx=(0, 5))
+        
+        saved_destino = settings.get_fase_b_destino_dir()
+        if saved_destino:
+            ent_destino.insert(0, saved_destino)
+
+        def select_destino():
+            folder = filedialog.askdirectory(title="Seleccionar Carpeta Destino")
+            if folder:
+                ent_destino.delete(0, "end")
+                ent_destino.insert(0, folder)
+                settings.set_fase_b_destino_dir(folder)
+
+        btn_destino = ctk.CTkButton(
+            destino_frame, text="Buscar...", width=80, height=28, fg_color="#FFFFFF", hover_color="#F8FAFC",
+            text_color="#1E293B", border_color="#CBD5E1", border_width=1, corner_radius=5,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"), command=select_destino
+        )
+        btn_destino.grid(row=1, column=1, sticky="e")
+
+        # 3. Checkbox Conservar Originales
+        chk_conservar = ctk.CTkCheckBox(
+            main_frame, 
+            text="Mantener copia de PDFs originales en origen (Recomendado)",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            text_color="#1E293B"
+        )
+        chk_conservar.select()
+        chk_conservar.pack(anchor="w", padx=15, pady=8)
+
+        # 4. Progreso y detalles
+        progreso_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        progreso_frame.pack(fill="x", padx=15, pady=(4, 2))
+        
+        lbl_prog_txt = ctk.CTkLabel(progreso_frame, text="Progreso:", font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"), text_color="#64748B")
+        lbl_prog_txt.pack(side="left")
+        
+        lbl_prog_det = ctk.CTkLabel(progreso_frame, text="Esperando inicio...", font=ctk.CTkFont(family="Segoe UI", size=9), text_color="#64748B")
+        lbl_prog_det.pack(side="right")
+        
+        bar_prog = ctk.CTkProgressBar(main_frame, fg_color="#F1F5F9", progress_color="#1E3E62", height=8, corner_radius=4)
+        bar_prog.set(0)
+        bar_prog.pack(fill="x", padx=15, pady=(0, 10))
+
+        # 5. Botones de acción
+        action_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        action_frame.pack(fill="x", side="bottom", padx=15, pady=15)
+
+        btn_cerrar = ctk.CTkButton(
+            action_frame, text="Cerrar", fg_color="#FFFFFF", hover_color="#F8FAFC",
+            text_color="#1E293B", border_color="#CBD5E1", border_width=1, corner_radius=6,
+            height=30, width=100, font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            command=dialog.destroy
+        )
+        btn_cerrar.pack(side="left")
+
+        def start_processing():
+            orig = ent_origen.get().strip()
+            dest = ent_destino.get().strip()
+            if not orig or not os.path.isdir(orig) or not dest or not os.path.isdir(dest):
+                messagebox.showerror("Directorios Requeridos", "Por favor seleccione carpetas de origen y destino válidas.")
+                return
+            
+            # Desactivar botones
+            btn_iniciar_proc.configure(state="disabled")
+            btn_cerrar.configure(state="disabled")
+            btn_origen.configure(state="disabled")
+            btn_destino.configure(state="disabled")
+            
+            def log_handler(msg, nivel):
+                self.event_queue.put({"type": "log", "message": msg, "nivel": nivel})
+                
+            def progress_handler(current, total, detail):
+                pct = current / total
+                dialog.after(0, lambda: bar_prog.set(pct))
+                dialog.after(0, lambda: lbl_prog_det.configure(text=f"{current}/{total} - {detail[:25]}..."))
+
+            def run():
+                from app.phase_b_extractor import procesar_carpeta_fase_b
+                try:
+                    res = procesar_carpeta_fase_b(
+                        origen_dir=orig,
+                        destino_dir=dest,
+                        conservar_originales=chk_conservar.get(),
+                        log_callback=log_handler,
+                        progress_callback=progress_handler
+                    )
+                    
+                    if res.get("success"):
+                        dialog.after(0, lambda: messagebox.showinfo(
+                            "Proceso Completado", 
+                            f"La extracción de la Fase B se ha completado con éxito.\n\n"
+                            f"Archivos procesados válidos: {res.get('processed')}"
+                        ))
+                    else:
+                        dialog.after(0, lambda: messagebox.showerror(
+                            "Error de Extracción", 
+                            f"Ocurrió un problema: {res.get('message')}"
+                        ))
+                except Exception as e:
+                    self.event_queue.put({"type": "log", "message": f"[ERROR FASE B] {e}", "nivel": "ERROR"})
+                    dialog.after(0, lambda: messagebox.showerror(
+                        "Error Crítico", 
+                        f"Error inesperado durante la ejecución:\n{e}"
+                    ))
+                finally:
+                    dialog.after(0, lambda: btn_iniciar_proc.configure(state="normal"))
+                    dialog.after(0, lambda: btn_cerrar.configure(state="normal"))
+                    dialog.after(0, lambda: btn_origen.configure(state="normal"))
+                    dialog.after(0, lambda: btn_destino.configure(state="normal"))
+                    dialog.after(0, lambda: lbl_prog_det.configure(text="Proceso finalizado."))
+
+            threading.Thread(target=run, daemon=True).start()
+
+        btn_iniciar_proc = ctk.CTkButton(
+            action_frame, text="Iniciar Extracción", fg_color="#1E3E62", hover_color="#152B44",
+            text_color="#FFFFFF", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            border_width=0, corner_radius=6, height=30, width=140, command=start_processing
+        )
+        btn_iniciar_proc.pack(side="right")
 
     def action_change_url(self):
         """Permite al usuario cambiar la URL del portal SATQ en caso de que haya sido modificada."""
