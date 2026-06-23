@@ -12,6 +12,7 @@ DEFAULT_CONFIG = {
     "max_timbrado_retries": 2,
     "reintento_automatico": True,
     "modo_timbrado": "asistido",
+    "lote_size": 100,
     "rfcs_permitidos": [
         "CIN010904D31",
         "CAD1001263P4",
@@ -130,4 +131,14 @@ def set_fase_b_destino_dir(path: str) -> None:
     """Establece el directorio destino de PDFs y Excels para la Fase B."""
     cfg = _load_config()
     cfg["fase_b_destino_dir"] = os.path.abspath(path)
+    _save_config(cfg)
+
+def get_lote_size() -> int:
+    """Obtiene el tamaño de lote configurado para Fase C."""
+    return _load_config().get("lote_size", 100)
+
+def set_lote_size(size: int) -> None:
+    """Guarda el tamaño de lote."""
+    cfg = _load_config()
+    cfg["lote_size"] = size
     _save_config(cfg)

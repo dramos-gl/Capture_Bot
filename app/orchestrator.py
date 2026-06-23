@@ -362,9 +362,11 @@ class BotOrchestrator:
                     "accion": "Iniciando consulta..."
                 })
                 
-                # Clasificación automática de lote (carpetas físicas cada 100 filas)
-                # Fila 2 a 101 -> Lote_1, Fila 102 a 201 -> Lote_2, etc.
-                numero_lote = ((fila - 2) // 100) + 1
+                # Clasificación automática de lote (carpetas físicas)
+                # Ejemplo: Lote size = 100
+                from app import settings
+                lote_size = settings.get_lote_size()
+                numero_lote = ((fila - 2) // lote_size) + 1
                 nombre_lote = f"Lote_{numero_lote}"
                 
                 # Actualizar celda a EN_PROCESO en caliente

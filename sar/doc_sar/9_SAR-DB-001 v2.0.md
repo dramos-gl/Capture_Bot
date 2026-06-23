@@ -1,0 +1,638 @@
+# SAR-DB-001 v2.0
+
+# Diseño Físico de Base de Datos
+
+## Sistema de Administración de Referencias (SAR)
+
+**Documento:** SAR-DB-001
+**Versión:** 2.0
+**Estado:** CONGELADO
+**Fecha:** 2026
+**Motor de Base de Datos:** PostgreSQL 16+
+**Arquitectura:** Business First Architecture (BFA)
+
+---
+
+# 1. Objetivo
+
+Definir la estructura física definitiva de la base de datos SAR, incluyendo:
+
+* Seguridad
+* Control de acceso
+* Auditoría
+* Producción de referencias
+* Gestión documental
+* Concurrencia
+* Trazabilidad
+* Recuperación operativa
+* Métricas y reportes
+
+---
+
+# 2. Principios de Diseño
+
+## DBD-001
+
+La entidad principal del sistema es:
+
+```text
+REFERENCIA
+```
+
+---
+
+## DBD-002
+
+Las boletas NO son entidades de negocio.
+
+Se consideran evidencia documental de una referencia.
+
+---
+
+## DBD-003
+
+Los archivos PDF se almacenan fuera de la base de datos.
+
+La base únicamente conserva:
+
+* Ruta
+* Hash SHA256
+* Metadatos
+
+---
+
+## DBD-004
+
+Toda operación crítica debe ser auditable.
+
+---
+
+## DBD-005
+
+Toda referencia debe ser trazable desde:
+
+```text
+ORDEN
+→ GRUPO
+→ SOLICITUD
+→ REFERENCIA
+```
+
+---
+
+# 3. Esquemas
+
+```text
+sar_seguridad
+sar_catalogo
+sar_produccion
+sar_archivo
+sar_auditoria
+sar_configuracion
+sar_reporte
+```
+
+---
+
+# 4. Módulo Seguridad
+
+## Tabla: usuario
+
+| Campo                 | Tipo               |
+| --------------------- | ------------------ |
+| usuario_id            | BIGSERIAL PK       |
+| username              | VARCHAR(50) UNIQUE |
+| nombre                | VARCHAR(200)       |
+| correo                | VARCHAR(200)       |
+| password_hash         | VARCHAR(500)       |
+| algoritmo_hash        | VARCHAR(50)        |
+| intentos_fallidos     | INTEGER            |
+| bloqueado             | BOOLEAN            |
+| fecha_bloqueo         | TIMESTAMPTZ        |
+| fecha_cambio_password | TIMESTAMPTZ        |
+| activo                | BOOLEAN            |
+| created_at            | TIMESTAMPTZ        |
+| updated_at            | TIMESTAMPTZ        |
+
+---
+
+## Tabla: rol
+
+| Campo  | Tipo         |
+| ------ | ------------ |
+| rol_id | BIGSERIAL PK |
+| codigo | VARCHAR(30)  |
+| nombre | VARCHAR(100) |
+| activo | BOOLEAN      |
+
+---
+
+## Tabla: modulo
+
+| Campo | Tipo |
+| :--- | :--- |
+| modulo_id | BIGSERIAL PK |
+| codigo | VARCHAR(50) UNIQUE |
+| nombre | VARCHAR(100) |
+| descripcion | VARCHAR(200) |
+| activo | BOOLEAN |
+
+---
+
+## Tabla: accion
+
+| Campo | Tipo |
+| :--- | :--- |
+| accion_id | BIGSERIAL PK |
+| codigo | VARCHAR(50) UNIQUE |
+| nombre | VARCHAR(100) |
+| descripcion | VARCHAR(200) |
+| activo | BOOLEAN |
+
+---
+
+## Tabla: permiso
+
+| Campo | Tipo |
+| :--- | :--- |
+| permiso_id | BIGSERIAL PK |
+| modulo_id | BIGINT FK |
+| accion_id | BIGINT FK |
+| activo | BOOLEAN |
+
+Restricción:
+```text
+UNIQUE(modulo_id, accion_id)
+```
+
+---
+
+## Tabla: usuario_rol
+
+| Campo      | Tipo      |
+| ---------- | --------- |
+| usuario_id | BIGINT FK |
+| rol_id     | BIGINT FK |
+
+PK:
+
+```text
+(usuario_id, rol_id)
+```
+
+---
+
+## Tabla: rol_permiso
+
+| Campo      | Tipo      |
+| ---------- | --------- |
+| rol_id     | BIGINT FK |
+| permiso_id | BIGINT FK |
+
+PK:
+
+```text
+(rol_id, permiso_id)
+```
+
+---
+
+## Tabla: sesion
+
+| Campo              | Tipo         |
+| ------------------ | ------------ |
+| sesion_id          | BIGSERIAL PK |
+| usuario_id         | BIGINT FK    |
+| equipo_nombre      | VARCHAR(200) |
+| equipo_uuid        | VARCHAR(200) |
+| huella_dispositivo | VARCHAR(500) |
+| ip_equipo          | VARCHAR(100) |
+| version_cliente    | VARCHAR(50)  |
+| refresh_token_hash | VARCHAR(500) |
+| fecha_inicio       | TIMESTAMPTZ  |
+| fecha_expiracion   | TIMESTAMPTZ  |
+| ultimo_heartbeat   | TIMESTAMPTZ  |
+| revocado           | BOOLEAN      |
+| fecha_revocacion   | TIMESTAMPTZ  |
+| estado             | VARCHAR(30)  |
+
+---
+
+# 5. Configuración
+
+## Tabla: parametro_sistema
+
+| Campo        | Tipo         |
+| ------------ | ------------ |
+| parametro_id | BIGSERIAL PK |
+| codigo       | VARCHAR(100) |
+| valor        | TEXT         |
+| descripcion  | TEXT         |
+| activo       | BOOLEAN      |
+
+---
+
+## Tabla: localizador_portal
+
+| Campo | Tipo |
+| ------------------- | ------------ |
+| localizador_id      | BIGSERIAL PK |
+| nombre_clave        | VARCHAR(100) |
+| label_visible        | VARCHAR(200) |
+| estrategia_selector | VARCHAR(50)  |
+| valor_selector      | VARCHAR(500) |
+| descripcion         | VARCHAR(500) |
+| activo              | BOOLEAN      |
+
+Restricción:
+```text
+UNIQUE(nombre_clave)
+```
+
+---
+
+# 6. Catálogos
+
+## Tabla: municipio
+
+| Campo         | Tipo         |
+| ------------- | ------------ |
+| municipio_id  | BIGSERIAL PK |
+| codigo_portal | VARCHAR(50)  |
+| nombre        | VARCHAR(200) |
+| activo        | BOOLEAN      |
+
+---
+
+## Tabla: delegacion
+
+| Campo         | Tipo         |
+| ------------- | ------------ |
+| delegacion_id | BIGSERIAL PK |
+| municipio_id  | BIGINT FK    |
+| codigo_portal | VARCHAR(300) |
+| nombre        | VARCHAR(200) |
+| activo        | BOOLEAN      |
+
+---
+
+## Tabla: concepto
+
+| Campo         | Tipo         |
+| ------------- | ------------ |
+| concepto_id   | BIGSERIAL PK |
+| codigo_portal | VARCHAR(300) |
+| nombre        | VARCHAR(300) |
+| alias         | VARCHAR(20)  |
+| activo        | BOOLEAN      |
+
+---
+
+## Tabla: estado_sistema
+
+| Campo       | Tipo         |
+| ----------- | ------------ |
+| estado_id   | BIGSERIAL PK |
+| entidad     | VARCHAR(100) |
+| codigo      | VARCHAR(50)  |
+| descripcion | VARCHAR(200) |
+
+Restricción:
+
+```text
+UNIQUE(entidad,codigo)
+```
+
+---
+
+## Tabla: evento_sistema
+
+| Campo       | Tipo         |
+| ----------- | ------------ |
+| evento_id   | BIGSERIAL PK |
+| codigo      | VARCHAR(100) |
+| descripcion | VARCHAR(300) |
+
+---
+
+# 7. RFC
+
+## Tabla: rfc
+
+| Campo         | Tipo               |
+| ------------- | ------------------ |
+| rfc_id        | BIGSERIAL PK       |
+| rfc           | VARCHAR(13) UNIQUE |
+| razon_social  | VARCHAR(500)       |
+| calle         | VARCHAR(500)       |
+| no_exterior   | VARCHAR(50)        |
+| no_interior   | VARCHAR(50)        |
+| colonia       | VARCHAR(300)       |
+| codigo_postal | VARCHAR(10)        |
+| localidad     | VARCHAR(300)       |
+| municipio     | VARCHAR(300)       |
+| estado        | VARCHAR(300)       |
+| activo        | BOOLEAN            |
+| created_at    | TIMESTAMPTZ        |
+| updated_at    | TIMESTAMPTZ        |
+
+---
+
+# 8. Producción
+
+## Tabla: orden_generacion
+
+| Campo          | Tipo               |
+| -------------- | ------------------ |
+| orden_id       | BIGSERIAL PK       |
+| folio          | VARCHAR(50) UNIQUE |
+| descripcion    | TEXT               |
+| municipio_id   | BIGINT FK          |
+| fecha_creacion | TIMESTAMPTZ        |
+| estado_id      | BIGINT FK          |
+| usuario_id     | BIGINT FK          |
+
+---
+
+## Tabla: grupo_referencia
+
+| Campo               | Tipo         |
+| ------------------- | ------------ |
+| grupo_id            | BIGSERIAL PK |
+| orden_id            | BIGINT FK    |
+| rfc_id              | BIGINT FK    |
+| concepto_id         | BIGINT FK    |
+| cantidad_solicitada | INTEGER      |
+| cantidad_generada   | INTEGER      |
+| cantidad_autorizada | INTEGER      |
+| cantidad_rechazada  | INTEGER      |
+| cantidad_expirada   | INTEGER      |
+| ultimo_consecutivo  | INTEGER      |
+| estado_id           | BIGINT FK    |
+| created_at          | TIMESTAMPTZ  |
+
+Restricción:
+
+```text
+UNIQUE
+(
+orden_id,
+rfc_id,
+concepto_id
+)
+```
+
+---
+
+## Tabla: solicitud
+
+| Campo               | Tipo         |
+| ------------------- | ------------ |
+| solicitud_id        | BIGSERIAL PK |
+| grupo_id            | BIGINT FK    |
+| delegacion_id       | BIGINT FK    |
+| cantidad_solicitada | INTEGER      |
+| cantidad_generada   | INTEGER      |
+| consecutivo_inicio  | INTEGER      |
+| consecutivo_fin     | INTEGER      |
+| ultimo_consecutivo  | INTEGER      |
+| usuario_asignado    | BIGINT FK    |
+| estado_id           | BIGINT FK    |
+| intentos            | INTEGER      |
+| ultimo_error        | TEXT         |
+| fecha_ultimo_error  | TIMESTAMPTZ  |
+| fecha_asignacion    | TIMESTAMPTZ  |
+| fecha_inicio        | TIMESTAMPTZ  |
+| fecha_fin           | TIMESTAMPTZ  |
+
+---
+
+## Tabla: referencia
+
+| Campo             | Tipo          |
+| ----------------- | ------------- |
+| referencia_id     | BIGSERIAL PK  |
+| grupo_id          | BIGINT FK     |
+| solicitud_id      | BIGINT FK     |
+| usuario_generador | BIGINT FK     |
+| sesion_id         | BIGINT FK     |
+| consecutivo_grupo | INTEGER       |
+| referencia_portal | VARCHAR(100)  |
+| importe           | NUMERIC(14,2) |
+| fecha_generacion  | TIMESTAMPTZ   |
+| fecha_vigencia    | DATE          |
+| estado_id         | BIGINT FK     |
+| created_at        | TIMESTAMPTZ   |
+
+Restricciones:
+
+```text
+UNIQUE(grupo_id, consecutivo_grupo)
+
+UNIQUE(referencia_portal)
+```
+
+---
+
+## Tabla: referencia_historial
+
+| Campo          | Tipo         |
+| -------------- | ------------ |
+| historial_id   | BIGSERIAL PK |
+| referencia_id  | BIGINT FK    |
+| estado_origen  | BIGINT FK    |
+| estado_destino | BIGINT FK    |
+| usuario_id     | BIGINT FK    |
+| fecha          | TIMESTAMPTZ  |
+| observacion    | TEXT         |
+
+---
+
+# 9. Gestión Documental
+
+## Tabla: archivo_pdf
+
+| Campo          | Tipo          |
+| -------------- | ------------- |
+| archivo_id     | BIGSERIAL PK  |
+| referencia_id  | BIGINT FK     |
+| tipo_archivo   | VARCHAR(50)   |
+| estado_archivo | VARCHAR(30)   |
+| nombre_archivo | VARCHAR(500)  |
+| ruta_archivo   | VARCHAR(1000) |
+| hash_sha256    | VARCHAR(64)   |
+| tamano_bytes   | BIGINT        |
+| fecha_creacion | TIMESTAMPTZ   |
+
+---
+
+## Tabla: factura
+
+| Campo          | Tipo          |
+| -------------- | ------------- |
+| factura_id     | BIGSERIAL PK  |
+| referencia_id  | BIGINT FK     |
+| uuid           | VARCHAR(36)   |
+| folio          | VARCHAR(100)  |
+| rfc_emisor     | VARCHAR(13)   |
+| fecha_factura  | TIMESTAMPTZ   |
+| pdf_path       | VARCHAR(1000) |
+| xml_path       | VARCHAR(1000) |
+| estado         | VARCHAR(30)   |
+
+Restricción:
+```text
+UNIQUE(uuid)
+```
+
+---
+
+## Tabla: asignacion
+
+| Campo            | Tipo          |
+| ---------------- | ------------- |
+| asignacion_id    | BIGSERIAL PK  |
+| factura_id       | BIGINT FK     |
+| usuario_destino  | VARCHAR(100)  |
+| tipo_asignacion  | VARCHAR(20)   |
+| fecha_asignacion | TIMESTAMPTZ   |
+| observaciones    | TEXT          |
+
+---
+
+# 10. Recuperación Operativa
+
+## Tabla: checkpoint_proceso
+
+| Campo                | Tipo         |
+| -------------------- | ------------ |
+| checkpoint_id        | BIGSERIAL PK |
+| solicitud_id         | BIGINT FK    |
+| ultima_referencia_id | BIGINT FK    |
+| fecha_checkpoint     | TIMESTAMPTZ  |
+| observaciones        | TEXT         |
+
+---
+
+# 11. Auditoría
+
+## Tabla: auditoria_evento
+
+| Campo               | Tipo         |
+| ------------------- | ------------ |
+| evento_auditoria_id | BIGSERIAL PK |
+| evento_id           | BIGINT FK    |
+| usuario_id          | BIGINT FK    |
+| sesion_id           | BIGINT FK    |
+| fecha               | TIMESTAMPTZ  |
+| modulo              | VARCHAR(100) |
+| valor_anterior      | JSONB        |
+| valor_nuevo         | JSONB        |
+| detalle             | JSONB        |
+
+---
+
+## Tabla: auditoria_login
+
+| Campo        | Tipo         |
+| ------------ | ------------ |
+| login_id     | BIGSERIAL PK |
+| usuario_id   | BIGINT FK    |
+| sesion_id    | BIGINT FK    |
+| fecha_login  | TIMESTAMPTZ  |
+| fecha_logout | TIMESTAMPTZ  |
+| ip           | VARCHAR(100) |
+| equipo       | VARCHAR(200) |
+
+---
+
+## Tabla: auditoria_error
+
+| Campo       | Tipo         |
+| ----------- | ------------ |
+| error_id    | BIGSERIAL PK |
+| usuario_id  | BIGINT FK    |
+| sesion_id   | BIGINT FK    |
+| modulo      | VARCHAR(100) |
+| mensaje     | TEXT         |
+| stack_trace | TEXT         |
+| fecha       | TIMESTAMPTZ  |
+
+---
+
+# 12. Reportes
+
+## Tabla: metrica_diaria
+
+| Campo                   | Tipo    |
+| ----------------------- | ------- |
+| fecha                   | DATE PK |
+| referencias_generadas   | INTEGER |
+| referencias_autorizadas | INTEGER |
+| referencias_rechazadas  | INTEGER |
+| referencias_expiradas   | INTEGER |
+| usuarios_activos        | INTEGER |
+
+---
+
+# 13. Estrategia de Concurrencia
+
+Nivel de aislamiento:
+
+```text
+READ COMMITTED
+```
+
+Control de consecutivos:
+
+```sql
+SELECT *
+FROM solicitud
+WHERE solicitud_id = ?
+FOR UPDATE;
+```
+
+Garantía:
+
+```text
+0 colisiones
+0 duplicados
+```
+
+---
+
+# 13.1 Estrategia de Indexación
+
+Para mitigar problemas de latencia y asegurar un rendimiento óptimo bajo cargas de concurrencia media-alta (múltiples Workers ejecutando scrapers y usuarios visualizando grids en vivo), se definen las siguientes reglas de indexación:
+
+1.  **Llaves Foráneas (FK)**: PostgreSQL no indexa las Fks de forma nativa. Se crean índices B-Tree explícitos en campos como `grupo_id`, `solicitud_id`, `referencia_id`, `rol_id` y `permiso_id` para acelerar operaciones de `JOIN` y cascada de eliminación.
+2.  **Fechas y Logs**: Las consultas sobre la bitácora y logs de errores ordenan los registros en orden cronológico inverso. Se crean índices descendentes (`DESC`) en campos `fecha` para optimizar consultas del tipo `ORDER BY fecha DESC LIMIT N`.
+3.  **Filtros de Negocio**: Se indexan columnas con alta variabilidad utilizadas recurrentemente para filtrar (e.g., `referencia.estado_id`, `solicitud.estado_id`).
+
+---
+
+# 14. Decisiones Congeladas
+
+* DBD-001 PostgreSQL Oficial
+* DBD-002 Referencia es la entidad principal
+* DBD-003 PDF fuera de la base de datos
+* DBD-004 Consecutivos por Grupo
+* DBD-005 RBAC basado en permisos
+* DBD-006 Historial de estados obligatorio
+* DBD-007 Auditoría forense obligatoria
+* DBD-008 Checkpoints obligatorios
+* DBD-009 SHA256 obligatorio para PDFs
+* DBD-010 Argon2id obligatorio para contraseñas
+* DBD-011 Refresh Tokens revocables
+* DBD-012 Trazabilidad usuario-sesión-referencia
+* DBD-013 Índices explícitos obligatorios en llaves foráneas y búsquedas de estado/fecha
+
+---
+
+# Estado
+
+```text
+SAR-DB-001 v2.0
+BASELINE CONGELADA
+APROBADA PARA DESARROLLO
+```

@@ -1,0 +1,72 @@
+"""Custom Styled Data Table Organism."""
+
+from typing import List
+from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QWidget, QHBoxLayout
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import Qt
+from sar.src.ui.design_system.components.atoms.gl_badge import StatusBadge
+from sar.src.ui.design_system.tokens.colors import Colors
+
+class StyledDataTable(QTableWidget):
+    """A clean, professional data table organism designed with our design system tokens."""
+    
+    def __init__(self, headers: List[str], parent=None):
+        super().__init__(parent)
+        self.setColumnCount(len(headers))
+        self.setHorizontalHeaderLabels(headers)
+        
+        # Configure table behavior
+        self.setAlternatingRowColors(True)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setFocusPolicy(self.focusPolicy().NoFocus)
+        self.setShowGrid(False)
+        
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        
+        # Styling headers
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        header.setHighlightSections(False)
+        
+        # Vertical header styling
+        self.verticalHeader().setVisible(False)
+        self.verticalHeader().setDefaultSectionSize(36)
+        
+    def populate_rows(self, data: List[List[str]], checkable_first_col: bool = False):
+        """Populates the table rows with string data and styled widgets."""
+        self.setRowCount(0)
+        self.setRowCount(len(data))
+        
+        for row_idx, row_data in enumerate(data):
+            for col_idx, value in enumerate(row_data):
+                val_str = str(value)
+                
+                # Render state string as a StatusBadge pill
+                if val_str in ["AUTORIZADA", "PENDIENTE", "ERROR", "GENERADA", "RECHAZADA", "FALLIDO", "EXPIRADA", "ASIGNADA", "BORRADOR", "ABIERTA", "PROCESANDO", "FINALIZADA", "CANCELADA", "PENDIENTE_AUTORIZACION", "AUTORIZACION_PENDIENTE", "COMPLETADA"]:
+                    badge_container = QWidget()
+                    badge_container.setStyleSheet("background-color: transparent;")
+                    badge_layout = QHBoxLayout(badge_container)
+                    badge_layout.setContentsMargins(0, 0, 0, 0)
+                    badge_layout.setAlignment(Qt.AlignCenter)
+                    
+                    badge = StatusBadge(val_str)
+                    badge_layout.addWidget(badge)
+                    
+                    item = QTableWidgetItem(val_str)
+                    self.setItem(row_idx, col_idx, item)
+                    self.setCellWidget(row_idx, col_idx, badge_container)
+                else:
+                    item = QTableWidgetItem(val_str)
+                    if checkable_first_col and col_idx == 0:
+                        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                        item.setCheckState(Qt.CheckState.Unchecked)
+                    
+                    self.setItem(row_idx, col_idx, item)
+        
+        self.resizeColumnsToContents()

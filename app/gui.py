@@ -120,7 +120,7 @@ class OptimaCaptureApp(ctk.CTk):
         self.btn_icon_config = ctk.CTkButton(
             controls_container, text="⚙️", font=ctk.CTkFont(size=14),
             fg_color="transparent", hover_color="#2D5A88", text_color="#FFFFFF",
-            width=28, height=28, corner_radius=14, command=self.action_change_url
+            width=28, height=28, corner_radius=14, command=self.action_abrir_ajustes
         )
         self.btn_icon_config.pack(side="left", padx=2)
         
@@ -231,11 +231,11 @@ class OptimaCaptureApp(ctk.CTk):
         )
         self.btn_preparar_fase_b.pack(fill="x", padx=15, pady=4)
         
-        # Botón Configurar URL con engrane integrado a la derecha
+        # Botón Ajustes Generales
         self.btn_change_url = ctk.CTkButton(
-            self.control_frame, text="🔗  Configurar URL SATQ", fg_color="#FFFFFF", hover_color="#F8FAFC",
+            self.control_frame, text="⚙️  Ajustes del Sistema", fg_color="#FFFFFF", hover_color="#F8FAFC",
             text_color="#1E293B", font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            border_color="#CBD5E1", border_width=1, corner_radius=6, height=32, command=self.action_change_url
+            border_color="#CBD5E1", border_width=1, corner_radius=6, height=32, command=self.action_abrir_ajustes
         )
         self.btn_change_url.pack(fill="x", padx=15, pady=(4, 15))
         
@@ -1303,15 +1303,73 @@ class OptimaCaptureApp(ctk.CTk):
         )
         btn_iniciar_proc.pack(side="right")
 
-    def action_change_url(self):
-        """Permite al usuario cambiar la URL del portal SATQ en caso de que haya sido modificada."""
-        from tkinter import simpledialog
-        current_url = settings.get_satq_url()
-        new_url = simpledialog.askstring("Cambiar URL SATQ", "Ingrese la nueva URL del portal SATQ:", initialvalue=current_url)
-        if new_url:
-            settings.set_satq_url(new_url)
-            self._agregar_log_consola(f"[SISTEMA] URL del portal SATQ actualizada a: {new_url}", "INFO")
-            self._agregar_log_consola("[SISTEMA] Reinicie el bot para cargar la nueva URL.", "WARNING")
+    def action_abrir_ajustes(self):
+        """Abre una ventana modal unificada para configurar la URL del SATQ y el tamaño de lote."""
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Ajustes del Sistema")
+        dialog.geometry("450x300")
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Centrar
+        x = self.winfo_x() + (self.winfo_width() // 2) - 225
+        y = self.winfo_y() + (self.winfo_height() // 2) - 150
+        dialog.geometry(f"+{x}+{y}")
+        dialog.configure(fg_color="#F1F5F9")
+
+        main_frame = ctk.CTkFrame(dialog, fg_color="#FFFFFF", corner_radius=8, border_color="#E2E8F0", border_width=1)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        lbl_titulo = ctk.CTkLabel(
+            main_frame, text="⚙️ Configuración General", 
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"), text_color="#1E3E62"
+        )
+        lbl_titulo.pack(anchor="w", padx=15, pady=(15, 10))
+
+        # URL Input
+        lbl_url = ctk.CTkLabel(main_frame, text="URL del Portal SATQ:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#1E293B")
+        lbl_url.pack(anchor="w", padx=15, pady=(5, 0))
+        ent_url = ctk.CTkEntry(main_frame, width=350, height=28, font=ctk.CTkFont(size=10))
+        ent_url.pack(anchor="w", padx=15, pady=(0, 10))
+        ent_url.insert(0, settings.get_satq_url())
+
+        # Lote Size Input
+        lbl_lote = ctk.CTkLabel(main_frame, text="Tamaño de Lote (descargas físicas):", font=ctk.CTkFont(size=11, weight="bold"), text_color="#1E293B")
+        lbl_lote.pack(anchor="w", padx=15, pady=(5, 0))
+        ent_lote = ctk.CTkEntry(main_frame, width=150, height=28, font=ctk.CTkFont(size=10))
+        ent_lote.pack(anchor="w", padx=15, pady=(0, 15))
+        ent_lote.insert(0, str(settings.get_lote_size()))
+
+        def save_settings():
+            new_url = ent_url.get().strip()
+            new_lote_str = ent_lote.get().strip()
+            
+            if new_url:
+                settings.set_satq_url(new_url)
+                
+            if new_lote_str.isdigit():
+                settings.set_lote_size(int(new_lote_str))
+            
+            self._agregar_log_consola(f"[SISTEMA] Ajustes actualizados (URL: {new_url[:20]}..., Lotes: {new_lote_str}).", "INFO")
+            dialog.destroy()
+
+        # Botones
+        action_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        action_frame.pack(fill="x", side="bottom", padx=15, pady=15)
+        
+        btn_cancelar = ctk.CTkButton(
+            action_frame, text="Cancelar", fg_color="#FFFFFF", hover_color="#F8FAFC",
+            text_color="#1E293B", border_color="#CBD5E1", border_width=1, corner_radius=6,
+            height=30, width=100, command=dialog.destroy
+        )
+        btn_cancelar.pack(side="left")
+        
+        btn_guardar = ctk.CTkButton(
+            action_frame, text="Guardar Cambios", fg_color="#1E3E62", hover_color="#152B44",
+            text_color="#FFFFFF", border_width=0, corner_radius=6, height=30, width=120, command=save_settings
+        )
+        btn_guardar.pack(side="right")
 
     def _validar_rutas(self):
         """Habilita el botón 'Iniciar Bot' sólo si Excel y carpeta de descargas están configurados y el RFC es válido."""

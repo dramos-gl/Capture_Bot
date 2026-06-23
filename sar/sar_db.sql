@@ -1,0 +1,737 @@
+-- ===========================================================================
+-- Sistema de Administración de Referencias (SAR)
+-- Script de Creación Física de Base de Datos para PostgreSQL 16+
+-- Archivo: sar_db.sql
+-- Versión: 2.1
+-- ===========================================================================
+
+-- 1. Creación de Esquemas
+CREATE SCHEMA IF NOT EXISTS sar_seguridad;
+CREATE SCHEMA IF NOT EXISTS sar_catalogo;
+CREATE SCHEMA IF NOT EXISTS sar_produccion;
+CREATE SCHEMA IF NOT EXISTS sar_archivo;
+CREATE SCHEMA IF NOT EXISTS sar_auditoria;
+CREATE SCHEMA IF NOT EXISTS sar_configuracion;
+CREATE SCHEMA IF NOT EXISTS sar_reporte;
+
+-- ===========================================================================
+-- ESQUEMA: sar_seguridad
+-- ===========================================================================
+
+-- Tabla: usuario
+CREATE TABLE sar_seguridad.usuario (
+    usuario_id BIGSERIAL PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    nombre VARCHAR(200) NOT NULL,
+    correo VARCHAR(200),
+    password_hash VARCHAR(500) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+-- Tabla: rol
+CREATE TABLE sar_seguridad.rol (
+    rol_id BIGSERIAL PRIMARY KEY,
+    codigo VARCHAR(30) NOT NULL UNIQUE,
+    nombre VARCHAR(100) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Tabla: usuario_rol
+CREATE TABLE sar_seguridad.usuario_rol (
+    usuario_id BIGINT NOT NULL,
+    rol_id BIGINT NOT NULL,
+    PRIMARY KEY (usuario_id, rol_id),
+    FOREIGN KEY (usuario_id) REFERENCES sar_seguridad.usuario(usuario_id) ON DELETE CASCADE,
+    FOREIGN KEY (rol_id) REFERENCES sar_seguridad.rol(rol_id) ON DELETE CASCADE
+);
+
+-- Tabla: app_modulo
+CREATE TABLE sar_seguridad.app_modulo (
+    app_modulo_id SERIAL PRIMARY KEY,
+    codigo VARCHAR(50) NOT NULL UNIQUE,
+    nombre VARCHAR(100) NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+INSERT INTO sar_seguridad.app_modulo (codigo, nombre, activo) VALUES
+('ADMIN', 'Administración', TRUE),
+('CTRL_REF', 'Control de Referencias', TRUE),
+('BOT_FACE_A', 'Bot-Pago de derechos', TRUE),
+('BOT_C', 'Bot-Facturación', TRUE)
+ON CONFLICT (codigo) DO NOTHING;
+
+-- Tabla: modulo
+CREATE TABLE sar_seguridad.modulo (
+    modulo_id BIGSERIAL PRIMARY KEY,
+    codigo VARCHAR(50) NOT NULL UNIQUE,
+    nombre VARCHAR(100) NOT NULL,
+    descripcion VARCHAR(200),
+    activo BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Tabla: accion
+CREATE TABLE sar_seguridad.accion (
+    accion_id BIGSERIAL PRIMARY KEY,
+    codigo VARCHAR(50) NOT NULL UNIQUE,
+    nombre VARCHAR(100) NOT NULL,
+    descripcion VARCHAR(200),
+    activo BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Tabla: permiso
+CREATE TABLE sar_seguridad.permiso (
+    permiso_id BIGSERIAL PRIMARY KEY,
+    modulo_id BIGINT NOT NULL,
+    accion_id BIGINT NOT NULL,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    FOREIGN KEY (modulo_id) REFERENCES sar_seguridad.modulo(modulo_id) ON DELETE CASCADE,
+    FOREIGN KEY (accion_id) REFERENCES sar_seguridad.accion(accion_id) ON DELETE CASCADE,
+    CONSTRAINT uq_modulo_accion UNIQUE (modulo_id, accion_id)
+);
+
+-- Tabla: rol_permiso
+CREATE TABLE sar_seguridad.rol_permiso (
+    rol_id BIGINT NOT NULL,
+    permiso_id BIGINT NOT NULL,
+    PRIMARY KEY (rol_id, permiso_id),
+    FOREIGN KEY (rol_id) REFERENCES sar_seguridad.rol(rol_id) ON DELETE CASCADE,
+    FOREIGN KEY (permiso_id) REFERENCES sar_seguridad.permiso(permiso_id) ON DELETE CASCADE
+);
+
+-- Tabla: sesion
+CREATE TABLE sar_seguridad.sesion (
+    sesion_id BIGSERIAL PRIMARY KEY,
+    usuario_id BIGINT NOT NULL,
+    equipo_nombre VARCHAR(200),
+    equipo_uuid VARCHAR(200),
+    ip_equipo VARCHAR(100),
+    version_cliente VARCHAR(50),
+    fecha_inicio TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultimo_heartbeat TIMESTAMPTZ,
+    estado VARCHAR(30),
+    FOREIGN KEY (usuario_id) REFERENCES sar_seguridad.usuario(usuario_id) ON DELETE CASCADE
+);
+
+-- ===========================================================================
+-- ESQUEMA: sar_catalogo
+-- ===========================================================================
+
+-- Tabla: municipio
+CREATE TABLE sar_catalogo.municipio (
+    municipio_id BIGSERIAL PRIMARY KEY,
+    codigo_portal VARCHAR(50),
+    nombre VARCHAR(200) NOT NULL,
+    activo BOOLEAN DEFAULT TRUE
+);
+
+-- Tabla: delegacion
+CREATE TABLE sar_catalogo.delegacion (
+    delegacion_id BIGSERIAL PRIMARY KEY,
+    municipio_id BIGINT NOT NULL,
+    codigo_portal VARCHAR(300),
+    nombre VARCHAR(200) NOT NULL,
+    activo BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (municipio_id) REFERENCES sar_catalogo.municipio(municipio_id) ON DELETE RESTRICT
+);
+
+-- Tabla: concepto
+CREATE TABLE sar_catalogo.concepto (
+    concepto_id BIGSERIAL PRIMARY KEY,
+    codigo_portal VARCHAR(300),
+    nombre VARCHAR(300) NOT NULL,
+    alias VARCHAR(20),
+    activo BOOLEAN DEFAULT TRUE
+);
+
+-- Tabla: rfc
+CREATE TABLE sar_catalogo.rfc (
+    rfc_id BIGSERIAL PRIMARY KEY,
+    rfc VARCHAR(13) NOT NULL UNIQUE,
+    razon_social VARCHAR(500) NOT NULL,
+    calle VARCHAR(500),
+    no_exterior VARCHAR(50),
+    no_interior VARCHAR(50),
+    colonia VARCHAR(300),
+    codigo_postal VARCHAR(10),
+    localidad VARCHAR(300),
+    municipio VARCHAR(300),
+    estado VARCHAR(300),
+    activo BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+-- Tabla: estado_sistema
+CREATE TABLE sar_catalogo.estado_sistema (
+    estado_id BIGSERIAL PRIMARY KEY,
+    entidad VARCHAR(100) NOT NULL,
+    codigo VARCHAR(50) NOT NULL,
+    descripcion VARCHAR(200),
+    UNIQUE(entidad, codigo)
+);
+
+-- ===========================================================================
+-- ESQUEMA: sar_produccion
+-- ===========================================================================
+
+-- Tabla: orden_generacion
+CREATE TABLE sar_produccion.orden_generacion (
+    orden_id BIGSERIAL PRIMARY KEY,
+    folio VARCHAR(50) NOT NULL UNIQUE,
+    descripcion TEXT,
+    municipio_id BIGINT NOT NULL DEFAULT 2,
+    fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    estado_id BIGINT NOT NULL,
+    usuario_id BIGINT NOT NULL,
+    FOREIGN KEY (municipio_id) REFERENCES sar_catalogo.municipio(municipio_id) ON DELETE RESTRICT,
+    FOREIGN KEY (estado_id) REFERENCES sar_catalogo.estado_sistema(estado_id) ON DELETE RESTRICT,
+    FOREIGN KEY (usuario_id) REFERENCES sar_seguridad.usuario(usuario_id) ON DELETE RESTRICT
+);
+
+-- Tabla: grupo_referencia
+CREATE TABLE sar_produccion.grupo_referencia (
+    grupo_id BIGSERIAL PRIMARY KEY,
+    orden_id BIGINT NOT NULL,
+    rfc_id BIGINT NOT NULL,
+    concepto_id BIGINT NOT NULL,
+    cantidad_solicitada INTEGER NOT NULL,
+    cantidad_generada INTEGER DEFAULT 0,
+    cantidad_autorizada INTEGER DEFAULT 0,
+    cantidad_rechazada INTEGER DEFAULT 0,
+    cantidad_expirada INTEGER DEFAULT 0,
+    ultimo_consecutivo INTEGER DEFAULT 0,
+    estado_id BIGINT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    FOREIGN KEY (orden_id) REFERENCES sar_produccion.orden_generacion(orden_id) ON DELETE CASCADE,
+    FOREIGN KEY (rfc_id) REFERENCES sar_catalogo.rfc(rfc_id) ON DELETE RESTRICT,
+    FOREIGN KEY (concepto_id) REFERENCES sar_catalogo.concepto(concepto_id) ON DELETE RESTRICT,
+    FOREIGN KEY (estado_id) REFERENCES sar_catalogo.estado_sistema(estado_id) ON DELETE RESTRICT,
+    CONSTRAINT uq_grupo UNIQUE (orden_id, rfc_id, concepto_id)
+);
+
+CREATE TABLE sar_produccion.solicitud (
+    solicitud_id BIGSERIAL PRIMARY KEY,
+    grupo_id BIGINT NOT NULL,
+    delegacion_id BIGINT NOT NULL,
+    cantidad_solicitada INTEGER NOT NULL,
+    cantidad_generada INTEGER DEFAULT 0,
+    consecutivo_inicio INTEGER NOT NULL,
+    consecutivo_fin INTEGER NOT NULL,
+    ultimo_consecutivo INTEGER DEFAULT 0,
+    usuario_asignado BIGINT,
+    estado_id BIGINT NOT NULL,
+    fecha_asignacion TIMESTAMPTZ,
+    fecha_inicio TIMESTAMPTZ,
+    fecha_fin TIMESTAMPTZ,
+    FOREIGN KEY (grupo_id) REFERENCES sar_produccion.grupo_referencia(grupo_id) ON DELETE CASCADE,
+    FOREIGN KEY (delegacion_id) REFERENCES sar_catalogo.delegacion(delegacion_id) ON DELETE RESTRICT,
+    FOREIGN KEY (usuario_asignado) REFERENCES sar_seguridad.usuario(usuario_id) ON DELETE SET NULL,
+    FOREIGN KEY (estado_id) REFERENCES sar_catalogo.estado_sistema(estado_id) ON DELETE RESTRICT
+);
+
+-- Tabla: referencia
+CREATE TABLE sar_produccion.referencia (
+    referencia_id BIGSERIAL PRIMARY KEY,
+    grupo_id BIGINT NOT NULL,
+    solicitud_id BIGINT NOT NULL,
+    consecutivo_grupo INTEGER NOT NULL,
+    referencia_portal VARCHAR(100) NOT NULL UNIQUE,
+    importe NUMERIC(14,2),
+    fecha_generacion TIMESTAMPTZ NOT NULL,
+    fecha_vigencia DATE,
+    usuario_asignado BIGINT,
+    estado_id BIGINT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    FOREIGN KEY (grupo_id) REFERENCES sar_produccion.grupo_referencia(grupo_id) ON DELETE CASCADE,
+    FOREIGN KEY (solicitud_id) REFERENCES sar_produccion.solicitud(solicitud_id) ON DELETE CASCADE,
+    FOREIGN KEY (usuario_asignado) REFERENCES sar_seguridad.usuario(usuario_id) ON DELETE SET NULL,
+    FOREIGN KEY (estado_id) REFERENCES sar_catalogo.estado_sistema(estado_id) ON DELETE RESTRICT,
+    CONSTRAINT uq_referencia_grupo UNIQUE (grupo_id, consecutivo_grupo)
+);
+
+-- ===========================================================================
+-- ESQUEMA: sar_archivo
+-- ===========================================================================
+
+-- Tabla: archivo_pdf
+CREATE TABLE sar_archivo.archivo_pdf (
+    archivo_id BIGSERIAL PRIMARY KEY,
+    referencia_id BIGINT NOT NULL,
+    tipo_archivo VARCHAR(50) NOT NULL,
+    estado_archivo VARCHAR(30) NOT NULL,
+    nombre_archivo VARCHAR(500) NOT NULL,
+    ruta_archivo VARCHAR(1000) NOT NULL,
+    hash_sha256 VARCHAR(64) NOT NULL,
+    tamano_bytes BIGINT NOT NULL,
+    fecha_creacion TIMESTAMPTZ DEFAULT NOW(),
+    FOREIGN KEY (referencia_id) REFERENCES sar_produccion.referencia(referencia_id) ON DELETE CASCADE
+);
+
+-- Tabla: factura
+CREATE TABLE sar_archivo.factura (
+    factura_id BIGSERIAL PRIMARY KEY,
+    referencia_id BIGINT NOT NULL,
+    uuid VARCHAR(36) NOT NULL UNIQUE,
+    folio VARCHAR(100),
+    rfc_emisor VARCHAR(13) NOT NULL,
+    fecha_factura TIMESTAMPTZ NOT NULL,
+    pdf_path VARCHAR(1000),
+    xml_path VARCHAR(1000),
+    estado VARCHAR(30) NOT NULL,
+    FOREIGN KEY (referencia_id) REFERENCES sar_produccion.referencia(referencia_id) ON DELETE RESTRICT
+);
+
+-- Tabla: asignación
+CREATE TABLE sar_archivo.asignacion (
+    asignacion_id BIGSERIAL PRIMARY KEY,
+    factura_id BIGINT NOT NULL,
+    usuario_destino VARCHAR(100) NOT NULL,
+    tipo_asignacion VARCHAR(20) NOT NULL,
+    fecha_asignacion TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    observaciones TEXT,
+    FOREIGN KEY (factura_id) REFERENCES sar_archivo.factura(factura_id) ON DELETE CASCADE
+);
+
+-- Tabla: evento_sistema
+CREATE TABLE sar_catalogo.evento_sistema (
+    evento_id BIGSERIAL PRIMARY KEY,
+    codigo VARCHAR(100) NOT NULL UNIQUE,
+    descripcion VARCHAR(300)
+);
+
+-- ===========================================================================
+-- ESQUEMA: sar_auditoria
+-- ===========================================================================
+
+-- Tabla: auditoria_login
+CREATE TABLE sar_auditoria.auditoria_login (
+    login_id BIGSERIAL PRIMARY KEY,
+    usuario_id BIGINT,
+    sesion_id BIGINT,
+    fecha_login TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    fecha_logout TIMESTAMPTZ,
+    ip VARCHAR(100),
+    equipo VARCHAR(200),
+    FOREIGN KEY (usuario_id) REFERENCES sar_seguridad.usuario(usuario_id) ON DELETE SET NULL,
+    FOREIGN KEY (sesion_id) REFERENCES sar_seguridad.sesion(sesion_id) ON DELETE SET NULL
+);
+
+-- Tabla: auditoria_evento
+CREATE TABLE sar_auditoria.auditoria_evento (
+    evento_auditoria_id BIGSERIAL PRIMARY KEY,
+    evento_id BIGINT NOT NULL,
+    usuario_id BIGINT,
+    sesion_id BIGINT,
+    fecha TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    modulo VARCHAR(100) NOT NULL,
+    valor_anterior JSONB,
+    valor_nuevo JSONB,
+    detalle JSONB,
+    FOREIGN KEY (evento_id) REFERENCES sar_catalogo.evento_sistema(evento_id) ON DELETE RESTRICT,
+    FOREIGN KEY (usuario_id) REFERENCES sar_seguridad.usuario(usuario_id) ON DELETE SET NULL,
+    FOREIGN KEY (sesion_id) REFERENCES sar_seguridad.sesion(sesion_id) ON DELETE SET NULL
+);
+
+-- Tabla: auditoria_error
+CREATE TABLE sar_auditoria.auditoria_error (
+    error_id BIGSERIAL PRIMARY KEY,
+    usuario_id BIGINT,
+    sesion_id BIGINT,
+    modulo VARCHAR(100) NOT NULL,
+    mensaje TEXT NOT NULL,
+    stack_trace TEXT,
+    fecha TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (usuario_id) REFERENCES sar_seguridad.usuario(usuario_id) ON DELETE SET NULL,
+    FOREIGN KEY (sesion_id) REFERENCES sar_seguridad.sesion(sesion_id) ON DELETE SET NULL
+);
+
+-- ===========================================================================
+-- ESQUEMA: sar_configuracion
+-- ===========================================================================
+
+-- Tabla: parametro_sistema
+CREATE TABLE sar_configuracion.parametro_sistema (
+    parametro_id BIGSERIAL PRIMARY KEY,
+    codigo VARCHAR(100) NOT NULL UNIQUE,
+    valor TEXT NOT NULL,
+    descripcion TEXT,
+    activo BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Tabla: localizador_portal
+CREATE TABLE sar_configuracion.localizador_portal (
+    localizador_id BIGSERIAL PRIMARY KEY,
+    nombre_clave VARCHAR(100) NOT NULL UNIQUE,
+    label_visible VARCHAR(200) NOT NULL,
+    estrategia_selector VARCHAR(50) NOT NULL,
+    valor_selector VARCHAR(500) NOT NULL,
+    descripcion VARCHAR(500),
+    activo BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- ===========================================================================
+-- INDICES DE RENDIMIENTO (PERFORMANCE INDEXES)
+-- ===========================================================================
+
+-- 1. Esquema: sar_seguridad
+CREATE INDEX IF NOT EXISTS idx_usuario_rol_rol_id ON sar_seguridad.usuario_rol (rol_id);
+CREATE INDEX IF NOT EXISTS idx_sesion_usuario_id ON sar_seguridad.sesion (usuario_id);
+CREATE INDEX IF NOT EXISTS idx_rol_permiso_permiso_id ON sar_seguridad.rol_permiso (permiso_id);
+CREATE INDEX IF NOT EXISTS idx_permiso_modulo_id ON sar_seguridad.permiso (modulo_id);
+CREATE INDEX IF NOT EXISTS idx_permiso_accion_id ON sar_seguridad.permiso (accion_id);
+
+-- 2. Esquema: sar_produccion
+CREATE INDEX IF NOT EXISTS idx_grupo_referencia_orden_id ON sar_produccion.grupo_referencia (orden_id);
+CREATE INDEX IF NOT EXISTS idx_grupo_referencia_estado_id ON sar_produccion.grupo_referencia (estado_id);
+CREATE INDEX IF NOT EXISTS idx_solicitud_grupo_id ON sar_produccion.solicitud (grupo_id);
+CREATE INDEX IF NOT EXISTS idx_solicitud_estado_id ON sar_produccion.solicitud (estado_id);
+CREATE INDEX IF NOT EXISTS idx_solicitud_usuario_asignado ON sar_produccion.solicitud (usuario_asignado);
+CREATE INDEX IF NOT EXISTS idx_referencia_grupo_id ON sar_produccion.referencia (grupo_id);
+CREATE INDEX IF NOT EXISTS idx_referencia_solicitud_id ON sar_produccion.referencia (solicitud_id);
+CREATE INDEX IF NOT EXISTS idx_referencia_estado_id ON sar_produccion.referencia (estado_id);
+
+-- 3. Esquema: sar_archivo
+CREATE INDEX IF NOT EXISTS idx_archivo_pdf_referencia_id ON sar_archivo.archivo_pdf (referencia_id);
+CREATE INDEX IF NOT EXISTS idx_factura_referencia_id ON sar_archivo.factura (referencia_id);
+CREATE INDEX IF NOT EXISTS idx_asignacion_factura_id ON sar_archivo.asignacion (factura_id);
+
+-- 4. Esquema: sar_auditoria
+CREATE INDEX IF NOT EXISTS idx_auditoria_login_usuario_id ON sar_auditoria.auditoria_login (usuario_id);
+CREATE INDEX IF NOT EXISTS idx_auditoria_login_sesion_id ON sar_auditoria.auditoria_login (sesion_id);
+CREATE INDEX IF NOT EXISTS idx_auditoria_evento_evento_id ON sar_auditoria.auditoria_evento (evento_id);
+CREATE INDEX IF NOT EXISTS idx_auditoria_evento_usuario_id ON sar_auditoria.auditoria_evento (usuario_id);
+CREATE INDEX IF NOT EXISTS idx_auditoria_evento_fecha ON sar_auditoria.auditoria_evento (fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_auditoria_error_fecha ON sar_auditoria.auditoria_error (fecha DESC);
+
+-- ===========================================================================
+-- DATOS SEMILLA (SEED DATA)
+-- ===========================================================================
+
+-- Parámetros del Sistema
+INSERT INTO sar_configuracion.parametro_sistema (codigo, valor, descripcion) VALUES
+('TRIBUTANET_URL', 'https://shacienda.qroo.gob.mx/tributanet/', 'URL base del portal Tributanet de Quintana Roo para la Fase A (Generación)'),
+('TRIBUTANET_RPP_URL', 'https://shacienda.qroo.gob.mx/tributanet/rpp/dec_rpp_control.php?tipo_declaracion=1', 'URL directa al formulario de pago de derechos RPP de Tributanet (Fase A)'),
+('SATQ_URL', 'https://paperless.sefiplan.qroo.gob.mx/', 'URL del portal SATQ para la Fase C (Consulta y Facturación/Timbrado)'),
+('HEARTBEAT_INTERVAL', '60', 'Intervalo en segundos para enviar la señal de vida de sesión operativa (Heartbeat)'),
+('TAMANO_LOTE', '299', 'Cantidad máxima de referencias agrupadas en un lote de control documental'),
+('REINTENTOS_AUTOMATICOS', '3', 'Cantidad de intentos de reintento del bot ante fallas de red temporales'),
+('RUTA_DERECHOS', 'T:\\DERECHOS', 'Ruta base por defecto donde se guardarán las boletas y facturas de los bots');
+
+-- Municipios de Quintana Roo (Códigos de Portal Tributanet)
+INSERT INTO sar_catalogo.municipio (codigo_portal, nombre) VALUES
+('01', 'OTHON P. BLANCO'),
+('02', 'BENITO JUAREZ'),
+('03', 'COZUMEL'),
+('04', 'ISLA MUJERES'),
+('05', 'FELIPE CARRILLO PUERTO'),
+('06', 'JOSE MARIA MORELOS'),
+('07', 'LAZARO CARDENAS'),
+('08', 'PLAYA DEL CARMEN'),
+('09', 'TULUM'),
+('00', 'CENTRAL'),
+('10', 'BACALAR'),
+('11', 'PUERTO MORELOS');
+
+-- Localizadores del Portal Tributanet (Pantalla de Acceso RPP)
+INSERT INTO sar_configuracion.localizador_portal (nombre_clave, label_visible, estrategia_selector, valor_selector, descripcion) VALUES
+('ddlMunicipio', 'Municipio', 'CSS', 'select[name="claveMunicipio"]', 'Selector del municipio en el formulario de acceso de Tributanet RPP'),
+('txtRFC', 'Registro Federal de Contribuyentes (RFC)', 'CSS', 'input[name="RFC"]', 'Input para capturar el RFC en el formulario de acceso de Tributanet RPP'),
+('btnEnviar', 'Enviar', 'CSS', 'input[type="submit"]', 'Botón para enviar el formulario de acceso de Tributanet RPP'),
+-- Localizadores del Formulario Principal RPP
+('txtNombre', 'Apellido Paterno, Materno, Nombre(s)', 'CSS', 'input#Nombre', 'Campo para Razón Social / Nombre en el formulario RPP'),
+('txtRfcReadOnly', 'RFC (Solo lectura)', 'CSS', 'input#RFC', 'Campo de RFC autocompletado en el formulario RPP'),
+('txtCalle', 'Calle (Cruce o Numeración)', 'CSS', 'input#Calle', 'Campo para la calle del RFC en el formulario RPP'),
+('txtColonia', 'Colonia', 'CSS', 'input#Colonia', 'Campo para la colonia del RFC en el formulario RPP'),
+('txtNumeroExterior', 'No. Exterior', 'CSS', 'input#Numero_Exterior', 'Campo para número exterior en el formulario RPP'),
+('txtNumeroInterior', 'No. Interior', 'CSS', 'input#Numero_Interior', 'Campo para número interior en el formulario RPP'),
+('txtCodigoPostal', 'Código Postal', 'CSS', 'input#Codigo_Postal', 'Campo para el código postal del RFC en el formulario RPP'),
+('txtLocalidad', 'Localidad', 'CSS', 'input#Localidad', 'Campo para la localidad en el formulario RPP'),
+('ddlDelegacion', 'Delegación', 'CSS', 'select[name="Delegacion"]', 'Selector de delegación física para el trámite RPP'),
+('ddlConcepto', 'Concepto', 'CSS', 'select#conceptos', 'Selector de conceptos de cobro RPP'),
+('btnAgregarConcepto', 'Agregar', 'CSS', 'input#agregar', 'Botón para agregar el concepto seleccionado a la grilla RPP'),
+('btnGenerarBoleta', 'Generar', 'CSS', 'input#generar', 'Botón para finalizar y generar la boleta de pago RPP'),
+-- Localizadores de la Vista Previa de la Boleta
+('lblBoletaReferencia', 'Referencia de la Boleta', 'XPATH', '//b[contains(text(), "REFERENCIA")]', 'Elemento que contiene los 17 dígitos de la referencia de pago'),
+('lblBoletaFechaAlta', 'Fecha de Alta de la Boleta', 'CSS', 'a.datomostrar', 'Elemento que contiene la fecha y hora de generación de la boleta'),
+('lblBoletaImporte', 'Importe de la Boleta', 'XPATH', '//b[contains(text(), "IMPORTE")]', 'Elemento que contiene el monto a pagar de la boleta'),
+('lblBoletaFechaLimite', 'Fecha Límite de la Boleta', 'XPATH', '//font[contains(text(), "FECHA LIMITE")]', 'Elemento que contiene la fecha de vencimiento de la referencia'),
+('btnImprimirBoleta', 'Imprimir', 'CSS', 'input[name="Imprimir"]', 'Botón para abrir el diálogo de impresión de la boleta'),
+-- Localizadores para la Fase C (Bot-Facturación)
+('input_referencia', 'Campo Referencia (Consulta)', 'CSS', 'input#Referencia', 'Campo para ingresar la referencia a consultar y facturar'),
+('input_rfc', 'Campo RFC (Consulta)', 'CSS', 'input#RFC', 'Campo para ingresar el RFC en la consulta de facturación'),
+('btn_buscar', 'Botón Buscar Referencia', 'CSS', 'button[type="submit"]', 'Botón para buscar la referencia a facturar'),
+('btn_generar_cfdi', 'Botón Generar CFDI', 'CSS', 'button:has-text("Generar CFDI"), a:has-text("Generar CFDI")', 'Botón para ingresar al formulario de timbrado de CFDI'),
+('input_nombre_receptor', 'Nombre Receptor (Razón Social)', 'CSS', 'input#NombreReceptor', 'Campo para ingresar la razón social en el timbrado'),
+('input_domicilio_fiscal_receptor', 'CP Receptor', 'CSS', 'input#DomicilioFiscalReceptor', 'Campo para ingresar el código postal del receptor en el timbrado'),
+('btn_timbrar', 'Botón Timbrar CFDI', 'CSS', 'button#btnTimbrar', 'Botón final para timbrar el CFDI'),
+('btn_pdf', 'Botón Descargar PDF Factura', 'CSS', 'button:has-text("PDF"), a:has-text("PDF")', 'Botón para descargar el PDF de la factura generada'),
+('btn_salir', 'Botón Salir Portal Factura', 'CSS', 'button:has-text("Salir"), a.btn.btn-default[href="./"], a:has-text("Salir")', 'Botón para salir de la consulta y regresar al inicio');
+
+-- Delegaciones del RPP (Mapeadas a su respectivo Municipio ID)
+-- 1: OTHON P. BLANCO, 2: BENITO JUAREZ, 8: PLAYA DEL CARMEN, 3: COZUMEL
+INSERT INTO sar_catalogo.delegacion (municipio_id, codigo_portal, nombre) VALUES
+(1, 'Delegación Chetumal (Othon p. Blanco, Carrillo Puerto, Jose Maria Morelos y Bacalar)', 'CHETUMAL'),
+(2, 'Delegación Cancun (Benito Juarez, Isla Mujeres y Lazaro cardenas)', 'CANCUN'),
+(8, 'Delegación Playa del Carmen (Playa del Carmen y Tulum)', 'PLAYA DEL CARMEN'),
+(3, 'Delegación Cozumel', 'COZUMEL');
+
+-- Conceptos de Cobro del RPP
+INSERT INTO sar_catalogo.concepto (codigo_portal, nombre, alias) VALUES
+('132-1 Análisis y calificación de documentos que contengan actos inscribibles-CT-65.00-117.31-', '1. Análisis y calificación de documentos', 'ANA'),
+('137-3 Por solicitud de asiento de presentación de primer aviso preventivo con vigencia de 30 días o segundo aviso preventivo con vigencia de 90 días.-CT-12.00-117.31-', '2. Primer o Segundo Aviso Preventivo', 'AVI'),
+('141-5 Expedición de certificados de información o datos que obren en el sistema de registro-CT-5.00-117.31-', '3. Certificados / CLG', 'CLG');
+
+-- ===========================================================================
+-- SEMILLA DE SEGURIDAD (RBAC)
+-- ===========================================================================
+
+-- Insertar Roles
+INSERT INTO sar_seguridad.rol (codigo, nombre, activo) VALUES
+('ADMINISTRADOR', 'Administrador General del Sistema', TRUE),
+('OPERADOR', 'Operador de Control y Scrapers', TRUE);
+
+-- Insertar Módulos
+INSERT INTO sar_seguridad.modulo (codigo, nombre, descripcion) VALUES
+('DASHBOARD', 'Tablero Principal', 'Módulo de métricas y resumen operativo'),
+('ORDENES', 'Órdenes de Generación', 'Módulo de creación y control de requerimientos masivos'),
+('SOLICITUDES', 'Solicitudes del Bot', 'Módulo de distribución y ejecución de solicitudes de scraping'),
+('REFERENCIAS', 'Referencias y Facturas', 'Módulo de consulta, descarga y asignación de referencias/facturas'),
+('CATALOGOS', 'Catálogos del Sistema', 'Módulo de mantenimiento de RFCs, conceptos y localizadores'),
+('SEGURIDAD', 'Control de Acceso (RBAC)', 'Módulo de administración de usuarios, roles y permisos');
+
+-- Insertar Acciones
+INSERT INTO sar_seguridad.accion (codigo, nombre, descripcion) VALUES
+('CREAR', 'Crear', 'Permite registrar nuevos elementos'),
+('LEER', 'Leer / Consultar', 'Permite visualizar y listar registros'),
+('EDITAR', 'Editar / Modificar', 'Permite actualizar registros existentes'),
+('ELIMINAR', 'Eliminar / Desactivar', 'Permite remover o desactivar registros'),
+('ASIGNAR', 'Asignar', 'Permite asignar solicitudes y facturas a usuarios'),
+('EJECUTAR', 'Ejecutar', 'Permite iniciar y controlar procesos del Bot (Playwright)');
+
+-- Generar todos los Permisos (Intersección Módulo x Acción)
+-- Hacemos una inserción cruzada de todos los módulos y acciones activos
+INSERT INTO sar_seguridad.permiso (modulo_id, accion_id, activo)
+SELECT m.modulo_id, a.accion_id, TRUE
+FROM sar_seguridad.modulo m
+CROSS JOIN sar_seguridad.accion a;
+
+-- Asignar Permisos a Roles
+-- 1. Rol ADMINISTRADOR recibe TODOS los permisos creados
+INSERT INTO sar_seguridad.rol_permiso (rol_id, permiso_id)
+SELECT (SELECT rol_id FROM sar_seguridad.rol WHERE codigo = 'ADMINISTRADOR'), permiso_id
+FROM sar_seguridad.permiso;
+
+-- 2. Rol OPERADOR recibe permisos de:
+--    - LEER en todos los módulos
+--    - EJECUTAR en SOLICITUDES y REFERENCIAS
+--    - EDITAR en SOLICITUDES (para pausas/reanudación)
+INSERT INTO sar_seguridad.rol_permiso (rol_id, permiso_id)
+SELECT (SELECT rol_id FROM sar_seguridad.rol WHERE codigo = 'OPERADOR'), p.permiso_id
+FROM sar_seguridad.permiso p
+JOIN sar_seguridad.modulo m ON p.modulo_id = m.modulo_id
+JOIN sar_seguridad.accion a ON p.accion_id = a.accion_id
+WHERE a.codigo = 'LEER'
+   OR (m.codigo IN ('SOLICITUDES', 'REFERENCIAS') AND a.codigo = 'EJECUTAR')
+   OR (m.codigo = 'SOLICITUDES' AND a.codigo = 'EDITAR');
+
+-- Insertar Usuario Administrador por Defecto (password_hash para 'admin123' usando Argon2id placeholder)
+INSERT INTO sar_seguridad.usuario (username, nombre, correo, password_hash, activo) VALUES
+('admin', 'Administrador General', 'admin@capturabot.com', '$argon2id$v=19$m=65536,t=3,p=4$anVzdGFzYWx0YnV0c2VjdXJl$placeholderhashforadmin123', TRUE);
+
+-- Asociar Usuario Administrador al Rol Administrador
+INSERT INTO sar_seguridad.usuario_rol (usuario_id, rol_id) VALUES
+((SELECT usuario_id FROM sar_seguridad.usuario WHERE username = 'admin'),
+ (SELECT rol_id FROM sar_seguridad.rol WHERE codigo = 'ADMINISTRADOR'));
+
+-- Insertar Eventos Críticos del Sistema en el Catálogo
+INSERT INTO sar_catalogo.evento_sistema (codigo, descripcion) VALUES
+('CREAR_ORDEN', 'Creación de nueva orden de generación masiva'),
+('PROCESAR_SOLICITUD', 'Inicio de procesamiento de solicitud de scraping por un worker'),
+('GENERAR_REFERENCIA', 'Generación de una referencia de pago individual en Tributanet'),
+('AUTORIZAR_REFERENCIA', 'Autorización / verificación de pago de una referencia'),
+('FACTURAR_REFERENCIA', 'Generación y descarga de la factura CFDI (XML/PDF)'),
+('ASIGNAR_FACTURA', 'Asignación de factura individual o masiva a un colaborador'),
+('MODIFICAR_CATALOGO', 'Actualización de datos en catálogos del sistema (RFCs, localizadores, etc.)'),
+('LOGIN_EXITOSO', 'Inicio de sesión de usuario en la aplicación'),
+('LOGOUT', 'Cierre de sesión de usuario en la aplicación'),
+('ERROR_CRITICO', 'Registro de un error crítico de ejecución o fallo del bot');
+
+-- ===========================================================================
+-- VISTAS: sar_produccion
+-- ===========================================================================
+
+-- Vista: vw_solicitudes_detalle
+-- Proporciona un desglose completo de la solicitud cruzando con órdenes, grupos, catálogos y estados.
+DROP VIEW IF EXISTS sar_produccion.vw_solicitudes_detalle;
+CREATE OR REPLACE VIEW sar_produccion.vw_solicitudes_detalle AS
+SELECT 
+    s.solicitud_id,
+    s.grupo_id,
+    og.folio,
+    rfc.razon_social AS rfc_razon_social,
+    c.nombre AS concepto_nombre,
+    d.nombre AS delegacion_nombre,
+    s.cantidad_solicitada,
+    s.cantidad_generada,
+    es.codigo AS estado_codigo,
+    u.nombre AS usuario_asignado_nombre,
+    s.fecha_inicio
+FROM sar_produccion.solicitud s
+JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
+JOIN sar_produccion.orden_generacion og ON gr.orden_id = og.orden_id
+JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
+JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
+JOIN sar_catalogo.estado_sistema es ON s.estado_id = es.estado_id
+LEFT JOIN sar_seguridad.usuario u ON s.usuario_asignado = u.usuario_id;
+
+-- ===========================================================================
+
+-- Vista: vw_referencias_detalle
+-- Proporciona un desglose completo de la referencia cruzando con órdenes, grupos, catálogos y estados.
+DROP VIEW IF EXISTS sar_produccion.vw_referencias_detalle;
+CREATE OR REPLACE VIEW sar_produccion.vw_referencias_detalle AS
+SELECT 
+    r.referencia_id,
+    r.referencia_portal,
+    r.consecutivo_grupo,
+    r.importe,
+    r.fecha_generacion,
+    r.fecha_vigencia,
+    og.folio AS folio_orden,
+    r.grupo_id,
+    rfc.razon_social AS rfc_razon_social,
+    c.nombre AS concepto_nombre,
+    d.nombre AS delegacion_nombre,
+    es.codigo AS estado_codigo,
+    u.nombre AS usuario_asignado_nombre
+FROM sar_produccion.referencia r
+JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+JOIN sar_produccion.orden_generacion og ON gr.orden_id = og.orden_id
+JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
+JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+JOIN sar_produccion.solicitud s ON r.solicitud_id = s.solicitud_id
+LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
+JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+LEFT JOIN sar_seguridad.usuario u ON r.usuario_asignado = u.usuario_id;
+
+-- ===========================================================================
+
+-- Vista: vw_ordenes_resumen
+-- Proporciona un resumen de las órdenes generadas y el progreso de sus referencias
+DROP VIEW IF EXISTS sar_produccion.vw_ordenes_resumen;
+CREATE OR REPLACE VIEW sar_produccion.vw_ordenes_resumen AS
+SELECT 
+    o.orden_id,
+    o.folio,
+    o.descripcion,
+    o.fecha_creacion,
+    u.nombre AS creador,
+    COALESCE(SUM(gr.cantidad_solicitada), 0) AS total_solicitadas,
+    COALESCE(SUM(gr.cantidad_generada), 0) AS total_generadas
+FROM sar_produccion.orden_generacion o
+JOIN sar_seguridad.usuario u ON o.usuario_id = u.usuario_id
+LEFT JOIN sar_produccion.grupo_referencia gr ON o.orden_id = gr.orden_id
+GROUP BY o.orden_id, o.folio, o.descripcion, o.fecha_creacion, u.nombre;
+
+-- ===========================================================================
+-- FUNCIONES PL/pgSQL: sar_produccion
+-- ===========================================================================
+
+-- Función: fn_cancelar_solicitud
+CREATE OR REPLACE FUNCTION sar_produccion.fn_cancelar_solicitud(
+    p_solicitud_id BIGINT
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_estado_actual_id BIGINT;
+    v_codigo_actual VARCHAR;
+    v_estado_cancelado_id BIGINT;
+    v_grupo_id BIGINT;
+    v_cantidad_solicitada INT;
+BEGIN
+    -- Validar que exista el estado CANCELADO
+    SELECT estado_id INTO v_estado_cancelado_id FROM sar_catalogo.estado_sistema WHERE codigo = 'CANCELADO' LIMIT 1;
+    IF v_estado_cancelado_id IS NULL THEN
+        INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion) VALUES ('GENERAL', 'CANCELADO', 'CANCELADO') RETURNING estado_id INTO v_estado_cancelado_id;
+    END IF;
+
+    -- Obtener datos de la solicitud
+    SELECT estado_id, grupo_id, cantidad_solicitada 
+    INTO v_estado_actual_id, v_grupo_id, v_cantidad_solicitada
+    FROM sar_produccion.solicitud 
+    WHERE solicitud_id = p_solicitud_id FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Solicitud no encontrada.';
+    END IF;
+
+    -- Verificar el codigo del estado actual
+    SELECT codigo INTO v_codigo_actual FROM sar_catalogo.estado_sistema WHERE estado_id = v_estado_actual_id;
+
+    IF v_codigo_actual != 'PENDIENTE' THEN
+        RAISE EXCEPTION 'Solo se pueden cancelar solicitudes en estado PENDIENTE. (Estado actual: %)', v_codigo_actual;
+    END IF;
+
+    -- Actualizar solicitud
+    UPDATE sar_produccion.solicitud 
+    SET estado_id = v_estado_cancelado_id
+    WHERE solicitud_id = p_solicitud_id;
+
+    -- Restar cantidad al grupo_referencia
+    UPDATE sar_produccion.grupo_referencia
+    SET cantidad_solicitada = cantidad_solicitada - v_cantidad_solicitada
+    WHERE grupo_id = v_grupo_id;
+
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Función: fn_editar_cantidad_solicitud
+CREATE OR REPLACE FUNCTION sar_produccion.fn_editar_cantidad_solicitud(
+    p_solicitud_id BIGINT,
+    p_nueva_cantidad INT
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_estado_actual_id BIGINT;
+    v_codigo_actual VARCHAR;
+    v_grupo_id BIGINT;
+    v_cantidad_actual INT;
+    v_diferencia INT;
+BEGIN
+    IF p_nueva_cantidad <= 0 THEN
+        RAISE EXCEPTION 'La cantidad debe ser mayor a 0.';
+    END IF;
+
+    SELECT estado_id, grupo_id, cantidad_solicitada 
+    INTO v_estado_actual_id, v_grupo_id, v_cantidad_actual
+    FROM sar_produccion.solicitud 
+    WHERE solicitud_id = p_solicitud_id FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Solicitud no encontrada.';
+    END IF;
+
+    -- Verificar el codigo del estado actual
+    SELECT codigo INTO v_codigo_actual FROM sar_catalogo.estado_sistema WHERE estado_id = v_estado_actual_id;
+
+    IF v_codigo_actual != 'PENDIENTE' THEN
+        RAISE EXCEPTION 'Solo se pueden editar solicitudes en estado PENDIENTE. (Estado actual: %)', v_codigo_actual;
+    END IF;
+
+    v_diferencia := p_nueva_cantidad - v_cantidad_actual;
+
+    -- Actualizar solicitud
+    UPDATE sar_produccion.solicitud 
+    SET cantidad_solicitada = p_nueva_cantidad
+    WHERE solicitud_id = p_solicitud_id;
+
+    -- Ajustar grupo_referencia
+    UPDATE sar_produccion.grupo_referencia
+    SET cantidad_solicitada = cantidad_solicitada + v_diferencia
+    WHERE grupo_id = v_grupo_id;
+
+    RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;

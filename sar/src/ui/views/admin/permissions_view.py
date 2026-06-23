@@ -1,0 +1,196 @@
+"""Permissions Administration Sub-view."""
+
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QComboBox, 
+    QTableWidget, QHeaderView, QAbstractItemView, QCheckBox, QLabel
+)
+from PySide6.QtCore import Qt
+from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
+from sar.src.storage.repositories import UsuarioRepository
+from sar.src.services.admin_service import AdminService
+
+class PermissionsView(QWidget):
+    def __init__(self, db_connector, current_user_id, current_sesion_id, can_edit, parent=None):
+        super().__init__(parent)
+        self.db_connector = db_connector
+        self.current_user_id = current_user_id
+        self.current_sesion_id = current_sesion_id
+        self.can_edit = can_edit
+        
+        self.roles = []
+        self.modulos = []
+        self.acciones = []
+        self.checkboxes_matrix = {}  # (mod_id, acc_id): chk
+        
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(16)
+        
+        self._build_ui()
+        self.refresh_data()
+        
+    def _build_ui(self):
+        # Top Bar
+        top_bar = QHBoxLayout()
+        
+        lbl_rol = QLabel("Seleccionar Rol:")
+        lbl_rol.setStyleSheet("font-weight: bold;")
+        
+        self.cmb_roles = QComboBox()
+        self.cmb_roles.setFixedWidth(300)
+        self.cmb_roles.currentIndexChanged.connect(self._on_rol_selected)
+        
+        self.btn_save = CustomButton("Guardar Cambios", icon_name="save")
+        self.btn_save.clicked.connect(self._save_permissions)
+        if not self.can_edit:
+            self.btn_save.setEnabled(False)
+            
+        top_bar.addWidget(lbl_rol)
+        top_bar.addWidget(self.cmb_roles)
+        top_bar.addStretch()
+        top_bar.addWidget(self.btn_save)
+        
+        self.layout.addLayout(top_bar)
+        
+        # Matrix Table
+        self.matrix_table = QTableWidget()
+        self.matrix_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.matrix_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.matrix_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.matrix_table.horizontalHeader().setStretchLastSection(True)
+        self.matrix_table.verticalHeader().setVisible(False)
+        
+        # Styling for table (to match the image's red header)
+        self.matrix_table.setStyleSheet("""
+            QHeaderView::section {
+                background-color: #A33A36;
+                color: white;
+                font-weight: bold;
+                border: 1px solid #8B322E;
+                padding: 8px;
+            }
+        """)
+        
+        self.layout.addWidget(self.matrix_table)
+        
+    def refresh_data(self):
+        try:
+            with self.db_connector.get_session() as session:
+                repo = UsuarioRepository(session)
+                
+                # Load roles
+                roles_items = repo.get_all_roles()
+                self.roles = [{"id": r.rol_id, "nombre": r.nombre} for r in roles_items if r.activo]
+                
+                # Load matrix headers
+                mod_items = repo.get_all_modulos()
+                self.modulos = [{"id": m.modulo_id, "nombre": m.nombre} for m in mod_items if m.activo]
+                
+                acc_items = repo.get_all_acciones()
+                self.acciones = [{"id": a.accion_id, "nombre": a.nombre} for a in acc_items if a.activo]
+                
+        except Exception as e:
+            print("Error loading initial data:", e)
+            return
+            
+        self._setup_matrix()
+        
+        # Populate combobox
+        self.cmb_roles.blockSignals(True)
+        self.cmb_roles.clear()
+        for r in self.roles:
+            self.cmb_roles.addItem(r["nombre"], r["id"])
+        self.cmb_roles.blockSignals(False)
+        
+        if self.roles:
+            self._on_rol_selected(0)
+            
+    def _setup_matrix(self):
+        self.matrix_table.setColumnCount(len(self.acciones) + 1)
+        self.matrix_table.setRowCount(len(self.modulos))
+        
+        headers = ["Módulo"] + [a["nombre"] for a in self.acciones]
+        self.matrix_table.setHorizontalHeaderLabels(headers)
+        
+        # Adjust Módulo column width
+        self.matrix_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        for i in range(1, len(headers)):
+            self.matrix_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
+        
+        self.checkboxes_matrix.clear()
+        
+        for r_idx, mod in enumerate(self.modulos):
+            # Módulo Name
+            from PySide6.QtWidgets import QTableWidgetItem
+            item = QTableWidgetItem(f" {mod['nombre']}")
+            item.setFlags(Qt.ItemIsEnabled)
+            self.matrix_table.setItem(r_idx, 0, item)
+            
+            # Action Checkboxes
+            for c_idx, acc in enumerate(self.acciones):
+                chk = QCheckBox()
+                if not self.can_edit:
+                    chk.setEnabled(False)
+                # Centering checkbox in cell
+                widget = QWidget()
+                l = QHBoxLayout(widget)
+                l.addWidget(chk)
+                l.setAlignment(Qt.AlignCenter)
+                l.setContentsMargins(0,0,0,0)
+                self.matrix_table.setCellWidget(r_idx, c_idx + 1, widget)
+                self.checkboxes_matrix[(mod["id"], acc["id"])] = chk
+                
+    def _on_rol_selected(self, index: int):
+        if index < 0: return
+        rol_id = self.cmb_roles.itemData(index)
+        
+        # Uncheck all
+        for chk in self.checkboxes_matrix.values():
+            chk.setChecked(False)
+            
+        # Load permissions for this rol
+        try:
+            with self.db_connector.get_session() as session:
+                repo = UsuarioRepository(session)
+                permisos = repo.get_permisos_for_rol(rol_id)
+                permisos_set = set(permisos)
+                for (m_id, a_id), chk in self.checkboxes_matrix.items():
+                    if (m_id, a_id) in permisos_set:
+                        chk.setChecked(True)
+        except Exception as e:
+            print("Error loading permissions for rol:", e)
+
+    def _save_permissions(self):
+        index = self.cmb_roles.currentIndex()
+        if index < 0: return
+        rol_id = self.cmb_roles.itemData(index)
+        
+        permisos_matrix = [(m_id, a_id) for (m_id, a_id), chk in self.checkboxes_matrix.items() if chk.isChecked()]
+        
+        data = {
+            "rol_id": rol_id,
+            "permisos_matrix": permisos_matrix
+        }
+        
+        try:
+            with self.db_connector.get_session() as session:
+                service = AdminService(session)
+                # We need a save_rol_permisos method or just reuse save_rol by updating only permisos
+                # Since save_rol updates the whole role including its permissions, we should fetch it first
+                repo = UsuarioRepository(session)
+                from sar.src.storage.models import Rol
+                rol = session.get(Rol, rol_id)
+                
+                full_data = {
+                    "rol_id": rol.rol_id,
+                    "codigo": rol.codigo,
+                    "nombre": rol.nombre,
+                    "activo": rol.activo,
+                    "permisos_matrix": permisos_matrix
+                }
+                
+                service.save_rol(self.current_user_id, self.current_sesion_id, full_data)
+                session.commit()
+            QMessageBox.information(self, "Éxito", "Permisos actualizados correctamente.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))

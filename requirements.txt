@@ -1,10 +1,17 @@
-customtkinter==5.2.2
-darkdetect==0.8.0
-et_xmlfile==2.0.0
-greenlet==3.5.1
-openpyxl==3.1.5
-packaging==26.2
-playwright==1.60.0
-pyee==13.0.1
-typing_extensions==4.15.0
-pypdf==4.2.0
+# Interfaz Gráfica (UI)
+PySide6>=6.8.0             # Framework de UI profesional compatible con Python 3.14+
+
+# Automatización y Scraping
+playwright>=1.48.0         # Playwright moderno compatible con Python 3.14+
+
+# Persistencia y Base de Datos
+SQLAlchemy>=2.0.30         # ORM moderno v2.0
+psycopg2-binary>=2.9.10     # Adaptador de PostgreSQL
+
+# Manejo de Archivos y Documentación
+openpyxl>=3.1.2            # Generación y lectura de archivos Excel para lotes
+pypdf>=4.2.0               # Librería para fusionar PDFs individuales en un PDF unificado por Lote
+
+# Utilidades y Seguridad
+cryptography>=42.0.7       # Criptografía avanzada para llaves y cifrado local
+argon2-cffi>=23.1.0        # Implementación segura de Argon2id para verificar contraseñas localmente
