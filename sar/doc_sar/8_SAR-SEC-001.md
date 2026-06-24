@@ -1,11 +1,8 @@
-SAR-SEC-001
-Arquitectura de Seguridad y Auditoría
-Sistema de Administración de Referencias (SAR)
-
-Documento: SAR-SEC-001
-Versión: 1.0
-Estado: CONGELADO
-Metodología: Business First Architecture (BFA)
+# SAR-SEC-001: Arquitectura de Seguridad y Auditoría
+**Categoría:** Seguridad  
+**Versión:** 1.0  
+**Estado:** Baseline Congelada  
+**Metodología:** Business-First Architecture (BFA)  
 
 1. Objetivo
 

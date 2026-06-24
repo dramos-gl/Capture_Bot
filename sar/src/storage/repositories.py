@@ -451,6 +451,24 @@ class OperacionRepository(BaseRepository):
             
         solicitud.usuario_asignado = usuario_id
         solicitud.estado_id = estado_asignado.estado_id
+        
+        # Actualizar la orden a 'ABIERTA' si su estado actual es 'PENDIENTE'
+        if solicitud.grupo and solicitud.grupo.orden:
+            from sqlalchemy import and_
+            orden = solicitud.grupo.orden
+            estado_orden = self.session.execute(select(EstadoSistema.codigo).where(EstadoSistema.estado_id == orden.estado_id)).scalar_one()
+            if estado_orden == 'PENDIENTE':
+                estado_abierta = self.session.execute(
+                    select(EstadoSistema).where(
+                        and_(EstadoSistema.entidad == 'orden_generacion', EstadoSistema.codigo == 'ABIERTA')
+                    )
+                ).scalars().first()
+                if not estado_abierta:
+                    estado_abierta = EstadoSistema(entidad='orden_generacion', codigo='ABIERTA', descripcion='Estado ABIERTA de orden_generacion')
+                    self.session.add(estado_abierta)
+                    self.session.flush()
+                orden.estado_id = estado_abierta.estado_id
+                
         self.session.flush()
         return True
 
@@ -625,6 +643,17 @@ class ProduccionRepository(BaseRepository):
             self.session.flush()
         return estado.estado_id
 
+    def get_orden_estado(self, orden_id: int) -> str:
+        from sqlalchemy import text
+        stmt = text("""
+            SELECT es.codigo 
+            FROM sar_produccion.orden_generacion o
+            JOIN sar_catalogo.estado_sistema es ON o.estado_id = es.estado_id
+            WHERE o.orden_id = :orden_id
+        """)
+        res = self.session.execute(stmt, {"orden_id": orden_id}).scalar()
+        return res if res else ""
+
     def get_solicitudes_detalle_by_orden(self, orden_id: int) -> List[dict]:
         from sqlalchemy import text
         stmt = text("""
@@ -702,6 +731,16 @@ class ProduccionRepository(BaseRepository):
         self.session.flush()
         
         if solicitud_ids:
+            # Actualizar el estado físico de las solicitudes mismas
+            sol_state_id = self._get_or_create_estado_id("solicitud", nuevo_estado)
+            upd_sol_stmt = text("""
+                UPDATE sar_produccion.solicitud
+                SET estado_id = :sol_state_id
+                WHERE solicitud_id IN :sol_ids
+            """)
+            self.session.execute(upd_sol_stmt, {"sol_state_id": sol_state_id, "sol_ids": tuple(solicitud_ids)})
+            self.session.flush()
+
             grp_stmt = text("""
                 SELECT DISTINCT s.grupo_id, gr.orden_id 
                 FROM sar_produccion.solicitud s
@@ -711,6 +750,30 @@ class ProduccionRepository(BaseRepository):
             affected = self.session.execute(grp_stmt, {"sol_ids": tuple(solicitud_ids)}).fetchall()
             
             for grp_id, ord_id in affected:
+                # Actualizar el estado físico del grupo si todas sus solicitudes están resueltas
+                check_grp_stmt = text("""
+                    SELECT 
+                        COALESCE(SUM(CASE WHEN es.codigo = 'AUTORIZADA' THEN 1 ELSE 0 END), 0) as aut,
+                        COALESCE(SUM(CASE WHEN es.codigo = 'RECHAZADA' THEN 1 ELSE 0 END), 0) as rech,
+                        COUNT(*) as total
+                    FROM sar_produccion.solicitud s
+                    JOIN sar_catalogo.estado_sistema es ON s.estado_id = es.estado_id
+                    WHERE s.grupo_id = :grp_id
+                """)
+                grp_counts = self.session.execute(check_grp_stmt, {"grp_id": grp_id}).fetchone()
+                if grp_counts and grp_counts.total > 0:
+                    from sar.src.storage.models import GrupoReferencia
+                    grupo = self.session.get(GrupoReferencia, grp_id)
+                    if grupo:
+                        if grp_counts.aut == grp_counts.total:
+                            grupo.estado_id = self._get_or_create_estado_id("grupo_referencia", "AUTORIZADA")
+                        elif grp_counts.rech == grp_counts.total:
+                            grupo.estado_id = self._get_or_create_estado_id("grupo_referencia", "RECHAZADA")
+                        elif grp_counts.aut + grp_counts.rech == grp_counts.total:
+                            grupo.estado_id = self._get_or_create_estado_id("grupo_referencia", "AUTORIZADA")
+                    self.session.flush()
+
+                # Actualizar el estado de la orden
                 check_ord_ref_stmt = text("""
                     SELECT 
                         COALESCE(SUM(CASE WHEN es.codigo = 'PENDIENTE_AUTORIZACION' THEN 1 ELSE 0 END), 0) as pdte,
@@ -738,17 +801,113 @@ class ProduccionRepository(BaseRepository):
         
         return {"rows_updated": rows_updated}
 
-    def update_orden_estado_masivo(self, orden_id: int, nuevo_estado_codigo: str):
-        estado_id = self._get_estado_id(nuevo_estado_codigo)
+    def cancelar_orden_transaccional(self, orden_id: int) -> dict:
         from sqlalchemy import text
-        stmt = text("""
+        from sar.src.storage.models import OrdenGeneracion
+        
+        # 1. Verificar si existen referencias asociadas a la orden
+        check_stmt = text("""
+            SELECT COUNT(*) FROM sar_produccion.referencia r
+            JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+            WHERE gr.orden_id = :orden_id
+        """)
+        ref_count = self.session.execute(check_stmt, {"orden_id": orden_id}).scalar()
+        if ref_count and ref_count > 0:
+            raise ValueError("No se puede cancelar una orden que ya tiene referencias generadas.")
+            
+        # 2. Obtener IDs de estado de cancelación
+        ord_cancel_id = self._get_or_create_estado_id("orden_generacion", "CANCELADA")
+        grp_cancel_id = self._get_or_create_estado_id("grupo_referencia", "CANCELADA")
+        sol_cancel_id = self._get_or_create_estado_id("solicitud", "CANCELADA")
+        
+        # 3. Cancelar solicitudes asociadas
+        upd_sol_stmt = text("""
+            UPDATE sar_produccion.solicitud
+            SET estado_id = :state_id
+            WHERE grupo_id IN (
+                SELECT grupo_id FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id
+            )
+        """)
+        self.session.execute(upd_sol_stmt, {"state_id": sol_cancel_id, "orden_id": orden_id})
+        
+        # 4. Cancelar grupos asociados
+        upd_grp_stmt = text("""
+            UPDATE sar_produccion.grupo_referencia
+            SET estado_id = :state_id
+            WHERE orden_id = :orden_id
+        """)
+        self.session.execute(upd_grp_stmt, {"state_id": grp_cancel_id, "orden_id": orden_id})
+        
+        # 5. Cancelar la orden principal
+        orden = self.session.get(OrdenGeneracion, orden_id)
+        if orden:
+            orden.estado_id = ord_cancel_id
+            
+        self.session.flush()
+        return {"success": True}
+
+    def update_orden_estado_masivo(self, orden_id: int, nuevo_estado_codigo: str):
+        from sqlalchemy import text
+        from sar.src.storage.models import OrdenGeneracion
+
+        # 1. Obtener la cantidad de referencias solicitadas en total para la orden
+        stmt_sol = text("""
+            SELECT COALESCE(SUM(s.cantidad_solicitada), 0)
+            FROM sar_produccion.solicitud s
+            JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
+            WHERE gr.orden_id = :orden_id
+        """)
+        total_solicitadas = self.session.execute(stmt_sol, {"orden_id": orden_id}).scalar()
+        
+        # 2. Obtener la cantidad de referencias actualmente en estado PENDIENTE_AUTORIZACION
+        stmt_pdte = text("""
+            SELECT COUNT(*) 
+            FROM sar_produccion.referencia r
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            WHERE r.grupo_id IN (SELECT grupo_id FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id)
+              AND es.codigo = 'PENDIENTE_AUTORIZACION'
+        """)
+        total_pendientes = self.session.execute(stmt_pdte, {"orden_id": orden_id}).scalar()
+        
+        if total_solicitadas == 0:
+            raise ValueError("La orden no tiene solicitudes registradas.")
+            
+        if total_pendientes != total_solicitadas:
+            raise ValueError(
+                f"No se puede procesar la orden completa de forma masiva porque no todas las referencias están listas para autorizar.\n\n"
+                f"- Referencias Solicitadas: {total_solicitadas}\n"
+                f"- Referencias Pendientes de Autorización: {total_pendientes}\n\n"
+                "Para autorizaciones parciales, por favor use el módulo individual dando doble clic sobre la orden."
+            )
+
+        # 3. Validar si la orden está cancelada
+        stmt_est = text("""
+            SELECT es.codigo 
+            FROM sar_produccion.orden_generacion o
+            JOIN sar_catalogo.estado_sistema es ON o.estado_id = es.estado_id
+            WHERE o.orden_id = :orden_id
+        """)
+        est_cod = self.session.execute(stmt_est, {"orden_id": orden_id}).scalar()
+        if est_cod == "CANCELADA":
+            raise ValueError("No se puede autorizar o rechazar una orden cancelada.")
+
+        # 4. Actualizar todas las referencias de la orden al nuevo estado
+        estado_id = self._get_estado_id(nuevo_estado_codigo)
+        stmt_upd = text("""
             UPDATE sar_produccion.referencia 
             SET estado_id = :estado_id 
             WHERE grupo_id IN (
                 SELECT grupo_id FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id
             )
         """)
-        self.session.execute(stmt, {"estado_id": estado_id, "orden_id": orden_id})
+        self.session.execute(stmt_upd, {"estado_id": estado_id, "orden_id": orden_id})
+        
+        # 5. Actualizar el estado de la orden principal
+        orden = self.session.get(OrdenGeneracion, orden_id)
+        if orden:
+            ord_estado_id = self._get_or_create_estado_id("orden_generacion", nuevo_estado_codigo)
+            orden.estado_id = ord_estado_id
+
         self.session.flush()
 
     def update_referencia_estado(self, referencia_id: int, nuevo_estado_codigo: str):
@@ -757,12 +916,135 @@ class ProduccionRepository(BaseRepository):
             ref.estado_id = self._get_estado_id(nuevo_estado_codigo)
             self.session.flush()
 
-    def update_referencias_estado_masivo(self, referencia_ids: List[int], nuevo_estado_codigo: str):
+    def update_referencias_estado_masivo(self, referencia_ids: List[int], nuevo_estado_codigo: str, rechazar_restantes: bool = False):
+        from sqlalchemy import text
+        from sar.src.storage.models import Referencia, Solicitud, GrupoReferencia, OrdenGeneracion
+        
         estado_id = self._get_estado_id(nuevo_estado_codigo)
-        from sqlalchemy import select
-        referencias = self.session.execute(select(Referencia).where(Referencia.referencia_id.in_(referencia_ids))).scalars().all()
-        for ref in referencias:
-            ref.estado_id = estado_id
+        pending_id = self._get_estado_id("PENDIENTE_AUTORIZACION")
+        rechazada_id = self._get_estado_id("RECHAZADA")
+        
+        # 1. Validar que todas las referencias seleccionadas estén en PENDIENTE_AUTORIZACION
+        stmt_check = text("""
+            SELECT COUNT(*) FROM sar_produccion.referencia r
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            WHERE r.referencia_id IN :ref_ids AND es.codigo != 'PENDIENTE_AUTORIZACION'
+        """)
+        not_pending = self.session.execute(stmt_check, {"ref_ids": tuple(referencia_ids)}).scalar()
+        if not_pending and not_pending > 0:
+            raise ValueError("Solo se pueden procesar referencias que estén en estado PENDIENTE_AUTORIZACION.")
+            
+        # 2. Obtener las solicitudes vinculadas
+        stmt_sols = text("""
+            SELECT DISTINCT solicitud_id FROM sar_produccion.referencia
+            WHERE referencia_id IN :ref_ids
+        """)
+        sol_rows = self.session.execute(stmt_sols, {"ref_ids": tuple(referencia_ids)}).fetchall()
+        sol_ids = [r[0] for r in sol_rows if r[0]]
+        
+        # 3. Si se solicita rechazar las restantes
+        if rechazar_restantes and sol_ids:
+            stmt_restantes = text("""
+                UPDATE sar_produccion.referencia
+                SET estado_id = :rechazada_id
+                WHERE solicitud_id IN :sol_ids 
+                  AND referencia_id NOT IN :selected_ids 
+                  AND estado_id = :pending_id
+            """)
+            self.session.execute(stmt_restantes, {
+                "rechazada_id": rechazada_id,
+                "sol_ids": tuple(sol_ids),
+                "selected_ids": tuple(referencia_ids),
+                "pending_id": pending_id
+            })
+            
+        # 4. Actualizar las referencias seleccionadas
+        for ref_id in referencia_ids:
+            ref = self.session.get(Referencia, ref_id)
+            if ref:
+                ref.estado_id = estado_id
+                
+        self.session.flush()
+        
+        # 5. Recalcular estados de solicitudes, grupos y órdenes vinculadas
+        if sol_ids:
+            for sol_id in sol_ids:
+                stmt_counts = text("""
+                    SELECT 
+                        COALESCE(SUM(CASE WHEN es.codigo = 'AUTORIZADA' THEN 1 ELSE 0 END), 0) as aut,
+                        COALESCE(SUM(CASE WHEN es.codigo = 'RECHAZADA' THEN 1 ELSE 0 END), 0) as rech,
+                        COALESCE(SUM(CASE WHEN es.codigo = 'PENDIENTE_AUTORIZACION' THEN 1 ELSE 0 END), 0) as pdte,
+                        COUNT(*) as total
+                    FROM sar_produccion.referencia r
+                    JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                    WHERE r.solicitud_id = :sol_id
+                """)
+                counts = self.session.execute(stmt_counts, {"sol_id": sol_id}).fetchone()
+                if counts and counts.total > 0:
+                    solicitud = self.session.get(Solicitud, sol_id)
+                    if solicitud:
+                        if counts.pdte > 0:
+                            pass
+                        elif counts.aut == counts.total:
+                            solicitud.estado_id = self._get_or_create_estado_id("solicitud", "AUTORIZADA")
+                        elif counts.rech == counts.total:
+                            solicitud.estado_id = self._get_or_create_estado_id("solicitud", "RECHAZADA")
+                        else:
+                            solicitud.estado_id = self._get_or_create_estado_id("solicitud", "AUTORIZACION_PARCIAL")
+                            
+            stmt_grps = text("""
+                SELECT DISTINCT s.grupo_id, gr.orden_id 
+                FROM sar_produccion.solicitud s
+                JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
+                WHERE s.solicitud_id IN :sol_ids
+            """)
+            affected = self.session.execute(stmt_grps, {"sol_ids": tuple(sol_ids)}).fetchall()
+            
+            for grp_id, ord_id in affected:
+                check_grp_stmt = text("""
+                    SELECT 
+                        COALESCE(SUM(CASE WHEN es.codigo = 'AUTORIZADA' THEN 1 ELSE 0 END), 0) as aut,
+                        COALESCE(SUM(CASE WHEN es.codigo = 'RECHAZADA' THEN 1 ELSE 0 END), 0) as rech,
+                        COALESCE(SUM(CASE WHEN es.codigo = 'AUTORIZACION_PARCIAL' THEN 1 ELSE 0 END), 0) as part,
+                        COUNT(*) as total
+                    FROM sar_produccion.solicitud s
+                    JOIN sar_catalogo.estado_sistema es ON s.estado_id = es.estado_id
+                    WHERE s.grupo_id = :grp_id
+                """)
+                grp_counts = self.session.execute(check_grp_stmt, {"grp_id": grp_id}).fetchone()
+                if grp_counts and grp_counts.total > 0:
+                    grupo = self.session.get(GrupoReferencia, grp_id)
+                    if grupo:
+                        if grp_counts.aut == grp_counts.total:
+                            grupo.estado_id = self._get_or_create_estado_id("grupo_referencia", "AUTORIZADA")
+                        elif grp_counts.rech == grp_counts.total:
+                            grupo.estado_id = self._get_or_create_estado_id("grupo_referencia", "RECHAZADA")
+                        else:
+                            grupo.estado_id = self._get_or_create_estado_id("grupo_referencia", "AUTORIZACION_PARCIAL")
+                            
+                check_ord_ref_stmt = text("""
+                    SELECT 
+                        COALESCE(SUM(CASE WHEN es.codigo = 'PENDIENTE_AUTORIZACION' THEN 1 ELSE 0 END), 0) as pdte,
+                        COALESCE(SUM(CASE WHEN es.codigo = 'AUTORIZADA' THEN 1 ELSE 0 END), 0) as aut,
+                        COALESCE(SUM(CASE WHEN es.codigo = 'RECHAZADA' THEN 1 ELSE 0 END), 0) as rech,
+                        COUNT(*) as total
+                    FROM sar_produccion.referencia r
+                    JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                    WHERE r.grupo_id IN (SELECT grupo_id FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id)
+                """)
+                counts = self.session.execute(check_ord_ref_stmt, {"orden_id": ord_id}).fetchone()
+                if counts and counts.total > 0:
+                    orden = self.session.get(OrdenGeneracion, ord_id)
+                    if orden:
+                        if counts.pdte == 0:
+                            if counts.aut == counts.total:
+                                orden.estado_id = self._get_or_create_estado_id("orden_generacion", "AUTORIZADA")
+                            elif counts.rech == counts.total:
+                                orden.estado_id = self._get_or_create_estado_id("orden_generacion", "RECHAZADA")
+                            else:
+                                if counts.aut > 0 and counts.aut + counts.rech == counts.total:
+                                    orden.estado_id = self._get_or_create_estado_id("orden_generacion", "AUTORIZADA")
+                                    
         self.session.flush()
 
     def asignar_referencias(self, referencia_ids: List[int], usuario_id: int) -> bool:

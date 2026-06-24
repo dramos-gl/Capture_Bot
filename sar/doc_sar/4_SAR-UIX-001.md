@@ -1,11 +1,8 @@
-SAR-UIX-001
-Diseño Funcional de Experiencia de Usuario (UI/UX)
-Sistema de Administración de Referencias (SAR)
-
-Documento: SAR-UIX-001
-Versión: 1.0
-Estado: Baseline Inicial
-Metodología: Business-First Architecture (BFA)
+# SAR-UIX-001: Especificación UX/UI
+**Categoría:** Experiencia de Usuario  
+**Versión:** 1.0  
+**Estado:** Baseline Inicial  
+**Metodología:** Business-First Architecture (BFA)  
 Dependencias:
 
 SAR-BLUEPRINT-001 v1.3

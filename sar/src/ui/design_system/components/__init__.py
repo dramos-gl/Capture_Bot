@@ -6,6 +6,7 @@ from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
 from sar.src.ui.design_system.components.atoms.gl_badge import StatusBadge
+from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
 
 # Molecules
 from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
@@ -25,6 +26,7 @@ __all__ = [
     "CustomInput",
     "CustomCheckBox",
     "StatusBadge",
+    "GLStatusIndicator",
     "CustomCard",
     "NavigationSidebar",
     "StyledDataTable",

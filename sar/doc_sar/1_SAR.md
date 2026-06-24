@@ -1,9 +1,9 @@
-SAR - Sistema de Administración de Referencias
-Blueprint Empresarial v1.3 (Baseline Congelada)
-Versión: 1.3
-Estado: Congelada
-Metodología: Business-First Architecture (BFA)
-Fecha: 2026
+# SAR-BLUEPRINT-001: Blueprint Empresarial SAR
+**Categoría:** Arquitectura Empresarial  
+**Versión:** 1.3  
+**Estado:** Baseline Congelada  
+**Metodología:** Business-First Architecture (BFA)  
+**Fecha:** 2026  
 ________________________________________
 1. Resumen Ejecutivo
 1.1 Propósito
@@ -483,7 +483,7 @@ Reglas de Negocio
 100%
 ________________________________________
 Modelo de Datos
-100% (Congelado mediante [SAR-DB-001 v2.0](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/docs/SAR/9_SAR-DB-001%20v2.0.md))
+100% (Congelado mediante [SAR-DB-001 v2.0](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/10_SAR-DB-001%20v2.0.md))
 ________________________________________
 Arquitectura Operativa
 85%

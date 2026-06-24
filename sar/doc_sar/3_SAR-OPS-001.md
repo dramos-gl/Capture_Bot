@@ -1,10 +1,8 @@
-SAR-OPS-001
-Arquitectura Operativa
-Sistema de Administración de Referencias (SAR)
-Documento: SAR-OPS-001
-Versión: 1.1
-Estado: Baseline Congelada
-Metodología: Business-First Architecture (BFA)
+# SAR-OPS-001: Modelo Operativo y Procesos
+**Categoría:** Operación y Negocio  
+**Versión:** 1.1  
+**Estado:** Baseline Congelada  
+**Metodología:** Business-First Architecture (BFA)  
 Dependencias:
 •	SAR-BLUEPRINT-001 v1.3
 •	SAR-DAT-001 v1.0
@@ -268,13 +266,16 @@ DA-005
 Procesamiento distribuido mediante usuarios operativos.
 ________________________________________
 20. Estado del Proyecto
-Documento	Estado
-SAR-BLUEPRINT-001	Congelado
-SAR-DAT-001	Congelado
-SAR-OPS-001	Congelado
-SAR-UIX-001	Pendiente
-SAR-TEC-001	Pendiente
-SAR-DEV-001	Pendiente
+Documento | Nombre Formal | Categoría | Estado
+--- | --- | --- | ---
+SAR-BLUEPRINT-001 | Blueprint Empresarial SAR | Arquitectura Empresarial | Congelado
+SAR-DAT-001 | Modelo de Datos de Negocio | Análisis de Datos | Congelado
+SAR-OPS-001 | Modelo Operativo y Procesos | Operación y Negocio | Congelado
+SAR-UIX-001 | Especificación UX/UI | Experiencia de Usuario | Pendiente
+SAR-TEC-001 | Arquitectura Técnica | Arquitectura de Solución | Pendiente
+SAR-DEV-001 | Guía de Desarrollo y Estándares | Ingeniería de Software | Pendiente
+SAR-SEC-001 | Arquitectura de Seguridad y Auditoría | Seguridad | Pendiente
+SAR-DB-001 | Diseño Físico de Base de Datos | Ingeniería de Datos | Pendiente
 ________________________________________
 Próximo Documento
 SAR-UIX-001

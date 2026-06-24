@@ -56,6 +56,9 @@ class BillingRpaWorker(QThread):
                 retries_str = config_repo.get_parametro("REINTENTOS_AUTOMATICOS")
                 max_retries = int(retries_str) if retries_str else 3
                 
+                # Fetch RUTA_DERECHOS
+                self.default_output_dir = config_repo.get_parametro("RUTA_DERECHOS") or "storage"
+                
                 # Fetch Portal Locators and extract values
                 db_locators = config_repo.get_localizadores()
                 locators = {k: v.valor_selector for k, v in db_locators.items()}
@@ -121,9 +124,12 @@ class BillingRpaWorker(QThread):
                 importe = 0.0
                 with self.db_connector.get_session() as db_session:
                     stmt = text("""
-                        SELECT referencia_id, referencia_portal, importe 
-                        FROM sar_produccion.referencia 
-                        WHERE solicitud_id = :solicitud_id AND consecutivo_grupo = :consecutivo
+                        SELECT r.referencia_id, r.referencia_portal, r.importe 
+                        FROM sar_produccion.referencia r
+                        JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                        WHERE r.solicitud_id = :solicitud_id 
+                          AND r.consecutivo_grupo = :consecutivo
+                          AND es.codigo = 'AUTORIZADA'
                     """)
                     row = db_session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"], "consecutivo": current}).fetchone()
                     if row:
@@ -132,9 +138,11 @@ class BillingRpaWorker(QThread):
                         importe = float(row.importe) if row.importe else 0.0
                 
                 if not referencia_portal:
-                    self.status_changed.emit(f"ADVERTENCIA: Consecutivo {current} no tiene referencia generada en BD. Saltando...")
-                    error_count += 1
-                    self.metric_updated.emit("errores", error_count)
+                    self.status_changed.emit(f"Consecutivo {current} no tiene referencia AUTORIZADA en BD (puede estar RECHAZADA o pendiente). Saltando...")
+                    # Incrementar el contador de éxito/procesadas para no congelar la barra de progreso
+                    success_count += 1
+                    pct = int((success_count / total_items) * 100)
+                    self.progress_changed.emit(pct)
                     continue
                 
                 self.status_changed.emit(f"Facturando referencia {referencia_portal} (Consecutivo {current})...")
@@ -260,17 +268,28 @@ class BillingRpaWorker(QThread):
                 
                 if step_success:
                     # Move PDF to final path
-                    # Pattern: [Download_Dir]/[Folio_Orden]/[RFC]/[RFC_DEL_CON_GRUPO_CONSEC_FACTURA.pdf]
-                    rfc_part = self.ctx["rfc"][:3].upper()
+                    # Rename Face C: Referencia_DELEGACION_3GRUPO_ID_[CONSECUTIVO_5].pdf (consecutivo simplificado)
                     del_part = "".join(c for c in self.ctx["delegacion_nombre"] if c.isalnum())[:3].upper()
-                    con_part = self.ctx["concepto_alias"][:3].upper()
                     grupo_id = self.ctx["grupo_id"]
-                    consec_str = str(current).zfill(5)
-                    filename = f"{rfc_part}_{del_part}_{con_part}_{grupo_id}_{consec_str}_FACTURA.pdf"
+                    consec_str = str(current - self.ctx["consecutivo_inicio"] + 1)
+                    filename = f"{referencia_portal}_{del_part}{grupo_id}_{consec_str}.pdf"
                     
-                    folio_clean = "".join(c for c in self.ctx["orden_folio"] if c.isalnum() or c in ("-", "_"))
-                    base_dir = self.custom_output_dir if self.custom_output_dir else "storage"
-                    dest_dir = os.path.abspath(os.path.join(base_dir, "facturas" if not self.custom_output_dir else "", folio_clean, self.ctx["rfc"]))
+                    # Extract year from current date for directory structure: Facturas/[Año]/[RFC]/[Concepto]/
+                    current_year = str(datetime.datetime.now().year)
+                    concepto_folder = "".join(c for c in (self.ctx.get("concepto_alias") or "CONCEPTO") if c.isalnum() or c in ("-", "_"))
+                    base_dir = self.custom_output_dir if self.custom_output_dir else getattr(self, "default_output_dir", "storage")
+                    
+                    # Verify write access to base_dir
+                    from sar.src.core.access_manager import check_write_access
+                    is_accessible, _ = check_write_access(base_dir)
+                    
+                    if not is_accessible:
+                        self.status_changed.emit("ALERTA: Ruta base no accesible. Activando contingencia local temporal...")
+                        # Save in local contingency folder preserving structural folders: contingencia/facturas/año/RFC/concepto/
+                        dest_dir = os.path.abspath(os.path.join("storage", "contingencia", "facturas", current_year, self.ctx["rfc"], concepto_folder))
+                    else:
+                        dest_dir = os.path.abspath(os.path.join(base_dir, "facturas" if not self.custom_output_dir else "", current_year, self.ctx["rfc"], concepto_folder))
+                        
                     os.makedirs(dest_dir, exist_ok=True)
                     
                     final_pdf_path = os.path.join(dest_dir, filename)
@@ -296,7 +315,7 @@ class BillingRpaWorker(QThread):
                 self._update_solicitud_estado("ASIGNADO")
                 self.finished_processing.emit(True, "Facturación pausada por el usuario.")
             else:
-                self._finalize_solicitud_in_db("COMPLETADA")
+                self._finalize_solicitud_in_db("FACTURADA")
                 self._log_event_db("PROCESAR_FACTURACION", f"Finalización exitosa facturación solicitud {self.ctx['solicitud_id']}")
                 self.finished_processing.emit(True, "Procesamiento de facturación completado con éxito.")
                 
@@ -347,6 +366,22 @@ class BillingRpaWorker(QThread):
                     "xml": None,
                     "estado": "TIMBRADA"
                 })
+            
+            # Update the reference status to FACTURADA
+            stmt_status = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = 'FACTURADA' LIMIT 1")
+            ref_status_id = session.execute(stmt_status).scalar()
+            if not ref_status_id:
+                ins_ref_stmt = text("""
+                    INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
+                    VALUES ('referencia', 'FACTURADA', 'FACTURADA')
+                    RETURNING estado_id
+                """)
+                ref_status_id = session.execute(ins_ref_stmt).scalar()
+                session.flush()
+                
+            ref = session.get(Referencia, referencia_id)
+            if ref:
+                ref.estado_id = ref_status_id
             
             # Update last consecutivo on Solicitud
             sol = session.get(Solicitud, self.ctx["solicitud_id"])

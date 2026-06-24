@@ -1,10 +1,8 @@
-SAR-TEC-001
-Arquitectura Técnica
-Sistema de Administración de Referencias (SAR)
-Documento: SAR-TEC-001
-Versión: 1.0
-Estado: Baseline Inicial
-Metodología: Business-First Architecture (BFA)
+# SAR-TEC-001: Arquitectura Técnica
+**Categoría:** Arquitectura de Solución  
+**Versión:** 1.0  
+**Estado:** Baseline Inicial  
+**Metodología:** Business-First Architecture (BFA)  
 ________________________________________
 1. Objetivo
 Definir la arquitectura técnica oficial para la implementación del Sistema de Administración de Referencias (SAR).
@@ -336,13 +334,16 @@ Reportes
 •	Exportaciones.
 ________________________________________
 Estado del Proyecto
-Documento	Estado
-SAR-BLUEPRINT-001	Congelado
-SAR-DAT-001	Congelado
-SAR-OPS-001	Congelado
-SAR-UIX-001	Congelado
-SAR-TEC-001	Congelado
-SAR-DEV-001	Pendiente
+Documento | Nombre Formal | Categoría | Estado
+--- | --- | --- | ---
+SAR-BLUEPRINT-001 | Blueprint Empresarial SAR | Arquitectura Empresarial | Congelado
+SAR-DAT-001 | Modelo de Datos de Negocio | Análisis de Datos | Congelado
+SAR-OPS-001 | Modelo Operativo y Procesos | Operación y Negocio | Congelado
+SAR-UIX-001 | Especificación UX/UI | Experiencia de Usuario | Congelado
+SAR-TEC-001 | Arquitectura Técnica | Arquitectura de Solución | Congelado
+SAR-DEV-001 | Guía de Desarrollo y Estándares | Ingeniería de Software | Pendiente
+SAR-SEC-001 | Arquitectura de Seguridad y Auditoría | Seguridad | Pendiente
+SAR-DB-001 | Diseño Físico de Base de Datos | Ingeniería de Datos | Pendiente
 ________________________________________
 Próximo Documento
 SAR-DEV-001

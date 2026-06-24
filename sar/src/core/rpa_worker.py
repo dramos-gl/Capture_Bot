@@ -55,6 +55,9 @@ class RpaWorker(QThread):
                 retries_str = config_repo.get_parametro("REINTENTOS_AUTOMATICOS")
                 max_retries = int(retries_str) if retries_str else 3
                 
+                # Fetch RUTA_DERECHOS
+                self.default_output_dir = config_repo.get_parametro("RUTA_DERECHOS") or "storage"
+                
                 # Fetch Portal Locators and extract values to decouple from SQLAlchemy Session
                 db_locators = config_repo.get_localizadores()
                 locators = {k: v.valor_selector for k, v in db_locators.items()}
@@ -235,22 +238,27 @@ class RpaWorker(QThread):
                 page.close()
                 
                 if step_success:
-                    # Move PDF to permanent path & Rename using custom pattern
-                    # RFC_3 + Delegacion_3 + ConceptoAlias_3 + GrupoID + Consecutivo_5
-                    rfc_part = self.ctx["rfc"][:3].upper()
+                    # Rename Face A: referencia_DELEGACION_3_GRUPO_ID_[CONSECUTIVO_5].pdf
                     del_part = "".join(c for c in self.ctx["delegacion_nombre"] if c.isalnum())[:3].upper()
-                    con_part = self.ctx["concepto_alias"][:3].upper()
                     grupo_id = self.ctx["grupo_id"]
                     consec_str = str(current).zfill(5)
+                    filename = f"{ref_portal}_{del_part}_{grupo_id}_{consec_str}.pdf"
                     
-                    filename = f"{rfc_part}_{del_part}_{con_part}_{grupo_id}_{consec_str}.pdf"
-                    
-                    # Target Directory: [selected_custom_path]/[Folio]/[RFC]/ OR fallback to storage/boletas/
                     folio_clean = "".join(c for c in self.ctx["orden_folio"] if c.isalnum() or c in ("-", "_"))
-                    base_dir = self.custom_output_dir if self.custom_output_dir else "storage"
+                    concepto_folder = "".join(c for c in (self.ctx.get("concepto_alias") or "CONCEPTO") if c.isalnum() or c in ("-", "_"))
+                    base_dir = self.custom_output_dir if self.custom_output_dir else getattr(self, "default_output_dir", "storage")
                     
-                    # Resolve directory
-                    dest_dir = os.path.abspath(os.path.join(base_dir, "boletas" if not self.custom_output_dir else "", folio_clean, self.ctx["rfc"]))
+                    # Verify write access to base_dir
+                    from sar.src.core.access_manager import check_write_access
+                    is_accessible, _ = check_write_access(base_dir)
+                    
+                    if not is_accessible:
+                        self.status_changed.emit("ALERTA: Ruta base no accesible. Activando contingencia local temporal...")
+                        # Save in local contingency folder preserving structural folders: contingencia/boletas/orden/RFC/concepto/
+                        dest_dir = os.path.abspath(os.path.join("storage", "contingencia", "boletas", folio_clean, self.ctx["rfc"], concepto_folder))
+                    else:
+                        dest_dir = os.path.abspath(os.path.join(base_dir, "boletas" if not self.custom_output_dir else "", folio_clean, self.ctx["rfc"], concepto_folder))
+                        
                     os.makedirs(dest_dir, exist_ok=True)
                     
                     final_pdf_path = os.path.join(dest_dir, filename)

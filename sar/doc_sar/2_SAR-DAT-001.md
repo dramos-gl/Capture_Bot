@@ -1,12 +1,9 @@
-# SAR-DAT-001
-# Modelo de Datos Empresarial y Físico
-## Sistema de Administración de Referencias (SAR)
-
-**Documento:** SAR-DAT-001  
+# SAR-DAT-001: Modelo de Datos de Negocio
+**Categoría:** Análisis de Datos  
 **Versión:** 1.0  
 **Estado:** Baseline Congelada  
 **Metodología:** Business-First Architecture (BFA)  
-**Fecha:** 2026
+**Fecha:** 2026  
 
 ---
 
@@ -373,6 +370,10 @@ PROCESANDO
 COMPLETADA
 ERROR
 CANCELADA
+AUTORIZADA
+RECHAZADA
+AUTORIZACION_PARCIAL
+FACTURADA
 ```
 
 ---
@@ -440,11 +441,19 @@ Las referencias transicionan a través de los siguientes estados a lo largo de s
 2. **Flujo de Autorización de Referencias y Ordenes**:
    * Las referencias en estado `PENDIENTE_AUTORIZACION` son validadas por el usuario u operador (validación de pago).
    * Cuando el usuario autoriza una referencia, su estado individual cambia a **`AUTORIZADA`**.
-   * **Transición de la Orden de Generación**: Cuando **todas** las referencias asociadas a los grupos de una **Orden de Generación** han sido autorizadas (estado `AUTORIZADA`), el estado general de la **Orden** cambia de forma automática a **`AUTORIZADA`**.
+   * **Regla de Autorización Masiva**: La autorización o rechazo masivo de una orden completa desde el listado principal de órdenes solo se permite si el 100% de las referencias solicitadas se encuentran en estado `PENDIENTE_AUTORIZACION`. Si se ha aplicado alguna autorización parcial previa o si faltan referencias por generar por el Bot A, el sistema bloqueará la acción masiva y exigirá el procesamiento granular a través del diálogo "Procesar solicitudes de la orden".
+   * **Transición de Solicitudes y Grupos**:
+     * Si el 100% de las referencias de una solicitud son autorizadas, la solicitud cambia físicamente en la base de datos a **`AUTORIZADA`**.
+     * Si el 100% de las referencias de una solicitud son rechazadas, la solicitud cambia físicamente en la base de datos a **`RECHAZADA`**.
+     * Si existe una mezcla de referencias autorizadas y rechazadas bajo una misma solicitud, esta cambia físicamente en la base de datos a **`AUTORIZACION_PARCIAL`**.
+     * El estado de los **Grupos de Referencia** cambia correspondientemente a `AUTORIZADA`, `RECHAZADA` o `AUTORIZACION_PARCIAL` al procesarse la totalidad de sus solicitudes.
+   * **Transición de la Orden de Generación**: Cuando **todas** las referencias de la orden han sido resueltas sin pendientes, si existe al menos una referencia autorizada, la orden principal cambia de forma automática a **`AUTORIZADA`**; de lo contrario, si el 100% de las referencias fueron rechazadas, la orden cambia a **`RECHAZADA`**.
 
 3. **Flujo de Ejecución del Bot C (Facturación)**:
-   * El Bot C toma solicitudes cuyas referencias asociadas o cuya **Orden de Generación** matriz se encuentre en estado **`AUTORIZADA`**.
+   * El Bot C (Facturación) toma para procesar aquellas solicitudes cuyo estado físico en base de datos sea **`AUTORIZADA`** o **`AUTORIZACION_PARCIAL`**.
+   * **Regla de Filtrado de Referencias**: Para solicitudes en estado **`AUTORIZACION_PARCIAL`**, el Bot C filtra y procesa **únicamente** las referencias hijas que tengan el estado físico **`AUTORIZADA`**, ignorando y saltando por completo aquellas marcadas como `RECHAZADA`.
    * El Bot C procesa el timbrado y descarga del CFDI, y al finalizar la descarga física e inserción del registro en la tabla de facturas, transiciona el estado de la referencia a **`FACTURADA`**.
+   * **Finalización de la Solicitud**: Una vez que el Bot C ha procesado la totalidad de las referencias válidas asignadas a la solicitud, el estado físico de la **Solicitud** se actualiza automáticamente en la base de datos a **`FACTURADA`** (lo que indica el fin del ciclo de procesamiento automático de timbrado para esa solicitud).
 
 ### Diagrama del Ciclo de Vida
 

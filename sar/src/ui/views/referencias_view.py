@@ -50,9 +50,6 @@ class ReferenciasView(QWidget):
         self.btn_estado = CustomButton("Cambiar Estado")
         self.btn_estado.clicked.connect(self._on_cambiar_estado)
         
-        self.btn_asignar = CustomButton("Asignar Usuario")
-        self.btn_asignar.clicked.connect(self._on_asignar)
-        
         self.btn_detalle = CustomButton("Ver Detalle", is_secondary=True)
         self.btn_detalle.clicked.connect(self._on_ver_detalle)
         
@@ -61,7 +58,6 @@ class ReferenciasView(QWidget):
         
         actions_layout.addWidget(self.btn_marcar_visibles)
         actions_layout.addWidget(self.btn_estado)
-        actions_layout.addWidget(self.btn_asignar)
         actions_layout.addWidget(self.btn_detalle)
         actions_layout.addWidget(self.btn_pdf)
         
@@ -70,6 +66,8 @@ class ReferenciasView(QWidget):
         
         self._current_search_text = ""
         self._current_estado_filter = "Todos"
+        
+        self.table.itemChanged.connect(self._on_table_item_changed)
         
         self.refresh_data()
         
@@ -91,64 +89,146 @@ class ReferenciasView(QWidget):
                 
         return ids
 
-    def _on_asignar(self):
-        ref_ids = self._get_selected_referencia_ids()
-        if not ref_ids:
-            QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una referencia usando las casillas (✔) o haciendo clic en una fila.")
-            return
-            
-        try:
-            with self.db_connector.get_session() as session:
-                from sar.src.storage.repositories import UsuarioRepository
-                u_repo = UsuarioRepository(session)
-                usuarios = u_repo.get_all_usuarios()
-                
-                if not usuarios:
-                    QMessageBox.warning(self, "Sin Usuarios", "No hay usuarios disponibles.")
-                    return
-                    
-                items = [f"{u.usuario_id} - {u.nombre} ({u.username})" for u in usuarios]
-                from PySide6.QtWidgets import QInputDialog
-                item, ok = QInputDialog.getItem(self, "Asignar Referencias", f"Selecciona el usuario para {len(ref_ids)} referencias:", items, 0, False)
-                
-            if ok and item:
-                u_id = int(item.split(" - ")[0])
-                with self.db_connector.get_session() as session:
-                    repo = ProduccionRepository(session)
-                    repo.asignar_referencias(ref_ids, u_id)
-                QMessageBox.information(self, "Éxito", f"{len(ref_ids)} referencias asignadas correctamente.")
-                self.refresh_data()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al asignar: {str(e)}")
-
     def _on_marcar_visibles(self):
-        """Marca las casillas de todas las filas que actualmente son visibles en la tabla."""
+        """Marca o desmarca las casillas de todas las filas que actualmente son visibles en la tabla."""
         from PySide6.QtCore import Qt
+        
+        # Determinar si hay alguna fila visible marcada
+        any_checked = False
+        for row in range(self.table.rowCount()):
+            if not self.table.isRowHidden(row):
+                item_check = self.table.item(row, 0)
+                if item_check and item_check.checkState() == Qt.CheckState.Checked:
+                    any_checked = True
+                    break
+                    
+        target_state = Qt.CheckState.Unchecked if any_checked else Qt.CheckState.Checked
+        action_name = "desmarcado" if any_checked else "marcado"
+        
+        self.table.blockSignals(True)
         count = 0
         for row in range(self.table.rowCount()):
             if not self.table.isRowHidden(row):
                 item_check = self.table.item(row, 0)
                 if item_check:
-                    item_check.setCheckState(Qt.CheckState.Checked)
+                    item_check.setCheckState(target_state)
                     count += 1
-        QMessageBox.information(self, "Selección", f"Se han marcado {count} referencias visibles.")
+        self.table.blockSignals(False)
+        
+        self.update_marcar_button_text()
+        QMessageBox.information(self, "Selección", f"Se han {action_name} {count} referencias visibles.")
+
+    def _on_table_item_changed(self, item):
+        if item.column() == 0:
+            self.update_marcar_button_text()
+
+    def update_marcar_button_text(self):
+        from PySide6.QtCore import Qt
+        any_checked = False
+        for row in range(self.table.rowCount()):
+            if not self.table.isRowHidden(row):
+                item_check = self.table.item(row, 0)
+                if item_check and item_check.checkState() == Qt.CheckState.Checked:
+                    any_checked = True
+                    break
+        if any_checked:
+            self.btn_marcar_visibles.setText("Desmarcar Visibles")
+        else:
+            self.btn_marcar_visibles.setText("Marcar Visibles")
 
     def _on_cambiar_estado(self):
-        ref_ids = self._get_selected_referencia_ids()
-        if not ref_ids:
-            QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una referencia.")
+        # 1. Obtener referencias seleccionadas y validar que estén en PENDIENTE_AUTORIZACION
+        selected_ids = []
+        for row in range(self.table.rowCount()):
+            item_check = self.table.item(row, 0)
+            if item_check and item_check.checkState() == Qt.CheckState.Checked:
+                state_text = self.table.item(row, 10).text() if self.table.item(row, 10) else ""
+                if state_text != "PENDIENTE_AUTORIZACION":
+                    QMessageBox.warning(self, "Acción Inválida", "Solo se pueden autorizar o rechazar referencias en estado PENDIENTE_AUTORIZACION.")
+                    return
+                selected_ids.append(int(self.table.item(row, 1).text()))
+                
+        if not selected_ids:
+            # Fallback a selección de fila única
+            selected = self.table.selectedItems()
+            if selected:
+                row = selected[0].row()
+                state_text = self.table.item(row, 10).text() if self.table.item(row, 10) else ""
+                if state_text != "PENDIENTE_AUTORIZACION":
+                    QMessageBox.warning(self, "Acción Inválida", "Solo se pueden autorizar o rechazar referencias en estado PENDIENTE_AUTORIZACION.")
+                    return
+                selected_ids.append(int(self.table.item(row, 1).text()))
+                
+        if not selected_ids:
+            QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una referencia pendiente.")
             return
             
         from PySide6.QtWidgets import QInputDialog
         opciones = ["AUTORIZADA", "RECHAZADA"]
-        item, ok = QInputDialog.getItem(self, "Cambiar Estado", f"Selecciona el nuevo estado para {len(ref_ids)} referencias:", opciones, 0, False)
+        item, ok = QInputDialog.getItem(self, "Cambiar Estado", f"Selecciona el nuevo estado para {len(selected_ids)} referencias:", opciones, 0, False)
         
         if ok and item:
             try:
+                from sqlalchemy import text
+                rechazar_restantes = False
+                
+                with self.db_connector.get_session() as session:
+                    # Buscar solicitudes asociadas
+                    stmt_sols = text("""
+                        SELECT DISTINCT solicitud_id FROM sar_produccion.referencia
+                        WHERE referencia_id IN :ref_ids
+                    """)
+                    sol_rows = session.execute(stmt_sols, {"ref_ids": tuple(selected_ids)}).fetchall()
+                    sol_ids = [r[0] for r in sol_rows if r[0]]
+                    
+                    if sol_ids:
+                        # Contar total pendientes de autorización en esas solicitudes
+                        stmt_pending = text("""
+                            SELECT COUNT(*) FROM sar_produccion.referencia r
+                            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                            WHERE r.solicitud_id IN :sol_ids AND es.codigo = 'PENDIENTE_AUTORIZACION'
+                        """)
+                        total_pendientes = session.execute(stmt_pending, {"sol_ids": tuple(sol_ids)}).scalar()
+                        remaining_pending = total_pendientes - len(selected_ids)
+                        
+                        if remaining_pending > 0:
+                            # Mostrar diálogo de confirmación personalizado
+                            msg_box = QMessageBox(self)
+                            msg_box.setWindowTitle("Confirmar Acción Parcial")
+                            msg_box.setIcon(QMessageBox.Question)
+                            msg_box.setText(
+                                f"Ha seleccionado {len(selected_ids)} referencias de un total de {total_pendientes} pendientes en la(s) solicitud(es) vinculada(s).\n\n"
+                                f"¿Desea cambiar el estado de las {len(selected_ids)} seleccionadas a {item} y RECHAZAR automáticamente las {remaining_pending} restantes?"
+                            )
+                            btn_yes = msg_box.addButton("Sí (Procesar y Rechazar Restantes)", QMessageBox.YesRole)
+                            btn_no = msg_box.addButton("No (Solo Procesar Seleccionadas)", QMessageBox.NoRole)
+                            btn_cancel = msg_box.addButton("Cancelar", QMessageBox.RejectRole)
+                            msg_box.setDefaultButton(btn_no)
+                            
+                            msg_box.exec()
+                            clicked = msg_box.clickedButton()
+                            
+                            if clicked == btn_cancel:
+                                return
+                            rechazar_restantes = (clicked == btn_yes)
+                        else:
+                            # Confirmación simple
+                            reply = QMessageBox.question(
+                                self, "Confirmar Cambio",
+                                f"¿Estás seguro de que deseas marcar las {len(selected_ids)} referencias seleccionadas como {item}?",
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                            )
+                            if reply == QMessageBox.No:
+                                return
+
+                # Ejecutar actualización transaccional
+                from sar.src.storage.repositories import ProduccionRepository
                 with self.db_connector.get_session() as session:
                     repo = ProduccionRepository(session)
-                    repo.update_referencias_estado_masivo(ref_ids, item)
-                QMessageBox.information(self, "Éxito", f"{len(ref_ids)} referencias cambiadas a {item}.")
+                    repo.update_referencias_estado_masivo(selected_ids, item, rechazar_restantes)
+                    session.commit()
+                    
+                QMessageBox.information(self, "Éxito", f"{len(selected_ids)} referencias cambiadas a {item}.")
                 self.refresh_data()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error al cambiar estado: {str(e)}")
@@ -189,8 +269,11 @@ class ReferenciasView(QWidget):
                         r["fecha_vigencia"]
                     ])
                     
+                self.table.blockSignals(True)
                 self.table.populate_rows(data_rows, checkable_first_col=True)
+                self.table.blockSignals(False)
                 self._apply_filters()
+                self.update_marcar_button_text()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo cargar la producción de referencias:\\n{str(e)}")
 

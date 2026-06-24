@@ -184,7 +184,7 @@ class RequestsView(QWidget):
             elif estado_filter == "Asignadas":
                 state_match = estado == "ASIGNADO"
             elif estado_filter == "Canceladas":
-                state_match = estado == "CANCELADO"
+                state_match = estado in ["CANCELADO", "CANCELADA"]
             # "Todas" matches everything
             
             # 2. Search Text Logic (search across all columns)

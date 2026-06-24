@@ -113,10 +113,25 @@ class BotView(QWidget):
         self.main_layout.setContentsMargins(16, 16, 16, 16)
         self.main_layout.setSpacing(16)
         
+        # Load default RUTA_DERECHOS parameter
+        self.default_output_dir = "storage"
+        try:
+            from sar.src.storage.repositories import ConfigRepository
+            with self.db_connector.get_session() as session:
+                repo = ConfigRepository(session)
+                db_dir = repo.get_parametro("RUTA_DERECHOS")
+                if db_dir:
+                    self.default_output_dir = db_dir
+        except Exception as e:
+            print("Error loading default output dir:", e)
+        
         self._build_header()
         self._build_top_panels()
         self._build_table_panel()
         self._build_console_panel()
+        
+        # Initial path check and sync trigger
+        self._verify_and_sync_paths()
         
         # Initial data load
         self._load_solicitudes()
@@ -261,7 +276,8 @@ class BotView(QWidget):
         c_layout.addWidget(lbl_path_title)
         
         path_input_layout = QHBoxLayout()
-        self.lbl_download_path_display = CustomLabel("Por defecto (storage/boletas/)", variant="body")
+        display_label_text = f"Por defecto ({self.default_output_dir})"
+        self.lbl_download_path_display = CustomLabel(display_label_text, variant="body")
         self.lbl_download_path_display.setStyleSheet("background-color: #f9fafb; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px;")
         self.selected_custom_path = None
         path_input_layout.addWidget(self.lbl_download_path_display, stretch=4)
@@ -271,6 +287,11 @@ class BotView(QWidget):
         self.btn_browse.clicked.connect(self._on_browse_path_clicked)
         path_input_layout.addWidget(self.btn_browse, stretch=1)
         c_layout.addLayout(path_input_layout)
+        
+        # GLStatusIndicator pill under the download path
+        from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
+        self.status_indicator = GLStatusIndicator()
+        c_layout.addWidget(self.status_indicator)
         
         self.btn_iniciar = CustomButton("▶ Iniciar Bot", is_secondary=False)
         self.btn_iniciar.clicked.connect(self._on_iniciar_bot)
@@ -666,6 +687,38 @@ class BotView(QWidget):
             QMessageBox.information(self, "Proceso Terminado", f"El procesamiento finalizó:\n{message}")
         else:
             QMessageBox.critical(self, "Error de Procesamiento", f"Fallo crítico en el bot:\n{message}")
+
+    def _verify_and_sync_paths(self):
+        """Asynchronously checks write access to the default output dir and triggers sync if connected."""
+        from sar.src.core.access_manager import PathVerifyThread
+        self.status_indicator.set_status("checking")
+        self.path_verify_thread = PathVerifyThread(self.default_output_dir, self)
+        self.path_verify_thread.result_ready.connect(self._on_path_verified)
+        self.path_verify_thread.start()
+
+    def _on_path_verified(self, path_str, has_access, error_message):
+        if has_access:
+            self.status_indicator.set_status("online", "CONECTADO")
+            self.log(f"Ruta por defecto accesible: {path_str}. Iniciando sincronización...")
+            
+            # Start sync of local contingency files
+            from sar.src.core.access_manager import SyncContingencyThread
+            self.sync_thread = SyncContingencyThread(self.db_connector, self.default_output_dir, self)
+            self.sync_thread.progress_msg.connect(self.log)
+            self.sync_thread.finished_sync.connect(self._on_sync_finished)
+            self.sync_thread.start()
+        else:
+            self.status_indicator.set_status("offline", "SIN ACCESO")
+            self.log(f"ADVERTENCIA: La ruta por defecto '{path_str}' no es accesible. Error: {error_message}")
+            self.log("Los archivos generados se guardarán temporalmente en contingencia local en caso de iniciarse el bot.")
+
+    def _on_sync_finished(self, success, migrated_count, message):
+        if success:
+            if migrated_count > 0:
+                self.log(f"Sincronización de contingencia exitosa: {message}")
+                QMessageBox.information(self, "Sincronización Exitosa", f"Se migraron {migrated_count} archivos de contingencia local a la unidad de red por defecto con éxito.")
+        else:
+            self.log(f"Fallo en sincronización de contingencia: {message}")
 
     def closeEvent(self, event):
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():

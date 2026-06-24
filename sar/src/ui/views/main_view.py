@@ -71,16 +71,20 @@ class MainView(QWidget):
         """Switches the stacked widget active view or opens independent windows."""
         if view_key == "dashboard":
             self.stacked_widget.setCurrentWidget(self.dashboard_view)
+            self.dashboard_view.refresh_data()
         elif view_key in ["ordenes", "ordenes_capturadas", "capturar_orden"]:
             self.stacked_widget.setCurrentWidget(self.orders_view)
+            self.orders_view.refresh_historial()
             if view_key == "ordenes_capturadas":
                 self.orders_view.tabs.setCurrentIndex(0)
             elif view_key == "capturar_orden":
                 self.orders_view.tabs.setCurrentIndex(1)
         elif view_key == "solicitudes":
             self.stacked_widget.setCurrentWidget(self.requests_view)
+            self.requests_view.refresh_data()
         elif view_key == "referencias":
             self.stacked_widget.setCurrentWidget(self.refs_view)
+            self.refs_view.refresh_data()
         elif view_key == "configuracion":
             if not self.admin_window:
                 self.admin_window = AdminWindow(self.db_connector, self)

@@ -303,7 +303,7 @@ class ThemeManager:
         QPushButton#orderProcessingCloseBtn {{
             font-size: 16px;
             font-weight: {Typography.WEIGHT_BOLD};
-            border-radius: 16px;
+            border-radius: 4px;
             background-color: transparent;
             color: {txt_secondary};
             border: {Spacing.BORDER_WIDTH_SM} solid {border};

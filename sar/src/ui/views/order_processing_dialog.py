@@ -17,6 +17,7 @@ class OrderProcessingDialog(QDialog):
         self.db_connector = db_connector
         self.orden_id = orden_id
         self.solicitudes_data = []
+        self.orden_estado = ""
         
         self.setWindowTitle("Procesar Solicitudes de la Orden")
         self.resize(1000, 680)
@@ -161,9 +162,11 @@ class OrderProcessingDialog(QDialog):
             with self.db_connector.get_session() as session:
                 repo = ProduccionRepository(session)
                 self.solicitudes_data = repo.get_solicitudes_detalle_by_orden(self.orden_id)
+                self.orden_estado = repo.get_orden_estado(self.orden_id)
                 
             self._populate_table()
             self._update_metrics_and_summary()
+            self._apply_readonly_if_cancelled()
         except Exception as e:
             QMessageBox.critical(self, "Error al cargar datos", f"No se pudo obtener el detalle de las solicitudes:\n{str(e)}")
 
@@ -172,6 +175,7 @@ class OrderProcessingDialog(QDialog):
         # Block signals to prevent itemChanged loop
         self.table.blockSignals(True)
         
+        is_cancelled = (self.orden_estado == "CANCELADA")
         data_rows = []
         for data in self.solicitudes_data:
             data_rows.append([
@@ -197,8 +201,8 @@ class OrderProcessingDialog(QDialog):
             # Retrieve generated checkbox item
             tbl_chk_item = self.table.item(row_idx, 0)
             if tbl_chk_item:
-                if data["estado"] != "PENDIENTE_AUTORIZACION":
-                    # Remove user checkability for other states
+                if data["estado"] != "PENDIENTE_AUTORIZACION" or is_cancelled:
+                    # Remove user checkability for other states or if cancelled
                     tbl_chk_item.setFlags(Qt.ItemFlag.ItemIsSelectable)
                     tbl_chk_item.setCheckState(Qt.CheckState.Unchecked)
                 else:
@@ -353,3 +357,39 @@ class OrderProcessingDialog(QDialog):
 
     def _on_reject_selected(self):
         self._process_selected_with_state("RECHAZADA", "RECHAZADAS")
+
+    def _apply_readonly_if_cancelled(self):
+        """Disables controls and displays a warning banner if the order is cancelled."""
+        if self.orden_estado == "CANCELADA":
+            self.btn_reject.setEnabled(False)
+            self.btn_authorize.setEnabled(False)
+            self.chk_select_all.setEnabled(False)
+            self.chk_select_all.setChecked(False)
+            
+            # Update banner for cancelled status
+            self.lbl_banner_text.setText(
+                "Esta orden se encuentra CANCELADA. Solo se permite la visualización de sus solicitudes."
+            )
+            # Use warning triangle icon
+            self.lbl_banner_icon.setPixmap(Icons.alert_triangle("#EF4444").pixmap(18, 18))
+            
+            # Change banner background styling to a light red alert style
+            self.banner.setStyleSheet("""
+                QFrame#orderProcessingBanner {
+                    background-color: #FEF2F2;
+                    border: 1px solid #FCA5A5;
+                    border-radius: 8px;
+                    padding: 12px;
+                }
+            """)
+            self.lbl_banner_text.setStyleSheet("color: #991B1B; font-weight: bold;")
+        else:
+            self.btn_reject.setEnabled(True)
+            self.btn_authorize.setEnabled(True)
+            # Default banner styling
+            self.lbl_banner_text.setText(
+                "Seleccione las solicitudes que desea procesar. Puede autorizar o rechazar individualmente o todas las pendientes."
+            )
+            self.lbl_banner_icon.setPixmap(Icons.check("#2563EB").pixmap(18, 18))
+            self.banner.setStyleSheet("") # Revert to stylesheet from theme_manager
+            self.lbl_banner_text.setStyleSheet("")

@@ -6,6 +6,7 @@ import re
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.utils.icons import Icons
+from sar.src.ui.design_system.tokens.colors import Colors
 
 class LabeledInput(QWidget):
     """A molecule grouping an Input with a Floating Label and icons.
@@ -13,8 +14,9 @@ class LabeledInput(QWidget):
     
     validity_changed = Signal(bool)
     
-    def __init__(self, label_text: str, placeholder: str = "", is_password: bool = False, icon_name: str = None, parent=None):
+    def __init__(self, label_text: str, placeholder: str = "", is_password: bool = False, icon_name: str = None, parent=None, bg_color: str = None):
         super().__init__(parent)
+        self._bg_color = bg_color
         
         self._validator_pattern = None
         self._validator_error_msg = ""
@@ -127,7 +129,9 @@ class LabeledInput(QWidget):
         
         # Apply styles BEFORE calculating geometry so adjustSize() uses the correct font
         if is_active:
-            self.label.setStyleSheet("background-color: #E8EEF5; color: #2C3E50; font-size: 11px; padding: 0 4px;")
+            bg_color = self._get_background_color()
+            text_color = "#F8FAFC" if bg_color in [Colors.BG_DARK, Colors.SURFACE_DARK] else "#2C3E50"
+            self.label.setStyleSheet(f"background-color: {bg_color}; color: {text_color}; font-size: 11px; padding: 0 4px;")
         else:
             self.label.setStyleSheet("background-color: transparent; color: #64748B; font-size: 13px; padding: 0 4px;")
             
@@ -139,7 +143,7 @@ class LabeledInput(QWidget):
         start_y = frame_rect.y() + (frame_rect.height() - lbl_h) // 2
         start_x = frame_rect.x() + 32 # Offset for leading icon
         
-        end_y = frame_rect.y() - (lbl_h // 2)
+        end_y = frame_rect.y() - lbl_h + 3 # Rests perfectly on the top line, minimizing intrusion inside the input box
         end_x = frame_rect.x() + 12
         
         target_rect = QRect(end_x, end_y, lbl_w, lbl_h) if is_active else QRect(start_x, start_y, lbl_w, lbl_h)
@@ -189,3 +193,35 @@ class LabeledInput(QWidget):
         self.error_label.setText("")
         self.error_label.setVisible(False)
         self.frame.setStyleSheet("")
+
+    def _get_background_color(self) -> str:
+        if self._bg_color:
+            return self._bg_color
+        
+        # Check parents for an objectName indicating a card or a custom background
+        in_card = False
+        p = self.parent()
+        while p:
+            if p.objectName() == "cardFrame":
+                in_card = True
+                break
+            p = p.parent()
+            
+        # Determine if we are in dark theme by checking window/parent hierarchy attributes
+        is_dark = False
+        p = self
+        while p:
+            if hasattr(p, "is_dark_theme"):
+                is_dark = getattr(p, "is_dark_theme")
+                break
+            p = p.parent()
+            
+        if is_dark:
+            return Colors.SURFACE_DARK if in_card else Colors.BG_DARK
+        else:
+            return Colors.SURFACE_LIGHT if in_card else Colors.BG_LIGHT
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.StyleChange:
+            self._update_label_state(animate=False)
+        super().changeEvent(event)

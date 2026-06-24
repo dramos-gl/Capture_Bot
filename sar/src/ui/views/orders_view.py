@@ -80,8 +80,12 @@ class OrdersView(QWidget):
         self.btn_rechazar_orden = CustomButton("Rechazar Orden Completa", is_secondary=True)
         self.btn_rechazar_orden.clicked.connect(self._on_rechazar_orden)
         
+        self.btn_cancelar_orden = CustomButton("Cancelar Orden", is_secondary=True)
+        self.btn_cancelar_orden.clicked.connect(self._on_cancelar_orden)
+        
         actions_layout.addWidget(self.btn_autorizar_orden)
         actions_layout.addWidget(self.btn_rechazar_orden)
+        actions_layout.addWidget(self.btn_cancelar_orden)
         
         self.historial_card.layout.addLayout(actions_layout)
         
@@ -357,3 +361,27 @@ class OrdersView(QWidget):
         
     def _on_rechazar_orden(self):
         self._change_orden_estado("RECHAZADA")
+
+    def _on_cancelar_orden(self):
+        orden_ids = self._get_selected_ordenes()
+        if not orden_ids:
+            QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una orden para cancelar.")
+            return
+            
+        reply = QMessageBox.question(self, "Confirmar Cancelación", 
+            f"¿Estás seguro de que deseas cancelar {len(orden_ids)} orden(es)? "
+            "Esto cancelará de forma permanente la orden y todas sus solicitudes asociadas.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            
+        if reply == QMessageBox.Yes:
+            try:
+                from sar.src.storage.repositories import ProduccionRepository
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    for oid in orden_ids:
+                        repo.cancelar_orden_transaccional(oid)
+                    session.commit()
+                QMessageBox.information(self, "Éxito", f"Las órdenes fueron canceladas con éxito.")
+                self.refresh_historial()
+            except Exception as e:
+                QMessageBox.critical(self, "Error al Cancelar", f"No se pudo cancelar la orden:\n{str(e)}")

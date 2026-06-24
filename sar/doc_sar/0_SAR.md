@@ -3,6 +3,23 @@
 
 ---
 
+## Registro de Documentos del Sistema (SAR)
+
+A continuación se presenta la relación de documentos técnicos oficiales que componen el ecosistema SAR:
+
+| Código | Nombre Formal | Categoría | Archivo de Documento |
+| :--- | :--- | :--- | :--- |
+| **SAR-BLUEPRINT-001** | Blueprint Empresarial SAR | Arquitectura Empresarial | [1_SAR.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/1_SAR.md) |
+| **SAR-DAT-001** | Modelo de Datos de Negocio | Análisis de Datos | [2_SAR-DAT-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/2_SAR-DAT-001.md) |
+| **SAR-OPS-001** | Modelo Operativo y Procesos | Operación y Negocio | [3_SAR-OPS-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/3_SAR-OPS-001.md) |
+| **SAR-UIX-001** | Especificación UX/UI | Experiencia de Usuario | [4_SAR-UIX-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/4_SAR-UIX-001.md) |
+| **SAR-TEC-001** | Arquitectura Técnica | Arquitectura de Solución | [6_SAR-TEC-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/6_SAR-TEC-001.md) |
+| **SAR-SEC-001** | Arquitectura de Seguridad y Auditoría | Seguridad | [8_SAR-SEC-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/8_SAR-SEC-001.md) |
+| **SAR-DB-001** | Diseño Físico de Base de Datos | Ingeniería de Datos | [10_SAR-DB-001 v2.0.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/10_SAR-DB-001%20v2.0.md) |
+| **SAR-DEV-001** | Guía de Desarrollo y Estándares | Ingeniería de Software | [7_SAR-DEV-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/7_SAR-DEV-001.md) |
+
+---
+
 ## 1. Perspectiva del Producto (Product Owner & Business Analyst)
 
 ### Objetivo del Ecosistema
