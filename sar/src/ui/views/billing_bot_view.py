@@ -8,34 +8,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QCursor
 
-from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox
-
-class MetricBox(QFrame):
-    def __init__(self, title: str, value: str, color: str, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(105)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: #ffffff;
-                border: 1px solid #e5e7eb;
-                border-left: 4px solid {color};
-                border-radius: 6px;
-            }}
-        """)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(4)
-        
-        lbl_title = CustomLabel(title, variant="muted")
-        lbl_title.setStyleSheet("font-weight: bold; color: #6b7280; font-size: 11px;")
-        layout.addWidget(lbl_title)
-        
-        self.lbl_value = CustomLabel(value, variant="header")
-        self.lbl_value.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {color};")
-        layout.addWidget(self.lbl_value)
-        
-    def set_value(self, value: str):
-        self.lbl_value.setText(value)
+from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, MetricBox
+from sar.src.ui.design_system.tokens.colors import Colors
 
 class BillingBotView(QWidget):
     logout_requested = Signal()
@@ -179,7 +153,7 @@ class BillingBotView(QWidget):
         
         self.main_layout.addWidget(header_frame)
 
-    def _on_gear_clicked(self):
+    def _create_styled_menu(self):
         menu = QMenu(self)
         menu.setStyleSheet("""
             QMenu {
@@ -197,6 +171,10 @@ class BillingBotView(QWidget):
                 background-color: #f3f4f6;
             }
         """)
+        return menu
+
+    def _on_gear_clicked(self):
+        menu = self._create_styled_menu()
         
         portal_url = "https://shacienda.qroo.gob.mx/tributanet/"
         try:
@@ -214,23 +192,7 @@ class BillingBotView(QWidget):
         menu.exec_(QCursor.pos())
 
     def _on_user_clicked(self):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #ffffff;
-                color: #1f2937;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 12px;
-                border-radius: 2px;
-            }
-            QMenu::item:selected {
-                background-color: #f3f4f6;
-            }
-        """)
+        menu = self._create_styled_menu()
         
         username = "Operador"
         try:
@@ -611,7 +573,7 @@ class BillingBotView(QWidget):
         
         self.log("INICIANDO SECUENCIA DE TIMBRADO RPA...")
         self.btn_iniciar.setText("⏹ Detener Bot")
-        self.btn_iniciar.setStyleSheet("background-color: #ef4444; color: white;")
+        self.btn_iniciar.setStyleSheet(f"background-color: {Colors.ERROR}; color: white;")
         self.btn_seleccionar.setEnabled(False)
         self.table.setEnabled(False)
         self.chk_autonomo.setEnabled(False)
@@ -619,7 +581,7 @@ class BillingBotView(QWidget):
         self.btn_browse.setEnabled(False)
         
         self.lbl_portal_status.setText("Portal: ACTIVO")
-        self.lbl_portal_status.setStyleSheet("background-color: #10b981; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
+        self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.ACCENT_EMERALD}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
         
         from sar.src.core.billing_rpa_worker import BillingRpaWorker
         self.worker = BillingRpaWorker(
@@ -652,14 +614,14 @@ class BillingBotView(QWidget):
         self.lbl_m_rfc.setText(rfc)
         self.lbl_m_est.setText(status)
         if status == "EXITOSO":
-            self.lbl_m_est.setStyleSheet("color: #10b981; font-weight: bold;")
+            self.lbl_m_est.setStyleSheet(f"color: {Colors.ACCENT_EMERALD}; font-weight: bold;")
         else:
-            self.lbl_m_est.setStyleSheet("color: #ef4444; font-weight: bold;")
+            self.lbl_m_est.setStyleSheet(f"color: {Colors.ERROR}; font-weight: bold;")
 
     def _on_finished_processing(self, success: bool, message: str):
         self.btn_iniciar.setEnabled(True)
         self.btn_iniciar.setText("▶ Iniciar Facturación")
-        self.btn_iniciar.setStyleSheet("background-color: #1e293b; color: white;")
+        self.btn_iniciar.setStyleSheet(f"background-color: {Colors.SURFACE_DARK}; color: white;")
         self.btn_seleccionar.setEnabled(True)
         self.table.setEnabled(True)
         self.chk_autonomo.setEnabled(True)
@@ -667,7 +629,7 @@ class BillingBotView(QWidget):
         self.btn_browse.setEnabled(True)
         
         self.lbl_portal_status.setText("Portal: INACTIVO")
-        self.lbl_portal_status.setStyleSheet("background-color: #334155; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")
+        self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.BORDER_DARK}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")
         
         # Reload the requests table to show progress
         self._load_solicitudes()
