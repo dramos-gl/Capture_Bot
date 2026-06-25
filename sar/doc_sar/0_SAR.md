@@ -30,7 +30,7 @@ Automatizar de manera íntegra, segura y auditable el ciclo de vida de las refer
 
 ### Requisitos Estratégicos del Negocio
 *   **Concurrencia de Workers Seguro:** Múltiples instancias de automatización pueden interactuar a la vez; el sistema debe asegurar que no existan folios o consecutivos duplicados mediante transaccionalidad estricta (`FOR UPDATE`).
-*   **Evolución del Bot de Escritorio:** Mantener una interfaz de usuario interactiva (CustomTkinter) que permita al operador alternar entre el modo asistido (para validaciones críticas del login y timbrado) y el modo autónomo de ejecución masiva.
+*   **Evolución del Bot de Escritorio:** Mantener interfaces de usuario interactivas que permitan al operador alternar entre el modo asistido (para validaciones críticas del login y timbrado) y el modo autónomo de ejecución masiva. El **bot legacy** (`app/`) utiliza **CustomTkinter** como framework de UI; los bots del ecosistema SAR (**Bot Face A** y **Bot Face C**) utilizan **PySide6**, alineado con el stack tecnológico unificado del sistema.
 *   **Trazabilidad Forense:** Registrar evidencias físicas en caliente (capturas de pantalla de errores en portales, logs rotativos de ejecución, registros de auditoría forense en base de datos).
 
 ---

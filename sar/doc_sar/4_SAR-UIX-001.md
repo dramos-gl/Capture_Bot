@@ -71,67 +71,92 @@ Procesar solicitudes.
 Consultar progreso.
 Consultar referencias generadas por sus procesos.
 4. Mapa General de Navegación
-LOGIN
 
-│
+El sistema SAR implementa un modelo de **ventanas independientes por módulo**. Al iniciar sesión, el usuario debe seleccionar el módulo al que desea acceder. Según el módulo seleccionado, el sistema abre una ventana independiente (`QMainWindow`) con su propia interfaz y permisos.
 
-▼
+```
+LOGIN (Ventana única de autenticación)
+  │
+  ├── [Selector de Módulo] ← ComboBox cargado dinámicamente desde BD
+  ├── [Usuario]
+  ├── [Contraseña]
+  └── [Iniciar Sesión]
+         │
+         ├── ADMIN          → Ventana: Administración del Sistema
+         │     ├── Seguridad (Usuarios, Roles, Permisos, Módulos, Acciones)
+         │     ├── Catálogos (Conceptos, Geografía, RFCs, Estados)
+         │     └── Configuración (Parámetros, Localizadores)
+         │
+         ├── CTRL_REF       → Ventana: Control de Referencias (maximizada)
+         │     ├── Dashboard
+         │     ├── Órdenes
+         │     ├── Solicitudes
+         │     └── Referencias
+         │
+         ├── BOT_FACE_A     → Ventana: Bot Face A - Automatización (Fase A)
+         │
+         └── BOT_C          → Ventana: Bot Face C - Facturación y Timbrado (Fase C)
+```
 
-DASHBOARD
-
-├── Órdenes
-│
-├── Solicitudes
-│
-├── Referencias
-│
-├── RFC
-│
-├── Conceptos
-│
-├── Delegaciones
-│
-├── Usuarios
-│
-├── Sesiones
-│
-├── Auditoría
-│
-├── Reportes
-│
-└── Configuración
+**Notas de implementación:**
+- Los módulos disponibles en el ComboBox se cargan dinámicamente desde la base de datos (`get_all_app_modulos()`).
+- Cada módulo abre su propia `QMainWindow` independiente; la ventana de login se oculta (`hide()`) durante la sesión activa.
+- Al cerrar sesión (`logout`), la ventana del módulo activo se cierra y la ventana de login vuelve a mostrarse (`show()`).
+- Los módulos `BOT_FACE_A` y `BOT_C` se abren en tamaño normal (1100×750); los módulos `ADMIN` y `CTRL_REF` se abren maximizados.
 5. Login
 Objetivo
 
-Autenticar usuarios.
+Autenticar usuarios y dirigirlos al módulo de trabajo correspondiente.
+
+Flujo de Autenticación
+1. El usuario selecciona el **módulo al que desea acceder** desde el ComboBox.
+2. Ingresa su **usuario** y **contraseña**.
+3. Presiona **[Iniciar Sesión]**.
+4. El sistema valida que los tres campos estén completos antes de emitir la solicitud.
+5. Las credenciales se verifican contra la base de datos física mediante `SecurityService.login()`.
+6. Si son válidas, la ventana de login se oculta y se abre la ventana del módulo seleccionado.
+7. Si son inválidas, se muestra el mensaje de error en el campo de contraseña.
 
 Componentes
 +----------------------------------+
 
-          SAR
+          🔒 SAR Login
 
- Sistema Administración
-      Referencias
+   Sistema Administración
+        Referencias
 
- Usuario
+  Módulo de Acceso
 
- [________________]
+  [  Seleccionar un módulo  ▼]
 
- Contraseña
+  Usuario
+  [________________________]
 
- [________________]
+  Contraseña
+  [························]
 
-       [Entrar]
+  [Iniciar Sesión]  [Cancelar]
 
 +----------------------------------+
-Acciones
-Entrar
 
-Valida credenciales.
+Detalle de Componentes
+
+| Componente | Tipo | Comportamiento |
+|---|---|---|
+| **Selector de Módulo** | `CustomComboBox` | Cargado dinámicamente desde BD. Campo requerido. |
+| **Usuario** | `LabeledInput` (icono user) | Campo requerido. Muestra error inline si vacío. |
+| **Contraseña** | `LabeledInput` (icono lock, enmascarado) | Campo requerido. Muestra error general de login. |
+| **[Iniciar Sesión]** | `CustomButton` (primario) | Valida campos y emite señal `login_requested`. |
+| **[Cancelar]** | `CustomButton` (peligro) | Ejecuta `QApplication.quit()`, cierra la app. |
+
+Navegación por Teclado
+- `Tab`: Módulo → Usuario → Contraseña → Iniciar Sesión → Cancelar
+- `Enter` en campo Usuario: mueve foco a Contraseña.
+- `Enter` en campo Contraseña: dispara acción de login.
 
 Recuperar Contraseña
 
-Opcional para futuras versiones.
+Reservado para futuras versiones.
 
 6. Dashboard Principal
 Administrador
