@@ -1,5 +1,8 @@
 """RPA Bot Dashboard View (Face A)."""
 
+import datetime
+from sqlalchemy import text
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
     QFrame, QLabel, QPushButton, QCheckBox, QTextEdit, 
@@ -9,79 +12,22 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QCursor
 
 from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, MetricBox
+from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.storage.repositories import ConfigRepository, OperacionRepository
+from sar.src.storage.models import Sesion, Solicitud
+from sar.src.core.rpa_worker import RpaWorker
+from sar.src.core.access_manager import PathVerifyThread, SyncContingencyThread
 
 class BotView(QWidget):
     logout_requested = Signal()
 
-    def __init__(self, db_connector, parent=None):
+    def __init__(self, db_connector, sesion_id, usuario_id, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
+        self.sesion_id = sesion_id
+        self.usuario_id = usuario_id
         self.current_bot_context = None
-        
-        # Force Light Theme styles for this specific view to match Optima Capture Bot
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f3f4f6;
-                color: #1f2937;
-                font-family: 'Segoe UI', sans-serif;
-            }
-            QFrame#card {
-                background-color: #ffffff;
-                border-radius: 8px;
-                border: 1px solid #e5e7eb;
-            }
-            QLabel {
-                background: transparent;
-            }
-            QPushButton#primaryBtn {
-                background-color: #1e293b;
-                color: white;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton#primaryBtn:hover {
-                background-color: #334155;
-            }
-            QPushButton#secondaryBtn {
-                background-color: #ffffff;
-                color: #4b5563;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton#secondaryBtn:hover {
-                background-color: #f9fafb;
-            }
-            QPushButton#iconHeaderBtn {
-                background-color: transparent;
-                border: none;
-                color: white;
-                font-size: 16px;
-                padding: 4px;
-            }
-            QPushButton#iconHeaderBtn:hover {
-                background-color: #334155;
-                border-radius: 4px;
-            }
-            QTextEdit#console {
-                background-color: #111827;
-                color: #10b981;
-                font-family: 'Consolas', monospace;
-                border-radius: 4px;
-                padding: 8px;
-            }
-            QProgressBar {
-                border: 1px solid #e5e7eb;
-                border-radius: 4px;
-                text-align: center;
-                background-color: #f3f4f6;
-            }
-            QProgressBar::chunk {
-                background-color: #1e293b;
-            }
-        """)
         
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(16, 16, 16, 16)
@@ -90,7 +36,6 @@ class BotView(QWidget):
         # Load default RUTA_DERECHOS parameter
         self.default_output_dir = "storage"
         try:
-            from sar.src.storage.repositories import ConfigRepository
             with self.db_connector.get_session() as session:
                 repo = ConfigRepository(session)
                 db_dir = repo.get_parametro("RUTA_DERECHOS")
@@ -112,18 +57,7 @@ class BotView(QWidget):
         
     def _build_header(self):
         header_frame = QFrame()
-        header_frame.setStyleSheet("""
-            QFrame {
-                background-color: #1e293b;
-                border-radius: 8px;
-                padding: 12px 24px;
-            }
-            QLabel {
-                color: white;
-                font-size: 18px;
-                font-weight: bold;
-            }
-        """)
+        header_frame.setObjectName("botHeaderFaceA")
         h_layout = QHBoxLayout(header_frame)
         h_layout.setContentsMargins(0, 0, 0, 0)
         h_layout.setSpacing(12)
@@ -152,22 +86,7 @@ class BotView(QWidget):
 
     def _create_styled_menu(self):
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #ffffff;
-                color: #1f2937;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 12px;
-                border-radius: 2px;
-            }
-            QMenu::item:selected {
-                background-color: #f3f4f6;
-            }
-        """)
+        menu.setObjectName("botMenu")
         return menu
 
     def _on_gear_clicked(self):
@@ -176,7 +95,6 @@ class BotView(QWidget):
         # Get Portal URL from DB parameter or fallback
         portal_url = "https://shacienda.qroo.gob.mx/tributanet/"
         try:
-            from sar.src.storage.repositories import ConfigRepository
             with self.db_connector.get_session() as session:
                 repo = ConfigRepository(session)
                 db_url = repo.get_parametro("TRIBUTANET_RPP_URL")
@@ -196,14 +114,12 @@ class BotView(QWidget):
         # Get Current Username
         username = "Operador"
         try:
-            main_window = self.window()
-            current_sesion_id = getattr(main_window, 'current_sesion_id', None)
-            if current_sesion_id:
-                from sar.src.storage.models import Sesion
+            if self.usuario_id:
                 with self.db_connector.get_session() as session:
-                    db_sesion = session.get(Sesion, current_sesion_id)
-                    if db_sesion and db_sesion.usuario:
-                        username = db_sesion.usuario.nombre
+                    from sar.src.storage.models import Usuario
+                    db_user = session.get(Usuario, self.usuario_id)
+                    if db_user:
+                        username = db_user.nombre
         except:
             pass
             
@@ -245,21 +161,23 @@ class BotView(QWidget):
         path_input_layout.addWidget(self.lbl_download_path_display, stretch=4)
         
         self.btn_browse = CustomButton("...", is_secondary=True)
+        self.btn_browse.setObjectName("secondaryBtn")
         self.btn_browse.setStyleSheet("padding: 4px 8px; font-weight: bold;")
         self.btn_browse.clicked.connect(self._on_browse_path_clicked)
         path_input_layout.addWidget(self.btn_browse, stretch=1)
         c_layout.addLayout(path_input_layout)
         
         # GLStatusIndicator pill under the download path
-        from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
         self.status_indicator = GLStatusIndicator()
         c_layout.addWidget(self.status_indicator)
         
         self.btn_iniciar = CustomButton("▶ Iniciar Bot", is_secondary=False)
+        self.btn_iniciar.setObjectName("primaryBtn")
         self.btn_iniciar.clicked.connect(self._on_iniciar_bot)
         c_layout.addWidget(self.btn_iniciar)
         
         self.btn_seleccionar = CustomButton("📥 Cargar Solicitud Seleccionada", is_secondary=True)
+        self.btn_seleccionar.setObjectName("secondaryBtn")
         self.btn_seleccionar.clicked.connect(self._on_cargar_solicitud)
         c_layout.addWidget(self.btn_seleccionar)
         
@@ -360,24 +278,8 @@ class BotView(QWidget):
         
         headers = ["ID Solicitud", "Folio Orden", "RFC", "Razón Social", "Concepto", "Solicitadas", "Generadas", "Estado"]
         self.table = StyledDataTable(headers, parent=self)
+        self.table.setObjectName("botTable")
         self.table.doubleClicked.connect(lambda index: self._on_cargar_solicitud())
-        # Override table styles for light theme
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: white;
-                color: #374151;
-                gridline-color: #e5e7eb;
-                border: 1px solid #e5e7eb;
-            }
-            QHeaderView::section {
-                background-color: #f9fafb;
-                color: #374151;
-                font-weight: bold;
-                border: none;
-                border-bottom: 1px solid #e5e7eb;
-                padding: 4px;
-            }
-        """)
         layout.addWidget(self.table)
         
         self.main_layout.addWidget(panel, stretch=2)
@@ -400,26 +302,15 @@ class BotView(QWidget):
         self.main_layout.addWidget(panel, stretch=1)
 
     def log(self, message: str):
-        import datetime
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         self.console.append(f"[{timestamp}] {message}")
 
     def _load_solicitudes(self):
         self.log("Actualizando tabla de solicitudes asignadas...")
         try:
-            from sar.src.storage.repositories import OperacionRepository
-            from sar.src.storage.models import Sesion
-            
-            # Get current user id from top level window
-            main_window = self.window()
-            current_sesion_id = getattr(main_window, 'current_sesion_id', None)
-            
             with self.db_connector.get_session() as session:
-                # If no active session logic is bound, default to user 1 for safety
-                u_id = 1
-                if current_sesion_id:
-                    db_sesion = session.get(Sesion, current_sesion_id)
-                    if db_sesion: u_id = db_sesion.usuario_id
+                # Use directly passed usuario_id
+                u_id = self.usuario_id if self.usuario_id else 1
                 
                 repo = OperacionRepository(session)
                 ver_todas = self.chk_ver_todas.isChecked() if hasattr(self, 'chk_ver_todas') else False
@@ -469,20 +360,12 @@ class BotView(QWidget):
         self.log(f"Cargando contexto para Solicitud {sol_id}...")
         
         try:
-            from sar.src.storage.repositories import OperacionRepository
             with self.db_connector.get_session() as session:
                 repo = OperacionRepository(session)
                 ctx = repo.get_solicitud_bot_context(sol_id)
                 
-                # Fetch active user_id from session for reference ownership
-                main_window = self.window()
-                current_sesion_id = getattr(main_window, 'current_sesion_id', None)
-                u_id = 1
-                if current_sesion_id:
-                    from sar.src.storage.models import Sesion
-                    db_sesion = session.get(Sesion, current_sesion_id)
-                    if db_sesion:
-                        u_id = db_sesion.usuario_id
+                # Fetch active user_id directly from constructor parameter
+                u_id = self.usuario_id if self.usuario_id else 1
                 
                 ctx["usuario_id"] = u_id
                 self.current_bot_context = ctx
@@ -521,9 +404,7 @@ class BotView(QWidget):
         # Double check if completed in DB right before starting
         sol_id = self.current_bot_context.get("solicitud_id")
         try:
-            from sqlalchemy import text
             with self.db_connector.get_session() as session:
-                from sar.src.storage.models import Solicitud
                 sol = session.get(Solicitud, sol_id)
                 if sol:
                     state_code = session.execute(
@@ -594,7 +475,6 @@ class BotView(QWidget):
         self.lbl_portal_status.setText("Portal: ACTIVO")
         self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.ACCENT_EMERALD}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
         
-        from sar.src.core.rpa_worker import RpaWorker
         self.worker = RpaWorker(
             db_connector=self.db_connector,
             context=self.current_bot_context,
@@ -652,7 +532,6 @@ class BotView(QWidget):
 
     def _verify_and_sync_paths(self):
         """Asynchronously checks write access to the default output dir and triggers sync if connected."""
-        from sar.src.core.access_manager import PathVerifyThread
         self.status_indicator.set_status("checking")
         self.path_verify_thread = PathVerifyThread(self.default_output_dir, self)
         self.path_verify_thread.result_ready.connect(self._on_path_verified)
@@ -664,7 +543,6 @@ class BotView(QWidget):
             self.log(f"Ruta por defecto accesible: {path_str}. Iniciando sincronización...")
             
             # Start sync of local contingency files
-            from sar.src.core.access_manager import SyncContingencyThread
             self.sync_thread = SyncContingencyThread(self.db_connector, self.default_output_dir, self)
             self.sync_thread.progress_msg.connect(self.log)
             self.sync_thread.finished_sync.connect(self._on_sync_finished)

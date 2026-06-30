@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
                 if sesion_obj:
                     # Successful login
                     self.current_sesion_id = sesion_obj.sesion_id
+                    self.current_usuario_id = sesion_obj.usuario_id
                     
                     # Clear login form
                     self.login_view.user_input.set_text("")
@@ -100,23 +101,18 @@ class MainWindow(QMainWindow):
                         self.active_module.setWindowTitle("SAR - Bot Face A (Automático)")
                         self.active_module.resize(1100, 750)
                         
-                        bot_view_widget = BotView(self.db_connector, self.active_module)
+                        bot_view_widget = BotView(self.db_connector, self.current_sesion_id, self.current_usuario_id, self.active_module)
                         self.active_module.setCentralWidget(bot_view_widget)
                         
                         # Hook up logout for BotView
                         bot_view_widget.logout_requested.connect(self._handle_logout)
                     elif selected_mod_code == "BOT_C":
-                        from sar.src.ui.views.billing_bot_view import BillingBotView
-                        self.active_module = QMainWindow()
+                        from sar.src.ui.views.billing_bot_view import BillingBotWindow
+                        self.active_module = BillingBotWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
                         self.active_module.current_sesion_id = self.current_sesion_id
-                        self.active_module.setWindowTitle("SAR - Bot Face C (Facturación y Timbrado)")
-                        self.active_module.resize(1100, 750)
                         
-                        billing_bot_widget = BillingBotView(self.db_connector, self.active_module)
-                        self.active_module.setCentralWidget(billing_bot_widget)
-                        
-                        # Hook up logout for BillingBotView
-                        billing_bot_widget.logout_requested.connect(self._handle_logout)
+                        # Hook up logout for BillingBotWindow
+                        self.active_module.logout_requested.connect(self._handle_logout)
                     else:
                         # Placeholder for other modules
                         from PySide6.QtWidgets import QLabel

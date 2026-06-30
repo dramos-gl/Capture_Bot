@@ -618,7 +618,7 @@ class ThemeManager:
         QCheckBox::indicator:checked {{
             background-color: {Colors.ACCENT};
             border-color: {Colors.ACCENT};
-            image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'/></svg>");
+            image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSI0IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwb2x5bGluZSBwb2ludHM9IjIwIDYgOSAxNyA0IDEyIi8+PC9zdmc+");
         }}
         QCheckBox::indicator:disabled {{
             border-color: {border};
@@ -698,6 +698,151 @@ class ThemeManager:
         QPushButton#logoutBtn:hover {{
             background-color: #FEF2F2;
             border-color: #EF4444;
+        }}
+
+        /* Bot Face A and Face C Specific Styles (Forced Light Look) */
+        BotView, BillingBotView {{
+            background-color: #f3f4f6;
+            color: #1f2937;
+            font-family: 'Segoe UI', sans-serif;
+        }}
+        BotView QFrame#card, BillingBotView QFrame#card {{
+            background-color: #ffffff;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }}
+        BotView QLabel, BillingBotView QLabel {{
+            background: transparent;
+        }}
+        BotView QPushButton#primaryBtn {{
+            background-color: #1e293b;
+            color: white;
+            border-radius: 4px;
+            padding: 8px 16px;
+            font-weight: bold;
+        }}
+        BotView QPushButton#primaryBtn:hover {{
+            background-color: #334155;
+        }}
+        BillingBotView QPushButton#primaryBtn {{
+            background-color: #1e293b;
+            color: white;
+            border-radius: 4px;
+            padding: 8px 16px;
+            font-weight: bold;
+        }}
+        BillingBotView QPushButton#primaryBtn:hover {{
+            background-color: #334155;
+        }}
+        BotView QPushButton#secondaryBtn, BillingBotView QPushButton#secondaryBtn {{
+            background-color: #ffffff;
+            color: #4b5563;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            padding: 8px 16px;
+        }}
+        BotView QPushButton#secondaryBtn:hover, BillingBotView QPushButton#secondaryBtn:hover {{
+            background-color: #f9fafb;
+        }}
+        BotView QPushButton#iconHeaderBtn {{
+            background-color: transparent;
+            border: none;
+            color: white;
+            font-size: 16px;
+            padding: 4px;
+        }}
+        BotView QPushButton#iconHeaderBtn:hover {{
+            background-color: #334155;
+            border-radius: 4px;
+        }}
+        BillingBotView QPushButton#iconHeaderBtn {{
+            background-color: transparent;
+            border: none;
+            color: white;
+            font-size: 16px;
+            padding: 4px;
+        }}
+        BillingBotView QPushButton#iconHeaderBtn:hover {{
+            background-color: #334155;
+            border-radius: 4px;
+        }}
+        BotView QTextEdit#console {{
+            background-color: #111827;
+            color: #10b981;
+            font-family: 'Consolas', monospace;
+            border-radius: 4px;
+            padding: 8px;
+        }}
+        BillingBotView QTextEdit#console {{
+            background-color: #111827;
+            color: #10b981;
+            font-family: 'Consolas', monospace;
+            border-radius: 4px;
+            padding: 8px;
+        }}
+        BotView QProgressBar, BillingBotView QProgressBar {{
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            text-align: center;
+            background-color: #f3f4f6;
+        }}
+        BotView QProgressBar::chunk {{
+            background-color: #1e293b;
+        }}
+        BillingBotView QProgressBar::chunk {{
+            background-color: #1e293b;
+        }}
+        QFrame#botHeaderFaceA {{
+            background-color: #1e293b;
+            border-radius: 8px;
+            padding: 12px 24px;
+        }}
+        QFrame#botHeaderFaceA QLabel {{
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+        }}
+        QFrame#botHeaderFaceC {{
+            background-color: #1e293b;
+            border-radius: 8px;
+            padding: 12px 24px;
+        }}
+        QFrame#botHeaderFaceC QLabel {{
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+        }}
+        
+        /* Table Styles inside Bots */
+        BotView QTableWidget#botTable, BillingBotView QTableWidget#botTable {{
+            background-color: white;
+            color: #374151;
+            gridline-color: #e5e7eb;
+            border: 1px solid #e5e7eb;
+        }}
+        BotView QTableWidget#botTable QHeaderView::section, BillingBotView QTableWidget#botTable QHeaderView::section {{
+            background-color: #f9fafb;
+            color: #374151;
+            font-weight: bold;
+            border: none;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 4px;
+        }}
+        
+        /* Dropdown menus for Bots (forces light style) */
+        QMenu#botMenu {{
+            background-color: #ffffff;
+            color: #1f2937;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            padding: 4px;
+        }}
+        QMenu#botMenu::item {{
+            padding: 6px 12px;
+            border-radius: 2px;
+        }}
+        QMenu#botMenu::item:selected {{
+            background-color: #f3f4f6;
         }}
         """
         return qss

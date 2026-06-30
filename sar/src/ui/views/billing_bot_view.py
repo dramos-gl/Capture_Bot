@@ -1,5 +1,8 @@
 """RPA Bot Dashboard View (Face C - Billing and Timbrado)."""
 
+import datetime
+from sqlalchemy import text
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
     QFrame, QLabel, QPushButton, QCheckBox, QTextEdit, 
@@ -9,80 +12,22 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QCursor
 
 from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, MetricBox
+from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.storage.repositories import ConfigRepository, OperacionRepository
+from sar.src.storage.models import Sesion, Solicitud
+from sar.src.core.billing_rpa_worker import BillingRpaWorker
+from sar.src.core.access_manager import PathVerifyThread, SyncContingencyThread
 
 class BillingBotView(QWidget):
     logout_requested = Signal()
 
-    def __init__(self, db_connector, parent=None):
+    def __init__(self, db_connector, sesion_id, usuario_id, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
+        self.sesion_id = sesion_id
+        self.usuario_id = usuario_id
         self.current_bot_context = None
-        
-        # Force Light Theme styles for this specific view to match Optima Capture Bot
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f3f4f6;
-                color: #1f2937;
-                font-family: 'Segoe UI', sans-serif;
-            }
-            QFrame#card {
-                background-color: #ffffff;
-                border-radius: 8px;
-                border: 1px solid #e5e7eb;
-            }
-            QLabel {
-                background: transparent;
-            }
-            QPushButton#primaryBtn {
-                background-color: #2563eb;
-                color: white;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton#primaryBtn:hover {
-                background-color: #1d4ed8;
-            }
-            QPushButton#secondaryBtn {
-                background-color: #ffffff;
-                color: #4b5563;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton#secondaryBtn:hover {
-                background-color: #f9fafb;
-            }
-            QPushButton#iconHeaderBtn {
-                background-color: transparent;
-                border: none;
-                color: #4b5563;
-                font-size: 16px;
-                padding: 4px;
-            }
-            QPushButton#iconHeaderBtn:hover {
-                background-color: #f3f4f6;
-                border-radius: 4px;
-            }
-            QTextEdit#console {
-                background-color: #f8fafc;
-                color: #0f172a;
-                font-family: 'Consolas', monospace;
-                border: 1px solid #e2e8f0;
-                border-radius: 4px;
-                padding: 8px;
-            }
-            QProgressBar {
-                border: 1px solid #e5e7eb;
-                border-radius: 4px;
-                text-align: center;
-                background-color: #f3f4f6;
-            }
-            QProgressBar::chunk {
-                background-color: #2563eb;
-            }
-        """)
         
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(16, 16, 16, 16)
@@ -91,7 +36,6 @@ class BillingBotView(QWidget):
         # Load default RUTA_DERECHOS parameter
         self.default_output_dir = "storage"
         try:
-            from sar.src.storage.repositories import ConfigRepository
             with self.db_connector.get_session() as session:
                 repo = ConfigRepository(session)
                 db_dir = repo.get_parametro("RUTA_DERECHOS")
@@ -113,20 +57,7 @@ class BillingBotView(QWidget):
         
     def _build_header(self):
         header_frame = QFrame()
-        header_frame.setStyleSheet("""
-            QFrame {
-                background-color: #ffffff;
-                border: 1px solid #e5e7eb;
-                border-left: 4px solid #2563eb;
-                border-radius: 8px;
-                padding: 12px 24px;
-            }
-            QLabel {
-                color: #0f172a;
-                font-size: 18px;
-                font-weight: bold;
-            }
-        """)
+        header_frame.setObjectName("botHeaderFaceC")
         h_layout = QHBoxLayout(header_frame)
         h_layout.setContentsMargins(0, 0, 0, 0)
         h_layout.setSpacing(12)
@@ -136,7 +67,7 @@ class BillingBotView(QWidget):
         h_layout.addStretch()
         
         self.lbl_portal_status = QLabel("Portal: INACTIVO")
-        self.lbl_portal_status.setStyleSheet("background-color: #eff6ff; border: 1px solid #bfdbfe; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: #1e40af; font-weight: bold;")
+        self.lbl_portal_status.setStyleSheet("background-color: #334155; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")
         h_layout.addWidget(self.lbl_portal_status)
         
         # Gear / Config button
@@ -155,30 +86,15 @@ class BillingBotView(QWidget):
 
     def _create_styled_menu(self):
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #ffffff;
-                color: #1f2937;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 12px;
-                border-radius: 2px;
-            }
-            QMenu::item:selected {
-                background-color: #f3f4f6;
-            }
-        """)
+        menu.setObjectName("botMenu")
         return menu
 
     def _on_gear_clicked(self):
         menu = self._create_styled_menu()
         
+        # Get Portal URL from DB parameter or fallback
         portal_url = "https://shacienda.qroo.gob.mx/tributanet/"
         try:
-            from sar.src.storage.repositories import ConfigRepository
             with self.db_connector.get_session() as session:
                 repo = ConfigRepository(session)
                 db_url = repo.get_parametro("SATQ_URL")
@@ -194,16 +110,15 @@ class BillingBotView(QWidget):
     def _on_user_clicked(self):
         menu = self._create_styled_menu()
         
+        # Get Current Username
         username = "Operador"
         try:
-            main_window = self.window()
-            current_sesion_id = getattr(main_window, 'current_sesion_id', None)
-            if current_sesion_id:
-                from sar.src.storage.models import Sesion
+            if self.usuario_id:
                 with self.db_connector.get_session() as session:
-                    db_sesion = session.get(Sesion, current_sesion_id)
-                    if db_sesion and db_sesion.usuario:
-                        username = db_sesion.usuario.nombre
+                    from sar.src.storage.models import Usuario
+                    db_user = session.get(Usuario, self.usuario_id)
+                    if db_user:
+                        username = db_user.nombre
         except:
             pass
             
@@ -232,6 +147,10 @@ class BillingBotView(QWidget):
         self.chk_autonomo = CustomCheckBox("Modo Autónomo (Facturación Directa)")
         c_layout.addWidget(self.chk_autonomo)
         
+        self.chk_omitir_ya_generadas = CustomCheckBox("Omitir/Descargar Ya Generadas")
+        self.chk_omitir_ya_generadas.setChecked(True)
+        c_layout.addWidget(self.chk_omitir_ya_generadas)
+        
         # Custom Download Path selector
         lbl_path_title = CustomLabel("📁 Ruta de Descarga / Facturas:", variant="body")
         lbl_path_title.setStyleSheet("font-weight: bold;")
@@ -245,21 +164,23 @@ class BillingBotView(QWidget):
         path_input_layout.addWidget(self.lbl_download_path_display, stretch=4)
         
         self.btn_browse = CustomButton("...", is_secondary=True)
+        self.btn_browse.setObjectName("secondaryBtn")
         self.btn_browse.setStyleSheet("padding: 4px 8px; font-weight: bold;")
         self.btn_browse.clicked.connect(self._on_browse_path_clicked)
         path_input_layout.addWidget(self.btn_browse, stretch=1)
         c_layout.addLayout(path_input_layout)
         
         # GLStatusIndicator pill under the download path
-        from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
         self.status_indicator = GLStatusIndicator()
         c_layout.addWidget(self.status_indicator)
         
         self.btn_iniciar = CustomButton("▶ Iniciar Facturación", is_secondary=False)
+        self.btn_iniciar.setObjectName("primaryBtn")
         self.btn_iniciar.clicked.connect(self._on_iniciar_bot)
         c_layout.addWidget(self.btn_iniciar)
         
         self.btn_seleccionar = CustomButton("📥 Cargar Solicitud Seleccionada", is_secondary=True)
+        self.btn_seleccionar.setObjectName("secondaryBtn")
         self.btn_seleccionar.clicked.connect(self._on_cargar_solicitud)
         c_layout.addWidget(self.btn_seleccionar)
         
@@ -276,7 +197,7 @@ class BillingBotView(QWidget):
         m_layout.addWidget(lbl_m)
         
         grid_m = QGridLayout()
-        self.box_pendientes = MetricBox("Pendientes", "0", "#3b82f6")
+        self.box_pendientes = MetricBox("Autorizadas", "0", "#3b82f6")
         self.box_exitosos = MetricBox("Facturadas", "0", "#10b981")
         self.box_errores = MetricBox("Errores", "0", "#ef4444")
         
@@ -346,7 +267,7 @@ class BillingBotView(QWidget):
         header_layout.addWidget(lbl)
         header_layout.addStretch()
         
-        self.chk_ver_todas = CustomCheckBox("Mostrar completadas y canceladas")
+        self.chk_ver_todas = CustomCheckBox("Mostrar solicitudes facturadas")
         self.chk_ver_todas.setStyleSheet("margin-right: 8px;")
         self.chk_ver_todas.stateChanged.connect(self._load_solicitudes)
         header_layout.addWidget(self.chk_ver_todas)
@@ -357,25 +278,10 @@ class BillingBotView(QWidget):
         
         layout.addLayout(header_layout)
         
-        headers = ["ID Solicitud", "Folio Orden", "RFC", "Razón Social", "Concepto", "Solicitadas", "Facturadas/Generadas", "Estado"]
+        headers = ["ID Solicitud", "Folio Orden", "RFC", "Razón Social", "Concepto", "Solicitadas", "Autorizadas", "Facturadas", "Estado"]
         self.table = StyledDataTable(headers, parent=self)
+        self.table.setObjectName("botTable")
         self.table.doubleClicked.connect(lambda index: self._on_cargar_solicitud())
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: white;
-                color: #374151;
-                gridline-color: #e5e7eb;
-                border: 1px solid #e5e7eb;
-            }
-            QHeaderView::section {
-                background-color: #f9fafb;
-                color: #374151;
-                font-weight: bold;
-                border: none;
-                border-bottom: 1px solid #e5e7eb;
-                padding: 4px;
-            }
-        """)
         layout.addWidget(self.table)
         
         self.main_layout.addWidget(panel, stretch=2)
@@ -398,28 +304,18 @@ class BillingBotView(QWidget):
         self.main_layout.addWidget(panel, stretch=1)
 
     def log(self, message: str):
-        import datetime
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         self.console.append(f"[{timestamp}] {message}")
 
     def _load_solicitudes(self):
         self.log("Actualizando tabla de solicitudes asignadas...")
         try:
-            from sar.src.storage.repositories import OperacionRepository
-            from sar.src.storage.models import Sesion
-            
-            main_window = self.window()
-            current_sesion_id = getattr(main_window, 'current_sesion_id', None)
-            
             with self.db_connector.get_session() as session:
-                u_id = 1
-                if current_sesion_id:
-                    db_sesion = session.get(Sesion, current_sesion_id)
-                    if db_sesion: u_id = db_sesion.usuario_id
+                u_id = self.usuario_id if self.usuario_id else 1
                 
                 repo = OperacionRepository(session)
                 ver_todas = self.chk_ver_todas.isChecked() if hasattr(self, 'chk_ver_todas') else False
-                solicitudes = repo.get_solicitudes_asignadas(u_id, ver_todas=ver_todas)
+                solicitudes = repo.get_solicitudes_facturacion(u_id, ver_facturadas=ver_todas)
                 
                 data_rows = []
                 for s in solicitudes:
@@ -430,7 +326,8 @@ class BillingBotView(QWidget):
                         s["razon_social"],
                         s["concepto"],
                         str(s["cantidad_solicitada"]),
-                        str(s["cantidad_generada"]),
+                        str(s.get("cantidad_autorizada", 0)),
+                        str(s.get("cantidad_facturada", 0)),
                         s["estado"]
                     ])
                     
@@ -450,8 +347,8 @@ class BillingBotView(QWidget):
             return
             
         row = selected[0].row()
-        estado = self.table.item(row, 7).text().upper()
-        valid_states = ("ASIGNADO", "ASIGNADA", "PROCESANDO", "ERROR")
+        estado = self.table.item(row, 8).text().upper()
+        valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "ERROR_VALIDACION")
         if estado not in valid_states:
             QMessageBox.warning(
                 self, 
@@ -465,19 +362,11 @@ class BillingBotView(QWidget):
         self.log(f"Cargando contexto para Solicitud {sol_id}...")
         
         try:
-            from sar.src.storage.repositories import OperacionRepository
             with self.db_connector.get_session() as session:
                 repo = OperacionRepository(session)
                 ctx = repo.get_solicitud_bot_context(sol_id)
                 
-                main_window = self.window()
-                current_sesion_id = getattr(main_window, 'current_sesion_id', None)
-                u_id = 1
-                if current_sesion_id:
-                    from sar.src.storage.models import Sesion
-                    db_sesion = session.get(Sesion, current_sesion_id)
-                    if db_sesion:
-                        u_id = db_sesion.usuario_id
+                u_id = self.usuario_id if self.usuario_id else 1
                 
                 ctx["usuario_id"] = u_id
                 self.current_bot_context = ctx
@@ -485,12 +374,21 @@ class BillingBotView(QWidget):
                 # Update UI labels
                 self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx['municipio']}")
                 
-                total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
-                completados = ctx["ultimo_consecutivo"] - ctx["consecutivo_inicio"] + 1 if ctx["ultimo_consecutivo"] >= ctx["consecutivo_inicio"] else 0
-                pendientes = total - completados
+                # --- Resetear métricas antes de calcular para evitar residuos de cargas previas ---
+                self.box_pendientes.set_value("0")
+                self.box_exitosos.set_value("0")
+                self.box_errores.set_value("0")
                 
-                self.box_pendientes.set_value(str(pendientes))
-                self.box_exitosos.set_value(str(completados))
+                total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
+                # Facturas ya procesadas/timbradas exitosamente.
+                facturadas = ctx["facturas_procesadas"]
+                # Referencias autorizadas pendientes de facturar (total autorizado menos lo ya facturado)
+                autorizadas_pendientes = total - facturadas
+                
+                # Tarjeta "Autorizadas": muestra cuántas referencias aún están por facturar
+                self.box_pendientes.set_value(str(max(0, autorizadas_pendientes)))
+                # Tarjeta "Facturadas": muestra cuántas ya fueron timbradas en sesiones previas
+                self.box_exitosos.set_value(str(max(0, facturadas)))
                 
                 self.log(f"ÉXITO: Contexto de {ctx['rfc']} cargado para facturación.")
                 self.log(f"Concepto: {ctx['concepto_nombre']} | Rango de Facturación: {ctx['consecutivo_inicio']} al {ctx['consecutivo_fin']}")
@@ -514,16 +412,14 @@ class BillingBotView(QWidget):
             
         sol_id = self.current_bot_context.get("solicitud_id")
         try:
-            from sqlalchemy import text
             with self.db_connector.get_session() as session:
-                from sar.src.storage.models import Solicitud
                 sol = session.get(Solicitud, sol_id)
                 if sol:
                     state_code = session.execute(
                         text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
                         {"eid": sol.estado_id}
                     ).scalar()
-                    valid_states = ("ASIGNADO", "ASIGNADA", "PROCESANDO", "ERROR")
+                    valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "PROCESANDO", "ERROR", "ERROR_VALIDACION")
                     if state_code not in valid_states:
                         QMessageBox.warning(
                             self, 
@@ -541,9 +437,9 @@ class BillingBotView(QWidget):
         concepto = self.current_bot_context.get("concepto_nombre", "Desconocido")
         consecutivo_inicio = self.current_bot_context.get("consecutivo_inicio", 1)
         consecutivo_fin = self.current_bot_context.get("consecutivo_fin", 1)
-        ultimo_consecutivo = self.current_bot_context.get("ultimo_consecutivo")
+        facturadas = self.current_bot_context.get("facturas_procesadas", 0)
         
-        start_consec = ultimo_consecutivo + 1 if (ultimo_consecutivo is not None and ultimo_consecutivo >= consecutivo_inicio) else consecutivo_inicio
+        start_consec = consecutivo_inicio + facturadas
         cantidad_a_procesar = consecutivo_fin - start_consec + 1
         
         if cantidad_a_procesar <= 0:
@@ -577,18 +473,22 @@ class BillingBotView(QWidget):
         self.btn_seleccionar.setEnabled(False)
         self.table.setEnabled(False)
         self.chk_autonomo.setEnabled(False)
+        self.chk_omitir_ya_generadas.setEnabled(False)
         self.chk_ver_todas.setEnabled(False)
         self.btn_browse.setEnabled(False)
+        self.btn_gear.setEnabled(False)
+        self.btn_user.setEnabled(False)
         
         self.lbl_portal_status.setText("Portal: ACTIVO")
         self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.ACCENT_EMERALD}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
         
-        from sar.src.core.billing_rpa_worker import BillingRpaWorker
+        omitir_ya_gen = self.chk_omitir_ya_generadas.isChecked()
         self.worker = BillingRpaWorker(
             db_connector=self.db_connector,
             context=self.current_bot_context,
             headless=headless_mode,
-            custom_output_dir=self.selected_custom_path
+            custom_output_dir=self.selected_custom_path,
+            omitir_ya_generadas=omitir_ya_gen
         )
         
         # Connect Signals
@@ -602,7 +502,8 @@ class BillingBotView(QWidget):
         self.worker.start()
 
     def _on_metric_updated(self, name: str, value: int):
-        if name == "pendientes":
+        if name in ("pendientes", "autorizadas"):
+            # "autorizadas": referencias autorizadas restantes por facturar
             self.box_pendientes.set_value(str(value))
         elif name == "exitosos":
             self.box_exitosos.set_value(str(value))
@@ -625,8 +526,11 @@ class BillingBotView(QWidget):
         self.btn_seleccionar.setEnabled(True)
         self.table.setEnabled(True)
         self.chk_autonomo.setEnabled(True)
+        self.chk_omitir_ya_generadas.setEnabled(True)
         self.chk_ver_todas.setEnabled(True)
         self.btn_browse.setEnabled(True)
+        self.btn_gear.setEnabled(True)
+        self.btn_user.setEnabled(True)
         
         self.lbl_portal_status.setText("Portal: INACTIVO")
         self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.BORDER_DARK}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")
@@ -641,7 +545,6 @@ class BillingBotView(QWidget):
 
     def _verify_and_sync_paths(self):
         """Asynchronously checks write access to the default output dir and triggers sync if connected."""
-        from sar.src.core.access_manager import PathVerifyThread
         self.status_indicator.set_status("checking")
         self.path_verify_thread = PathVerifyThread(self.default_output_dir, self)
         self.path_verify_thread.result_ready.connect(self._on_path_verified)
@@ -653,7 +556,6 @@ class BillingBotView(QWidget):
             self.log(f"Ruta por defecto accesible: {path_str}. Iniciando sincronización...")
             
             # Start sync of local contingency files
-            from sar.src.core.access_manager import SyncContingencyThread
             self.sync_thread = SyncContingencyThread(self.db_connector, self.default_output_dir, self)
             self.sync_thread.progress_msg.connect(self.log)
             self.sync_thread.finished_sync.connect(self._on_sync_finished)
@@ -682,3 +584,24 @@ class BillingBotView(QWidget):
             event.ignore()
             return
         event.accept()
+
+from PySide6.QtWidgets import QMainWindow
+from PySide6.QtCore import Signal
+
+class BillingBotWindow(QMainWindow):
+    logout_requested = Signal()
+
+    def __init__(self, db_connector, sesion_id, usuario_id, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("SAR - Bot Face C (Facturación y Timbrado)")
+        self.resize(1100, 750)
+        self.view = BillingBotView(db_connector, sesion_id, usuario_id, self)
+        self.setCentralWidget(self.view)
+        
+        # Propagate logout signal
+        self.view.logout_requested.connect(self.logout_requested.emit)
+
+    def closeEvent(self, event):
+        # Delegate close event validation directly to the child view
+        self.view.closeEvent(event)
+

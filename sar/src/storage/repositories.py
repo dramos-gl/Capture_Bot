@@ -504,7 +504,9 @@ class OperacionRepository(BaseRepository):
             WHERE s.usuario_asignado = :usuario_id
         """
         if not ver_todas:
-            query_str += " AND es.codigo NOT IN ('COMPLETADA', 'COMPLETADO', 'CANCELADA')"
+            query_str += " AND es.codigo IN ('ASIGNADO', 'ASIGNADA', 'PROCESANDO', 'ERROR')"
+        else:
+            query_str += " AND es.codigo IN ('ASIGNADO', 'ASIGNADA', 'PROCESANDO', 'ERROR', 'COMPLETADA', 'COMPLETADO', 'CANCELADA')"
             
         query_str += " ORDER BY s.solicitud_id ASC"
         
@@ -525,9 +527,70 @@ class OperacionRepository(BaseRepository):
                 "estado": row.estado
             })
         return res
+    def get_solicitudes_facturacion(self, usuario_id: int, ver_facturadas: bool = False) -> List[dict]:
+        """Fetch only solicitudes assigned to a specific user for billing."""
+        from sqlalchemy import text
+        query_str = """
+            SELECT s.solicitud_id, s.grupo_id, o.folio, rfc.rfc, rfc.razon_social, 
+                   c.nombre as concepto, d.nombre as delegacion, 
+                   s.cantidad_solicitada,
+                   COALESCE((
+                       SELECT COUNT(*)
+                       FROM sar_produccion.referencia r
+                       JOIN sar_catalogo.estado_sistema es_ref ON r.estado_id = es_ref.estado_id
+                       WHERE r.solicitud_id = s.solicitud_id AND es_ref.codigo = 'AUTORIZADA'
+                   ), 0) AS cantidad_autorizada,
+                   COALESCE((
+                       SELECT COUNT(*)
+                       FROM sar_produccion.referencia r
+                       JOIN sar_catalogo.estado_sistema es_ref ON r.estado_id = es_ref.estado_id
+                       WHERE r.solicitud_id = s.solicitud_id AND es_ref.codigo = 'FACTURADA'
+                   ), 0) AS cantidad_facturada,
+                   es.codigo as estado
+            FROM sar_produccion.solicitud s
+            JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
+            JOIN sar_produccion.orden_generacion o ON gr.orden_id = o.orden_id
+            JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
+            JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+            JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
+            JOIN sar_catalogo.estado_sistema es ON s.estado_id = es.estado_id
+            WHERE s.usuario_asignado = :usuario_id
+        """
+        if ver_facturadas:
+            query_str += " AND es.codigo IN ('AUTORIZADA', 'AUTORIZACION_PARCIAL', 'FACTURADA', 'FACTURADA_PARCIAL', 'ERROR_VALIDACION')"
+        else:
+            query_str += " AND es.codigo IN ('AUTORIZADA', 'AUTORIZACION_PARCIAL')"
+            
+        query_str += " ORDER BY s.solicitud_id ASC"
+        
+        stmt = text(query_str)
+        result = self.session.execute(stmt, {"usuario_id": usuario_id})
+        res = []
+        for row in result:
+            res.append({
+                "solicitud_id": row.solicitud_id,
+                "grupo_id": row.grupo_id,
+                "folio": row.folio,
+                "rfc": row.rfc,
+                "razon_social": row.razon_social,
+                "concepto": row.concepto,
+                "delegacion": row.delegacion,
+                "cantidad_solicitada": row.cantidad_solicitada,
+                "cantidad_autorizada": row.cantidad_autorizada,
+                "cantidad_facturada": row.cantidad_facturada,
+                "estado": row.estado
+            })
+        return res
 
     def get_solicitud_bot_context(self, solicitud_id: int) -> dict:
-        """Fetches the deep context needed for the Bot to process a Solicitud."""
+        """Fetches the deep context needed for the Bot to process a Solicitud.
+        
+        NOTA DE DISEÑO: El campo `ultimo_consecutivo` en la tabla solicitud es propiedad
+        de Face A (Generación de Referencias en Tributanet). Cuando Face A termina,
+        este valor queda igual a `consecutivo_fin`. Face C (Facturación) NO debe usar
+        `ultimo_consecutivo` como indicador de progreso propio; en su lugar se usa
+        `facturas_procesadas`, que cuenta las facturas reales registradas en sar_archivo.factura.
+        """
         from sqlalchemy import text
         stmt = text("""
             SELECT 
@@ -538,7 +601,14 @@ class OperacionRepository(BaseRepository):
                 m.codigo_portal as municipio_codigo_portal,
                 c.nombre as concepto_nombre, c.alias as concepto_alias, c.codigo_portal as concepto_codigo_portal,
                 d.nombre as delegacion_nombre,
-                o.folio as orden_folio
+                o.folio as orden_folio,
+                -- Conteo real de referencias ya timbradas por Face C (fuente de verdad para reanudación)
+                COALESCE((
+                    SELECT COUNT(DISTINCT f.factura_id)
+                    FROM sar_produccion.referencia r
+                    JOIN sar_archivo.factura f ON f.referencia_id = r.referencia_id
+                    WHERE r.solicitud_id = s.solicitud_id
+                ), 0) AS facturas_procesadas
             FROM sar_produccion.solicitud s
             JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
             JOIN sar_produccion.orden_generacion o ON gr.orden_id = o.orden_id
@@ -557,6 +627,7 @@ class OperacionRepository(BaseRepository):
             "consecutivo_inicio": row.consecutivo_inicio,
             "consecutivo_fin": row.consecutivo_fin,
             "ultimo_consecutivo": row.ultimo_consecutivo,
+            "facturas_procesadas": row.facturas_procesadas,
             "rfc": row.rfc,
             "razon_social": row.razon_social,
             "calle": row.calle,

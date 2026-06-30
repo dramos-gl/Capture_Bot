@@ -259,6 +259,8 @@ CREATE TABLE sar_produccion.grupo_referencia
 
     cantidad_expirada INTEGER DEFAULT 0,
 
+    cantidad_facturada INTEGER DEFAULT 0,
+
     ultimo_consecutivo INTEGER DEFAULT 0,
 
     estado_id BIGINT NOT NULL,
@@ -296,6 +298,10 @@ CREATE TABLE sar_produccion.solicitud
     cantidad_solicitada INTEGER NOT NULL,
 
     cantidad_generada INTEGER DEFAULT 0,
+
+    cantidad_autorizada INTEGER DEFAULT 0,
+
+    cantidad_facturada INTEGER DEFAULT 0,
 
     consecutivo_inicio INTEGER NOT NULL,
 
