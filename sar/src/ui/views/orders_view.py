@@ -3,8 +3,9 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox
 )
+from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components import (
-    CustomCard, CustomLabel, CustomButton, InteractiveGrid, CustomInput, CustomComboBox
+    CustomCard, CustomLabel, CustomButton, InteractiveGrid, CustomInput, CustomComboBox, FilterBar
 )
 from sar.src.storage.repositories import CatalogoRepository
 from sar.src.services.ordenes_service import OrdenesService
@@ -49,6 +50,8 @@ class OrdersView(QWidget):
         self._setup_nueva_orden_tab()
         
         # Pre-load catalogs and data
+        self._current_search_text = ""
+        self._current_estado_filter = "Todas"
         self._load_catalogs()
         self.refresh_historial()
         
@@ -60,6 +63,19 @@ class OrdersView(QWidget):
         layout = QVBoxLayout(self.tab_historial)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
+        
+        # Filter Bar
+        self.filter_bar_historial = FilterBar(
+            search_placeholder="Buscar por folio, descripción, estado...",
+            state_options=["Todas", "BORRADOR", "PENDIENTE", "EN_PROCESO", "COMPLETADA", "AUTORIZADA", "RECHAZADA", "CANCELADA"],
+            on_search=self._on_historial_search,
+            on_state_change=self._on_historial_state_change,
+            on_action=self.refresh_historial,
+            action_icon_name="actualizar",
+            action_tooltip="Actualizar Historial",
+            parent=self
+        )
+        layout.addWidget(self.filter_bar_historial)
         
         # Main Card for the Data Table
         self.historial_card = CustomCard(parent=self)
@@ -291,10 +307,10 @@ class OrdersView(QWidget):
             from sar.src.storage.repositories import ProduccionRepository
             with self.db_connector.get_session() as session:
                 repo = ProduccionRepository(session)
-                ordenes = repo.get_ordenes()
+                self._all_ordenes_data = repo.get_ordenes()
                 
                 data_rows = []
-                for o in ordenes:
+                for o in self._all_ordenes_data:
                     data_rows.append([
                         "", # Checkbox vacio inicial
                         str(o["orden_id"]),
@@ -308,8 +324,43 @@ class OrdersView(QWidget):
                     ])
                     
                 self.table_historial.populate_rows(data_rows, checkable_first_col=True)
+                self._apply_historial_filters()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo cargar el historial de órdenes:\n{str(e)}")
+    
+    def _on_historial_search(self, text: str):
+        self._current_search_text = text.strip().lower()
+        self._apply_historial_filters()
+    
+    def _on_historial_state_change(self, state: str):
+        self._current_estado_filter = state
+        self._apply_historial_filters()
+    
+    def _apply_historial_filters(self):
+        search_text = getattr(self, '_current_search_text', "")
+        estado_filter = getattr(self, '_current_estado_filter', "Todas")
+        
+        for row in range(self.table_historial.rowCount()):
+            # Estado is in column 4
+            estado_item = self.table_historial.item(row, 4)
+            estado = estado_item.text() if estado_item else ""
+            
+            # 1. State Filter
+            state_match = True
+            if estado_filter != "Todas":
+                state_match = (estado == estado_filter)
+            
+            # 2. Text search across visible columns
+            text_match = True
+            if search_text:
+                text_match = False
+                for col in range(self.table_historial.columnCount()):
+                    item = self.table_historial.item(row, col)
+                    if item and search_text in item.text().lower():
+                        text_match = True
+                        break
+            
+            self.table_historial.setRowHidden(row, not (state_match and text_match))
 
     def _on_row_double_clicked(self, row: int, column: int):
         id_item = self.table_historial.item(row, 1)

@@ -8,6 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 
 from sar.src.ui.design_system.theme_manager import ThemeManager
 from sar.src.ui.views.login_view import LoginView
@@ -153,7 +154,21 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    # Register explicit AppUserModelID for Windows Taskbar grouping/icon representation
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            myappid = "dramos.gl.sar.system.v2"
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception as e:
+            print("Error setting AppUserModelID:", e)
+
     app = QApplication(sys.argv)
+    
+    # Apply global window icon
+    icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "src", "ui", "assets", "sar_logo.png"))
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
     
     # Apply theme
     ThemeManager.apply_theme(app, is_dark=False)

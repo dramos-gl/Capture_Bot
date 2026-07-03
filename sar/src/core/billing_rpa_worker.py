@@ -56,7 +56,7 @@ class BillingRpaWorker(QThread):
                 # Fetch System Parameters
                 satq_url = config_repo.get_parametro("SATQ_URL") or "https://shacienda.qroo.gob.mx/tributanet/"
                 retries_str = config_repo.get_parametro("REINTENTOS_AUTOMATICOS")
-                max_retries = int(retries_str) if retries_str else 3
+                max_retries = int(retries_str) if retries_str else 4
                 
                 # Fetch RUTA_DERECHOS
                 self.default_output_dir = config_repo.get_parametro("RUTA_DERECHOS") or "storage"
@@ -67,7 +67,11 @@ class BillingRpaWorker(QThread):
                 
             self._log_event_db("PROCESAR_FACTURACION", f"Inicio procesamiento lote facturación solicitud {self.ctx['solicitud_id']}", detalle={"consecutivo_inicio": self.ctx['consecutivo_inicio'], "consecutivo_fin": self.ctx['consecutivo_fin']})
             
-            # 2. Launch Playwright
+            # 2. Reclamar la solicitud para prevenir concurrencia (Race Condition Lock)
+            self.status_changed.emit("Bloqueando solicitud (PROCESANDO)...")
+            self._update_solicitud_estado("PROCESANDO")
+            
+            # 3. Launch Playwright
             self.status_changed.emit("Iniciando navegador Playwright (Headed)...")
             playwright_inst = sync_playwright().start()
             
@@ -108,16 +112,30 @@ class BillingRpaWorker(QThread):
             
             # 3. Execution Loop
             facturas_procesadas = self.ctx.get("facturas_procesadas", 0)
-            start_consecutivo = self.ctx["consecutivo_inicio"] + facturas_procesadas
-            end_consecutivo = self.ctx["consecutivo_fin"]
-            total_items = end_consecutivo - self.ctx["consecutivo_inicio"] + 1
+            total_items = self.ctx["consecutivo_fin"] - self.ctx["consecutivo_inicio"] + 1
             
+            with self.db_connector.get_session() as db_session:
+                status_filter = "('AUTORIZADA', 'ERROR', 'ERROR_VALIDACION')" if self.omitir_ya_generadas else "('AUTORIZADA', 'FACTURADA', 'ERROR', 'ERROR_VALIDACION')"
+                stmt = text(f"""
+                    SELECT r.consecutivo_grupo
+                    FROM sar_produccion.referencia r
+                    JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                    WHERE r.solicitud_id = :solicitud_id 
+                      AND es.codigo IN {status_filter}
+                    ORDER BY r.consecutivo_grupo ASC
+                """)
+                rows = db_session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"]}).fetchall()
+                consecutivos_to_process = [row[0] for row in rows]
+                
             success_count = facturas_procesadas
             error_count = 0
             
-            self.status_changed.emit(f"Facturando consecutivas desde {start_consecutivo} al {end_consecutivo}...")
+            if not consecutivos_to_process:
+                self.status_changed.emit("No hay referencias procesables para esta solicitud.")
+            else:
+                self.status_changed.emit(f"Facturando {len(consecutivos_to_process)} referencia(s) pendiente(s)...")
             
-            for current in range(start_consecutivo, end_consecutivo + 1):
+            for current in consecutivos_to_process:
                 if self._stop_requested:
                     self.status_changed.emit("Proceso detenido por el usuario.")
                     break
@@ -133,7 +151,6 @@ class BillingRpaWorker(QThread):
                         JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
                         WHERE r.solicitud_id = :solicitud_id 
                           AND r.consecutivo_grupo = :consecutivo
-                          AND es.codigo IN ('AUTORIZADA', 'FACTURADA')
                     """)
                     row = db_session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"], "consecutivo": current}).fetchone()
                     if row:
@@ -147,9 +164,8 @@ class BillingRpaWorker(QThread):
                 if not referencia_portal:
                     if not row or (row and row.estado_codigo != 'FACTURADA'):
                         self.status_changed.emit(f"Consecutivo {current} no tiene referencia procesable en BD. Saltando...")
-                    # Incrementar el contador de éxito/procesadas para no congelar la barra de progreso
                     success_count += 1
-                    pct = int((success_count / total_items) * 100)
+                    pct = int(((success_count + error_count) / total_items) * 100) if total_items > 0 else 100
                     self.progress_changed.emit(pct)
                     continue
                 
@@ -513,6 +529,8 @@ class BillingRpaWorker(QThread):
                     
                     facturadas = status_counts.get("FACTURADA", 0)
                     validaciones = status_counts.get("ERROR_VALIDACION", 0)
+                    errores = status_counts.get("ERROR", 0)
+                    total_errores = validaciones + errores
                     autorizadas = status_counts.get("AUTORIZADA", 0)
                     rechazadas = status_counts.get("RECHAZADA", 0)
                     pendientes = autorizadas
@@ -520,16 +538,14 @@ class BillingRpaWorker(QThread):
                     original_state = "AUTORIZACION_PARCIAL" if rechazadas > 0 else "AUTORIZADA"
                     
                     if total_refs > 0:
-                        if pendientes > 0:
-                            # Mientras haya referencias autorizadas pendientes, retiene su estado original
-                            final_status = original_state
-                        else:
-                            # Ya se terminaron de procesar todas las AUTORIZADAS
-                            if validaciones > 0:
-                                final_status = "FACTURADA_PARCIAL" if facturadas > 0 else "ERROR_VALIDACION"
+                        if pendientes > 0 or total_errores > 0:
+                            if facturadas > 0:
+                                final_status = "FACTURADA_PARCIAL"
                             else:
-                                # Todas las procesadas fueron FACTURADAS (0 errores)
-                                final_status = "FACTURADA_PARCIAL" if rechazadas > 0 else "FACTURADA"
+                                final_status = "ERROR_VALIDACION" if validaciones > 0 else ("ERROR" if errores > 0 else original_state)
+                        else:
+                            # Ya se terminaron de procesar todas las AUTORIZADAS, ERROR, etc (todo es facturado)
+                            final_status = "FACTURADA_PARCIAL" if rechazadas > 0 else "FACTURADA"
                     else:
                         final_status = "AUTORIZADA"
             except Exception as db_err:
@@ -564,6 +580,8 @@ class BillingRpaWorker(QThread):
                     total_refs = sum(status_counts.values())
                     facturadas = status_counts.get("FACTURADA", 0)
                     validaciones = status_counts.get("ERROR_VALIDACION", 0)
+                    errores = status_counts.get("ERROR", 0)
+                    total_errores = validaciones + errores
                     autorizadas = status_counts.get("AUTORIZADA", 0)
                     rechazadas = status_counts.get("RECHAZADA", 0)
                     pendientes = autorizadas
@@ -571,13 +589,13 @@ class BillingRpaWorker(QThread):
                     original_state = "AUTORIZACION_PARCIAL" if rechazadas > 0 else "AUTORIZADA"
                     
                     if total_refs > 0:
-                        if pendientes > 0:
-                            final_status = original_state
-                        else:
-                            if validaciones > 0:
-                                final_status = "FACTURADA_PARCIAL" if facturadas > 0 else "ERROR_VALIDACION"
+                        if pendientes > 0 or total_errores > 0:
+                            if facturadas > 0:
+                                final_status = "FACTURADA_PARCIAL"
                             else:
-                                final_status = "FACTURADA_PARCIAL" if rechazadas > 0 else "FACTURADA"
+                                final_status = "ERROR_VALIDACION" if validaciones > 0 else ("ERROR" if errores > 0 else original_state)
+                        else:
+                            final_status = "FACTURADA_PARCIAL" if rechazadas > 0 else "FACTURADA"
             except:
                 pass
             

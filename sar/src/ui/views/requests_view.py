@@ -83,11 +83,11 @@ class RequestsView(QWidget):
         
         self.filter_bar = FilterBar(
             search_placeholder="Buscar solicitud",
-            state_options=["Activas", "Todas", "Pendientes", "Asignadas", "Canceladas"],
+            state_options=["Todas", "ASIGNADA", "AUTORIZADA", "CANCELADA", "COMPLETADA", "ERROR", "FACTURADA", "FACTURADA_PARCIAL", "PENDIENTE", "PROCESANDO"],
             on_search=self._filter_table_by_text,
             on_state_change=self._filter_table_by_state,
             on_action=self.refresh_data,
-            action_icon_name="refresh",
+            action_icon_name="actualizar",
             action_tooltip="Actualizar Bandeja",
             parent=self
         )
@@ -141,6 +141,20 @@ class RequestsView(QWidget):
         self.card.layout.addLayout(actions_layout)
         self.layout.addWidget(self.card)
         
+        self.selected_orden_ids = []
+        self.todas_las_ordenes = []
+        
+        # Add order filter button to FilterBar layout
+        from sar.src.ui.design_system.utils.icons import Icons
+        self.btn_filter_orden = CustomButton("", is_secondary=True)
+        self.btn_filter_orden.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden.setFixedSize(36, 36)
+        self.btn_filter_orden.setToolTip("Filtrar por Orden")
+        self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
+        
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.btn_filter_orden, alignment=Qt.AlignmentFlag.AlignBottom)
+        
+        self._load_available_orders()
         self.refresh_data()
         
     def _get_selected_solicitud_id(self) -> int:
@@ -445,7 +459,8 @@ class RequestsView(QWidget):
         try:
             with self.db_connector.get_session() as session:
                 repo = OperacionRepository(session)
-                solicitudes = repo.get_solicitudes()
+                orden_ids = getattr(self, 'selected_orden_ids', [])
+                solicitudes = repo.get_solicitudes(orden_ids=orden_ids)
                 
                 data_rows = []
                 for s in solicitudes:
@@ -477,22 +492,22 @@ class RequestsView(QWidget):
 
     def _apply_filters(self):
         search_text = getattr(self, '_current_search_text', "")
-        estado_filter = getattr(self, '_current_estado_filter', "Activas")
+        estado_filter = getattr(self, '_current_estado_filter', "Todas")
         
         for row in range(self.table.rowCount()):
             estado = self.table.item(row, 8).text() if self.table.item(row, 8) else ""
             
             # 1. State Filter Logic
             state_match = True
-            if estado_filter == "Activas":
-                state_match = estado in ["PENDIENTE", "ASIGNADO", "PROCESANDO", "BORRADOR"]
-            elif estado_filter == "Pendientes":
-                state_match = estado == "PENDIENTE"
-            elif estado_filter == "Asignadas":
-                state_match = estado == "ASIGNADO"
-            elif estado_filter == "Canceladas":
-                state_match = estado in ["CANCELADO", "CANCELADA"]
-            # "Todas" matches everything
+            if estado_filter != "Todas":
+                if estado_filter == "ASIGNADA":
+                    state_match = estado in ["ASIGNADA", "ASIGNADO"]
+                elif estado_filter == "CANCELADA":
+                    state_match = estado in ["CANCELADA", "CANCELADO"]
+                elif estado_filter == "COMPLETADA":
+                    state_match = estado in ["COMPLETADA", "COMPLETADO"]
+                else:
+                    state_match = (estado == estado_filter)
             
             # 2. Search Text Logic (search across all columns)
             text_match = False
@@ -506,3 +521,86 @@ class RequestsView(QWidget):
                 self.table.setRowHidden(row, False)
             else:
                 self.table.setRowHidden(row, True)
+
+    def _load_available_orders(self):
+        try:
+            with self.db_connector.get_session() as session:
+                from sar.src.storage.repositories import ProduccionRepository
+                repo = ProduccionRepository(session)
+                self.todas_las_ordenes = repo.get_ordenes()
+                
+            if self.todas_las_ordenes:
+                # Default to the latest created order (first one since it is sorted DESC by date)
+                self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
+            else:
+                self.selected_orden_ids = []
+        except Exception as e:
+            print("Error loading available orders for requests:", e)
+            self.todas_las_ordenes = []
+            self.selected_orden_ids = []
+
+    def _show_order_filter_menu(self):
+        from PySide6.QtWidgets import QMenu
+        from PySide6.QtGui import QAction
+        
+        # Load orders if not loaded yet
+        if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
+            self._load_available_orders()
+            
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 8px;
+                border-radius: 4px;
+                color: #1E293B;
+            }
+            QMenu::item:selected {
+                background-color: #F1F5F9;
+                color: #0F172A;
+            }
+        """)
+        
+        # "Todas" action
+        action_all = QAction("Todas las órdenes", menu, checkable=True)
+        is_all_selected = len(self.selected_orden_ids) == len(self.todas_las_ordenes) and len(self.todas_las_ordenes) > 0
+        action_all.setChecked(is_all_selected)
+        
+        def toggle_all(checked):
+            if checked:
+                self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
+            else:
+                self.selected_orden_ids = []
+            self.refresh_data()
+            
+        action_all.triggered.connect(toggle_all)
+        menu.addAction(action_all)
+        menu.addSeparator()
+        
+        # Actions for individual orders
+        for ord in self.todas_las_ordenes:
+            label = f"{ord['folio']} ({ord['fecha_creacion'].split()[0] if isinstance(ord['fecha_creacion'], str) else ord['fecha_creacion'].strftime('%Y-%m-%d')})"
+            action = QAction(label, menu, checkable=True)
+            action.setChecked(ord["orden_id"] in self.selected_orden_ids)
+            
+            def make_toggle_handler(oid):
+                def handler(checked):
+                    if checked:
+                        if oid not in self.selected_orden_ids:
+                            self.selected_orden_ids.append(oid)
+                    else:
+                        if oid in self.selected_orden_ids:
+                            self.selected_orden_ids.remove(oid)
+                    self.refresh_data()
+                return handler
+                
+            action.triggered.connect(make_toggle_handler(ord["orden_id"]))
+            menu.addAction(action)
+            
+        # Display the menu directly under the filter button
+        menu.exec(self.btn_filter_orden.mapToGlobal(self.btn_filter_orden.rect().bottomLeft()))

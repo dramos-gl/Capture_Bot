@@ -55,7 +55,7 @@ class FilterBar(QFrame):
             
             from sar.src.ui.design_system.utils.icons import Icons
             if action_icon_name and hasattr(Icons, action_icon_name):
-                self.btn_add.setIcon(getattr(Icons, action_icon_name)())
+                self.btn_add.setIcon(getattr(Icons, action_icon_name)("#FFFFFF"))
                 from PySide6.QtCore import QSize
                 self.btn_add.setIconSize(QSize(20, 20))
             else:

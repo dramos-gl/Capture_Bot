@@ -5,6 +5,7 @@ from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
+from sar.src.ui.design_system.components.atoms.gl_switch import CustomSwitch
 from sar.src.ui.design_system.components.atoms.gl_badge import StatusBadge
 from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
 
@@ -27,6 +28,7 @@ __all__ = [
     "CustomLabel",
     "CustomInput",
     "CustomCheckBox",
+    "CustomSwitch",
     "StatusBadge",
     "GLStatusIndicator",
     "CustomCard",

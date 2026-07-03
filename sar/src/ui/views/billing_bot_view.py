@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QCursor
 
-from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, MetricBox
+from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, CustomSwitch, MetricBox
 from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import ConfigRepository, OperacionRepository
@@ -144,11 +144,14 @@ class BillingBotView(QWidget):
         lbl_c = CustomLabel("⚙ CONTROLES OPERATIVOS", variant="subheader")
         c_layout.addWidget(lbl_c)
         
-        self.chk_autonomo = CustomCheckBox("Modo Autónomo (Facturación Directa)")
+        self.chk_autonomo = CustomSwitch("🤖 Modo Autónomo (Visible Recomendado)")
+        self.chk_autonomo.setChecked(True)
+        self.chk_autonomo.setEnabled(False)
         c_layout.addWidget(self.chk_autonomo)
         
-        self.chk_omitir_ya_generadas = CustomCheckBox("Omitir/Descargar Ya Generadas")
+        self.chk_omitir_ya_generadas = CustomSwitch("Omitir 'Ya Generadas'")
         self.chk_omitir_ya_generadas.setChecked(True)
+        self.chk_omitir_ya_generadas.setToolTip("Activado: Las referencias confirmadas en el portal ya facturadas se omitiran")
         c_layout.addWidget(self.chk_omitir_ya_generadas)
         
         # Custom Download Path selector
@@ -174,7 +177,7 @@ class BillingBotView(QWidget):
         self.status_indicator = GLStatusIndicator()
         c_layout.addWidget(self.status_indicator)
         
-        self.btn_iniciar = CustomButton("▶ Iniciar Facturación", is_secondary=False)
+        self.btn_iniciar = CustomButton("▶ Iniciar Bot", is_secondary=False)
         self.btn_iniciar.setObjectName("primaryBtn")
         self.btn_iniciar.clicked.connect(self._on_iniciar_bot)
         c_layout.addWidget(self.btn_iniciar)
@@ -250,6 +253,16 @@ class BillingBotView(QWidget):
         self.main_layout.addLayout(top_layout, stretch=1)
 
     def _on_browse_path_clicked(self):
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Cambio de Ruta",
+            f"Se recomienda encarecidamente utilizar la ruta por defecto ({self.default_output_dir}) para garantizar la sincronización automática y auditoría centralizada.\n\n¿Estás seguro de que deseas cambiar la ruta de descarga?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.No:
+            return
+            
         dir_path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Descarga de Facturas")
         if dir_path:
             self.selected_custom_path = dir_path
@@ -278,7 +291,7 @@ class BillingBotView(QWidget):
         
         layout.addLayout(header_layout)
         
-        headers = ["ID Solicitud", "Folio Orden", "RFC", "Razón Social", "Concepto", "Solicitadas", "Autorizadas", "Facturadas", "Estado"]
+        headers = ["ID Solicitud", "Folio Orden", "RFC", "Razón Social", "Concepto", "Solicitadas", "P. x Facturar", "Facturadas", "Estado"]
         self.table = StyledDataTable(headers, parent=self)
         self.table.setObjectName("botTable")
         self.table.doubleClicked.connect(lambda index: self._on_cargar_solicitud())
@@ -348,7 +361,7 @@ class BillingBotView(QWidget):
             
         row = selected[0].row()
         estado = self.table.item(row, 8).text().upper()
-        valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "ERROR_VALIDACION")
+        valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "ERROR_VALIDACION", "FACTURADA_PARCIAL")
         if estado not in valid_states:
             QMessageBox.warning(
                 self, 
@@ -372,7 +385,7 @@ class BillingBotView(QWidget):
                 self.current_bot_context = ctx
                 
                 # Update UI labels
-                self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx['municipio']}")
+                self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}")
                 
                 # --- Resetear métricas antes de calcular para evitar residuos de cargas previas ---
                 self.box_pendientes.set_value("0")
@@ -382,13 +395,16 @@ class BillingBotView(QWidget):
                 total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
                 # Facturas ya procesadas/timbradas exitosamente.
                 facturadas = ctx["facturas_procesadas"]
-                # Referencias autorizadas pendientes de facturar (total autorizado menos lo ya facturado)
-                autorizadas_pendientes = total - facturadas
+                errores = ctx.get("referencias_con_error", 0)
+                # Referencias autorizadas pendientes de facturar (total autorizado menos lo ya facturado y lo que falló)
+                autorizadas_pendientes = total - facturadas - errores
                 
                 # Tarjeta "Autorizadas": muestra cuántas referencias aún están por facturar
                 self.box_pendientes.set_value(str(max(0, autorizadas_pendientes)))
                 # Tarjeta "Facturadas": muestra cuántas ya fueron timbradas en sesiones previas
                 self.box_exitosos.set_value(str(max(0, facturadas)))
+                # Tarjeta "Errores": muestra cuántas fallaron previamente
+                self.box_errores.set_value(str(max(0, errores)))
                 
                 self.log(f"ÉXITO: Contexto de {ctx['rfc']} cargado para facturación.")
                 self.log(f"Concepto: {ctx['concepto_nombre']} | Rango de Facturación: {ctx['consecutivo_inicio']} al {ctx['consecutivo_fin']}")
@@ -419,7 +435,7 @@ class BillingBotView(QWidget):
                         text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
                         {"eid": sol.estado_id}
                     ).scalar()
-                    valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "PROCESANDO", "ERROR", "ERROR_VALIDACION")
+                    valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "PROCESANDO", "ERROR", "ERROR_VALIDACION", "FACTURADA_PARCIAL")
                     if state_code not in valid_states:
                         QMessageBox.warning(
                             self, 
@@ -430,6 +446,16 @@ class BillingBotView(QWidget):
                         self.current_bot_context = None
                         self._load_solicitudes()
                         return
+                    if state_code == "PROCESANDO":
+                        reply_proc = QMessageBox.warning(
+                            self,
+                            "Colisión Detectada",
+                            "Esta solicitud está actualmente en estado PROCESANDO (posiblemente por otro bot o una ejecución previa no cerrada correctamente).\n\nSi fuerzas el inicio podrías duplicar operaciones y causar errores.\n\n¿Estás seguro de forzar el inicio?",
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.No
+                        )
+                        if reply_proc == QMessageBox.StandardButton.No:
+                            return
         except Exception as e:
             self.log(f"Advertencia al validar estado de solicitud en BD: {str(e)}")
             
@@ -465,7 +491,8 @@ class BillingBotView(QWidget):
             self.log("Inicio del Bot cancelado por el usuario.")
             return
             
-        headless_mode = self.chk_autonomo.isChecked()
+        # Inverted logic: Checked/ON = Visible (headless=False), Unchecked/OFF = Invisible (headless=True)
+        headless_mode = not self.chk_autonomo.isChecked()
         
         self.log("INICIANDO SECUENCIA DE TIMBRADO RPA...")
         self.btn_iniciar.setText("⏹ Detener Bot")
@@ -521,7 +548,7 @@ class BillingBotView(QWidget):
 
     def _on_finished_processing(self, success: bool, message: str):
         self.btn_iniciar.setEnabled(True)
-        self.btn_iniciar.setText("▶ Iniciar Facturación")
+        self.btn_iniciar.setText("▶ Iniciar Bot")
         self.btn_iniciar.setStyleSheet(f"background-color: {Colors.SURFACE_DARK}; color: white;")
         self.btn_seleccionar.setEnabled(True)
         self.table.setEnabled(True)

@@ -10,13 +10,14 @@ class ReferencesLoadWorker(QThread):
     result_ready = Signal(list, int) # data, total_count
     error_occurred = Signal(str)
     
-    def __init__(self, db_connector, limit: int, offset: int, search_text: str, estado_filter: str):
+    def __init__(self, db_connector, limit: int, offset: int, search_text: str, estado_filter: str, orden_ids: list = None):
         super().__init__()
         self.db_connector = db_connector
         self.limit = limit
         self.offset = offset
         self.search_text = search_text
         self.estado_filter = estado_filter
+        self.orden_ids = orden_ids
         
     def run(self):
         try:
@@ -26,7 +27,8 @@ class ReferencesLoadWorker(QThread):
                     limit=self.limit,
                     offset=self.offset,
                     search_text=self.search_text,
-                    estado_filter=self.estado_filter
+                    estado_filter=self.estado_filter,
+                    orden_ids=self.orden_ids
                 )
                 self.result_ready.emit(res, total_count)
         except Exception as e:
@@ -52,7 +54,7 @@ class ReferenciasView(QWidget):
             on_search=self._filter_table_by_text,
             on_state_change=self._filter_table_by_state,
             on_action=self.refresh_data,
-            action_icon_name="refresh",
+            action_icon_name="actualizar",
             action_tooltip="Actualizar Referencias",
             parent=self
         )
@@ -130,6 +132,18 @@ class ReferenciasView(QWidget):
         
         self._current_search_text = ""
         self._current_estado_filter = "Todos"
+        self.selected_orden_ids = []
+        self.todas_las_ordenes = []
+        
+        # Add order filter button to FilterBar layout
+        from sar.src.ui.design_system.utils.icons import Icons
+        self.btn_filter_orden = CustomButton("", is_secondary=True)
+        self.btn_filter_orden.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden.setFixedSize(36, 36)
+        self.btn_filter_orden.setToolTip("Filtrar por Orden")
+        self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
+        
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.btn_filter_orden, alignment=Qt.AlignmentFlag.AlignBottom)
         
         # Debounce timer for text search (350ms delay) to prevent database flooding while typing
         self.search_timer = QTimer(self)
@@ -138,6 +152,7 @@ class ReferenciasView(QWidget):
         
         self.table.itemChanged.connect(self._on_table_item_changed)
         
+        self._load_available_orders()
         self.refresh_data()
         
     def _get_selected_referencia_ids(self) -> list[int]:
@@ -328,13 +343,15 @@ class ReferenciasView(QWidget):
         search_text = getattr(self, '_current_search_text', "").strip()
         estado_filter = getattr(self, '_current_estado_filter', "Todos")
         offset = (self.current_page - 1) * self.page_size
+        orden_ids = getattr(self, 'selected_orden_ids', [])
 
         self.active_worker = ReferencesLoadWorker(
             db_connector=self.db_connector,
             limit=self.page_size,
             offset=offset,
             search_text=search_text,
-            estado_filter=estado_filter
+            estado_filter=estado_filter,
+            orden_ids=orden_ids
         )
         self.active_worker.result_ready.connect(self._on_data_loaded)
         self.active_worker.error_occurred.connect(self._on_load_error)
@@ -464,3 +481,87 @@ class ReferenciasView(QWidget):
     def _set_page(self, page_num: int):
         self.current_page = page_num
         self.refresh_data()
+
+    def _load_available_orders(self):
+        try:
+            with self.db_connector.get_session() as session:
+                repo = ProduccionRepository(session)
+                self.todas_las_ordenes = repo.get_ordenes()
+                
+            if self.todas_las_ordenes:
+                # Default to the latest created order (first one since it is sorted DESC by date)
+                self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
+            else:
+                self.selected_orden_ids = []
+        except Exception as e:
+            print("Error loading available orders for references:", e)
+            self.todas_las_ordenes = []
+            self.selected_orden_ids = []
+
+    def _show_order_filter_menu(self):
+        from PySide6.QtWidgets import QMenu
+        from PySide6.QtGui import QAction
+        
+        # Load orders if not loaded yet
+        if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
+            self._load_available_orders()
+            
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 8px;
+                border-radius: 4px;
+                color: #1E293B;
+            }
+            QMenu::item:selected {
+                background-color: #F1F5F9;
+                color: #0F172A;
+            }
+        """)
+        
+        # "Todas" action
+        action_all = QAction("Todas las órdenes", menu, checkable=True)
+        is_all_selected = len(self.selected_orden_ids) == len(self.todas_las_ordenes) and len(self.todas_las_ordenes) > 0
+        action_all.setChecked(is_all_selected)
+        
+        def toggle_all(checked):
+            if checked:
+                self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
+            else:
+                self.selected_orden_ids = []
+            self.current_page = 1
+            self.refresh_data()
+            
+        action_all.triggered.connect(toggle_all)
+        menu.addAction(action_all)
+        menu.addSeparator()
+        
+        # Actions for individual orders
+        for ord in self.todas_las_ordenes:
+            label = f"{ord['folio']} ({ord['fecha_creacion'].split()[0] if isinstance(ord['fecha_creacion'], str) else ord['fecha_creacion'].strftime('%Y-%m-%d')})"
+            action = QAction(label, menu, checkable=True)
+            action.setChecked(ord["orden_id"] in self.selected_orden_ids)
+            
+            def make_toggle_handler(oid):
+                def handler(checked):
+                    if checked:
+                        if oid not in self.selected_orden_ids:
+                            self.selected_orden_ids.append(oid)
+                    else:
+                        if oid in self.selected_orden_ids:
+                            self.selected_orden_ids.remove(oid)
+                    self.current_page = 1
+                    self.refresh_data()
+                return handler
+                
+            action.triggered.connect(make_toggle_handler(ord["orden_id"]))
+            menu.addAction(action)
+            
+        # Display the menu directly under the filter button
+        menu.exec(self.btn_filter_orden.mapToGlobal(self.btn_filter_orden.rect().bottomLeft()))

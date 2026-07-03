@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QCursor
 
-from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, MetricBox
+from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, CustomSwitch, MetricBox
 from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import ConfigRepository, OperacionRepository
@@ -145,7 +145,9 @@ class BotView(QWidget):
         lbl_c = CustomLabel("⚙ CONTROLES OPERATIVOS", variant="subheader")
         c_layout.addWidget(lbl_c)
         
-        self.chk_autonomo = CustomCheckBox("Modo Autónomo (Sin confirmación)")
+        self.chk_autonomo = CustomSwitch("🤖 Modo Autónomo (Visible Recomendado)")
+        self.chk_autonomo.setChecked(True)
+        self.chk_autonomo.setEnabled(False)
         c_layout.addWidget(self.chk_autonomo)
         
         # Custom Download Path selector
@@ -247,6 +249,16 @@ class BotView(QWidget):
         self.main_layout.addLayout(top_layout, stretch=1)
 
     def _on_browse_path_clicked(self):
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Cambio de Ruta",
+            f"Se recomienda utilizar la ruta por defecto ({self.default_output_dir}) para la sincronización y auditoría.\n\n¿Estás seguro de que deseas cambiar la ruta de descarga?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.No:
+            return
+            
         dir_path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Almacenamiento de Boletas")
         if dir_path:
             self.selected_custom_path = dir_path
@@ -371,7 +383,7 @@ class BotView(QWidget):
                 self.current_bot_context = ctx
                 
                 # Update UI
-                self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx['municipio']}")
+                self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}")
                 
                 total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
                 completados = ctx["ultimo_consecutivo"] - ctx["consecutivo_inicio"] + 1 if ctx["ultimo_consecutivo"] >= ctx["consecutivo_inicio"] else 0
@@ -458,10 +470,8 @@ class BotView(QWidget):
             self.log("Inicio del Bot cancelado por el usuario.")
             return
             
-        # Visible browser checkbox state
-        # In Playwright, headless is True (invisible) or False (visible).
-        # We will launch visible unless autonomous mode is checked or we run headless
-        headless_mode = self.chk_autonomo.isChecked()
+        # Inverted logic: Checked/ON = Visible (headless=False), Unchecked/OFF = Invisible (headless=True)
+        headless_mode = not self.chk_autonomo.isChecked()
         
         self.log("INICIANDO SECUENCIA RPA...")
         self.btn_iniciar.setText("⏹ Detener Bot")

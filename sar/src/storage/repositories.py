@@ -419,10 +419,18 @@ class OperacionRepository(BaseRepository):
         self.session.flush()
         return solicitud
         
-    def get_solicitudes(self) -> List[dict]:
+    def get_solicitudes(self, orden_ids: list = None) -> List[dict]:
         from sqlalchemy import text
-        stmt = text("SELECT * FROM sar_produccion.vw_solicitudes_detalle ORDER BY grupo_id ASC, solicitud_id ASC")
-        result = self.session.execute(stmt)
+        if orden_ids:
+            stmt = text("""
+                SELECT * FROM sar_produccion.vw_solicitudes_detalle 
+                WHERE grupo_id IN (SELECT g_ref.grupo_id FROM sar_produccion.grupo_referencia g_ref WHERE g_ref.orden_id IN :orden_ids_param)
+                ORDER BY grupo_id ASC, solicitud_id ASC
+            """)
+            result = self.session.execute(stmt, {"orden_ids_param": tuple(orden_ids)})
+        else:
+            stmt = text("SELECT * FROM sar_produccion.vw_solicitudes_detalle ORDER BY grupo_id ASC, solicitud_id ASC")
+            result = self.session.execute(stmt)
         res = []
         for row in result:
             res.append({
@@ -605,7 +613,7 @@ class OperacionRepository(BaseRepository):
                 s.grupo_id,
                 rfc.rfc, rfc.razon_social, rfc.calle, rfc.codigo_postal, rfc.municipio as rfc_municipio,
                 rfc.colonia, rfc.no_exterior, rfc.no_interior, rfc.localidad,
-                m.codigo_portal as municipio_codigo_portal,
+                m.codigo_portal as municipio_codigo_portal, m.nombre as municipio_nombre,
                 c.nombre as concepto_nombre, c.alias as concepto_alias, c.codigo_portal as concepto_codigo_portal,
                 d.nombre as delegacion_nombre,
                 o.folio as orden_folio,
@@ -615,7 +623,14 @@ class OperacionRepository(BaseRepository):
                     FROM sar_produccion.referencia r
                     JOIN sar_archivo.factura f ON f.referencia_id = r.referencia_id
                     WHERE r.solicitud_id = s.solicitud_id
-                ), 0) AS facturas_procesadas
+                ), 0) AS facturas_procesadas,
+                -- Conteo de referencias con error para predictibilidad visual en UI
+                COALESCE((
+                    SELECT COUNT(r.referencia_id)
+                    FROM sar_produccion.referencia r
+                    JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                    WHERE r.solicitud_id = s.solicitud_id AND es.codigo IN ('ERROR', 'ERROR_VALIDACION')
+                ), 0) AS referencias_con_error
             FROM sar_produccion.solicitud s
             JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
             JOIN sar_produccion.orden_generacion o ON gr.orden_id = o.orden_id
@@ -635,9 +650,14 @@ class OperacionRepository(BaseRepository):
             "consecutivo_fin": row.consecutivo_fin,
             "ultimo_consecutivo": row.ultimo_consecutivo,
             "facturas_procesadas": row.facturas_procesadas,
+            "referencias_con_error": row.referencias_con_error,
             "rfc": row.rfc,
             "razon_social": row.razon_social,
             "calle": row.calle,
+            "codigo_postal": row.codigo_postal,
+            "rfc_municipio": row.rfc_municipio,
+            "municipio_nombre": row.municipio_nombre,
+            "municipio_codigo_portal": row.municipio_codigo_portal,
             "no_exterior": row.no_exterior or "",
             "no_interior": row.no_interior or "",
             "colonia": row.colonia or "",
