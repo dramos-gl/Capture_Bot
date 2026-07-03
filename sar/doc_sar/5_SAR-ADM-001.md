@@ -30,7 +30,7 @@ El Módulo de Administración permitirá gestionar la información base de confi
 *   **estado_sistema** y **evento_sistema**: Catálogos estáticos de estados transaccionales (generalmente de sólo lectura o edición controlada).
 
 #### C. Esquema `sar_configuracion`
-*   **parametro_sistema**: Configuración de variables globales (e.g. `TAMANO_LOTE`, `TIEMPO_HEARTBEAT`).
+*   **parametro_sistema**: Configuración de variables globales (e.g. `TAMANO_LOTE`, `TAMANO_LOTE_SOLICITUD`, `TIEMPO_HEARTBEAT`).
 *   **localizador_portal**: Selectores dinámicos del bot Playwright.
 
 ### 1.2 Dependencias y Restricciones

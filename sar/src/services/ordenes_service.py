@@ -58,8 +58,8 @@ class OrdenesService:
         estado_grupo_id = self._get_estado_id("PENDIENTE")
         estado_sol_id = self._get_estado_id("PENDIENTE")
 
-        # Config parameter for max batch size
-        lote_size = self.config_repo.get_lote_size()
+        # Config parameter for max batch size of solicitudes
+        lote_size = self.config_repo.get_lote_solicitud_size()
 
         # Generate unique Folio (e.g. ORD-YYYYMMDD-HHMMSS)
         folio_str = f"ORD-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"

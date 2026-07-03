@@ -7,6 +7,15 @@ from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components.atoms.gl_badge import StatusBadge
 from sar.src.ui.design_system.tokens.colors import Colors
 
+class StatusTableWidgetItem(QTableWidgetItem):
+    """A custom table widget item that stores the status string but exposes empty display text so Qt never paints it."""
+    def __init__(self, text: str):
+        super().__init__("")
+        self.status_text = text
+        
+    def text(self) -> str:
+        return self.status_text
+
 class StyledDataTable(QTableWidget):
     """A clean, professional data table organism designed with our design system tokens."""
     
@@ -58,7 +67,7 @@ class StyledDataTable(QTableWidget):
                     badge = StatusBadge(val_str)
                     badge_layout.addWidget(badge)
                     
-                    item = QTableWidgetItem(val_str)
+                    item = StatusTableWidgetItem(val_str)
                     self.setItem(row_idx, col_idx, item)
                     self.setCellWidget(row_idx, col_idx, badge_container)
                 else:
@@ -70,3 +79,7 @@ class StyledDataTable(QTableWidget):
                     self.setItem(row_idx, col_idx, item)
         
         self.resizeColumnsToContents()
+        
+        # Enforce last column stretching to fill viewport width
+        if self.columnCount() > 0:
+            self.horizontalHeader().setSectionResizeMode(self.columnCount() - 1, QHeaderView.ResizeMode.Stretch)

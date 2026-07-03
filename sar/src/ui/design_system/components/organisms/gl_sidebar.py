@@ -98,8 +98,8 @@ class NavigationSidebar(QFrame):
         self.btn_capturar_nueva.setCheckable(True)
         self.btn_capturar_nueva.setIcon(Icons.hollow_dot("#94A3B8"))
         
-        self.submenu_layout.addWidget(self.btn_ordenes_capturadas)
         self.submenu_layout.addWidget(self.btn_capturar_nueva)
+        self.submenu_layout.addWidget(self.btn_ordenes_capturadas)
         
         self.buttons["ordenes_capturadas"] = self.btn_ordenes_capturadas
         self.buttons["capturar_orden"] = self.btn_capturar_nueva

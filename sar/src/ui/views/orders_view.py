@@ -40,8 +40,8 @@ class OrdersView(QWidget):
         self.tab_historial = QWidget()
         self.tab_nueva = QWidget()
         
-        self.tabs.addTab(self.tab_historial, "Órdenes Capturadas")
         self.tabs.addTab(self.tab_nueva, "Capturar Nueva Orden")
+        self.tabs.addTab(self.tab_historial, "Órdenes Capturadas")
         
         self.layout.addWidget(self.tabs)
         

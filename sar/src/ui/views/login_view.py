@@ -48,8 +48,17 @@ class LoginView(QWidget):
         # Module Selection
         self.cb_modulo = CustomComboBox(self)
         self.cb_modulo.setPlaceholderText("Seleccionar un módulo")
+        self.cb_modulo_original_stylesheet = self.cb_modulo.styleSheet()
         self._load_modules()
         self.center_layout.addWidget(self.cb_modulo)
+        
+        # Module Error Label
+        self.modulo_error_lbl = CustomLabel("", variant="muted", parent=self)
+        self.modulo_error_lbl.setVisible(False)
+        self.center_layout.addWidget(self.modulo_error_lbl)
+        
+        # Clear module error when selection changes
+        self.cb_modulo.currentIndexChanged.connect(self._clear_modulo_error)
         
         # Labeled inputs
         self.user_input = LabeledInput(label_text="Usuario", icon_name="user", parent=self)
@@ -109,6 +118,11 @@ class LoginView(QWidget):
         except Exception as e:
             print("Error loading modules:", e)
         
+    def _clear_modulo_error(self):
+        self.modulo_error_lbl.setText("")
+        self.modulo_error_lbl.setVisible(False)
+        self.cb_modulo.setStyleSheet(self.cb_modulo_original_stylesheet)
+        
     def _on_login_clicked(self):
         """Validates simple layout fields and emits request."""
         username = self.user_input.text().strip()
@@ -117,6 +131,15 @@ class LoginView(QWidget):
         
         has_error = False
         
+        if not selected_mod_code:
+            self.modulo_error_lbl.setText("Debe seleccionar un módulo")
+            self.modulo_error_lbl.set_error_style(True)
+            self.modulo_error_lbl.setVisible(True)
+            self.cb_modulo.setStyleSheet(self.cb_modulo_original_stylesheet + "\nQComboBox { border: 1px solid #DC2626; }")
+            has_error = True
+        else:
+            self._clear_modulo_error()
+            
         if not username:
             self.user_input.show_error("El usuario es requerido")
             has_error = True
@@ -128,9 +151,6 @@ class LoginView(QWidget):
             has_error = True
         else:
             self.pass_input.clear_error()
-            
-        if not selected_mod_code:
-            has_error = True
             
         if not has_error:
             self.login_requested.emit(username, password, selected_mod_code)

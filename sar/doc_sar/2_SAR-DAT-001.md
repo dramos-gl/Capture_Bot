@@ -663,10 +663,20 @@ No por Delegación.
 
 ---
 
-## Tamaño Inicial
+## Tamaño Inicial (Fase B - Control Documental)
 
 ```text
 299 referencias
+```
+
+---
+
+## Tamaño de Lote de Solicitudes (Fase A - Captura Bot)
+
+Para la división de tareas enviadas al Bot de captura, se cuenta con el parámetro independiente:
+
+```text
+TAMANO_LOTE_SOLICITUD (2000 referencias por defecto)
 ```
 
 ---

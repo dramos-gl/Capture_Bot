@@ -2,11 +2,12 @@
 
 from typing import List
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QMessageBox, QFrame, QLineEdit, QComboBox, QCheckBox, QTableWidgetItem, QLabel
+    QDialog, QVBoxLayout, QHBoxLayout, QMessageBox, QFrame, QLineEdit, QComboBox, QCheckBox, QTableWidgetItem, QLabel, QWidget
 )
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components import CustomLabel, CustomButton, StyledDataTable, CustomComboBox
 from sar.src.ui.design_system.utils.icons import Icons
+from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import ProduccionRepository
 
 class OrderProcessingDialog(QDialog):
@@ -39,18 +40,17 @@ class OrderProcessingDialog(QDialog):
         title_block.addWidget(self.lbl_title)
         title_block.addWidget(self.lbl_subtitle)
         self.header_layout.addLayout(title_block)
-        self.header_layout.addStretch()
-        
-        # Close button
-        self.btn_close_top = CustomButton("✕", is_secondary=True)
-        self.btn_close_top.setFixedSize(32, 32)
-        self.btn_close_top.setObjectName("orderProcessingCloseBtn")
-        self.btn_close_top.clicked.connect(self.reject)
-        self.header_layout.addWidget(self.btn_close_top)
         
         self.main_layout.addLayout(self.header_layout)
 
-        # 2. Information Banner
+        # 2. Information Row (Banner + Metrics Card side-by-side)
+        self.banner_row = QWidget()
+        self.banner_row.setStyleSheet("background: transparent;")
+        banner_row_layout = QHBoxLayout(self.banner_row)
+        banner_row_layout.setContentsMargins(0, 0, 0, 0)
+        banner_row_layout.setSpacing(16)
+        
+        # 2a. Information Banner
         self.banner = QFrame()
         self.banner.setObjectName("orderProcessingBanner")
         banner_layout = QHBoxLayout(self.banner)
@@ -58,8 +58,7 @@ class OrderProcessingDialog(QDialog):
         banner_layout.setSpacing(10)
         
         self.lbl_banner_icon = QLabel()
-        if hasattr(Icons, 'check'):
-            self.lbl_banner_icon.setPixmap(Icons.check("#2563EB").pixmap(18, 18))
+        self.lbl_banner_icon.setPixmap(Icons.get_pixmap("informacion", 18, Colors.ACCENT))
         banner_layout.addWidget(self.lbl_banner_icon)
         
         self.lbl_banner_text = CustomLabel(
@@ -69,8 +68,51 @@ class OrderProcessingDialog(QDialog):
         self.lbl_banner_text.setObjectName("orderProcessingBannerText")
         banner_layout.addWidget(self.lbl_banner_text, stretch=1)
         
-        self.main_layout.addWidget(self.banner)
-
+        banner_row_layout.addWidget(self.banner, stretch=3)
+        
+        # 2b. Metrics block
+        self.metric_frame = QFrame()
+        self.metric_frame.setObjectName("orderProcessingMetricBar")
+        metric_layout = QHBoxLayout(self.metric_frame)
+        metric_layout.setContentsMargins(16, 6, 16, 6)
+        metric_layout.setSpacing(8)
+        metric_layout.setAlignment(Qt.AlignCenter)
+        
+        # Color dots indicators using design system Colors
+        self.dot_pending = QLabel()
+        self.dot_pending.setFixedSize(10, 10)
+        self.dot_pending.setStyleSheet(f"background-color: {Colors.WARNING}; border-radius: 5px; border: none;")
+        
+        self.lbl_metric_pending = CustomLabel("Pendientes: 0", variant="body")
+        self.lbl_metric_pending.setObjectName("orderProcessingMetricPending")
+        
+        self.dot_auth = QLabel()
+        self.dot_auth.setFixedSize(10, 10)
+        self.dot_auth.setStyleSheet(f"background-color: {Colors.SUCCESS}; border-radius: 5px; border: none;")
+        
+        self.lbl_metric_auth = CustomLabel("Autorizadas: 0", variant="body")
+        self.lbl_metric_auth.setObjectName("orderProcessingMetricAuth")
+        
+        self.dot_rej = QLabel()
+        self.dot_rej.setFixedSize(10, 10)
+        self.dot_rej.setStyleSheet(f"background-color: {Colors.ERROR}; border-radius: 5px; border: none;")
+        
+        self.lbl_metric_rej = CustomLabel("Rechazadas: 0", variant="body")
+        self.lbl_metric_rej.setObjectName("orderProcessingMetricRej")
+        
+        metric_layout.addWidget(self.dot_pending)
+        metric_layout.addWidget(self.lbl_metric_pending)
+        metric_layout.addSpacing(8)
+        metric_layout.addWidget(self.dot_auth)
+        metric_layout.addWidget(self.lbl_metric_auth)
+        metric_layout.addSpacing(8)
+        metric_layout.addWidget(self.dot_rej)
+        metric_layout.addWidget(self.lbl_metric_rej)
+        
+        banner_row_layout.addWidget(self.metric_frame, stretch=2)
+        
+        self.main_layout.addWidget(self.banner_row)
+ 
         # 3. Filter and Selection Bar
         self.filter_layout = QHBoxLayout()
         
@@ -96,12 +138,6 @@ class OrderProcessingDialog(QDialog):
         self.cmb_filter.currentTextChanged.connect(self._filter_table_rows)
         self.filter_layout.addWidget(self.cmb_filter)
         
-        # Refresh Button
-        self.btn_refresh = CustomButton("↻")
-        self.btn_refresh.setFixedSize(35, 35)
-        self.btn_refresh.clicked.connect(self._load_data)
-        self.filter_layout.addWidget(self.btn_refresh)
-        
         self.main_layout.addLayout(self.filter_layout)
 
         # 4. Solicitudes Table
@@ -112,42 +148,36 @@ class OrderProcessingDialog(QDialog):
         self.table.itemChanged.connect(self._on_item_changed)
         self.main_layout.addWidget(self.table)
 
-        # 5. Bottom Metrics Bar and Action Buttons
+        # 5. Bottom Action Buttons Layout
         self.bottom_layout = QHBoxLayout()
         
-        # Metrics block
-        self.metric_frame = QFrame()
-        self.metric_frame.setObjectName("orderProcessingMetricBar")
-        metric_layout = QHBoxLayout(self.metric_frame)
-        metric_layout.setContentsMargins(12, 6, 12, 6)
-        metric_layout.setSpacing(16)
-        
-        self.lbl_metric_pending = CustomLabel("Pendientes: 0", variant="body")
-        self.lbl_metric_pending.setObjectName("orderProcessingMetricPending")
-        self.lbl_metric_auth = CustomLabel("Autorizadas: 0", variant="body")
-        self.lbl_metric_auth.setObjectName("orderProcessingMetricAuth")
-        self.lbl_metric_rej = CustomLabel("Rechazadas: 0", variant="body")
-        self.lbl_metric_rej.setObjectName("orderProcessingMetricRej")
-        
-        metric_layout.addWidget(self.lbl_metric_pending)
-        metric_layout.addWidget(self.lbl_metric_auth)
-        metric_layout.addWidget(self.lbl_metric_rej)
-        
-        self.bottom_layout.addWidget(self.metric_frame)
-        self.bottom_layout.addStretch()
-        
         # Action Buttons
+        self.btn_fase_b_excel = CustomButton("Generar Excel", is_secondary=True)
+        self.btn_fase_b_excel.setIcon(Icons.file_excel("#16A34A")) # Excel green
+        self.btn_fase_b_excel.setToolTip("Generar Archivos Excel Lotes")
+        self.btn_fase_b_excel.clicked.connect(self._on_generar_excel_lotes)
+        
+        self.btn_fase_b_pdf = CustomButton("Generar PDF", is_secondary=True)
+        self.btn_fase_b_pdf.setIcon(Icons.file_pdf("#DC2626")) # PDF red
+        self.btn_fase_b_pdf.setToolTip("Generar Archivos PDF Unificado")
+        self.btn_fase_b_pdf.clicked.connect(self._on_generar_pdf_unificado)
+
         self.btn_cancel = CustomButton("Cancelar", is_secondary=True)
         self.btn_cancel.clicked.connect(self.reject)
         
         self.btn_reject = CustomButton("Rechazar seleccionadas", is_secondary=False)
         self.btn_reject.setObjectName("orderProcessingRejectBtn")
+        self.btn_reject.setIcon(Icons.cancelar(Colors.ERROR))
         self.btn_reject.clicked.connect(self._on_reject_selected)
         
         self.btn_authorize = CustomButton("Autorizar seleccionadas", is_secondary=False)
         self.btn_authorize.setObjectName("orderProcessingAuthBtn")
+        self.btn_authorize.setIcon(Icons.aceptar("#FFFFFF"))
         self.btn_authorize.clicked.connect(self._on_authorize_selected)
         
+        self.bottom_layout.addWidget(self.btn_fase_b_excel)
+        self.bottom_layout.addWidget(self.btn_fase_b_pdf)
+        self.bottom_layout.addStretch()
         self.bottom_layout.addWidget(self.btn_cancel)
         self.bottom_layout.addWidget(self.btn_reject)
         self.bottom_layout.addWidget(self.btn_authorize)
@@ -201,13 +231,9 @@ class OrderProcessingDialog(QDialog):
             # Retrieve generated checkbox item
             tbl_chk_item = self.table.item(row_idx, 0)
             if tbl_chk_item:
-                if data["estado"] != "PENDIENTE_AUTORIZACION" or is_cancelled:
-                    # Remove user checkability for other states or if cancelled
-                    tbl_chk_item.setFlags(Qt.ItemFlag.ItemIsSelectable)
-                    tbl_chk_item.setCheckState(Qt.CheckState.Unchecked)
-                else:
-                    tbl_chk_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
-                    tbl_chk_item.setCheckState(Qt.CheckState.Unchecked)
+                # Allow selecting all rows for Fase B generation
+                tbl_chk_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
+                tbl_chk_item.setCheckState(Qt.CheckState.Unchecked)
                     
         self.table.blockSignals(False)
         self._filter_table_rows()
@@ -265,11 +291,11 @@ class OrderProcessingDialog(QDialog):
         self.lbl_metric_rej.setText(f"Rechazadas: {rechazadas}")
         
         # Update check all label
-        self.chk_select_all.setText(f"Seleccionar todas ({pendientes})")
-        self.chk_select_all.setEnabled(pendientes > 0)
+        self.chk_select_all.setText(f"Seleccionar todas ({total_sols})")
+        self.chk_select_all.setEnabled(total_sols > 0)
         
-        # Uncheck check-all if no pending
-        if pendientes == 0:
+        # Uncheck check-all if no items
+        if total_sols == 0:
             self.chk_select_all.setChecked(False)
 
     def _on_select_all_clicked(self):
@@ -322,9 +348,22 @@ class OrderProcessingDialog(QDialog):
                     ids.append(int(id_item.text()))
         return ids
 
+    def _get_selected_solicitud_ids_for_authorization(self) -> List[int]:
+        """Returns database IDs only for checked rows that are in PENDIENTE_AUTORIZACION state."""
+        ids = []
+        for row in range(self.table.rowCount()):
+            chk_item = self.table.item(row, 0)
+            if chk_item and chk_item.checkState() == Qt.CheckState.Checked:
+                estado_item = self.table.item(row, 8)
+                if estado_item and estado_item.text() == "PENDIENTE_AUTORIZACION":
+                    id_item = self.table.item(row, 1)
+                    if id_item:
+                        ids.append(int(id_item.text()))
+        return ids
+
     def _process_selected_with_state(self, nuevo_estado: str, label_action: str):
         """Performs transactional update in database and provides success/error notifications."""
-        selected_ids = self._get_selected_solicitud_ids()
+        selected_ids = self._get_selected_solicitud_ids_for_authorization()
         if not selected_ids:
             QMessageBox.warning(self, "Selección Requerida", "Seleccione al menos una solicitud pendiente de autorización.")
             return
@@ -348,7 +387,8 @@ class OrderProcessingDialog(QDialog):
                     f"Se procesaron con éxito {len(selected_ids)} solicitudes ({res['rows_updated']} referencias actualizadas)."
                 )
                 self._load_data()
-                self.parent().refresh_historial() # Update main view order list
+                if self.parent() and hasattr(self.parent(), 'refresh_historial'):
+                    self.parent().refresh_historial() # Update main view order list
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Ocurrió un error al procesar las solicitudes:\n{str(e)}")
 
@@ -357,6 +397,171 @@ class OrderProcessingDialog(QDialog):
 
     def _on_reject_selected(self):
         self._process_selected_with_state("RECHAZADA", "RECHAZADAS")
+
+    def _get_default_directory(self) -> str:
+        """Helper to get the default directory configured in parametro_sistema, pointing to 'boletas'."""
+        import os
+        try:
+            from sar.src.storage.repositories import ConfigRepository
+            with self.db_connector.get_session() as session:
+                config_repo = ConfigRepository(session)
+                base_path = config_repo.get_parametro("RUTA_DERECHOS")
+                if base_path:
+                    for sub in ["boletas", "BOLETAS"]:
+                        sub_path = os.path.join(base_path, sub)
+                        if os.path.exists(sub_path):
+                            return os.path.abspath(sub_path)
+                    if os.path.exists(base_path):
+                        return os.path.abspath(base_path)
+        except Exception:
+            pass
+        return ""
+
+    def _on_generar_excel_lotes(self):
+        sol_ids = self._get_selected_solicitud_ids()
+        if not sol_ids:
+            QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una solicitud de la tabla primero.")
+            return
+        
+        confirm = QMessageBox.question(
+            self,
+            "Confirmar Generación - Excel",
+            f"¿Está seguro de que desea generar los archivos Excel en lotes para las {len(sol_ids)} solicitudes seleccionadas?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm != QMessageBox.Yes:
+            return
+            
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            default_dir = self._get_default_directory()
+            dest_dir = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta para Guardar Excel Lotes", default_dir)
+            if not dest_dir:
+                return
+                
+            from sar.src.services.fase_b_service import FaseBService, FaseBWorker
+            from sar.src.ui.design_system.components import GLLoadingDialog
+            
+            service = FaseBService(self.db_connector)
+            
+            # Check for existing file conflicts
+            conflicts = service.check_conflicting_files(sol_ids, dest_dir, action_type="excel")
+            if conflicts:
+                conflicts_str = "\n".join([f"- {name}" for name in conflicts])
+                replace_confirm = QMessageBox.warning(
+                    self,
+                    "Archivos Existentes - Reemplazar",
+                    f"Los siguientes archivos ya existen en la carpeta de destino:\n\n{conflicts_str}\n\n¿Desea reemplazarlos?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if replace_confirm != QMessageBox.Yes:
+                    return
+            
+            # Show Loading dialog
+            self.loading_dialog = GLLoadingDialog("Generando archivos Excel...", self)
+            self.loading_dialog.show()
+            
+            # Start background worker
+            self.excel_worker = FaseBWorker(service, sol_ids, dest_dir, action_type="excel")
+            
+            def on_finished(result):
+                self.loading_dialog.close()
+                if result["success"]:
+                    archivos_str = "\n".join([f"- {name}" for name in result["archivos"]])
+                    msg = (
+                        f"¡Archivos Excel generados con éxito!\n\n"
+                        f"Total de referencias: {result['total_referencias']}\n"
+                        f"Total de lotes: {result['lotes_generados']}\n\n"
+                        f"Archivos:\n{archivos_str}\n\n"
+                        f"Guardados en:\n{dest_dir}"
+                    )
+                    QMessageBox.information(self, "Éxito - Generar Excel", msg)
+                else:
+                    QMessageBox.warning(self, "Advertencia - Generar Excel", result["message"])
+                    
+            def on_error(err):
+                self.loading_dialog.close()
+                QMessageBox.critical(self, "Error - Generar Excel", f"Ocurrió un error al generar los archivos Excel:\n{str(err)}")
+                
+            self.excel_worker.finished.connect(on_finished)
+            self.excel_worker.error.connect(on_error)
+            self.excel_worker.start()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error - Generar Excel", f"Ocurrió un error al iniciar la generación de Excel:\n{str(e)}")
+
+    def _on_generar_pdf_unificado(self):
+        sol_ids = self._get_selected_solicitud_ids()
+        if not sol_ids:
+            QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una solicitud de la tabla primero.")
+            return
+        
+        confirm = QMessageBox.question(
+            self,
+            "Confirmar Generación - PDF",
+            f"¿Está seguro de que desea generar los PDFs unificados en lotes para las {len(sol_ids)} solicitudes seleccionadas?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm != QMessageBox.Yes:
+            return
+            
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            default_dir = self._get_default_directory()
+            dest_dir = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta para Guardar PDF Unificado", default_dir)
+            if not dest_dir:
+                return
+                
+            from sar.src.services.fase_b_service import FaseBService, FaseBWorker
+            from sar.src.ui.design_system.components import GLLoadingDialog
+            
+            service = FaseBService(self.db_connector)
+            
+            # Check for existing file conflicts
+            conflicts = service.check_conflicting_files(sol_ids, dest_dir, action_type="pdf")
+            if conflicts:
+                conflicts_str = "\n".join([f"- {name}" for name in conflicts])
+                replace_confirm = QMessageBox.warning(
+                    self,
+                    "Archivos Existentes - Reemplazar",
+                    f"Los siguientes archivos ya existen en la carpeta de destino:\n\n{conflicts_str}\n\n¿Desea reemplazarlos?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if replace_confirm != QMessageBox.Yes:
+                    return
+            
+            # Show Loading dialog
+            self.loading_dialog = GLLoadingDialog("Generando PDFs unificados...", self)
+            self.loading_dialog.show()
+            
+            # Start background worker
+            self.pdf_worker = FaseBWorker(service, sol_ids, dest_dir, action_type="pdf")
+            
+            def on_finished(result):
+                self.loading_dialog.close()
+                if result["success"]:
+                    archivos_str = "\n".join([f"- {name}" for name in result["archivos"]])
+                    msg = (
+                        f"¡PDFs unificados generados con éxito!\n\n"
+                        f"Total de referencias: {result['total_referencias']}\n"
+                        f"Total de lotes: {result['lotes_generados']}\n\n"
+                        f"Archivos:\n{archivos_str}\n\n"
+                        f"Guardados en:\n{dest_dir}"
+                    )
+                    QMessageBox.information(self, "Éxito - Generar PDF Unificado", msg)
+                else:
+                    QMessageBox.warning(self, "Advertencia - Generar PDF Unificado", result["message"])
+                    
+            def on_error(err):
+                self.loading_dialog.close()
+                QMessageBox.critical(self, "Error - Generar PDF Unificado", f"Ocurrió un error al generar los PDFs unificados:\n{str(err)}")
+                
+            self.pdf_worker.finished.connect(on_finished)
+            self.pdf_worker.error.connect(on_error)
+            self.pdf_worker.start()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error - Generar PDF Unificado", f"Ocurrió un error al iniciar la generación de PDFs:\n{str(e)}")
 
     def _apply_readonly_if_cancelled(self):
         """Disables controls and displays a warning banner if the order is cancelled."""

@@ -257,6 +257,13 @@ class ConfigRepository(BaseRepository):
             return int(val)
         return default_size
 
+    def get_lote_solicitud_size(self, default_size: int = 2000) -> int:
+        """Helper to get TAMANO_LOTE_SOLICITUD parameter or return default."""
+        val = self.get_parametro("TAMANO_LOTE_SOLICITUD")
+        if val is not None and val.isdigit():
+            return int(val)
+        return default_size
+
     def get_all_parametros(self) -> List[ParametroSistema]:
         stmt = select(ParametroSistema).order_by(ParametroSistema.codigo)
         return list(self.session.execute(stmt).scalars().all())
@@ -439,18 +446,18 @@ class OperacionRepository(BaseRepository):
             return False
             
         estado_codigo = self.session.execute(select(EstadoSistema.codigo).where(EstadoSistema.estado_id == solicitud.estado_id)).scalar_one()
-        if estado_codigo != 'PENDIENTE':
-            raise ValueError("Solo se pueden asignar solicitudes en estado PENDIENTE.")
-            
-        # Buscar o crear el estado ASIGNADO
-        estado_asignado = self.session.execute(select(EstadoSistema).where(EstadoSistema.codigo == 'ASIGNADO')).scalars().first()
-        if not estado_asignado:
-            estado_asignado = EstadoSistema(entidad='SOLICITUD', codigo='ASIGNADO', descripcion='ASIGNADO')
-            self.session.add(estado_asignado)
-            self.session.flush()
-            
+        
+        # Asignar el nuevo usuario siempre
         solicitud.usuario_asignado = usuario_id
-        solicitud.estado_id = estado_asignado.estado_id
+        
+        # Solo actualizar el estado a ASIGNADO si el estado actual es PENDIENTE
+        if estado_codigo == 'PENDIENTE':
+            estado_asignado = self.session.execute(select(EstadoSistema).where(EstadoSistema.codigo == 'ASIGNADO')).scalars().first()
+            if not estado_asignado:
+                estado_asignado = EstadoSistema(entidad='SOLICITUD', codigo='ASIGNADO', descripcion='ASIGNADO')
+                self.session.add(estado_asignado)
+                self.session.flush()
+            solicitud.estado_id = estado_asignado.estado_id
         
         # Actualizar la orden a 'ABIERTA' si su estado actual es 'PENDIENTE'
         if solicitud.grupo and solicitud.grupo.orden:
@@ -674,6 +681,74 @@ class ProduccionRepository(BaseRepository):
                 "procesado_por": row.usuario_asignado_nombre or "Sin Asignar"
             })
         return res
+
+    def get_referencias_paginated(self, limit: int = 200, offset: int = 0, search_text: str = "", estado_filter: str = "Todos", orden_ids: list = None) -> tuple:
+        """
+        Returns a paginated list of references and the total count matching the filters.
+        """
+        from sqlalchemy import text
+        
+        # Build base WHERE clause
+        conditions = []
+        params = {"lim": limit, "off": offset}
+        
+        if orden_ids:
+            conditions.append("grupo_id IN (SELECT g_ref.grupo_id FROM sar_produccion.grupo_referencia g_ref WHERE g_ref.orden_id IN :orden_ids_param)")
+            params["orden_ids_param"] = tuple(orden_ids)
+            
+        if estado_filter and estado_filter != "Todos":
+            conditions.append("estado_codigo = :estado")
+            params["estado"] = estado_filter
+            
+        if search_text:
+            search_conds = [
+                "CAST(referencia_id AS TEXT) ILIKE :search",
+                "referencia_portal ILIKE :search",
+                "CAST(consecutivo_grupo AS TEXT) ILIKE :search",
+                "CAST(importe AS TEXT) ILIKE :search",
+                "folio_orden ILIKE :search",
+                "rfc_razon_social ILIKE :search",
+                "concepto_nombre ILIKE :search",
+                "delegacion_nombre ILIKE :search",
+                "estado_codigo ILIKE :search",
+                "usuario_asignado_nombre ILIKE :search"
+            ]
+            conditions.append(f"({' OR '.join(search_conds)})")
+            params["search"] = f"%{search_text}%"
+            
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        
+        # Query total count
+        count_stmt = text(f"SELECT COUNT(*) FROM sar_produccion.vw_referencias_detalle {where_clause}")
+        total_count = self.session.execute(count_stmt, params).scalar()
+        
+        # Query page records
+        query_stmt = text(f"""
+            SELECT * FROM sar_produccion.vw_referencias_detalle 
+            {where_clause} 
+            ORDER BY fecha_generacion DESC, referencia_id DESC
+            LIMIT :lim OFFSET :off
+        """)
+        result = self.session.execute(query_stmt, params)
+        
+        res = []
+        for row in result:
+            res.append({
+                "referencia_id": row.referencia_id,
+                "referencia_portal": row.referencia_portal,
+                "importe": str(row.importe) if row.importe else "",
+                "consecutivo_grupo": row.consecutivo_grupo,
+                "fecha_generacion": row.fecha_generacion.strftime("%Y-%m-%d") if row.fecha_generacion else "",
+                "fecha_vigencia": row.fecha_vigencia.strftime("%Y-%m-%d") if row.fecha_vigencia else "",
+                "estado": row.estado_codigo,
+                "folio_orden": row.folio_orden,
+                "grupo_id": row.grupo_id,
+                "empresa": row.rfc_razon_social,
+                "concepto": row.concepto_nombre,
+                "delegacion": row.delegacion_nombre or "Sin Delegación",
+                "procesado_por": row.usuario_asignado_nombre or "Sin Asignar"
+            })
+        return res, total_count
         
     def get_ordenes(self) -> List[dict]:
         from sqlalchemy import text
@@ -1136,9 +1211,15 @@ class ProduccionRepository(BaseRepository):
         self.session.flush()
         return True
 
-    def get_dashboard_kpis(self) -> dict:
+    def get_dashboard_kpis(self, orden_ids: list = None) -> dict:
         from sqlalchemy import select, func
-        total_generadas = self.session.execute(select(func.count(Referencia.referencia_id))).scalar_one()
+        from sar.src.storage.models import GrupoReferencia
+        
+        query_total = select(func.count(Referencia.referencia_id))
+        if orden_ids:
+            query_total = query_total.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
+            
+        total_generadas = self.session.execute(query_total).scalar_one()
         
         try:
             pdte_codes = ["GENERADA", "ASIGNADA", "PENDIENTE"]
@@ -1165,9 +1246,18 @@ class ProduccionRepository(BaseRepository):
                 except ValueError:
                     pass
             
-            pendientes = self.session.execute(select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(pdte_ids))).scalar_one() if pdte_ids else 0
-            autorizadas = self.session.execute(select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(aut_ids))).scalar_one() if aut_ids else 0
-            con_error = self.session.execute(select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(err_ids))).scalar_one() if err_ids else 0
+            query_pdte = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(pdte_ids))
+            query_aut = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(aut_ids))
+            query_err = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(err_ids))
+            
+            if orden_ids:
+                query_pdte = query_pdte.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
+                query_aut = query_aut.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
+                query_err = query_err.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
+                
+            pendientes = self.session.execute(query_pdte).scalar_one() if pdte_ids else 0
+            autorizadas = self.session.execute(query_aut).scalar_one() if aut_ids else 0
+            con_error = self.session.execute(query_err).scalar_one() if err_ids else 0
         except Exception:
             pendientes = 0
             autorizadas = 0

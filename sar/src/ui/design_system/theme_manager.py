@@ -334,18 +334,24 @@ class ThemeManager:
         }}
         
         QLabel#orderProcessingMetricPending {{
-            color: {Colors.WARNING};
+            color: {txt_primary};
             font-weight: {Typography.WEIGHT_BOLD};
         }}
         
         QLabel#orderProcessingMetricAuth {{
-            color: {Colors.SUCCESS};
+            color: {txt_primary};
             font-weight: {Typography.WEIGHT_BOLD};
         }}
         
         QLabel#orderProcessingMetricRej {{
-            color: {Colors.ERROR};
+            color: {txt_primary};
             font-weight: {Typography.WEIGHT_BOLD};
+        }}
+        
+        /* Table contour/border styling inside dialog */
+        QDialog#orderProcessingDialog QTableWidget {{
+            border: {Spacing.BORDER_WIDTH_SM} solid {border};
+            border-radius: {Spacing.RADIUS_MD};
         }}
         
         QPushButton#orderProcessingRejectBtn {{

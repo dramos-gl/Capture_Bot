@@ -85,6 +85,10 @@ class CrudTablePanel(QWidget):
                 self.table.setItem(row_idx, col_idx, item)
         
         self.table.resizeColumnsToContents()
+        
+        # Enforce last column stretching to fill viewport width
+        if self.table.columnCount() > 0:
+            self.table.horizontalHeader().setSectionResizeMode(self.table.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
                 
     def _on_selection_changed(self):
         selected_items = self.table.selectedItems()

@@ -76,9 +76,9 @@ class MainView(QWidget):
             self.stacked_widget.setCurrentWidget(self.orders_view)
             self.orders_view.refresh_historial()
             if view_key == "ordenes_capturadas":
-                self.orders_view.tabs.setCurrentIndex(0)
-            elif view_key == "capturar_orden":
                 self.orders_view.tabs.setCurrentIndex(1)
+            elif view_key == "capturar_orden":
+                self.orders_view.tabs.setCurrentIndex(0)
         elif view_key == "solicitudes":
             self.stacked_widget.setCurrentWidget(self.requests_view)
             self.requests_view.refresh_data()

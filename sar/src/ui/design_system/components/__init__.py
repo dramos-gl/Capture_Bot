@@ -12,6 +12,7 @@ from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStat
 from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
 from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.molecules.gl_metric_box import MetricBox
+from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
 
 # Organisms
 from sar.src.ui.design_system.components.organisms.gl_sidebar import NavigationSidebar
@@ -35,5 +36,6 @@ __all__ = [
     "FilterBar",
     "CustomComboBox",
     "LabeledComboBox",
-    "MetricBox"
+    "MetricBox",
+    "GLLoadingDialog"
 ]
