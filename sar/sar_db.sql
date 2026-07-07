@@ -566,6 +566,38 @@ INSERT INTO sar_catalogo.evento_sistema (codigo, descripcion) VALUES
 ('LOGOUT', 'Cierre de sesión de usuario en la aplicación'),
 ('ERROR_CRITICO', 'Registro de un error crítico de ejecución o fallo del bot');
 
+-- Insertar Estados del Sistema Estandarizados en el Catálogo
+INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion) VALUES
+('orden_generacion', 'ABIERTA', 'Orden abierta para edición'),
+('orden_generacion', 'COMPLETADA', 'Orden con todas las referencias generadas'),
+('orden_generacion', 'AUTORIZADA', 'Orden con todas las referencias autorizadas'),
+('orden_generacion', 'CANCELADA', 'Orden cancelada'),
+('grupo_referencia', 'PENDIENTE', 'Grupo pendiente de procesamiento'),
+('grupo_referencia', 'COMPLETADO', 'Grupo completamente generado'),
+('grupo_referencia', 'AUTORIZADO', 'Grupo completamente autorizado'),
+('grupo_referencia', 'CANCELADO', 'Grupo cancelado'),
+('solicitud', 'PENDIENTE', 'Solicitud pendiente de procesamiento por bot'),
+('solicitud', 'PROCESANDO', 'Solicitud siendo procesada por bot'),
+('solicitud', 'ASIGNADA', 'Solicitud asignada a operador/bot'),
+('solicitud', 'COMPLETADA', 'Solicitud completada con éxito'),
+('solicitud', 'AUTORIZADA', 'Solicitud autorizada de pago'),
+('solicitud', 'CANCELADA', 'Solicitud cancelada'),
+('solicitud', 'ERROR', 'Solicitud finalizada con error en bot'),
+('solicitud', 'FACTURADA', 'Solicitud completamente facturada'),
+('solicitud', 'FACTURADA_PARCIAL', 'Solicitud parcialmente facturada'),
+('referencia', 'PENDIENTE', 'Referencia pendiente'),
+('referencia', 'GENERADA', 'Referencia generada en Tributanet'),
+('referencia', 'ASIGNADA', 'Referencia asignada a operador'),
+('referencia', 'PENDIENTE_AUTORIZACION', 'Referencia pendiente de validación de pago'),
+('referencia', 'AUTORIZADA', 'Referencia con pago verificado'),
+('referencia', 'RECHAZADA', 'Referencia rechazada de pago'),
+('referencia', 'EXPIRADA', 'Referencia vencida sin pago'),
+('referencia', 'FACTURADA', 'Referencia facturada en SATQ'),
+('referencia', 'ERROR', 'Referencia con error en proceso'),
+('referencia', 'ERROR_VALIDACION', 'Referencia con error de validación'),
+('general', 'CANCELADO', 'Estado general cancelado')
+ON CONFLICT (entidad, codigo) DO NOTHING;
+
 -- ===========================================================================
 -- VISTAS: sar_produccion
 -- ===========================================================================

@@ -143,6 +143,7 @@ class RequestsView(QWidget):
         
         self.selected_orden_ids = []
         self.todas_las_ordenes = []
+        self.is_custom_filter = False
         
         # Add order filter button to FilterBar layout
         from sar.src.ui.design_system.utils.icons import Icons
@@ -456,6 +457,7 @@ class RequestsView(QWidget):
         
     def refresh_data(self):
         """Fetches the latest Solicitudes from the database."""
+        self._load_available_orders(preserve_selection=True)
         try:
             with self.db_connector.get_session() as session:
                 repo = OperacionRepository(session)
@@ -522,7 +524,7 @@ class RequestsView(QWidget):
             else:
                 self.table.setRowHidden(row, True)
 
-    def _load_available_orders(self):
+    def _load_available_orders(self, preserve_selection=False):
         try:
             with self.db_connector.get_session() as session:
                 from sar.src.storage.repositories import ProduccionRepository
@@ -530,8 +532,12 @@ class RequestsView(QWidget):
                 self.todas_las_ordenes = repo.get_ordenes()
                 
             if self.todas_las_ordenes:
-                # Default to the latest created order (first one since it is sorted DESC by date)
-                self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
+                valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
+                if preserve_selection and self.is_custom_filter and self.selected_orden_ids:
+                    self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
+                
+                if not self.selected_orden_ids or (preserve_selection and not self.is_custom_filter):
+                    self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
             else:
                 self.selected_orden_ids = []
         except Exception as e:
@@ -572,6 +578,7 @@ class RequestsView(QWidget):
         action_all.setChecked(is_all_selected)
         
         def toggle_all(checked):
+            self.is_custom_filter = True
             if checked:
                 self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
             else:
@@ -590,6 +597,7 @@ class RequestsView(QWidget):
             
             def make_toggle_handler(oid):
                 def handler(checked):
+                    self.is_custom_filter = True
                     if checked:
                         if oid not in self.selected_orden_ids:
                             self.selected_orden_ids.append(oid)

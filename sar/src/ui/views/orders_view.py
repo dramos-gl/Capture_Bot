@@ -80,9 +80,9 @@ class OrdersView(QWidget):
         # Main Card for the Data Table
         self.historial_card = CustomCard(parent=self)
         
-        headers = ["✔", "ID", "Folio", "Descripción", "Estado", "Creador", "Fecha Creación", "Total Solicitadas", "Total Generadas"]
+        headers = ["ID", "Folio", "Descripción", "Estado", "Creador", "Fecha Creación", "Total Solicitadas", "Total Generadas"]
         self.table_historial = StyledDataTable(headers, parent=self)
-        self.table_historial.setColumnHidden(1, True) # Ocultar ID interno
+        self.table_historial.setColumnHidden(0, True) # Ocultar ID interno
         self.table_historial.cellDoubleClicked.connect(self._on_row_double_clicked)
         
         self.historial_card.add_widget(self.table_historial)
@@ -312,7 +312,6 @@ class OrdersView(QWidget):
                 data_rows = []
                 for o in self._all_ordenes_data:
                     data_rows.append([
-                        "", # Checkbox vacio inicial
                         str(o["orden_id"]),
                         o["folio"],
                         o["descripcion"],
@@ -323,7 +322,7 @@ class OrdersView(QWidget):
                         str(o["total_generadas"])
                     ])
                     
-                self.table_historial.populate_rows(data_rows, checkable_first_col=True)
+                self.table_historial.populate_rows(data_rows, checkable_first_col=False)
                 self._apply_historial_filters()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo cargar el historial de órdenes:\n{str(e)}")
@@ -341,8 +340,8 @@ class OrdersView(QWidget):
         estado_filter = getattr(self, '_current_estado_filter', "Todas")
         
         for row in range(self.table_historial.rowCount()):
-            # Estado is in column 4
-            estado_item = self.table_historial.item(row, 4)
+            # Estado is in column 3
+            estado_item = self.table_historial.item(row, 3)
             estado = estado_item.text() if estado_item else ""
             
             # 1. State Filter
@@ -363,7 +362,7 @@ class OrdersView(QWidget):
             self.table_historial.setRowHidden(row, not (state_match and text_match))
 
     def _on_row_double_clicked(self, row: int, column: int):
-        id_item = self.table_historial.item(row, 1)
+        id_item = self.table_historial.item(row, 0)
         if id_item:
             orden_id = int(id_item.text())
             from sar.src.ui.views.order_processing_dialog import OrderProcessingDialog
@@ -371,18 +370,16 @@ class OrdersView(QWidget):
             dialog.exec()
 
     def _get_selected_ordenes(self) -> list[int]:
-        from PySide6.QtCore import Qt
         ids = []
-        for row in range(self.table_historial.rowCount()):
-            item_check = self.table_historial.item(row, 0)
-            if item_check and item_check.checkState() == Qt.CheckState.Checked:
-                ids.append(int(self.table_historial.item(row, 1).text()))
-                
-        if not ids:
-            selected = self.table_historial.selectedItems()
-            if selected:
-                row = selected[0].row()
-                ids.append(int(self.table_historial.item(row, 1).text()))
+        selected = self.table_historial.selectedItems()
+        if selected:
+            rows = set()
+            for item in selected:
+                rows.add(item.row())
+            for row in rows:
+                id_item = self.table_historial.item(row, 0)
+                if id_item:
+                    ids.append(int(id_item.text()))
         return ids
 
     def _change_orden_estado(self, estado_codigo: str):
@@ -390,22 +387,54 @@ class OrdersView(QWidget):
         if not orden_ids:
             QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una orden para procesar.")
             return
+
+        total_referencias_acumuladas = 0
+        try:
+            from sar.src.storage.repositories import ProduccionRepository
+            with self.db_connector.get_session() as session:
+                repo = ProduccionRepository(session)
+                for oid in orden_ids:
+                    res = repo.check_orden_ready_for_masivo(oid)
+                    if not res["ready"]:
+                        QMessageBox.warning(
+                            self, 
+                            "Acción Inválida", 
+                            f"No se puede aplicar la acción masiva sobre la orden ID {oid}:\n\n"
+                            f"{res['reason']}\n\n"
+                            f"Sugerencia: Vaya al módulo 'Procesar Solicitud de la Orden' "
+                            f"haciendo doble clic sobre la orden para realizar un procesamiento parcial."
+                        )
+                        return
+                    total_referencias_acumuladas += res.get("total_referencias", 0)
+        except Exception as e:
+            QMessageBox.critical(self, "Error de Validación", f"No se pudo validar el estado de las órdenes:\n{str(e)}")
+            return
             
-        reply = QMessageBox.question(self, "Confirmar Acción", 
-            f"¿Estás seguro de que deseas marcar {len(orden_ids)} orden(es) como {estado_codigo}? Esto actualizará todas sus referencias.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        reply = QMessageBox.question(
+            self, 
+            "Confirmar Acción", 
+            f"¿Estás seguro de que deseas marcar {len(orden_ids)} orden(es) como {estado_codigo}?\n\n"
+            f"Se procesará un total de {total_referencias_acumuladas} referencias en estado PENDIENTE_AUTORIZACION.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
             
         if reply == QMessageBox.Yes:
             try:
                 from sar.src.storage.repositories import ProduccionRepository
+                main_window = self.window()
+                current_sesion_id = getattr(main_window, 'current_sesion_id', None)
                 with self.db_connector.get_session() as session:
+                    from sar.src.storage.models import Sesion
+                    db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
+                    usuario_id = db_sesion.usuario_id if db_sesion else 1
+
                     repo = ProduccionRepository(session)
                     for oid in orden_ids:
-                        repo.update_orden_estado_masivo(oid, estado_codigo)
-                QMessageBox.information(self, "Éxito", f"Las órdenes fueron procesadas como {estado_codigo}.")
+                        repo.update_orden_estado_masivo(oid, estado_codigo, usuario_id=usuario_id, sesion_id=current_sesion_id)
+                QMessageBox.information(self, "Éxito", f"Las órdenes fueron procesadas como {estado_codigo} con éxito.")
                 self.refresh_historial()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Ocurrió un error: {str(e)}")
+                QMessageBox.critical(self, "Error", f"Ocurrió un error al procesar las órdenes:\n{str(e)}")
 
     def _on_autorizar_orden(self):
         self._change_orden_estado("AUTORIZADA")
@@ -427,10 +456,16 @@ class OrdersView(QWidget):
         if reply == QMessageBox.Yes:
             try:
                 from sar.src.storage.repositories import ProduccionRepository
+                main_window = self.window()
+                current_sesion_id = getattr(main_window, 'current_sesion_id', None)
                 with self.db_connector.get_session() as session:
+                    from sar.src.storage.models import Sesion
+                    db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
+                    usuario_id = db_sesion.usuario_id if db_sesion else 1
+
                     repo = ProduccionRepository(session)
                     for oid in orden_ids:
-                        repo.cancelar_orden_transaccional(oid)
+                        repo.cancelar_orden_transaccional(oid, usuario_id=usuario_id, sesion_id=current_sesion_id)
                     session.commit()
                 QMessageBox.information(self, "Éxito", f"Las órdenes fueron canceladas con éxito.")
                 self.refresh_historial()

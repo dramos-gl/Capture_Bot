@@ -358,7 +358,7 @@ class BotView(QWidget):
             
         row = selected[0].row()
         estado = self.table.item(row, 7).text().upper()
-        valid_states = ("ASIGNADO", "ASIGNADA", "PROCESANDO", "ERROR")
+        valid_states = ("ASIGNADA", "PROCESANDO", "ERROR")
         if estado not in valid_states:
             QMessageBox.warning(
                 self, 
@@ -423,7 +423,7 @@ class BotView(QWidget):
                         text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
                         {"eid": sol.estado_id}
                     ).scalar()
-                    valid_states = ("ASIGNADO", "ASIGNADA", "PROCESANDO", "ERROR")
+                    valid_states = ("ASIGNADA", "PROCESANDO", "ERROR")
                     if state_code not in valid_states:
                         QMessageBox.warning(
                             self, 

@@ -20,7 +20,7 @@ class OrderProcessingDialog(QDialog):
         self.solicitudes_data = []
         self.orden_estado = ""
         
-        self.setWindowTitle("Procesar Solicitudes de la Orden")
+        self.setWindowTitle("Procesar Referencias por Solicitud")
         self.resize(1000, 680)
         self.setMinimumSize(900, 600)
         self.setObjectName("orderProcessingDialog")
@@ -32,8 +32,8 @@ class OrderProcessingDialog(QDialog):
 
         # 1. Header Section
         self.header_layout = QHBoxLayout()
-        self.lbl_title = CustomLabel("Procesar Solicitudes de la Orden", variant="header")
-        self.lbl_subtitle = CustomLabel("Orden: ... | Total de solicitudes: 0 | Pendientes de autorización: 0", variant="body")
+        self.lbl_title = CustomLabel("Procesar Referencias por Solicitud", variant="header")
+        self.lbl_subtitle = CustomLabel("Orden: ... | Total de solicitudes: 0 | Referencias pendientes por autorización: 0", variant="body")
         self.lbl_subtitle.setObjectName("orderProcessingSubtitle")
         
         title_block = QVBoxLayout()
@@ -43,48 +43,35 @@ class OrderProcessingDialog(QDialog):
         
         self.main_layout.addLayout(self.header_layout)
 
-        # 2. Information Row (Banner + Metrics Card side-by-side)
+        # 2. Information Row (Metrics Card stretching full-width)
         self.banner_row = QWidget()
         self.banner_row.setStyleSheet("background: transparent;")
         banner_row_layout = QHBoxLayout(self.banner_row)
         banner_row_layout.setContentsMargins(0, 0, 0, 0)
-        banner_row_layout.setSpacing(16)
+        banner_row_layout.setSpacing(0)
         
-        # 2a. Information Banner
-        self.banner = QFrame()
-        self.banner.setObjectName("orderProcessingBanner")
-        banner_layout = QHBoxLayout(self.banner)
-        banner_layout.setContentsMargins(12, 12, 12, 12)
-        banner_layout.setSpacing(10)
-        
-        self.lbl_banner_icon = QLabel()
-        self.lbl_banner_icon.setPixmap(Icons.get_pixmap("informacion", 18, Colors.ACCENT))
-        banner_layout.addWidget(self.lbl_banner_icon)
-        
-        self.lbl_banner_text = CustomLabel(
-            "Seleccione las solicitudes que desea procesar. Puede autorizar o rechazar individualmente o todas las pendientes.",
-            variant="body"
-        )
-        self.lbl_banner_text.setObjectName("orderProcessingBannerText")
-        banner_layout.addWidget(self.lbl_banner_text, stretch=1)
-        
-        banner_row_layout.addWidget(self.banner, stretch=3)
-        
-        # 2b. Metrics block
+        # Metrics block
         self.metric_frame = QFrame()
         self.metric_frame.setObjectName("orderProcessingMetricBar")
         metric_layout = QHBoxLayout(self.metric_frame)
         metric_layout.setContentsMargins(16, 6, 16, 6)
-        metric_layout.setSpacing(8)
+        metric_layout.setSpacing(16)
         metric_layout.setAlignment(Qt.AlignCenter)
         
         # Color dots indicators using design system Colors
-        self.dot_pending = QLabel()
-        self.dot_pending.setFixedSize(10, 10)
-        self.dot_pending.setStyleSheet(f"background-color: {Colors.WARNING}; border-radius: 5px; border: none;")
+        self.dot_solicitadas = QLabel()
+        self.dot_solicitadas.setFixedSize(10, 10)
+        self.dot_solicitadas.setStyleSheet(f"background-color: #64748B; border-radius: 5px; border: none;")
         
-        self.lbl_metric_pending = CustomLabel("Pendientes: 0", variant="body")
-        self.lbl_metric_pending.setObjectName("orderProcessingMetricPending")
+        self.lbl_metric_solicitadas = CustomLabel("Solicitadas: 0", variant="body")
+        self.lbl_metric_solicitadas.setObjectName("orderProcessingMetricSolicitadas")
+        
+        self.dot_generadas = QLabel()
+        self.dot_generadas.setFixedSize(10, 10)
+        self.dot_generadas.setStyleSheet(f"background-color: {Colors.PRIMARY}; border-radius: 5px; border: none;")
+        
+        self.lbl_metric_generadas = CustomLabel("Generadas: 0", variant="body")
+        self.lbl_metric_generadas.setObjectName("orderProcessingMetricGeneradas")
         
         self.dot_auth = QLabel()
         self.dot_auth.setFixedSize(10, 10)
@@ -100,18 +87,59 @@ class OrderProcessingDialog(QDialog):
         self.lbl_metric_rej = CustomLabel("Rechazadas: 0", variant="body")
         self.lbl_metric_rej.setObjectName("orderProcessingMetricRej")
         
-        metric_layout.addWidget(self.dot_pending)
-        metric_layout.addWidget(self.lbl_metric_pending)
-        metric_layout.addSpacing(8)
+        self.dot_facturadas = QLabel()
+        self.dot_facturadas.setFixedSize(10, 10)
+        self.dot_facturadas.setStyleSheet(f"background-color: {Colors.ACCENT_VIOLET}; border-radius: 5px; border: none;")
+        
+        self.lbl_metric_facturadas = CustomLabel("Facturadas: 0", variant="body")
+        self.lbl_metric_facturadas.setObjectName("orderProcessingMetricFacturadas")
+        
+        metric_layout.addWidget(self.dot_solicitadas)
+        metric_layout.addWidget(self.lbl_metric_solicitadas)
+        metric_layout.addSpacing(24)
+        metric_layout.addWidget(self.dot_generadas)
+        metric_layout.addWidget(self.lbl_metric_generadas)
+        metric_layout.addSpacing(24)
         metric_layout.addWidget(self.dot_auth)
         metric_layout.addWidget(self.lbl_metric_auth)
-        metric_layout.addSpacing(8)
+        metric_layout.addSpacing(24)
         metric_layout.addWidget(self.dot_rej)
         metric_layout.addWidget(self.lbl_metric_rej)
+        metric_layout.addSpacing(24)
+        metric_layout.addWidget(self.dot_facturadas)
+        metric_layout.addWidget(self.lbl_metric_facturadas)
         
-        banner_row_layout.addWidget(self.metric_frame, stretch=2)
-        
+        banner_row_layout.addWidget(self.metric_frame)
         self.main_layout.addWidget(self.banner_row)
+        
+        # Cancelled Warning Banner (Hidden by default, shown only if order is CANCELADA)
+        self.cancelled_banner = QFrame()
+        self.cancelled_banner.setObjectName("orderProcessingBanner")
+        self.cancelled_banner.setStyleSheet("""
+            QFrame#orderProcessingBanner {
+                background-color: #FEF2F2;
+                border: 1px solid #FCA5A5;
+                border-radius: 8px;
+                padding: 12px;
+            }
+        """)
+        cb_layout = QHBoxLayout(self.cancelled_banner)
+        cb_layout.setContentsMargins(12, 12, 12, 12)
+        cb_layout.setSpacing(10)
+        
+        self.lbl_cb_icon = QLabel()
+        self.lbl_cb_icon.setPixmap(Icons.alert_triangle("#EF4444").pixmap(18, 18))
+        cb_layout.addWidget(self.lbl_cb_icon)
+        
+        self.lbl_cb_text = CustomLabel(
+            "Esta orden se encuentra CANCELADA. Solo se permite la visualización de sus solicitudes.",
+            variant="body"
+        )
+        self.lbl_cb_text.setStyleSheet("color: #991B1B; font-weight: bold;")
+        cb_layout.addWidget(self.lbl_cb_text, stretch=1)
+        
+        self.cancelled_banner.setVisible(False)
+        self.main_layout.addWidget(self.cancelled_banner)
  
         # 3. Filter and Selection Bar
         self.filter_layout = QHBoxLayout()
@@ -162,7 +190,9 @@ class OrderProcessingDialog(QDialog):
         self.btn_fase_b_pdf.setToolTip("Generar Archivos PDF Unificado")
         self.btn_fase_b_pdf.clicked.connect(self._on_generar_pdf_unificado)
 
-        self.btn_cancel = CustomButton("Cancelar", is_secondary=True)
+        self.btn_cancel = CustomButton("Cancelar", is_secondary=False)
+        self.btn_cancel.setObjectName("dangerBtn")
+        self.btn_cancel.setIcon(Icons.cancelar("#FFFFFF"))
         self.btn_cancel.clicked.connect(self.reject)
         
         self.btn_reject = CustomButton("Rechazar seleccionadas", is_secondary=False)
@@ -177,10 +207,10 @@ class OrderProcessingDialog(QDialog):
         
         self.bottom_layout.addWidget(self.btn_fase_b_excel)
         self.bottom_layout.addWidget(self.btn_fase_b_pdf)
-        self.bottom_layout.addStretch()
-        self.bottom_layout.addWidget(self.btn_cancel)
-        self.bottom_layout.addWidget(self.btn_reject)
         self.bottom_layout.addWidget(self.btn_authorize)
+        self.bottom_layout.addWidget(self.btn_reject)
+        self.bottom_layout.addWidget(self.btn_cancel)
+        self.bottom_layout.addStretch()
         
         self.main_layout.addLayout(self.bottom_layout)
         
@@ -276,19 +306,25 @@ class OrderProcessingDialog(QDialog):
     def _update_metrics_and_summary(self):
         """Recalculates counts and updates the subtitles and metrics block in real time."""
         total_sols = len(self.solicitudes_data)
-        pendientes = sum(1 for d in self.solicitudes_data if d["estado"] == "PENDIENTE_AUTORIZACION")
-        autorizadas = sum(1 for d in self.solicitudes_data if d["estado"] == "AUTORIZADA")
-        rechazadas = sum(1 for d in self.solicitudes_data if d["estado"] == "RECHAZADA")
+        
+        total_solicitadas = sum(d["cantidad_solicitada"] for d in self.solicitudes_data)
+        total_generadas = sum(d["cantidad_generada"] for d in self.solicitudes_data)
+        total_autorizadas = sum(d["count_autorizada"] for d in self.solicitudes_data)
+        total_rechazadas = sum(d["count_rechazada"] for d in self.solicitudes_data)
+        total_facturadas = sum(d.get("count_facturada", 0) for d in self.solicitudes_data)
+        total_pendientes = sum(d["count_pendiente"] for d in self.solicitudes_data)
         
         folio = self.solicitudes_data[0]["folio_orden"] if self.solicitudes_data else "N/A"
         
         self.lbl_subtitle.setText(
-            f"Orden: {folio} | Total de solicitudes: {total_sols} | Pendientes de autorización: {pendientes}"
+            f"Orden: {folio} | Total de solicitudes: {total_sols} | Referencias pendientes por autorización: {total_pendientes}"
         )
         
-        self.lbl_metric_pending.setText(f"Pendientes: {pendientes}")
-        self.lbl_metric_auth.setText(f"Autorizadas: {autorizadas}")
-        self.lbl_metric_rej.setText(f"Rechazadas: {rechazadas}")
+        self.lbl_metric_solicitadas.setText(f"Solicitadas: {total_solicitadas}")
+        self.lbl_metric_generadas.setText(f"Generadas: {total_generadas}")
+        self.lbl_metric_auth.setText(f"Autorizadas: {total_autorizadas}")
+        self.lbl_metric_rej.setText(f"Rechazadas: {total_rechazadas}")
+        self.lbl_metric_facturadas.setText(f"Facturadas: {total_facturadas}")
         
         # Update check all label
         self.chk_select_all.setText(f"Seleccionar todas ({total_sols})")
@@ -363,14 +399,50 @@ class OrderProcessingDialog(QDialog):
 
     def _process_selected_with_state(self, nuevo_estado: str, label_action: str):
         """Performs transactional update in database and provides success/error notifications."""
-        selected_ids = self._get_selected_solicitud_ids_for_authorization()
+        selected_ids = self._get_selected_solicitud_ids()
         if not selected_ids:
-            QMessageBox.warning(self, "Selección Requerida", "Seleccione al menos una solicitud pendiente de autorización.")
+            QMessageBox.warning(self, "Selección Requerida", "Seleccione al menos una solicitud de la tabla primero.")
+            return
+
+        invalid_sols = []
+        valid_ids = []
+        for sol_id in selected_ids:
+            data = next((d for d in self.solicitudes_data if d["solicitud_id"] == sol_id), None)
+            if data:
+                is_pending_state = (data["estado"] == "PENDIENTE_AUTORIZACION")
+                all_refs_pending = (
+                    data["count_pendiente"] == data["cantidad_generada"] and 
+                    data["count_autorizada"] == 0 and 
+                    data["count_rechazada"] == 0
+                )
+                
+                if not (is_pending_state and all_refs_pending):
+                    invalid_sols.append(
+                        f"- Solicitud ID {sol_id} (Estado: {data['estado']}, "
+                        f"Pendientes: {data['count_pendiente']}/{data['cantidad_generada']})"
+                    )
+                else:
+                    valid_ids.append(sol_id)
+
+        if invalid_sols:
+            invalid_list = "\n".join(invalid_sols)
+            QMessageBox.warning(
+                self, 
+                "Acción Bloqueada", 
+                f"No se pueden procesar las siguientes solicitudes porque no se encuentran en estado PENDIENTE_AUTORIZACION "
+                f"o tienen referencias ya autorizadas/rechazadas:\n\n"
+                f"{invalid_list}\n\n"
+                f"Por favor, desmarque estas solicitudes antes de proceder."
+            )
+            return
+
+        if not valid_ids:
+            QMessageBox.warning(self, "Selección Requerida", "Seleccione al menos una solicitud válida pendiente de autorización.")
             return
             
         reply = QMessageBox.question(
             self, "Confirmar Procesamiento",
-            f"¿Estás seguro de que deseas marcar las {len(selected_ids)} solicitudes seleccionadas como {label_action}?\n"
+            f"¿Estás seguro de que deseas marcar las {len(valid_ids)} solicitudes seleccionadas como {label_action}?\n"
             "Esto actualizará todas sus referencias hijas pendientes.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
@@ -379,12 +451,12 @@ class OrderProcessingDialog(QDialog):
             try:
                 with self.db_connector.get_session() as session:
                     repo = ProduccionRepository(session)
-                    res = repo.procesar_estado_solicitudes_seleccionadas(selected_ids, nuevo_estado)
+                    res = repo.procesar_estado_solicitudes_seleccionadas(valid_ids, nuevo_estado)
                     session.commit()
                     
                 QMessageBox.information(
                     self, "Éxito", 
-                    f"Se procesaron con éxito {len(selected_ids)} solicitudes ({res['rows_updated']} referencias actualizadas)."
+                    f"Se procesaron con éxito {len(valid_ids)} solicitudes ({res['rows_updated']} referencias actualizadas)."
                 )
                 self._load_data()
                 if self.parent() and hasattr(self.parent(), 'refresh_historial'):
@@ -417,19 +489,52 @@ class OrderProcessingDialog(QDialog):
             pass
         return ""
 
+    def _confirm_generation_with_counts(self, sol_ids: List[int], file_type: str) -> bool:
+        """Validates and prompts the user confirming the reference count requested vs generated."""
+        selected_data = [d for d in self.solicitudes_data if d["solicitud_id"] in sol_ids]
+        
+        sum_solicitadas = sum(d["cantidad_solicitada"] for d in selected_data)
+        sum_generadas = sum(d["cantidad_generada"] for d in selected_data)
+        
+        has_mismatch = any(d["cantidad_solicitada"] != d["cantidad_generada"] for d in selected_data)
+        
+        if has_mismatch:
+            msg = (
+                f"Advertencia: Existe una discrepancia en la cantidad de referencias para las solicitudes seleccionadas.\n\n"
+                f"• Referencias Solicitadas: {sum_solicitadas}\n"
+                f"• Referencias Generadas: {sum_generadas}\n\n"
+                f"Esto significa que una o varias solicitudes seleccionadas aún no han sido completamente procesadas por el Bot A.\n\n"
+                f"¿Está seguro de que desea proceder con la generación de archivos de todos modos?"
+            )
+            confirm = QMessageBox.warning(
+                self,
+                f"Confirmar Generación - Discrepancia {file_type}",
+                msg,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+        else:
+            msg = (
+                f"Se procederá a generar los archivos {file_type} para las solicitudes seleccionadas.\n\n"
+                f"• Referencias Solicitadas: {sum_solicitadas}\n"
+                f"• Referencias Generadas: {sum_generadas}\n\n"
+                f"¿Está seguro de que desea continuar?"
+            )
+            confirm = QMessageBox.question(
+                self,
+                f"Confirmar Generación - {file_type}",
+                msg,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            )
+            
+        return confirm == QMessageBox.Yes
+
     def _on_generar_excel_lotes(self):
         sol_ids = self._get_selected_solicitud_ids()
         if not sol_ids:
             QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una solicitud de la tabla primero.")
             return
         
-        confirm = QMessageBox.question(
-            self,
-            "Confirmar Generación - Excel",
-            f"¿Está seguro de que desea generar los archivos Excel en lotes para las {len(sol_ids)} solicitudes seleccionadas?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if confirm != QMessageBox.Yes:
+        if not self._confirm_generation_with_counts(sol_ids, "Excel"):
             return
             
         try:
@@ -496,13 +601,7 @@ class OrderProcessingDialog(QDialog):
             QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una solicitud de la tabla primero.")
             return
         
-        confirm = QMessageBox.question(
-            self,
-            "Confirmar Generación - PDF",
-            f"¿Está seguro de que desea generar los PDFs unificados en lotes para las {len(sol_ids)} solicitudes seleccionadas?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if confirm != QMessageBox.Yes:
+        if not self._confirm_generation_with_counts(sol_ids, "PDF"):
             return
             
         try:
@@ -570,31 +669,8 @@ class OrderProcessingDialog(QDialog):
             self.btn_authorize.setEnabled(False)
             self.chk_select_all.setEnabled(False)
             self.chk_select_all.setChecked(False)
-            
-            # Update banner for cancelled status
-            self.lbl_banner_text.setText(
-                "Esta orden se encuentra CANCELADA. Solo se permite la visualización de sus solicitudes."
-            )
-            # Use warning triangle icon
-            self.lbl_banner_icon.setPixmap(Icons.alert_triangle("#EF4444").pixmap(18, 18))
-            
-            # Change banner background styling to a light red alert style
-            self.banner.setStyleSheet("""
-                QFrame#orderProcessingBanner {
-                    background-color: #FEF2F2;
-                    border: 1px solid #FCA5A5;
-                    border-radius: 8px;
-                    padding: 12px;
-                }
-            """)
-            self.lbl_banner_text.setStyleSheet("color: #991B1B; font-weight: bold;")
+            self.cancelled_banner.setVisible(True)
         else:
             self.btn_reject.setEnabled(True)
             self.btn_authorize.setEnabled(True)
-            # Default banner styling
-            self.lbl_banner_text.setText(
-                "Seleccione las solicitudes que desea procesar. Puede autorizar o rechazar individualmente o todas las pendientes."
-            )
-            self.lbl_banner_icon.setPixmap(Icons.check("#2563EB").pixmap(18, 18))
-            self.banner.setStyleSheet("") # Revert to stylesheet from theme_manager
-            self.lbl_banner_text.setStyleSheet("")
+            self.cancelled_banner.setVisible(False)

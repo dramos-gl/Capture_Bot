@@ -460,9 +460,14 @@ class OperacionRepository(BaseRepository):
         
         # Solo actualizar el estado a ASIGNADO si el estado actual es PENDIENTE
         if estado_codigo == 'PENDIENTE':
-            estado_asignado = self.session.execute(select(EstadoSistema).where(EstadoSistema.codigo == 'ASIGNADO')).scalars().first()
+            from sqlalchemy import and_
+            estado_asignado = self.session.execute(
+                select(EstadoSistema).where(
+                    and_(EstadoSistema.entidad == 'solicitud', EstadoSistema.codigo == 'ASIGNADA')
+                )
+            ).scalars().first()
             if not estado_asignado:
-                estado_asignado = EstadoSistema(entidad='SOLICITUD', codigo='ASIGNADO', descripcion='ASIGNADO')
+                estado_asignado = EstadoSistema(entidad='solicitud', codigo='ASIGNADA', descripcion='Estado ASIGNADA de solicitud')
                 self.session.add(estado_asignado)
                 self.session.flush()
             solicitud.estado_id = estado_asignado.estado_id
@@ -672,11 +677,15 @@ class OperacionRepository(BaseRepository):
         }
 
 class ProduccionRepository(BaseRepository):
-    def _get_estado_id(self, codigo: str) -> int:
-        from sqlalchemy import select
-        estado = self.session.execute(select(EstadoSistema).where(EstadoSistema.codigo == codigo)).scalars().first()
+    def _get_estado_id(self, entidad: str, codigo: str) -> int:
+        from sqlalchemy import select, and_
+        estado = self.session.execute(
+            select(EstadoSistema).where(
+                and_(EstadoSistema.entidad == entidad, EstadoSistema.codigo == codigo)
+            )
+        ).scalars().first()
         if not estado:
-            raise ValueError(f"Estado no encontrado: {codigo}")
+            raise ValueError(f"Estado no encontrado: {entidad} -> {codigo}")
         return estado.estado_id
 
     def get_referencias(self, limit: int = 500) -> List[dict]:
@@ -834,7 +843,8 @@ class ProduccionRepository(BaseRepository):
                 es.codigo as solicitud_estado_codigo,
                 COALESCE((SELECT COUNT(*) FROM sar_produccion.referencia r JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id WHERE r.solicitud_id = s.solicitud_id AND esr.codigo = 'PENDIENTE_AUTORIZACION'), 0) as count_pendiente,
                 COALESCE((SELECT COUNT(*) FROM sar_produccion.referencia r JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id WHERE r.solicitud_id = s.solicitud_id AND esr.codigo = 'AUTORIZADA'), 0) as count_autorizada,
-                COALESCE((SELECT COUNT(*) FROM sar_produccion.referencia r JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id WHERE r.solicitud_id = s.solicitud_id AND esr.codigo = 'RECHAZADA'), 0) as count_rechazada
+                COALESCE((SELECT COUNT(*) FROM sar_produccion.referencia r JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id WHERE r.solicitud_id = s.solicitud_id AND esr.codigo = 'RECHAZADA'), 0) as count_rechazada,
+                COALESCE((SELECT COUNT(*) FROM sar_produccion.referencia r JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id WHERE r.solicitud_id = s.solicitud_id AND esr.codigo = 'FACTURADA'), 0) as count_facturada
             FROM sar_produccion.solicitud s
             JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
             JOIN sar_produccion.orden_generacion o ON gr.orden_id = o.orden_id
@@ -872,7 +882,8 @@ class ProduccionRepository(BaseRepository):
                 "estado": estado_visual,
                 "count_pendiente": row.count_pendiente,
                 "count_autorizada": row.count_autorizada,
-                "count_rechazada": row.count_rechazada
+                "count_rechazada": row.count_rechazada,
+                "count_facturada": row.count_facturada
             })
         return res
 
@@ -967,7 +978,7 @@ class ProduccionRepository(BaseRepository):
         
         return {"rows_updated": rows_updated}
 
-    def cancelar_orden_transaccional(self, orden_id: int) -> dict:
+    def cancelar_orden_transaccional(self, orden_id: int, usuario_id: int = None, sesion_id: int = None) -> dict:
         from sqlalchemy import text
         from sar.src.storage.models import OrdenGeneracion
         
@@ -981,9 +992,8 @@ class ProduccionRepository(BaseRepository):
         if ref_count and ref_count > 0:
             raise ValueError("No se puede cancelar una orden que ya tiene referencias generadas.")
             
-        # 2. Obtener IDs de estado de cancelación
         ord_cancel_id = self._get_or_create_estado_id("orden_generacion", "CANCELADA")
-        grp_cancel_id = self._get_or_create_estado_id("grupo_referencia", "CANCELADA")
+        grp_cancel_id = self._get_or_create_estado_id("grupo_referencia", "CANCELADO")
         sol_cancel_id = self._get_or_create_estado_id("solicitud", "CANCELADA")
         
         # 3. Cancelar solicitudes asociadas
@@ -1010,9 +1020,78 @@ class ProduccionRepository(BaseRepository):
             orden.estado_id = ord_cancel_id
             
         self.session.flush()
+
+        # Registro de Auditoría
+        try:
+            from sar.src.storage.models import EventoSistema, AuditoriaEvento
+            import datetime
+            stmt_ev = select(EventoSistema.evento_id).where(EventoSistema.codigo == 'MODIFICAR_CATALOGO')
+            evento_id = self.session.execute(stmt_ev).scalar() or 1
+            
+            log = AuditoriaEvento(
+                evento_id=evento_id,
+                usuario_id=usuario_id,
+                sesion_id=sesion_id,
+                fecha=datetime.datetime.now(datetime.timezone.utc),
+                modulo="CTRL_REF",
+                detalle={"orden_id": orden_id, "action": "cancelar_orden_transaccional", "status": "CANCELADA"}
+            )
+            self.session.add(log)
+            self.session.flush()
+        except Exception as e:
+            print("Error logging audit event for cancel_orden:", e)
+
         return {"success": True}
 
-    def update_orden_estado_masivo(self, orden_id: int, nuevo_estado_codigo: str):
+    def check_orden_ready_for_masivo(self, orden_id: int) -> dict:
+        from sqlalchemy import text
+        
+        # 1. Validar si la orden está cancelada
+        stmt_est = text("""
+            SELECT es.codigo 
+            FROM sar_produccion.orden_generacion o
+            JOIN sar_catalogo.estado_sistema es ON o.estado_id = es.estado_id
+            WHERE o.orden_id = :orden_id
+        """)
+        est_cod = self.session.execute(stmt_est, {"orden_id": orden_id}).scalar()
+        if est_cod == "CANCELADA":
+            return {"ready": False, "reason": "No se puede autorizar o rechazar una orden cancelada."}
+
+        # 2. Obtener la cantidad de referencias solicitadas en total para la orden
+        stmt_sol = text("""
+            SELECT COALESCE(SUM(s.cantidad_solicitada), 0)
+            FROM sar_produccion.solicitud s
+            JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
+            WHERE gr.orden_id = :orden_id
+        """)
+        total_solicitadas = self.session.execute(stmt_sol, {"orden_id": orden_id}).scalar()
+        
+        # 3. Obtener la cantidad de referencias actualmente en estado PENDIENTE_AUTORIZACION
+        stmt_pdte = text("""
+            SELECT COUNT(*) 
+            FROM sar_produccion.referencia r
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            WHERE r.grupo_id IN (SELECT grupo_id FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id)
+              AND es.codigo = 'PENDIENTE_AUTORIZACION'
+        """)
+        total_pendientes = self.session.execute(stmt_pdte, {"orden_id": orden_id}).scalar()
+        
+        if total_solicitadas == 0:
+            return {"ready": False, "reason": "La orden no tiene solicitudes registradas."}
+            
+        if total_pendientes != total_solicitadas:
+            return {
+                "ready": False,
+                "reason": (
+                    f"No todas las referencias están listas para autorizar de forma masiva.\n\n"
+                    f"- Referencias Solicitadas: {total_solicitadas}\n"
+                    f"- Referencias Pendientes de Autorización: {total_pendientes}"
+                )
+            }
+            
+        return {"ready": True, "total_referencias": total_solicitadas}
+
+    def update_orden_estado_masivo(self, orden_id: int, nuevo_estado_codigo: str, usuario_id: int = None, sesion_id: int = None):
         from sqlalchemy import text
         from sar.src.storage.models import OrdenGeneracion
 
@@ -1058,7 +1137,7 @@ class ProduccionRepository(BaseRepository):
             raise ValueError("No se puede autorizar o rechazar una orden cancelada.")
 
         # 4. Actualizar todas las referencias de la orden al nuevo estado
-        estado_id = self._get_estado_id(nuevo_estado_codigo)
+        estado_id = self._get_estado_id("referencia", nuevo_estado_codigo)
         stmt_upd = text("""
             UPDATE sar_produccion.referencia 
             SET estado_id = :estado_id 
@@ -1068,6 +1147,28 @@ class ProduccionRepository(BaseRepository):
         """)
         self.session.execute(stmt_upd, {"estado_id": estado_id, "orden_id": orden_id})
         
+        # 4.5. Actualizar todas las solicitudes al nuevo estado en cascada
+        sol_estado_codigo = "AUTORIZADA" if nuevo_estado_codigo == "AUTORIZADA" else "CANCELADA"
+        sol_estado_id = self._get_or_create_estado_id("solicitud", sol_estado_codigo)
+        stmt_sol_upd = text("""
+            UPDATE sar_produccion.solicitud
+            SET estado_id = :estado_id
+            WHERE grupo_id IN (
+                SELECT grupo_id FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id
+            )
+        """)
+        self.session.execute(stmt_sol_upd, {"estado_id": sol_estado_id, "orden_id": orden_id})
+
+        # 4.6. Actualizar todos los grupos de referencia al nuevo estado en cascada
+        grp_estado_codigo = "AUTORIZADO" if nuevo_estado_codigo == "AUTORIZADA" else "CANCELADO"
+        grp_estado_id = self._get_or_create_estado_id("grupo_referencia", grp_estado_codigo)
+        stmt_grp_upd = text("""
+            UPDATE sar_produccion.grupo_referencia
+            SET estado_id = :estado_id
+            WHERE orden_id = :orden_id
+        """)
+        self.session.execute(stmt_grp_upd, {"estado_id": grp_estado_id, "orden_id": orden_id})
+        
         # 5. Actualizar el estado de la orden principal
         orden = self.session.get(OrdenGeneracion, orden_id)
         if orden:
@@ -1076,19 +1177,39 @@ class ProduccionRepository(BaseRepository):
 
         self.session.flush()
 
+        # Registro de Auditoría
+        try:
+            from sar.src.storage.models import EventoSistema, AuditoriaEvento
+            import datetime
+            stmt_ev = select(EventoSistema.evento_id).where(EventoSistema.codigo == 'AUTORIZAR_REFERENCIA')
+            evento_id = self.session.execute(stmt_ev).scalar() or 1
+            
+            log = AuditoriaEvento(
+                evento_id=evento_id,
+                usuario_id=usuario_id,
+                sesion_id=sesion_id,
+                fecha=datetime.datetime.now(datetime.timezone.utc),
+                modulo="CTRL_REF",
+                detalle={"orden_id": orden_id, "action": "update_orden_estado_masivo", "status": nuevo_estado_codigo}
+            )
+            self.session.add(log)
+            self.session.flush()
+        except Exception as e:
+            print("Error logging audit event for update_orden_masivo:", e)
+
     def update_referencia_estado(self, referencia_id: int, nuevo_estado_codigo: str):
         ref = self.session.get(Referencia, referencia_id)
         if ref:
-            ref.estado_id = self._get_estado_id(nuevo_estado_codigo)
+            ref.estado_id = self._get_estado_id("referencia", nuevo_estado_codigo)
             self.session.flush()
 
     def update_referencias_estado_masivo(self, referencia_ids: List[int], nuevo_estado_codigo: str, rechazar_restantes: bool = False):
         from sqlalchemy import text
         from sar.src.storage.models import Referencia, Solicitud, GrupoReferencia, OrdenGeneracion
         
-        estado_id = self._get_estado_id(nuevo_estado_codigo)
-        pending_id = self._get_estado_id("PENDIENTE_AUTORIZACION")
-        rechazada_id = self._get_estado_id("RECHAZADA")
+        estado_id = self._get_estado_id("referencia", nuevo_estado_codigo)
+        pending_id = self._get_estado_id("referencia", "PENDIENTE_AUTORIZACION")
+        rechazada_id = self._get_estado_id("referencia", "RECHAZADA")
         
         # 1. Validar que todas las referencias seleccionadas estén en PENDIENTE_AUTORIZACION
         stmt_check = text("""
@@ -1217,9 +1338,14 @@ class ProduccionRepository(BaseRepository):
         from sqlalchemy import select
         
         # Obtener o crear estado ASIGNADA
-        estado_asignada = self.session.execute(select(EstadoSistema).where(EstadoSistema.codigo == 'ASIGNADA')).scalars().first()
+        from sqlalchemy import and_
+        estado_asignada = self.session.execute(
+            select(EstadoSistema).where(
+                and_(EstadoSistema.entidad == 'referencia', EstadoSistema.codigo == 'ASIGNADA')
+            )
+        ).scalars().first()
         if not estado_asignada:
-            estado_asignada = EstadoSistema(entidad='REFERENCIA', codigo='ASIGNADA', descripcion='ASIGNADA')
+            estado_asignada = EstadoSistema(entidad='referencia', codigo='ASIGNADA', descripcion='Estado ASIGNADA de referencia')
             self.session.add(estado_asignada)
             self.session.flush()
             
@@ -1246,7 +1372,7 @@ class ProduccionRepository(BaseRepository):
             pdte_ids = []
             for code in pdte_codes:
                 try:
-                    pdte_ids.append(self._get_estado_id(code))
+                    pdte_ids.append(self._get_estado_id("referencia", code))
                 except ValueError:
                     pass
                     
@@ -1254,7 +1380,7 @@ class ProduccionRepository(BaseRepository):
             aut_ids = []
             for code in aut_codes:
                 try:
-                    aut_ids.append(self._get_estado_id(code))
+                    aut_ids.append(self._get_estado_id("referencia", code))
                 except ValueError:
                     pass
                     
@@ -1262,7 +1388,7 @@ class ProduccionRepository(BaseRepository):
             err_ids = []
             for code in err_codes:
                 try:
-                    err_ids.append(self._get_estado_id(code))
+                    err_ids.append(self._get_estado_id("referencia", code))
                 except ValueError:
                     pass
             

@@ -60,6 +60,7 @@ class DashboardView(QWidget):
         self.active_worker = None
         self.selected_orden_ids = []
         self.todas_las_ordenes = []
+        self.is_custom_filter = False
         
         # Debounce timer for text search (350ms delay) to prevent database flooding while typing
         self.search_timer = QTimer(self)
@@ -232,6 +233,8 @@ class DashboardView(QWidget):
         # Update timestamp label
         self.lbl_datetime.setText(QDateTime.currentDateTime().toString("dd/MM/yyyy  hh:mm AP"))
         
+        self._load_available_orders(preserve_selection=True)
+        
         try:
             with self.db_connector.get_session() as session:
                 repo = ProduccionRepository(session)
@@ -376,15 +379,19 @@ class DashboardView(QWidget):
         self.current_page = page_num
         self.refresh_data_references()
 
-    def _load_available_orders(self):
+    def _load_available_orders(self, preserve_selection=False):
         try:
             with self.db_connector.get_session() as session:
                 repo = ProduccionRepository(session)
                 self.todas_las_ordenes = repo.get_ordenes()
                 
             if self.todas_las_ordenes:
-                # Default to the latest created order (first one since it is sorted DESC by date)
-                self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
+                valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
+                if preserve_selection and self.is_custom_filter and self.selected_orden_ids:
+                    self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
+                
+                if not self.selected_orden_ids or (preserve_selection and not self.is_custom_filter):
+                    self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
             else:
                 self.selected_orden_ids = []
         except Exception as e:
@@ -425,6 +432,7 @@ class DashboardView(QWidget):
         action_all.setChecked(is_all_selected)
         
         def toggle_all(checked):
+            self.is_custom_filter = True
             if checked:
                 self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
             else:
@@ -443,6 +451,7 @@ class DashboardView(QWidget):
             
             def make_toggle_handler(oid):
                 def handler(checked):
+                    self.is_custom_filter = True
                     if checked:
                         if oid not in self.selected_orden_ids:
                             self.selected_orden_ids.append(oid)

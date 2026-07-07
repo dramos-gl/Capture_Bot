@@ -42,6 +42,7 @@ class StyledDataTable(QTableWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
         header.setHighlightSections(False)
+        header.setMinimumSectionSize(120)
         
         # Vertical header styling
         self.verticalHeader().setVisible(False)
@@ -52,12 +53,14 @@ class StyledDataTable(QTableWidget):
         self.setRowCount(0)
         self.setRowCount(len(data))
         
+        status_cols = set()
         for row_idx, row_data in enumerate(data):
             for col_idx, value in enumerate(row_data):
                 val_str = str(value)
                 
                 # Render state string as a StatusBadge pill
                 if val_str in ["AUTORIZADA", "PENDIENTE", "ERROR", "GENERADA", "RECHAZADA", "FALLIDO", "EXPIRADA", "ASIGNADA", "BORRADOR", "ABIERTA", "PROCESANDO", "FINALIZADA", "CANCELADA", "PENDIENTE_AUTORIZACION", "AUTORIZACION_PENDIENTE", "COMPLETADA"]:
+                    status_cols.add(col_idx)
                     badge_container = QWidget()
                     badge_container.setStyleSheet("background-color: transparent;")
                     badge_layout = QHBoxLayout(badge_container)
@@ -80,6 +83,16 @@ class StyledDataTable(QTableWidget):
         
         self.resizeColumnsToContents()
         
+        # Adjust any status column width so it does not collapse to 0 width
+        for col_idx in status_cols:
+            self.setColumnWidth(col_idx, 140)
+            self.horizontalHeader().setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Interactive)
+        
         # Enforce last column stretching to fill viewport width
         if self.columnCount() > 0:
-            self.horizontalHeader().setSectionResizeMode(self.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
+            last_col = self.columnCount() - 1
+            if last_col in status_cols:
+                # If the last column is a status, let it be interactive/stretched with a minimum width
+                self.setColumnWidth(last_col, 140)
+            else:
+                self.horizontalHeader().setSectionResizeMode(last_col, QHeaderView.ResizeMode.Stretch)

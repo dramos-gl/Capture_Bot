@@ -266,10 +266,9 @@ UNIQUE(FOLIO)
 ### Estados
 
 ```text
-BORRADOR
 ABIERTA
-PROCESANDO
-FINALIZADA
+COMPLETADA
+AUTORIZADA
 CANCELADA
 ```
 
@@ -326,9 +325,9 @@ CONCEPTO_ID
 
 ```text
 PENDIENTE
-GENERANDO
 COMPLETADO
-CERRADO
+AUTORIZADO
+CANCELADO
 ```
 
 ---
@@ -368,17 +367,14 @@ RFC + CONCEPTO + DELEGACION
 
 ```text
 PENDIENTE
-ASIGNADA
 PROCESANDO
+ASIGNADA
 COMPLETADA
-ERROR
-CANCELADA
 AUTORIZADA
-RECHAZADA
-AUTORIZACION_PARCIAL
+CANCELADA
+ERROR
 FACTURADA
 FACTURADA_PARCIAL
-ERROR_VALIDACION
 ```
 
 ---
@@ -439,9 +435,9 @@ Las referencias transicionan a través de los siguientes estados a lo largo de s
 ### Reglas de Operación y Transición de Estados
 
 1. **Flujo de Ejecución del Bot A (Pago de Derechos)**:
-   * El Bot A toma solicitudes en estado `ASIGNADO` y las procesa.
+   * El Bot A toma solicitudes en estado `ASIGNADA` y las procesa.
    * A medida que cada consecutivo se descarga con éxito, la referencia correspondiente se crea en el sistema en estado `GENERADA`.
-   * **Transición de Solicitud Completa**: Al completarse exitosamente todo el rango de la solicitud (estado cambia a `COMPLETADA`), el bot actualiza automáticamente todas las referencias generadas por esta solicitud al estado **`PENDIENTE_AUTORIZACION`**.
+   * **Transición de Solicitud Completa**: Al completarse exitosamente todo el rango de la solicitud (estado cambia a `COMPLETADA`), el bot actualiza automáticamente todas las referencias generadas por esta solicitud al estado **`PENDIENTE_AUTORIZACION`** o el estado final correspondiente.
 
 2. **Flujo de Autorización de Referencias y Ordenes**:
    * Las referencias en estado `PENDIENTE_AUTORIZACION` son validadas por el usuario u operador (validación de pago).

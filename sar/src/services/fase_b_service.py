@@ -172,9 +172,20 @@ class FaseBService:
                 pdf_path = os.path.join(dest_dir, pdf_filename)
                 
                 pdf_paths_to_merge = []
+                missing_refs = []
                 for row in batch_rows:
-                    if row.ruta_archivo:
+                    if not row.ruta_archivo or not os.path.exists(row.ruta_archivo):
+                        missing_refs.append(
+                            f"- Consecutivo: {row.consecutivo_grupo} | Referencia: {row.referencia_portal or 'N/A'}"
+                        )
+                    else:
                         pdf_paths_to_merge.append(row.ruta_archivo)
+                
+                if missing_refs:
+                    missing_str = "\n".join(missing_refs)
+                    raise FileNotFoundError(
+                        f"Hacen falta archivos PDF de boletas para las siguientes referencias en {pdf_filename}:\n\n{missing_str}"
+                    )
                 
                 if pdf_paths_to_merge:
                     merge_pdfs(pdf_paths_to_merge, pdf_path)

@@ -26,4 +26,14 @@ def generate_excel_batch(filepath: str, data: List[Dict[str, Any]]) -> None:
             row.get("importe")
         ])
         
+    # Auto-fit column widths to prevent text clipping
+    for col in ws.columns:
+        max_len = 0
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        for cell in col:
+            val_str = str(cell.value or '')
+            if len(val_str) > max_len:
+                max_len = len(val_str)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+        
     wb.save(filepath)

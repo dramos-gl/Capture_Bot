@@ -8,6 +8,7 @@ import traceback
 import hashlib
 import shutil
 import uuid
+import re
 from typing import Optional, Dict, Any, List
 from PySide6.QtCore import QThread, Signal
 from playwright.sync_api import sync_playwright
@@ -275,21 +276,25 @@ class BillingRpaWorker(QThread):
                             input_nombre = main_frame.wait_for_selector(sel_nombre, timeout=10000)
                             input_nombre.click()
                             time.sleep(random.uniform(0.2, 0.4))
+                            
+                            # Clean the razon_social to exclude SAT-restricted regimes (e.g. S.A. DE C.V.)
+                            razon_social_clean = self._clean_razon_social(self.ctx["razon_social"])
+                            
                             # Estrategia 1: fill() directo
-                            input_nombre.fill(str(self.ctx["razon_social"]))
+                            input_nombre.fill(razon_social_clean)
                             # Verificar valor y usar fallback si el portal rechazó el fill()
-                            if input_nombre.input_value().strip() != str(self.ctx["razon_social"]).strip():
+                            if input_nombre.input_value().strip() != razon_social_clean.strip():
                                 self.status_changed.emit("fill() rechazado en Razón Social. Usando tipeo char-by-char como fallback...")
                                 input_nombre.fill("")
                                 page.keyboard.press("Control+A")
                                 page.keyboard.press("Delete")
-                                for char in str(self.ctx["razon_social"]):
+                                for char in razon_social_clean:
                                     page.keyboard.type(char)
                                     time.sleep(random.uniform(0.02, 0.04))
                             # Validación de integridad post-fill
                             val_nombre = input_nombre.input_value().strip()
-                            if not val_nombre or val_nombre != str(self.ctx["razon_social"]).strip():
-                                raise Exception(f"Integridad fallida: Razón Social en portal ('{val_nombre}') != catálogo ('{self.ctx['razon_social']}')")
+                            if not val_nombre or val_nombre != razon_social_clean.strip():
+                                raise Exception(f"Integridad fallida: Razón Social en portal ('{val_nombre}') != catálogo limpio ('{razon_social_clean}')")
                             
                             # ── LLENADO ROBUSTO DE CÓDIGO POSTAL (P1-Fix1) ───────────────────
                             sel_domicilio = locators.get("input_domicilio_fiscal_receptor") or "input#DomicilioFiscalReceptor"
@@ -853,4 +858,32 @@ class BillingRpaWorker(QThread):
                 session.commit()
         except Exception as e:
             self.status_changed.emit(f"Error al registrar estado {estado_codigo} para referencia {referencia_id}: {str(e)}")
+
+    def _clean_razon_social(self, name: str) -> str:
+        """Strips Mexican capital regimes and suffixes from business names to comply with CFDI 4.0 validation."""
+        if not name:
+            return ""
+        
+        name_clean = name.upper().strip()
+        
+        # Regex patterns for common Mexican capital regimes
+        regimes = [
+            r"\bS\.?\s*A\.?\s*D\.?\s*E\.?\s*C\.?\s*V\.?\b",
+            r"\bS\.?\s*D\.?\s*E\.?\s*R\.?\s*L\.?\s*D\.?\s*E\.?\s*C\.?\s*V\.?\b",
+            r"\bS\.?\s*A\.?\s*P\.?\s*I\.?\s*D\.?\s*E\.?\s*C\.?\s*V\.?\b",
+            r"\bS\.?\s*A\.?\s*B\.?\s*D\.?\s*E\.?\s*C\.?\s*V\.?\b",
+            r"\bS\.?\s*A\.?\b",
+            r"\bA\.?\s*C\.?\b",
+            r"\bS\.?\s*C\.?\b",
+            r"\bS\.?\s*D\.?\s*E\.?\s*R\.?\s*L\.?\b",
+            r"\bS\.?\s*P\.?\s*R\.?\b",
+        ]
+        
+        for r in regimes:
+            name_clean = re.sub(r, "", name_clean)
+            
+        # Clean trailing commas and collapse extra spacing
+        name_clean = re.sub(r"\s*,\s*$", "", name_clean)
+        name_clean = re.sub(r"\s+", " ", name_clean)
+        return name_clean.strip()
 

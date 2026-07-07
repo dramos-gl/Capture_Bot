@@ -1,6 +1,7 @@
 """RPA Bot Dashboard View (Face C - Billing and Timbrado)."""
 
 import datetime
+import re
 from sqlalchemy import text
 
 from PySide6.QtWidgets import (
@@ -385,7 +386,8 @@ class BillingBotView(QWidget):
                 self.current_bot_context = ctx
                 
                 # Update UI labels
-                self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}")
+                razon_social_clean = self._clean_razon_social(ctx['razon_social'])
+                self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {razon_social_clean}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}")
                 
                 # --- Resetear métricas antes de calcular para evitar residuos de cargas previas ---
                 self.box_pendientes.set_value("0")
@@ -611,6 +613,34 @@ class BillingBotView(QWidget):
             event.ignore()
             return
         event.accept()
+
+    def _clean_razon_social(self, name: str) -> str:
+        """Strips Mexican capital regimes and suffixes from business names to comply with CFDI 4.0 validation."""
+        if not name:
+            return ""
+        
+        name_clean = name.upper().strip()
+        
+        # Regex patterns for common Mexican capital regimes
+        regimes = [
+            r"\bS\.?\s*A\.?\s*D\.?\s*E\.?\s*C\.?\s*V\.?\b",
+            r"\bS\.?\s*D\.?\s*E\.?\s*R\.?\s*L\.?\s*D\.?\s*E\.?\s*C\.?\s*V\.?\b",
+            r"\bS\.?\s*A\.?\s*P\.?\s*I\.?\s*D\.?\s*E\.?\s*C\.?\s*V\.?\b",
+            r"\bS\.?\s*A\.?\s*B\.?\s*D\.?\s*E\.?\s*C\.?\s*V\.?\b",
+            r"\bS\.?\s*A\.?\b",
+            r"\bA\.?\s*C\.?\b",
+            r"\bS\.?\s*C\.?\b",
+            r"\bS\.?\s*D\.?\s*E\.?\s*R\.?\s*L\.?\b",
+            r"\bS\.?\s*P\.?\s*R\.?\b",
+        ]
+        
+        for r in regimes:
+            name_clean = re.sub(r, "", name_clean)
+            
+        # Clean trailing commas and collapse extra spacing
+        name_clean = re.sub(r"\s*,\s*$", "", name_clean)
+        name_clean = re.sub(r"\s+", " ", name_clean)
+        return name_clean.strip()
 
 from PySide6.QtWidgets import QMainWindow
 from PySide6.QtCore import Signal

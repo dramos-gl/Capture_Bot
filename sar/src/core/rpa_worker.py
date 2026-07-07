@@ -286,7 +286,7 @@ class RpaWorker(QThread):
             
             # Final state update
             if self._stop_requested:
-                self._update_solicitud_estado("ASIGNADO")
+                self._update_solicitud_estado("ASIGNADA")
                 self.finished_processing.emit(True, "Ejecución pausada por el usuario.")
             else:
                 self._finalize_solicitud_in_db("COMPLETADA")
@@ -315,7 +315,7 @@ class RpaWorker(QThread):
     def _save_referencia_db(self, consecutivo: int, ref_portal: str, importe: float, fecha_vig: Optional[datetime.date], filename: str, path: str, sha256: str, size: int):
         with self.db_connector.get_session() as session:
             # Query status ID
-            state_stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE codigo = 'GENERADA' LIMIT 1")
+            state_stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = 'GENERADA' LIMIT 1")
             state_id = session.execute(state_stmt).scalar()
             if not state_id:
                 # Fallback to general default if not found
