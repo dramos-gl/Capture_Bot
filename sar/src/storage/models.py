@@ -43,6 +43,14 @@ rol_permiso = Table(
     schema="sar_seguridad"
 )
 
+rol_app_modulo = Table(
+    "rol_app_modulo",
+    Base.metadata,
+    Column("rol_id", ForeignKey("sar_seguridad.rol.rol_id", ondelete="CASCADE"), primary_key=True),
+    Column("app_modulo_id", ForeignKey("sar_seguridad.app_modulo.app_modulo_id", ondelete="CASCADE"), primary_key=True),
+    schema="sar_seguridad"
+)
+
 
 # ===========================================================================
 # ESQUEMA: sar_seguridad
@@ -78,6 +86,7 @@ class Rol(Base):
     # Relaciones
     usuarios: Mapped[List["Usuario"]] = relationship(secondary=usuario_rol, back_populates="roles")
     permisos: Mapped[List["Permiso"]] = relationship(secondary=rol_permiso, back_populates="roles")
+    app_modulos: Mapped[List["AppModulo"]] = relationship(secondary=rol_app_modulo, back_populates="roles")
 
 
 class Modulo(Base):
@@ -103,6 +112,9 @@ class AppModulo(Base):
     codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Relaciones
+    roles: Mapped[List["Rol"]] = relationship(secondary=rol_app_modulo, back_populates="app_modulos")
 
 
 class Accion(Base):

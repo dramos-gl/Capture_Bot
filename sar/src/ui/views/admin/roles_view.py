@@ -1,6 +1,7 @@
 """Roles Administration Sub-view."""
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QMessageBox, QCheckBox
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QMessageBox
+from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
 from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
@@ -21,6 +22,7 @@ class RolesView(QWidget):
         
         self.modulos = []
         self.acciones = []
+        self.app_modulos = []
         
         self._build_ui()
         self.refresh_data()
@@ -40,18 +42,18 @@ class RolesView(QWidget):
         
         self.inp_r_codigo = LabeledInput("Código del Rol")
         self.inp_r_nombre = LabeledInput("Nombre")
-        self.chk_r_activo = QCheckBox("Rol Activo")
+        self.chk_r_activo = CustomCheckBox("Rol Activo")
         self.chk_r_activo.setChecked(True)
         
         dialog.add_widget(self.inp_r_codigo)
         dialog.add_widget(self.inp_r_nombre)
         dialog.add_widget(self.chk_r_activo)
         
-        from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+        from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QGridLayout
         from PySide6.QtCore import Qt
         
         self.group_permisos = QGroupBox("Matriz de Permisos")
-        self.group_permisos.setStyleSheet("QGroupBox { font-weight: bold; margin-top: 10px; }")
+        self.group_permisos.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 10px; padding-top: 24px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
         self.permisos_layout = QVBoxLayout()
         
         self.matrix_table = QTableWidget()
@@ -62,16 +64,19 @@ class RolesView(QWidget):
         self.matrix_table.setHorizontalHeaderLabels([a["nombre"] for a in self.acciones])
         self.matrix_table.setVerticalHeaderLabels([m["nombre"] for m in self.modulos])
         self.matrix_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.matrix_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.matrix_table.setMinimumHeight(220)
         
         self.checkboxes_matrix = {}  # (mod_id, acc_id): chk
         
         for r_idx, mod in enumerate(self.modulos):
             for c_idx, acc in enumerate(self.acciones):
-                chk = QCheckBox()
+                chk = CustomCheckBox()
                 if not self.can_edit:
                     chk.setEnabled(False)
                 # Centering checkbox in cell
                 widget = QWidget()
+                widget.setStyleSheet("background-color: transparent;")
                 l = QHBoxLayout(widget)
                 l.addWidget(chk)
                 l.setAlignment(Qt.AlignCenter)
@@ -83,8 +88,29 @@ class RolesView(QWidget):
         self.group_permisos.setLayout(self.permisos_layout)
         dialog.add_widget(self.group_permisos)
         
-        # Make dialog wider for the matrix
-        dialog.setMinimumWidth(700)
+        # Módulos de Aplicación (Nivel 1)
+        self.group_apps = QGroupBox("Módulos de Aplicación Autorizados (Acceso Nivel 1)")
+        self.group_apps.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 10px; padding-top: 24px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
+        self.apps_layout = QGridLayout()
+        self.apps_layout.setContentsMargins(15, 10, 15, 10)
+        self.apps_layout.setHorizontalSpacing(20)
+        self.apps_layout.setVerticalSpacing(10)
+        self.checkboxes_apps = {}  # app_modulo_id: chk
+        
+        for idx, app in enumerate(self.app_modulos):
+            chk = CustomCheckBox(app["nombre"])
+            if not self.can_edit:
+                chk.setEnabled(False)
+            row = idx // 2
+            col = idx % 2
+            self.apps_layout.addWidget(chk, row, col)
+            self.checkboxes_apps[app["id"]] = chk
+            
+        self.group_apps.setLayout(self.apps_layout)
+        dialog.add_widget(self.group_apps)
+        
+        # Make dialog wider and taller for the matrix and proper spacing
+        dialog.setMinimumSize(780, 640)
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
@@ -119,6 +145,12 @@ class RolesView(QWidget):
                 permisos_set = set(permisos)
                 for (m_id, a_id), chk in self.checkboxes_matrix.items():
                     chk.setChecked((m_id, a_id) in permisos_set)
+                    
+                # Cargar módulos de aplicación autorizados
+                app_mods = repo.get_app_modulos_for_rol(self.current_rol_id)
+                app_mods_set = set(app_mods)
+                for am_id, chk in self.checkboxes_apps.items():
+                    chk.setChecked(am_id in app_mods_set)
         except Exception as e:
             print("Error loading permissions:", e)
         
@@ -128,13 +160,15 @@ class RolesView(QWidget):
     def _save_rol(self, dialog: CustomDialog):
         
         permisos_matrix = [(m_id, a_id) for (m_id, a_id), chk in self.checkboxes_matrix.items() if chk.isChecked()]
+        app_modulo_ids = [am_id for am_id, chk in self.checkboxes_apps.items() if chk.isChecked()]
         
         data = {
             "rol_id": self.current_rol_id,
             "codigo": self.inp_r_codigo.text().strip(),
             "nombre": self.inp_r_nombre.text().strip(),
             "activo": self.chk_r_activo.isChecked(),
-            "permisos_matrix": permisos_matrix
+            "permisos_matrix": permisos_matrix,
+            "app_modulo_ids": app_modulo_ids
         }
         
         try:
@@ -156,6 +190,7 @@ class RolesView(QWidget):
                 # Load matrix headers
                 self.modulos = [{"id": m.modulo_id, "nombre": m.nombre} for m in repo.get_all_modulos()]
                 self.acciones = [{"id": a.accion_id, "nombre": a.nombre} for a in repo.get_all_acciones()]
+                self.app_modulos = [{"id": am.app_modulo_id, "nombre": am.nombre} for am in repo.get_all_app_modulos()]
                 
                 items = repo.get_all_roles()
                 data = [{"rol_id": i.rol_id, "codigo": i.codigo, "nombre": i.nombre, "activo": i.activo} for i in items]

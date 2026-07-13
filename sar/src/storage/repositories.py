@@ -84,6 +84,11 @@ class UsuarioRepository(BaseRepository):
         )
         return list(self.session.execute(stmt).all())
 
+    def get_app_modulos_for_rol(self, rol_id: int) -> List[int]:
+        from sar.src.storage.models import rol_app_modulo
+        stmt = select(rol_app_modulo.c.app_modulo_id).where(rol_app_modulo.c.rol_id == rol_id)
+        return list(self.session.execute(stmt).scalars().all())
+
     def save_rol(self, rol: Rol) -> Rol:
         self.session.add(rol)
         self.session.flush()
@@ -103,6 +108,21 @@ class UsuarioRepository(BaseRepository):
             .where(and_(Usuario.usuario_id == usuario_id, Permiso.activo == True))
         )
         return self.session.execute(stmt).all()
+
+    def get_authorized_app_modules(self, usuario_id: int) -> List[str]:
+        """Fetches distinct application module codes that the user is authorized to access."""
+        from sar.src.storage.models import rol_app_modulo, AppModulo
+        stmt = (
+            select(AppModulo.codigo)
+            .select_from(Usuario)
+            .join(usuario_rol, Usuario.usuario_id == usuario_rol.c.usuario_id)
+            .join(Rol, usuario_rol.c.rol_id == Rol.rol_id)
+            .join(rol_app_modulo, Rol.rol_id == rol_app_modulo.c.rol_id)
+            .join(AppModulo, rol_app_modulo.c.app_modulo_id == AppModulo.app_modulo_id)
+            .where(and_(Usuario.usuario_id == usuario_id, AppModulo.activo == True))
+            .distinct()
+        )
+        return list(self.session.execute(stmt).scalars().all())
 
 
 class OrdenRepository(BaseRepository):

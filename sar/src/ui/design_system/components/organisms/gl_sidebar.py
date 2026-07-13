@@ -92,11 +92,13 @@ class NavigationSidebar(QFrame):
         self.btn_ordenes_capturadas.setObjectName("subNavBtn")
         self.btn_ordenes_capturadas.setCheckable(True)
         self.btn_ordenes_capturadas.setIcon(Icons.hollow_dot("#94A3B8"))
+        self.btn_ordenes_capturadas.setVisible(False)
         
         self.btn_capturar_nueva = QPushButton("Capturar Nueva Orden")
         self.btn_capturar_nueva.setObjectName("subNavBtn")
         self.btn_capturar_nueva.setCheckable(True)
         self.btn_capturar_nueva.setIcon(Icons.hollow_dot("#94A3B8"))
+        self.btn_capturar_nueva.setVisible(False)
         
         self.submenu_layout.addWidget(self.btn_capturar_nueva)
         self.submenu_layout.addWidget(self.btn_ordenes_capturadas)
@@ -125,6 +127,7 @@ class NavigationSidebar(QFrame):
                 _update_btn_icon(btn, icon_name, False)
                 
             self.layout.addWidget(btn)
+            btn.setVisible(False)
             self.buttons[key] = btn
             
             if key == "ordenes":
@@ -260,7 +263,12 @@ class NavigationSidebar(QFrame):
     def hide_item(self, key: str):
         """Hides a specific navigation item by its key."""
         if key in self.buttons:
-            self.buttons[key].hide()
+            self.buttons[key].setVisible(False)
+
+    def show_item(self, key: str):
+        """Shows a specific navigation item by its key."""
+        if key in self.buttons:
+            self.buttons[key].setVisible(True)
             
     def set_username(self, username: str):
         """Updates the username in the profile status widget."""

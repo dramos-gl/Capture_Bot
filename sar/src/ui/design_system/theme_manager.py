@@ -1,5 +1,4 @@
-"""Theme manager utilizing design tokens to apply premium Dark/Light modes."""
-
+import os
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.ui.design_system.tokens.typography import Typography
 from sar.src.ui.design_system.tokens.spacing import Spacing
@@ -18,6 +17,12 @@ class ThemeManager:
         txt_primary = Colors.TEXT_DARK_PRIMARY if is_dark else Colors.TEXT_LIGHT_PRIMARY
         txt_secondary = Colors.TEXT_DARK_SECONDARY if is_dark else Colors.TEXT_LIGHT_SECONDARY
         txt_muted = Colors.TEXT_DARK_MUTED if is_dark else Colors.TEXT_LIGHT_MUTED
+
+        # Resolve asset paths for QSS
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        icons_dir = os.path.abspath(os.path.join(base_dir, "..", "assets", "icons"))
+        check_path = os.path.join(icons_dir, "check.svg").replace("\\", "/")
+        chevron_down_path = os.path.join(icons_dir, "chevron_down.svg").replace("\\", "/")
 
         qss = f"""
         /* Global Defaults */
@@ -116,7 +121,7 @@ class ThemeManager:
             width: 30px;
         }}
         QComboBox::down-arrow {{
-            image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            image: url({chevron_down_path});
             width: 16px;
             height: 16px;
         }}
@@ -624,7 +629,7 @@ class ThemeManager:
         QCheckBox::indicator:checked {{
             background-color: {Colors.ACCENT};
             border-color: {Colors.ACCENT};
-            image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSI0IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwb2x5bGluZSBwb2ludHM9IjIwIDYgOSAxNyA0IDEyIi8+PC9zdmc+");
+            image: url({check_path});
         }}
         QCheckBox::indicator:disabled {{
             border-color: {border};

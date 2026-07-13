@@ -161,7 +161,27 @@ Permisos:
 Dashboards
 
 Reportes
-7. Matriz RBAC
+7. Arquitectura de Control de Acceso en Dos Niveles
+
+El sistema SAR implementa una estrategia de control de acceso basada en roles (RBAC) estructurada en dos niveles independientes y complementarios:
+
+### Nivel 1: Validación de Acceso al Módulo (Macronivel)
+Antes de instanciar cualquier vista o cargar datos del servidor, el sistema intercepta el login y valida si el rol del usuario tiene asignado el módulo de la aplicación (`app_modulo`) al que intenta entrar (`ADMIN`, `CTRL_REF`, `BOT_FACE_A`, `BOT_C`). Las relaciones se definen en la tabla asociativa `sar_seguridad.rol_app_modulo` administrada desde el panel de Roles.
+
+### Nivel 2: Validación de Permisos de Operación (Micronivel)
+Una vez dentro del módulo, las acciones específicas del usuario (Crear, Leer, Editar, Eliminar, Ejecutar, etc.) se validan contra los permisos granulares asociados a sus roles en la matriz de permisos (`rol_permiso` -> `permiso` -> `modulo` x `accion`).
+
+### Diagrama de Relación y Mapeo de Seguridad (RBAC)
+```mermaid
+graph TD
+    Usuario[Usuario] -->|pertenece a| Rol[Rol]
+    Rol -->|Nivel 1: Acceso Módulo| AppModulo[Módulo de Aplicación<br>ADMIN, CTRL_REF, BOT_A, BOT_C]
+    Rol -->|Nivel 2: Asigna| Permiso[Permiso Granular]
+    Permiso -->|se compone de| Modulo[Módulo Funcional<br>SEGURIDAD, CATALOGOS, ORDENES...]
+    Permiso -->|se compone de| Accion[Acción<br>CREAR, LEER, EDITAR, EJECUTAR...]
+```
+
+8. Matriz RBAC
 Recurso	Admin	Supervisor	Operador	Consulta
 Usuarios	Sí	No	No	No
 Roles	Sí	No	No	No
@@ -172,7 +192,7 @@ Solicitudes	Sí	Sí	Sí	Lectura
 Referencias	Sí	Sí	Sí	Lectura
 Dashboard	Sí	Sí	Sí	Sí
 Auditoría	Sí	Sí	No	No
-8. Seguridad de Contraseñas
+9. Seguridad de Contraseñas
 Hash
 Argon2
 
@@ -181,7 +201,7 @@ No almacenar:
 Texto plano
 MD5
 SHA1
-9. Seguridad de API
+10. Seguridad de API
 Token
 JWT
 
@@ -192,7 +212,7 @@ Tiempo recomendado:
 Refresh:
 
 24 horas
-10. Auditoría Obligatoria
+11. Auditoría Obligatoria
 
 Toda acción deberá registrarse.
 
@@ -213,7 +233,7 @@ Cambio Estado
 REFERENCIA_STATUS
 Reproceso
 REFERENCIA_REPROCESS
-11. No Repudio
+12. No Repudio
 
 Toda auditoría deberá almacenar:
 
@@ -240,7 +260,7 @@ Ejemplo:
   "referencia":"123456789",
   "fecha":"2026-07-01 14:32:10"
 }
-12. Auditoría de Producción
+13. Auditoría de Producción
 Tabla
 auditoria_evento
 
@@ -250,7 +270,7 @@ Qué hizo
 Quién lo hizo
 Cuándo lo hizo
 Dónde lo hizo
-13. Auditoría de Acceso
+14. Auditoría de Acceso
 Tabla
 auditoria_login
 
@@ -265,7 +285,7 @@ Sesión
 IP
 
 Equipo
-14. Auditoría de Errores
+15. Auditoría de Errores
 Tabla
 auditoria_error
 
@@ -280,7 +300,7 @@ Usuario
 Módulo
 
 Fecha
-15. Seguridad de PDFs
+16. Seguridad de PDFs
 
 Los PDFs representan evidencia operativa.
 
@@ -293,7 +313,7 @@ Estados permitidos:
 Activo
 
 Archivado
-16. Integridad de Archivos
+17. Integridad de Archivos
 
 Cada PDF almacenará:
 
@@ -308,7 +328,7 @@ Corrupción
 Manipulación
 
 Sustitución
-17. Recuperación Operativa
+18. Recuperación Operativa
 Checkpoints
 
 Obligatorios.
@@ -322,7 +342,7 @@ Referencia 850
 Falla eléctrica
 ↓
 Reanudar desde 851
-18. Seguridad de Concurrencia
+19. Seguridad de Concurrencia
 
 Problema:
 
@@ -346,7 +366,7 @@ Cero duplicados
 
 en consecutivos.
 
-19. Respaldo
+20. Respaldo
 Base de Datos
 
 Diario.
@@ -362,7 +382,7 @@ Diaria.
 Retención:
 
 5 años
-20. Monitoreo
+21. Monitoreo
 
 Indicadores:
 
@@ -371,7 +391,7 @@ Sesiones Activas
 Solicitudes Procesándose
 Referencias Generadas
 Errores por Hora
-21. Riesgos Identificados
+22. Riesgos Identificados
 R-001
 
 Cambio de estructura Tributanet.
@@ -396,7 +416,7 @@ R-006
 
 Acceso indebido.
 
-22. Controles Mitigantes
+23. Controles Mitigantes
 Riesgo	Mitigación
 Duplicidad	FOR UPDATE
 Manipulación PDF	SHA256

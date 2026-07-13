@@ -117,3 +117,15 @@ class SecurityService:
             if mod == modulo_codigo and acc == accion_codigo:
                 return True
         return False
+
+    def has_app_module_access(self, usuario_id: int, app_modulo_codigo: str) -> bool:
+        """Verifies if the user holds access to the specified AppModulo."""
+        authorized_modules = self.user_repo.get_authorized_app_modules(usuario_id)
+        return app_modulo_codigo in authorized_modules
+
+    def is_session_active(self, sesion_id: Optional[int]) -> bool:
+        """Verifies if the session exists and is active."""
+        if not sesion_id:
+            return False
+        sesion = self.session.get(Sesion, sesion_id)
+        return sesion is not None and sesion.estado == "ACTIVA"

@@ -1,6 +1,7 @@
 """Users Administration Sub-view."""
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QMessageBox, QCheckBox
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QMessageBox
+from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
 from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
@@ -47,7 +48,7 @@ class UsersView(QWidget):
         self.inp_u_correo = LabeledInput("Correo (Opcional)")
         self.inp_u_correo.set_validator(r"^(?:[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)?$", "Formato de correo inválido.")
         self.inp_u_pass = LabeledInput("Contraseña", "Dejar en blanco si no se cambia", is_password=True)
-        self.chk_u_activo = QCheckBox("Usuario Activo")
+        self.chk_u_activo = CustomCheckBox("Usuario Activo")
         self.chk_u_activo.setChecked(True)
         
         dialog.add_widget(self.inp_u_username)

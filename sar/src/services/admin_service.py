@@ -1,5 +1,6 @@
 """Service layer for Administration operations (CRUD and Auditing)."""
 
+import functools
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 from argon2 import PasswordHasher
@@ -15,6 +16,17 @@ from sar.src.storage.models import (
     AppModulo, Modulo, EstadoSistema, Accion
 )
 
+def require_active_session(func):
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        sesion_id = kwargs.get("sesion_id")
+        if sesion_id is None and len(args) >= 2:
+            sesion_id = args[1]
+        
+        self._validate_session(sesion_id)
+        return func(self, *args, **kwargs)
+    return wrapper
+
 class AdminService:
     """Handles business logic for the System Administration Module."""
 
@@ -25,6 +37,15 @@ class AdminService:
         self.config_repo = ConfigRepository(session)
         self.audit_repo = AuditRepository(session)
         self.ph = PasswordHasher()
+
+    def _validate_session(self, sesion_id: Optional[int]) -> None:
+        """Helper to strictly validate if the session exists and is active."""
+        if not sesion_id:
+            raise PermissionError("Acceso denegado: Sesión requerida.")
+        from sar.src.services.security_service import SecurityService
+        sec_service = SecurityService(self.session)
+        if not sec_service.is_session_active(sesion_id):
+            raise PermissionError("Acceso denegado: La sesión no está activa o ha expirado.")
 
     def _ensure_evento(self, codigo: str) -> None:
         """Ensures the event code exists in EventoSistema to prevent crash."""
@@ -52,6 +73,7 @@ class AdminService:
         except Exception as e:
             print(f"Failed to audit {action}: {e}")
 
+    @require_active_session
     def save_usuario(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Usuario:
         modulo = "ADMIN_USUARIOS"
         action = "CREAR_REGISTRO"
@@ -108,6 +130,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"username": user.username})
         return user
 
+    @require_active_session
     def save_rfc(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Rfc:
         modulo = "ADMIN_CATALOGOS"
         action = "CREAR_REGISTRO"
@@ -150,6 +173,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"rfc": rfc.rfc})
         return rfc
 
+    @require_active_session
     def save_concepto(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Concepto:
         modulo = "ADMIN_CATALOGOS"
         action = "CREAR_REGISTRO"
@@ -178,6 +202,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": concepto.nombre})
         return concepto
 
+    @require_active_session
     def save_estado_sistema(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> EstadoSistema:
         modulo = "ADMIN_CATALOGOS"
         action = "CREAR_REGISTRO"
@@ -203,6 +228,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"codigo": est.codigo})
         return est
 
+    @require_active_session
     def save_parametro(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> ParametroSistema:
         modulo = "ADMIN_CONFIG"
         action = "CREAR_REGISTRO"
@@ -229,6 +255,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"codigo": param.codigo})
         return param
 
+    @require_active_session
     def save_rol(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Rol:
         modulo = "ADMIN_SEGURIDAD"
         action = "CREAR_REGISTRO"
@@ -265,11 +292,18 @@ class AdminService:
                 new_permisos.append(permiso)
             rol.permisos = new_permisos
 
+        if "app_modulo_ids" in data:
+            new_app_mods = []
+            if data["app_modulo_ids"]:
+                new_app_mods = self.session.query(AppModulo).filter(AppModulo.app_modulo_id.in_(data["app_modulo_ids"])).all()
+            rol.app_modulos = new_app_mods
+
         self.user_repo.save_rol(rol)
         new_val = {"rol_id": rol.rol_id, "codigo": rol.codigo, "nombre": rol.nombre, "activo": rol.activo}
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": rol.nombre})
         return rol
 
+    @require_active_session
     def save_app_modulo(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> AppModulo:
         modulo = "ADMIN_SEGURIDAD"
         action = "CREAR_REGISTRO"
@@ -297,6 +331,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": am.nombre})
         return am
 
+    @require_active_session
     def save_modulo(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Modulo:
         modulo = "ADMIN_SEGURIDAD"
         action = "CREAR_REGISTRO"
@@ -326,6 +361,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": m.nombre})
         return m
 
+    @require_active_session
     def save_accion(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]):
         modulo = "ADMIN_SEGURIDAD"
         action = "CREAR_REGISTRO"
@@ -355,6 +391,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": a.nombre})
         return a
 
+    @require_active_session
     def save_localizador(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> LocalizadorPortal:
         modulo = "ADMIN_CONFIG"
         action = "CREAR_REGISTRO"
@@ -402,6 +439,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre_clave": loc.nombre_clave})
         return loc
 
+    @require_active_session
     def save_municipio(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Municipio:
         modulo = "ADMIN_CATALOGOS"
         action = "CREAR_REGISTRO"
@@ -428,6 +466,7 @@ class AdminService:
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": mun.nombre})
         return mun
 
+    @require_active_session
     def save_delegacion(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Delegacion:
         modulo = "ADMIN_CATALOGOS"
         action = "CREAR_REGISTRO"

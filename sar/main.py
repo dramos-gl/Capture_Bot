@@ -63,6 +63,12 @@ class MainWindow(QMainWindow):
                 sesion_obj = security_service.login(username, password)
                 
                 if sesion_obj:
+                    # Verificar acceso al módulo seleccionado (Nivel 1)
+                    if not security_service.has_app_module_access(sesion_obj.usuario_id, selected_mod_code):
+                        security_service.logout(sesion_obj.sesion_id)
+                        self.login_view.set_login_error("Acceso no autorizado para este módulo.")
+                        return
+
                     # Successful login
                     self.current_sesion_id = sesion_obj.sesion_id
                     self.current_usuario_id = sesion_obj.usuario_id
@@ -78,13 +84,17 @@ class MainWindow(QMainWindow):
                     
                     if selected_mod_code == "ADMIN":
                         from sar.src.ui.views.admin_view import AdminWindow
-                        self.active_module = AdminWindow(self.db_connector)
-                        self.active_module.current_sesion_id = self.current_sesion_id
+                        self.active_module = AdminWindow(
+                            self.db_connector,
+                            current_usuario_id=self.current_usuario_id,
+                            current_sesion_id=self.current_sesion_id
+                        )
                         self.active_module.logout_requested.connect(self._handle_logout)
                     elif selected_mod_code == "CTRL_REF":
                         from sar.src.ui.views.main_view import MainView
                         self.active_module = QMainWindow()
                         self.active_module.current_sesion_id = self.current_sesion_id
+                        self.active_module.current_usuario_id = self.current_usuario_id
                         self.active_module.setWindowTitle("SAR - Control de Referencias")
                         self.active_module.resize(1100, 750)
                         

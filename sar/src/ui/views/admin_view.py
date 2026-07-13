@@ -27,10 +27,12 @@ class AdminWindow(QMainWindow):
     
     logout_requested = Signal()
     
-    def __init__(self, db_connector, parent=None):
+    def __init__(self, db_connector, parent=None, current_usuario_id=None, current_sesion_id=None):
         super().__init__(parent)
         self.db_connector = db_connector
         self._logging_out = False
+        self.current_usuario_id = current_usuario_id
+        self.current_sesion_id = current_sesion_id
         
         # Window setup
         self.setWindowTitle("Configuración del Sistema")
@@ -85,10 +87,14 @@ class AdminWindow(QMainWindow):
         self._setup_views()
         
     def _get_current_session(self):
+        if self.current_sesion_id:
+            return self.current_sesion_id
         main_window = self.window()
         return getattr(main_window, 'current_sesion_id', None)
         
     def _get_current_user(self):
+        if self.current_usuario_id:
+            return self.current_usuario_id
         try:
             with self.db_connector.get_session() as session:
                 from sar.src.storage.models import Sesion
@@ -124,9 +130,6 @@ class AdminWindow(QMainWindow):
             pass
             
     def _can_edit(self, modulo: str) -> bool:
-        # Dev fallback: If no permissions are loaded for the user or the module is missing, assume True.
-        if not self.user_permissions or not any(m == modulo for m, a in self.user_permissions):
-            return True
         # Check if CREAR or EDITAR is present for this modulo
         return (modulo, "CREAR") in self.user_permissions or (modulo, "EDITAR") in self.user_permissions
 
@@ -135,17 +138,17 @@ class AdminWindow(QMainWindow):
         current_session = self._get_current_session()
         
         self.views = {
-            "usuarios": UsersView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_SEGURIDAD")),
-            "roles": RolesView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_SEGURIDAD")),
-            "permisos": PermissionsView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_SEGURIDAD")),
-            "app_modulos": ModulesView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_SEGURIDAD")),
-            "acciones": ActionsView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_SEGURIDAD")),
-            "conceptos": CatalogsView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_CATALOGOS")),
-            "geografia": GeographyView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_CATALOGOS")),
-            "rfcs": RfcsView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_CATALOGOS")),
-            "estados": StatusView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_CATALOGOS")),
-            "parametros": ParametersView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_CONFIG")),
-            "localizadores": LocalizersView(self.db_connector, current_user, current_session, self._can_edit("ADMIN_CONFIG"))
+            "usuarios": UsersView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
+            "roles": RolesView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
+            "permisos": PermissionsView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
+            "app_modulos": ModulesView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
+            "acciones": ActionsView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
+            "conceptos": CatalogsView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
+            "geografia": GeographyView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
+            "rfcs": RfcsView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
+            "estados": StatusView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
+            "parametros": ParametersView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
+            "localizadores": LocalizersView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION"))
         }
         
         # Add a default placeholder view

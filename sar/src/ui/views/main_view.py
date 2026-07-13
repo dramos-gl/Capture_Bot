@@ -57,6 +57,44 @@ class MainView(QWidget):
         # Connect logout action
         self.sidebar.logout_requested.connect(self.logout_requested.emit)
         
+        # Apply RBAC permissions (Nivel 2)
+        self._apply_permissions()
+        
+    def _apply_permissions(self):
+        """Loads user permissions and shows authorized sidebar navigation items (Fail-Closed)."""
+        try:
+            parent_window = self.window()
+            usuario_id = getattr(parent_window, 'current_usuario_id', None)
+            if not usuario_id:
+                return
+
+            with self.db_connector.get_session() as session:
+                from sar.src.services.security_service import SecurityService
+                sec_service = SecurityService(session)
+                
+                # Check each module LEER permission
+                has_dashboard = sec_service.has_permission(usuario_id, "DASHBOARD", "LEER")
+                has_ordenes = sec_service.has_permission(usuario_id, "ORDENES", "LEER")
+                has_solicitudes = sec_service.has_permission(usuario_id, "SOLICITUDES", "LEER")
+                has_referencias = sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
+                has_seguridad = sec_service.has_permission(usuario_id, "SEGURIDAD", "LEER")
+                
+                if has_dashboard:
+                    self.sidebar.show_item("dashboard")
+                if has_ordenes:
+                    self.sidebar.show_item("ordenes")
+                    self.sidebar.show_item("ordenes_capturadas")
+                    self.sidebar.show_item("capturar_orden")
+                    self.sidebar.submenu_container.show()
+                if has_solicitudes:
+                    self.sidebar.show_item("solicitudes")
+                if has_referencias:
+                    self.sidebar.show_item("referencias")
+                if has_seguridad:
+                    self.sidebar.show_item("configuracion")
+        except Exception as e:
+            print(f"Error applying permissions in MainView: {e}")
+
     def _create_placeholder_view(self, title_text: str) -> QWidget:
         """Helper to create simple layout placeholders for views."""
         widget = QWidget()
@@ -68,7 +106,36 @@ class MainView(QWidget):
         return widget
         
     def _on_navigation(self, view_key: str):
-        """Switches the stacked widget active view or opens independent windows."""
+        """Switches the stacked widget active view or opens independent windows with routing permissions check."""
+        try:
+            parent_window = self.window()
+            usuario_id = getattr(parent_window, 'current_usuario_id', None)
+            if not usuario_id:
+                return
+
+            with self.db_connector.get_session() as session:
+                from sar.src.services.security_service import SecurityService
+                sec_service = SecurityService(session)
+                
+                mod_mapping = {
+                    "dashboard": "DASHBOARD",
+                    "ordenes": "ORDENES",
+                    "ordenes_capturadas": "ORDENES",
+                    "capturar_orden": "ORDENES",
+                    "solicitudes": "SOLICITUDES",
+                    "referencias": "REFERENCIAS",
+                    "configuracion": "SEGURIDAD"
+                }
+                
+                req_mod = mod_mapping.get(view_key)
+                if req_mod and not sec_service.has_permission(usuario_id, req_mod, "LEER"):
+                    from PySide6.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "Acceso Denegado", f"No tiene permisos para acceder al módulo {req_mod}.")
+                    return
+        except Exception as e:
+            print(f"Routing security error in MainView: {e}")
+            return
+
         if view_key == "dashboard":
             self.stacked_widget.setCurrentWidget(self.dashboard_view)
             self.dashboard_view.refresh_data()
@@ -87,7 +154,15 @@ class MainView(QWidget):
             self.refs_view.refresh_data()
         elif view_key == "configuracion":
             if not self.admin_window:
-                self.admin_window = AdminWindow(self.db_connector, self)
+                parent_window = self.window()
+                uid = getattr(parent_window, 'current_usuario_id', None)
+                sid = getattr(parent_window, 'current_sesion_id', None)
+                self.admin_window = AdminWindow(
+                    self.db_connector,
+                    self,
+                    current_usuario_id=uid,
+                    current_sesion_id=sid
+                )
             self.admin_window.show()
             self.admin_window.raise_()
             self.admin_window.activateWindow()

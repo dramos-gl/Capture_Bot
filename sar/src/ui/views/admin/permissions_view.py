@@ -2,10 +2,12 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QComboBox, 
-    QTableWidget, QHeaderView, QAbstractItemView, QCheckBox, QLabel
+    QTableWidget, QHeaderView, QAbstractItemView, QLabel
 )
+from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
+from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import UsuarioRepository
 from sar.src.services.admin_service import AdminService
 
@@ -56,19 +58,19 @@ class PermissionsView(QWidget):
         self.matrix_table = QTableWidget()
         self.matrix_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.matrix_table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.matrix_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.matrix_table.horizontalHeader().setStretchLastSection(True)
+        self.matrix_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.matrix_table.horizontalHeader().setStretchLastSection(False)
         self.matrix_table.verticalHeader().setVisible(False)
         
-        # Styling for table (to match the image's red header)
-        self.matrix_table.setStyleSheet("""
-            QHeaderView::section {
-                background-color: #A33A36;
+        # Styling for table (to match Design System corporate navy header)
+        self.matrix_table.setStyleSheet(f"""
+            QHeaderView::section {{
+                background-color: {Colors.PRIMARY};
                 color: white;
                 font-weight: bold;
-                border: 1px solid #8B322E;
+                border: 1px solid {Colors.PRIMARY_LIGHT};
                 padding: 8px;
-            }
+            }}
         """)
         
         self.layout.addWidget(self.matrix_table)
@@ -112,10 +114,9 @@ class PermissionsView(QWidget):
         headers = ["Módulo"] + [a["nombre"] for a in self.acciones]
         self.matrix_table.setHorizontalHeaderLabels(headers)
         
-        # Adjust Módulo column width
-        self.matrix_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        for i in range(1, len(headers)):
-            self.matrix_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
+        # Adjust all columns width to contents to prevent label truncation
+        for i in range(len(headers)):
+            self.matrix_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeToContents)
         
         self.checkboxes_matrix.clear()
         
@@ -128,11 +129,12 @@ class PermissionsView(QWidget):
             
             # Action Checkboxes
             for c_idx, acc in enumerate(self.acciones):
-                chk = QCheckBox()
+                chk = CustomCheckBox()
                 if not self.can_edit:
                     chk.setEnabled(False)
                 # Centering checkbox in cell
                 widget = QWidget()
+                widget.setStyleSheet("background-color: transparent;")
                 l = QHBoxLayout(widget)
                 l.addWidget(chk)
                 l.setAlignment(Qt.AlignCenter)
