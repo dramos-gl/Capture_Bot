@@ -339,6 +339,8 @@ class Referencia(Base):
     fecha_vigencia: Mapped[Optional[date]] = mapped_column(Date)
     usuario_asignado: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id"))
     estado_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.estado_sistema.estado_id"), nullable=False)
+    cantidad: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    porcentaje: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     # Relaciones

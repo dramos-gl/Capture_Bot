@@ -47,6 +47,8 @@ class FaseBService:
                     r.consecutivo_grupo,
                     r.referencia_portal,
                     r.importe,
+                    r.cantidad,
+                    r.porcentaje,
                     pdf.ruta_archivo,
                     rfc.rfc,
                     c.alias AS concepto_alias
@@ -136,7 +138,9 @@ class FaseBService:
                     {
                         "id": row.consecutivo_grupo,
                         "Referencia": row.referencia_portal,
-                        "importe": float(row.importe) if row.importe is not None else 0.0
+                        "cantidad": row.cantidad,
+                        "importe": float(row.importe) if row.importe is not None else 0.0,
+                        "porcentaje": row.porcentaje
                     }
                     for row in batch_rows
                 ]

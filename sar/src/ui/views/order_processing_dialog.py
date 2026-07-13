@@ -471,7 +471,7 @@ class OrderProcessingDialog(QDialog):
         self._process_selected_with_state("RECHAZADA", "RECHAZADAS")
 
     def _get_default_directory(self) -> str:
-        """Helper to get the default directory configured in parametro_sistema, pointing to 'boletas'."""
+        """Helper to get the default directory configured in parametro_sistema, pointing to 'boletas' and order subfolder."""
         import os
         try:
             from sar.src.storage.repositories import ConfigRepository
@@ -479,11 +479,23 @@ class OrderProcessingDialog(QDialog):
                 config_repo = ConfigRepository(session)
                 base_path = config_repo.get_parametro("RUTA_DERECHOS")
                 if base_path:
+                    # Obtener folio de la orden de los datos de solicitudes
+                    folio = self.solicitudes_data[0]["folio_orden"] if self.solicitudes_data else ""
+                    folio_clean = "".join(c for c in folio if c.isalnum() or c in ("-", "_")).strip()
+                    
                     for sub in ["boletas", "BOLETAS"]:
                         sub_path = os.path.join(base_path, sub)
                         if os.path.exists(sub_path):
+                            if folio_clean:
+                                order_path = os.path.join(sub_path, folio_clean)
+                                os.makedirs(order_path, exist_ok=True)
+                                return os.path.abspath(order_path)
                             return os.path.abspath(sub_path)
                     if os.path.exists(base_path):
+                        if folio_clean:
+                            order_path = os.path.join(base_path, folio_clean)
+                            os.makedirs(order_path, exist_ok=True)
+                            return os.path.abspath(order_path)
                         return os.path.abspath(base_path)
         except Exception:
             pass

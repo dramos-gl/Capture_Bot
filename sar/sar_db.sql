@@ -256,6 +256,8 @@ CREATE TABLE sar_produccion.referencia (
     fecha_vigencia DATE,
     usuario_asignado BIGINT,
     estado_id BIGINT NOT NULL,
+    cantidad INTEGER NOT NULL DEFAULT 1,
+    porcentaje INTEGER NOT NULL DEFAULT 100,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     FOREIGN KEY (grupo_id) REFERENCES sar_produccion.grupo_referencia(grupo_id) ON DELETE CASCADE,
     FOREIGN KEY (solicitud_id) REFERENCES sar_produccion.solicitud(solicitud_id) ON DELETE CASCADE,

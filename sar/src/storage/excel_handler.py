@@ -4,18 +4,18 @@ import openpyxl
 from typing import List, Dict, Any
 
 def generate_excel_batch(filepath: str, data: List[Dict[str, Any]]) -> None:
-    """Generates an Excel file with columns: id, Referencia, importe.
+    """Generates an Excel file with columns: Id, Referencia, Cantidad, Importe, Porcentaje.
     
     Args:
         filepath: The destination file path.
-        data: A list of dictionaries with keys 'id', 'Referencia', 'importe'.
+        data: A list of dictionaries with keys 'id', 'Referencia', 'cantidad', 'importe', 'porcentaje'.
     """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Lote"
     
     # Headers
-    headers = ["id", "Referencia", "importe"]
+    headers = ["Id", "Referencia", "Cantidad", "Importe", "Porcentaje"]
     ws.append(headers)
     
     # Data rows
@@ -23,7 +23,9 @@ def generate_excel_batch(filepath: str, data: List[Dict[str, Any]]) -> None:
         ws.append([
             row.get("id"),
             row.get("Referencia"),
-            row.get("importe")
+            row.get("cantidad"),
+            row.get("importe"),
+            row.get("porcentaje")
         ])
         
     # Auto-fit column widths to prevent text clipping
