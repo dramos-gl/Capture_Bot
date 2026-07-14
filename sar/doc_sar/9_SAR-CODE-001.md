@@ -352,6 +352,10 @@ CREATE TABLE sar_produccion.referencia
 
     estado_id BIGINT NOT NULL,
 
+    cantidad INTEGER NOT NULL DEFAULT 1,
+
+    porcentaje INTEGER NOT NULL DEFAULT 100,
+
     created_at TIMESTAMPTZ DEFAULT NOW(),
 
     FOREIGN KEY (grupo_id)

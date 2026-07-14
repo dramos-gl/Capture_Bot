@@ -398,6 +398,8 @@ Representa una referencia generada por Tributanet.
 | FECHA_GENERACION | DATETIME |
 | FECHA_VENCIMIENTO | DATETIME |
 | ESTADO | VARCHAR(30) |
+| CANTIDAD | INTEGER |
+| PORCENTAJE | INTEGER |
 | PDF_PATH | VARCHAR(1000) |
 | PDF_HASH | VARCHAR(128) |
 | WORKER_ID | BIGINT |
@@ -701,10 +703,11 @@ CONSECUTIVO_GRUPO
 ### Columnas
 
 ```text
-Consecutivo
+Id
 Referencia
+Cantidad
 Importe
-Vigencia
+Porcentaje
 ```
 
 ---
