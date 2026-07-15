@@ -91,6 +91,16 @@ Start-Service SAR_API
 Get-Service SAR_API
 ```
 
+### 4.4. Inicio Manual del Servidor (Modo Desarrollo/Pruebas)
+Para realizar pruebas rápidas, depurar o ejecutar el servidor de la API sin instalarlo como servicio de Windows, ejecute el siguiente comando desde la raíz del proyecto con el entorno virtual activo:
+```powershell
+.venv_sar\Scripts\activate
+python -m uvicorn sar.main_api:app --host 0.0.0.0 --port 8000 --reload
+```
+* **`--host 0.0.0.0`**: Permite recibir conexiones desde cualquier IP (localhost y subred local).
+* **`--port 8000`**: Puerto de escucha del servidor.
+* **`--reload`**: Reinicia automáticamente el servidor al detectar cambios en el código de Python.
+
 ---
 
 ## 5. Fase 3: Configuración del Firewall de Windows
@@ -121,17 +131,26 @@ Disable-NetFirewallRule -DisplayName "PostgreSQL*"
 ## 6. Fase 4: Despliegue y Distribución del Cliente
 
 ### 6.1. Archivo de Configuración del Cliente (`settings.json`)
-En la carpeta de instalación de cada cliente de escritorio (junto al ejecutable compilado), se creará un archivo de configuración dinámico:
+En la carpeta de instalación de cada cliente de escritorio (junto al ejecutable compilado `SAR_Cliente.exe`), se creará un archivo de configuración dinámico para controlar la conexión:
 
 ```json
 {
-  "api_url": "http://192.168.1.15:8000"
+  "CONNECT_VIA_API": false,
+  "API_URL": "http://127.0.0.1:8000",
+  "DB_USER": "postgres",
+  "DB_PASSWORD": "",
+  "DB_HOST": "127.0.0.1",
+  "DB_PORT": "5432",
+  "DB_NAME": "db_sar"
 }
 ```
+* **`CONNECT_VIA_API`**: Interruptor de seguridad. Si se establece en `false`, el cliente se conecta de forma directa a la base de datos local (comportamiento legacy). Si se cambia a `true`, la autenticación se conmuta automáticamente a la API REST.
+
+---
 
 ### 6.2. Compilación del Cliente
-Utilice PyInstaller para compilar la aplicación de escritorio a partir del archivo `.spec` existente en el workspace:
+Utilice PyInstaller desde el entorno virtual para compilar la aplicación de escritorio especificando la ruta de búsqueda de módulos:
 ```powershell
-pyinstaller main.spec --noconfirm
+.venv_sar\Scripts\pyinstaller --noconfirm --onedir --windowed --paths=. --name="SAR_Cliente" sar/main.py
 ```
-Distribuya la carpeta de salida `dist/main/` (que incluye el ejecutable `main.exe` y el archivo `settings.json`) a los operadores de la red local.
+Distribuya la carpeta de salida `dist/SAR_Cliente/` (que incluye el ejecutable `SAR_Cliente.exe` y el archivo `settings.json`) a los operadores de la red local.

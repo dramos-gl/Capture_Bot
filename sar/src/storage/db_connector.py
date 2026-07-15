@@ -12,12 +12,22 @@ class DatabaseConnector:
     """Manages the database connection and session lifecycle."""
 
     def __init__(self):
-        # Intentar leer variables de entorno con valores por defecto locales seguros
-        self.db_user = os.getenv("DB_USER", "postgres")
-        self.db_password = os.getenv("DB_PASSWORD", "")
-        self.db_host = os.getenv("DB_HOST", "localhost")
-        self.db_port = os.getenv("DB_PORT", "5432")
-        self.db_name = os.getenv("DB_NAME", "db_sar")
+        # Intentar cargar variables desde settings.json si existe
+        import json
+        settings_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "settings.json"))
+        settings_data = {}
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    settings_data = json.load(f)
+            except Exception as e:
+                print(f"Advertencia: No se pudo cargar settings.json: {e}")
+
+        self.db_user = settings_data.get("DB_USER", os.getenv("DB_USER", "postgres"))
+        self.db_password = settings_data.get("DB_PASSWORD", os.getenv("DB_PASSWORD", ""))
+        self.db_host = settings_data.get("DB_HOST", os.getenv("DB_HOST", "localhost"))
+        self.db_port = settings_data.get("DB_PORT", os.getenv("DB_PORT", "5432"))
+        self.db_name = settings_data.get("DB_NAME", os.getenv("DB_NAME", "db_sar"))
 
         # Construir URL de conexión para PostgreSQL usando psycopg2
         self.database_url = (

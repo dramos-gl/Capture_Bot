@@ -26,8 +26,10 @@ class MainWindow(QMainWindow):
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.resize(400, 520)
         
-        # Initialize Database Connector
+        # Initialize Database Connector and API Client wrapper
         self.db_connector = DatabaseConnector()
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         self.current_sesion_id = None
         self._drag_pos = None
         
@@ -55,91 +57,118 @@ class MainWindow(QMainWindow):
         event.accept()
         
     def _handle_login(self, username, password, selected_mod_code):
-        """Validates credentials using the physical database and transitions."""
+        """Validates credentials using the API switch or direct database connection."""
         try:
-            with self.db_connector.get_session() as db_session:
-                security_service = SecurityService(db_session)
+            if self.api_client.connect_via_api:
+                # ===================================================================
+                # RUTA A: Conexión mediante API REST (FastAPI)
+                # ===================================================================
+                payload = {
+                    "username": username,
+                    "password": password,
+                    "ip_equipo": "127.0.0.1",
+                    "equipo_nombre": "Cliente LAN"
+                }
+                res = self.api_client.request("POST", "/api/auth/login", data=payload)
                 
-                sesion_obj = security_service.login(username, password)
+                # Verificar acceso al módulo seleccionado (Nivel 1)
+                access_res = self.api_client.request("GET", f"/api/auth/module-access/{res['usuario_id']}/{selected_mod_code}")
+                if not access_res.get("has_access", False):
+                    self.api_client.request("POST", "/api/auth/logout", data={"sesion_id": res["sesion_id"]})
+                    self.login_view.set_login_error("Acceso no autorizado para este módulo.")
+                    return
                 
-                if sesion_obj:
-                    # Verificar acceso al módulo seleccionado (Nivel 1)
+                # Almacenar token de sesión de forma segura
+                self.api_client.save_token(username, res["access_token"])
+                
+                self.current_sesion_id = res["sesion_id"]
+                self.current_usuario_id = res["usuario_id"]
+                self.current_username = username
+            else:
+                # ===================================================================
+                # RUTA B: Conexión Directa a PostgreSQL (Código Original)
+                # ===================================================================
+                with self.db_connector.get_session() as db_session:
+                    security_service = SecurityService(db_session)
+                    sesion_obj = security_service.login(username, password)
+                    
+                    if not sesion_obj:
+                        self.login_view.set_login_error("Credenciales inválidas o usuario inactivo")
+                        return
+                        
                     if not security_service.has_app_module_access(sesion_obj.usuario_id, selected_mod_code):
                         security_service.logout(sesion_obj.sesion_id)
                         self.login_view.set_login_error("Acceso no autorizado para este módulo.")
                         return
 
-                    # Successful login
                     self.current_sesion_id = sesion_obj.sesion_id
                     self.current_usuario_id = sesion_obj.usuario_id
+
+            # Clear login form
+            self.login_view.user_input.set_text("")
+            self.login_view.pass_input.set_text("")
+            self.login_view.user_input.clear_error()
+            self.login_view.pass_input.clear_error()
+            
+            # Hide login window
+            self.hide()
                     
-                    # Clear login form
-                    self.login_view.user_input.set_text("")
-                    self.login_view.pass_input.set_text("")
-                    self.login_view.user_input.clear_error()
-                    self.login_view.pass_input.clear_error()
-                    
-                    # Hide login window
-                    self.hide()
-                    
-                    if selected_mod_code == "ADMIN":
-                        from sar.src.ui.views.admin_view import AdminWindow
-                        self.active_module = AdminWindow(
-                            self.db_connector,
-                            current_usuario_id=self.current_usuario_id,
-                            current_sesion_id=self.current_sesion_id
-                        )
-                        self.active_module.logout_requested.connect(self._handle_logout)
-                    elif selected_mod_code == "CTRL_REF":
-                        from sar.src.ui.views.main_view import MainView
-                        self.active_module = QMainWindow()
-                        self.active_module.current_sesion_id = self.current_sesion_id
-                        self.active_module.current_usuario_id = self.current_usuario_id
-                        self.active_module.setWindowTitle("SAR - Control de Referencias")
-                        self.active_module.resize(1100, 750)
-                        
-                        # Use the existing MainView (which has the sidebar and dashboard)
-                        main_view_widget = MainView(ThemeManager, self.db_connector, self.active_module)
-                        main_view_widget.hide_admin_menu()
-                        self.active_module.setCentralWidget(main_view_widget)
-                        
-                        # Hook up logout for MainView
-                        main_view_widget.logout_requested.connect(self._handle_logout)
-                    elif selected_mod_code == "BOT_FACE_A":
-                        from sar.src.ui.views.bot_view import BotView
-                        self.active_module = QMainWindow()
-                        self.active_module.current_sesion_id = self.current_sesion_id
-                        self.active_module.setWindowTitle("SAR - Bot Face A (Automático)")
-                        self.active_module.resize(1100, 750)
-                        
-                        bot_view_widget = BotView(self.db_connector, self.current_sesion_id, self.current_usuario_id, self.active_module)
-                        self.active_module.setCentralWidget(bot_view_widget)
-                        
-                        # Hook up logout for BotView
-                        bot_view_widget.logout_requested.connect(self._handle_logout)
-                    elif selected_mod_code == "BOT_C":
-                        from sar.src.ui.views.billing_bot_view import BillingBotWindow
-                        self.active_module = BillingBotWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
-                        self.active_module.current_sesion_id = self.current_sesion_id
-                        
-                        # Hook up logout for BillingBotWindow
-                        self.active_module.logout_requested.connect(self._handle_logout)
-                    else:
-                        # Placeholder for other modules
-                        from PySide6.QtWidgets import QLabel
-                        self.active_module = QMainWindow()
-                        self.active_module.setWindowTitle(f"Módulo: {selected_mod_code}")
-                        self.active_module.resize(800, 600)
-                        lbl = QLabel(f"Bienvenido al módulo {selected_mod_code}", self.active_module)
-                        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                        self.active_module.setCentralWidget(lbl)
-                        
-                    if selected_mod_code in ("BOT_FACE_A", "BOT_C"):
-                        self.active_module.show()
-                    else:
-                        self.active_module.showMaximized()
-                else:
-                    self.login_view.set_login_error("Credenciales inválidas o usuario inactivo")
+            if selected_mod_code == "ADMIN":
+                from sar.src.ui.views.admin_view import AdminWindow
+                self.active_module = AdminWindow(
+                    self.db_connector,
+                    current_usuario_id=self.current_usuario_id,
+                    current_sesion_id=self.current_sesion_id
+                )
+                self.active_module.logout_requested.connect(self._handle_logout)
+            elif selected_mod_code == "CTRL_REF":
+                from sar.src.ui.views.main_view import MainView
+                self.active_module = QMainWindow()
+                self.active_module.current_sesion_id = self.current_sesion_id
+                self.active_module.current_usuario_id = self.current_usuario_id
+                self.active_module.setWindowTitle("SAR - Control de Referencias")
+                self.active_module.resize(1100, 750)
+                
+                # Use the existing MainView (which has the sidebar and dashboard)
+                main_view_widget = MainView(ThemeManager, self.db_connector, self.active_module)
+                main_view_widget.hide_admin_menu()
+                self.active_module.setCentralWidget(main_view_widget)
+                
+                # Hook up logout for MainView
+                main_view_widget.logout_requested.connect(self._handle_logout)
+            elif selected_mod_code == "BOT_FACE_A":
+                from sar.src.ui.views.bot_view import BotView
+                self.active_module = QMainWindow()
+                self.active_module.current_sesion_id = self.current_sesion_id
+                self.active_module.setWindowTitle("SAR - Bot Face A (Automático)")
+                self.active_module.resize(1100, 750)
+                
+                bot_view_widget = BotView(self.db_connector, self.current_sesion_id, self.current_usuario_id, self.active_module)
+                self.active_module.setCentralWidget(bot_view_widget)
+                
+                # Hook up logout for BotView
+                bot_view_widget.logout_requested.connect(self._handle_logout)
+            elif selected_mod_code == "BOT_C":
+                from sar.src.ui.views.billing_bot_view import BillingBotWindow
+                self.active_module = BillingBotWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
+                self.active_module.current_sesion_id = self.current_sesion_id
+                
+                # Hook up logout for BillingBotWindow
+                self.active_module.logout_requested.connect(self._handle_logout)
+            else:
+                # Placeholder for other modules
+                from PySide6.QtWidgets import QLabel
+                self.active_module = QMainWindow()
+                self.active_module.setWindowTitle(f"Módulo: {selected_mod_code}")
+                self.active_module.resize(800, 600)
+                lbl = QLabel(f"Bienvenido al módulo {selected_mod_code}", self.active_module)
+                lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.active_module.setCentralWidget(lbl)
+                
+            if selected_mod_code in ("BOT_FACE_A", "BOT_C"):
+                self.active_module.show()
+            else:
+                self.active_module.showMaximized()
         except OperationalError:
             self.login_view.set_login_error("Error: No se pudo conectar a la base de datos física.")
         except Exception as e:
@@ -149,9 +178,18 @@ class MainWindow(QMainWindow):
         """Logs out the user, closes the session and returns to the login screen."""
         if self.current_sesion_id is not None:
             try:
-                with self.db_connector.get_session() as db_session:
-                    security_service = SecurityService(db_session)
-                    security_service.logout(self.current_sesion_id)
+                if self.api_client.connect_via_api:
+                    self.api_client.request(
+                        "POST", 
+                        "/api/auth/logout", 
+                        data={"sesion_id": self.current_sesion_id},
+                        username=getattr(self, 'current_username', None)
+                    )
+                    self.api_client.delete_token(getattr(self, 'current_username', ""))
+                else:
+                    with self.db_connector.get_session() as db_session:
+                        security_service = SecurityService(db_session)
+                        security_service.logout(self.current_sesion_id)
             except Exception as e:
                 print(f"Error al registrar logout: {e}")
             finally:
