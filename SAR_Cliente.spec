@@ -5,7 +5,7 @@ a = Analysis(
     ['sar\\main.py'],
     pathex=['.'],
     binaries=[],
-    datas=[],
+    datas=[('sar/src/ui/assets', 'sar/src/ui/assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

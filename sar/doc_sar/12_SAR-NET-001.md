@@ -29,19 +29,24 @@ La arquitectura de 3 capas aísla la base de datos de las estaciones de trabajo 
 
 ---
 
-## 3. Fase 1: Configuración de PostgreSQL (Aislamiento)
+## 3. Fase 1: Configuración de PostgreSQL (Pruebas / Conexión Externa)
 
-En producción, la base de datos PostgreSQL **no debe** aceptar conexiones directas desde los equipos clientes.
+Para permitir que los equipos clientes de la red local puedan comunicarse con la base de datos alojada en el servidor:
 
-1. **`postgresql.conf`**: Configure PostgreSQL para escuchar en la interfaz local del servidor:
+1. **`postgresql.conf`**: Configure PostgreSQL para escuchar en todas las interfaces de red del servidor (`10.11.8.151`):
    ```ini
-   listen_addresses = 'localhost'
+   listen_addresses = '*'
    ```
-2. **`pg_hba.conf`**: Restrinja el acceso de red local solo para conexiones locales desde el propio servidor donde corre la API:
+2. **`pg_hba.conf`**: Autorice explícitamente el acceso remoto al cliente de pruebas (`10.11.8.108`) y mantenga las conexiones locales:
    ```text
    # TYPE  DATABASE        USER            ADDRESS                 METHOD
-   host    db_sar          postgres        127.0.0.1/32            scram-sha-256
-   host    db_sar          sar_api_user    127.0.0.1/32            scram-sha-256
+   # Conexiones locales del servidor (127.0.0.1 y localhost)
+   local   all             all                                     scram-sha-256
+   host    all             all             127.0.0.1/32            scram-sha-256
+   host    all             all             ::1/128                 scram-sha-256
+   
+   # Conexiones remotas desde el cliente de pruebas
+   host    db_sar          postgres        10.11.8.108/32          scram-sha-256
    ```
 
 ---
@@ -103,27 +108,32 @@ python -m uvicorn sar.main_api:app --host 0.0.0.0 --port 8000 --reload
 
 ---
 
-## 5. Fase 3: Configuración del Firewall de Windows
+## 5. Fase 3: Configuración del Firewall de Windows (Servidor)
 
-El Firewall de Windows debe cerrarse para la base de datos pero abrirse de manera controlada para el puerto de la API.
+El Firewall de Windows Defender en la máquina Servidor (`10.11.8.151`) debe permitir tráfico entrante desde el cliente (`10.11.8.108`) tanto para la API como para PostgreSQL en los perfiles de Dominio y Privado.
 
 ### 5.1. Regla de Entrada para la API (Puerto 8000)
-Autorice a los equipos de la subred local (`192.168.1.0/24`) a conectarse a la API de FastAPI:
-
+Autorice al equipo cliente (`10.11.8.108`) a conectarse a la API de FastAPI en los perfiles `Domain,Private`:
 ```powershell
-New-NetFirewallRule -DisplayName "SAR - Servidor API (Producción)" `
+New-NetFirewallRule -DisplayName "SAR - Servidor API (Cliente 10.11.8.108)" `
     -Direction Inbound `
     -Action Allow `
     -Protocol TCP `
     -LocalPort 8000 `
-    -Profile Private `
-    -RemoteAddress 192.168.1.0/24
+    -Profile Domain,Private `
+    -RemoteAddress 10.11.8.108
 ```
 
-### 5.2. Bloqueo del Puerto PostgreSQL (Puerto 5432)
-Asegúrese de que no existan reglas entrantes que permitan tráfico a PostgreSQL desde fuera del servidor:
+### 5.2. Regla de Entrada para PostgreSQL (Puerto 5432)
+Autorice al equipo cliente (`10.11.8.108`) a conectarse directamente a la Base de Datos PostgreSQL en los perfiles `Domain,Private`:
 ```powershell
-Disable-NetFirewallRule -DisplayName "PostgreSQL*"
+New-NetFirewallRule -DisplayName "SAR - Base de Datos (Cliente 10.11.8.108)" `
+    -Direction Inbound `
+    -Action Allow `
+    -Protocol TCP `
+    -LocalPort 5432 `
+    -Profile Domain,Private `
+    -RemoteAddress 10.11.8.108
 ```
 
 ---
@@ -149,8 +159,8 @@ En la carpeta de instalación de cada cliente de escritorio (junto al ejecutable
 ---
 
 ### 6.2. Compilación del Cliente
-Utilice PyInstaller desde el entorno virtual para compilar la aplicación de escritorio especificando la ruta de búsqueda de módulos:
+Utilice PyInstaller desde el entorno virtual para compilar la aplicación de escritorio especificando la ruta de búsqueda de módulos e incluyendo la carpeta de recursos visuales (iconos/imágenes):
 ```powershell
-.venv_sar\Scripts\pyinstaller --noconfirm --onedir --windowed --paths=. --name="SAR_Cliente" sar/main.py
+.venv_sar\Scripts\pyinstaller --noconfirm --onedir --windowed --paths=. --add-data "sar/src/ui/assets;sar/src/ui/assets" --name="SAR_Cliente" sar/main.py
 ```
-Distribuya la carpeta de salida `dist/SAR_Cliente/` (que incluye el ejecutable `SAR_Cliente.exe` y el archivo `settings.json`) a los operadores de la red local.
+Distribuya la carpeta de salida `dist/SAR_Cliente/` (que incluye el ejecutable `SAR_Cliente.exe`, el archivo `settings.json` y los assets empaquetados) a los operadores de la red local.

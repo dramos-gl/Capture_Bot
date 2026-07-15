@@ -110,12 +110,36 @@ class LoginView(QWidget):
         
     def _load_modules(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
-                modulos = repo.get_all_app_modulos()
+            from sar.src.storage.api_client import APIClient
+            api_client = APIClient()
+            if api_client.connect_via_api:
+                # Load modules via API
+                modulos = api_client.request("GET", "/api/auth/modules")
                 for mod in modulos:
-                    self.cb_modulo.addItem(mod.nombre, userData=mod.codigo)
+                    self.cb_modulo.addItem(mod["nombre"], userData=mod["codigo"])
+            else:
+                # Load modules via database
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    modulos = repo.get_all_app_modulos()
+                    for mod in modulos:
+                        self.cb_modulo.addItem(mod.nombre, userData=mod.codigo)
         except Exception as e:
+            import traceback
+            import sys
+            import os
+            import datetime
+            try:
+                if getattr(sys, 'frozen', False):
+                    log_dir = os.path.dirname(sys.executable)
+                else:
+                    log_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
+                log_path = os.path.join(log_dir, "sar_error.log")
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n[{datetime.datetime.now()}] Error loading modules: {str(e)}\n")
+                    traceback.print_exc(file=f)
+            except Exception:
+                pass
             print("Error loading modules:", e)
         
     def _clear_modulo_error(self):

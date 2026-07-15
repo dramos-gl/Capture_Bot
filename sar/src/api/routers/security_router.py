@@ -36,6 +36,10 @@ class LoginResponse(BaseModel):
 class LogoutRequest(BaseModel):
     sesion_id: int
 
+class ModuleInfo(BaseModel):
+    nombre: str
+    codigo: str
+
 def get_db():
     """Dependencia para inyectar la sesión de base de datos transaccional."""
     with db_connector.get_session() as session:
@@ -51,6 +55,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+@router.get("/modules", response_model=list[ModuleInfo])
+def get_active_modules(db: Session = Depends(get_db)):
+    """Retorna los módulos de aplicación activos del sistema."""
+    from sar.src.storage.repositories import UsuarioRepository
+    repo = UsuarioRepository(db)
+    modulos = repo.get_all_app_modulos()
+    return [{"nombre": mod.nombre, "codigo": mod.codigo} for mod in modulos]
 
 @router.post("/login", response_model=LoginResponse)
 def login(request: LoginRequest, db: Session = Depends(get_db)):

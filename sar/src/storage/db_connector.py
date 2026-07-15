@@ -14,7 +14,16 @@ class DatabaseConnector:
     def __init__(self):
         # Intentar cargar variables desde settings.json si existe
         import json
-        settings_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "settings.json"))
+        import sys
+        
+        # Resolver ruta robusta de settings.json (soporte para PyInstaller)
+        if getattr(sys, 'frozen', False):
+            # En producción (.exe), buscar al lado del archivo ejecutable
+            settings_path = os.path.abspath(os.path.join(os.path.dirname(sys.executable), "settings.json"))
+        else:
+            # En desarrollo, buscar en la carpeta 'sar'
+            settings_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "settings.json"))
+            
         settings_data = {}
         if os.path.exists(settings_path):
             try:
