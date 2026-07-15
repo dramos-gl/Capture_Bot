@@ -7,6 +7,7 @@ from sar.src.ui.views.dashboard_view import DashboardView
 from sar.src.ui.views.orders_view import OrdersView
 from sar.src.ui.views.requests_view import RequestsView
 from sar.src.ui.views.referencias_view import ReferenciasView
+from sar.src.ui.views.inventory_view import InventoryView
 from sar.src.ui.views.admin_view import AdminWindow
 
 class MainView(QWidget):
@@ -43,10 +44,12 @@ class MainView(QWidget):
         self.orders_view = OrdersView(self.db_connector, self)
         self.requests_view = RequestsView(self.db_connector, self)
         self.refs_view = ReferenciasView(self.db_connector, self)
+        self.inventory_view = InventoryView(self.db_connector, self)
         
         self.stacked_widget.addWidget(self.orders_view)
         self.stacked_widget.addWidget(self.requests_view)
         self.stacked_widget.addWidget(self.refs_view)
+        self.stacked_widget.addWidget(self.inventory_view)
         
         # Connect sidebar navigation selection
         self.sidebar.nav_selected.connect(self._on_navigation)
@@ -90,6 +93,7 @@ class MainView(QWidget):
                     self.sidebar.show_item("solicitudes")
                 if has_referencias:
                     self.sidebar.show_item("referencias")
+                    self.sidebar.show_item("inventario")
                 if has_seguridad:
                     self.sidebar.show_item("configuracion")
         except Exception as e:
@@ -124,6 +128,7 @@ class MainView(QWidget):
                     "capturar_orden": "ORDENES",
                     "solicitudes": "SOLICITUDES",
                     "referencias": "REFERENCIAS",
+                    "inventario": "REFERENCIAS",
                     "configuracion": "SEGURIDAD"
                 }
                 
@@ -152,6 +157,9 @@ class MainView(QWidget):
         elif view_key == "referencias":
             self.stacked_widget.setCurrentWidget(self.refs_view)
             self.refs_view.refresh_data()
+        elif view_key == "inventario":
+            self.stacked_widget.setCurrentWidget(self.inventory_view)
+            self.inventory_view.refresh_all()
         elif view_key == "configuracion":
             if not self.admin_window:
                 parent_window = self.window()

@@ -194,6 +194,7 @@ class Delegacion(Base):
     # Relaciones
     municipio: Mapped["Municipio"] = relationship(back_populates="delegaciones")
     solicitudes: Mapped[List["Solicitud"]] = relationship(back_populates="delegacion")
+    desarrollos: Mapped[List["Desarrollo"]] = relationship(back_populates="delegacion")
 
 
 class Concepto(Base):
@@ -231,6 +232,47 @@ class Rfc(Base):
 
     # Relaciones
     grupos_referencia: Mapped[List["GrupoReferencia"]] = relationship(back_populates="rfc")
+
+
+class Notaria(Base):
+    __tablename__ = "notaria"
+    __table_args__ = {"schema": "sar_catalogo"}
+
+    notaria_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    nombre: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    lote_asignaciones: Mapped[List["LoteAsignacion"]] = relationship(back_populates="notaria")
+
+
+class Colaborador(Base):
+    __tablename__ = "colaborador"
+    __table_args__ = {"schema": "sar_catalogo"}
+
+    colaborador_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    nombre: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    lote_asignaciones: Mapped[List["LoteAsignacion"]] = relationship(back_populates="colaborador")
+
+
+class Desarrollo(Base):
+    __tablename__ = "desarrollo"
+    __table_args__ = {"schema": "sar_catalogo"}
+
+    desarrollo_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    delegacion_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.delegacion.delegacion_id", ondelete="RESTRICT"), nullable=False)
+    nombre: Mapped[str] = mapped_column(String(200), nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    delegacion: Mapped["Delegacion"] = relationship(back_populates="desarrollos")
+    lote_detalles: Mapped[List["LoteDetalle"]] = relationship(back_populates="desarrollo")
 
 
 class EstadoSistema(Base):
@@ -348,6 +390,7 @@ class Referencia(Base):
     solicitud: Mapped["Solicitud"] = relationship(back_populates="referencias")
     archivos_pdf: Mapped[List["ArchivoPDF"]] = relationship(back_populates="referencia", cascade="all, delete-orphan")
     facturas: Mapped[List["Factura"]] = relationship(back_populates="referencia", cascade="all, delete-orphan")
+    lote_detalles: Mapped[List["LoteDetalle"]] = relationship(back_populates="referencia")
 
 
 # ===========================================================================
@@ -388,22 +431,51 @@ class Factura(Base):
 
     # Relaciones
     referencia: Mapped["Referencia"] = relationship(back_populates="facturas")
-    asignaciones: Mapped[List["Asignacion"]] = relationship(back_populates="factura", cascade="all, delete-orphan")
 
 
-class Asignacion(Base):
-    __tablename__ = "asignacion"
+class LoteAsignacion(Base):
+    __tablename__ = "lote_asignacion"
     __table_args__ = {"schema": "sar_archivo"}
 
-    asignacion_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    factura_id: Mapped[int] = mapped_column(ForeignKey("sar_archivo.factura.factura_id", ondelete="CASCADE"), nullable=False)
-    usuario_destino: Mapped[str] = mapped_column(String(100), nullable=False)
-    tipo_asignacion: Mapped[str] = mapped_column(String(20), nullable=False)
-    fecha_asignacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    lote_asignacion_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tipo_destino: Mapped[str] = mapped_column(String(20), nullable=False) # 'NOTARIA' or 'COLABORADOR'
+    notaria_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_catalogo.notaria.notaria_id", ondelete="RESTRICT"))
+    colaborador_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_catalogo.colaborador.colaborador_id", ondelete="RESTRICT"))
+    solicitante_externo: Mapped[Optional[str]] = mapped_column(String(200))
+    fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     observaciones: Mapped[Optional[str]] = mapped_column(Text)
+    usuario_creacion: Mapped[int] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id", ondelete="RESTRICT"), nullable=False)
 
     # Relaciones
-    factura: Mapped["Factura"] = relationship(back_populates="asignaciones")
+    notaria: Mapped[Optional["Notaria"]] = relationship(back_populates="lote_asignaciones")
+    colaborador: Mapped[Optional["Colaborador"]] = relationship(back_populates="lote_asignaciones")
+    usuario: Mapped["Usuario"] = relationship()
+    detalles: Mapped[List["LoteDetalle"]] = relationship(back_populates="lote_asignacion", cascade="all, delete-orphan")
+
+
+class LoteDetalle(Base):
+    __tablename__ = "lote_detalle"
+    __table_args__ = {"schema": "sar_archivo"}
+
+    lote_detalle_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    lote_asignacion_id: Mapped[int] = mapped_column(ForeignKey("sar_archivo.lote_asignacion.lote_asignacion_id", ondelete="CASCADE"), nullable=False)
+    cliente: Mapped[str] = mapped_column(String(250), nullable=False)
+    desarrollo_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id", ondelete="RESTRICT"), nullable=False)
+    fecha_solicitud: Mapped[Optional[date]] = mapped_column(Date)
+    mz: Mapped[Optional[str]] = mapped_column(String(50))
+    lote: Mapped[Optional[str]] = mapped_column(String(50))
+    edif: Mapped[Optional[str]] = mapped_column(String(50))
+    viv: Mapped[Optional[str]] = mapped_column(String(50))
+    folio_electronico: Mapped[Optional[str]] = mapped_column(String(100))
+    estatus_primer_aviso: Mapped[Optional[str]] = mapped_column(String(100))
+    concepto_solicitado: Mapped[str] = mapped_column(String(50), nullable=False) # 'ANALISIS', 'AVISO', 'CLG', etc.
+    referencia_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_produccion.referencia.referencia_id", ondelete="SET NULL"))
+    referencia_asignada: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+
+    # Relaciones
+    lote_asignacion: Mapped["LoteAsignacion"] = relationship(back_populates="detalles")
+    desarrollo: Mapped["Desarrollo"] = relationship(back_populates="lote_detalles")
+    referencia: Mapped[Optional["Referencia"]] = relationship(back_populates="lote_detalles")
 
 
 # ===========================================================================

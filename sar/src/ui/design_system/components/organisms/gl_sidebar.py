@@ -67,6 +67,7 @@ class NavigationSidebar(QFrame):
             ("Órdenes", "ordenes", "list_icon"),
             ("Solicitudes", "solicitudes", "file_text"),
             ("Referencias", "referencias", "database"),
+            ("Inventario", "inventario", "tabla"),
             ("Administración", "configuracion", "shield_lock")
         ]
         
