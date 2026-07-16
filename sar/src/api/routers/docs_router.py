@@ -530,3 +530,172 @@ def registrar_referencia_bot(request: RegistrarReferenciaBotRequest, db: Session
         return {"referencia_id": ref.referencia_id, "referencia_portal": ref.referencia_portal}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/solicitudes/facturacion/{usuario_id}")
+def get_solicitudes_facturacion(usuario_id: int, ver_facturadas: bool = False, db: Session = Depends(get_db)):
+    repo = OperacionRepository(db)
+    try:
+        return repo.get_solicitudes_facturacion(usuario_id, ver_facturadas)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class RegistrarFacturaBotRequest(BaseModel):
+    referencia_id: int
+    pdf_paths: List[str]
+    rfc_emisor: str
+    consecutivo: int
+    solicitud_id: int
+    grupo_id: int
+
+@router.post("/facturas/bot")
+def registrar_factura_bot(request: RegistrarFacturaBotRequest, db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    import uuid
+    import datetime
+    import os
+    from sar.src.storage.models import Referencia, Solicitud, GrupoReferencia
+    try:
+        # Verificar si ya existe un registro de factura para esta referencia
+        dup_stmt = text("SELECT factura_id FROM sar_archivo.factura WHERE referencia_id = :rid LIMIT 1")
+        dup_id = db.execute(dup_stmt, {"rid": request.referencia_id}).scalar()
+        
+        pdf_path_1 = request.pdf_paths[0] if len(request.pdf_paths) > 0 else None
+        pdf_path_2 = request.pdf_paths[1] if len(request.pdf_paths) > 1 else None
+        filename_1 = os.path.basename(pdf_path_1) if pdf_path_1 else ""
+        
+        if not dup_id:
+            factura_uuid = str(uuid.uuid4())
+            ins_factura = text("""
+                INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, xml_path, estado)
+                VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :xml, :estado)
+            """)
+            db.execute(ins_factura, {
+                "rid": request.referencia_id,
+                "uuid": factura_uuid,
+                "folio": filename_1.replace(".pdf", ""),
+                "rfc_emisor": request.rfc_emisor,
+                "fecha": datetime.datetime.now(datetime.timezone.utc),
+                "pdf": pdf_path_1,
+                "xml": pdf_path_2,
+                "estado": "TIMBRADA"
+            })
+        else:
+            upd_stmt = text("""
+                UPDATE sar_archivo.factura
+                SET pdf_path = :pdf, xml_path = :xml, estado = 'TIMBRADA'
+                WHERE factura_id = :fid
+            """)
+            db.execute(upd_stmt, {
+                "pdf": pdf_path_1,
+                "xml": pdf_path_2,
+                "fid": dup_id
+            })
+        
+        # Actualizar estado de la referencia a FACTURADA
+        stmt_status = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = 'FACTURADA' LIMIT 1")
+        ref_status_id = db.execute(stmt_status).scalar()
+        if not ref_status_id:
+            ins_ref_stmt = text("""
+                INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
+                VALUES ('referencia', 'FACTURADA', 'FACTURADA')
+                RETURNING estado_id
+            """)
+            ref_status_id = db.execute(ins_ref_stmt).scalar()
+            db.flush()
+            
+        ref = db.get(Referencia, request.referencia_id)
+        if ref:
+            ref.estado_id = ref_status_id
+        
+        # Actualizar último consecutivo en Solicitud
+        sol = db.get(Solicitud, request.solicitud_id)
+        if sol:
+            sol.ultimo_consecutivo = request.consecutivo
+            if request.consecutivo >= sol.consecutivo_fin:
+                sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
+            if not sol.fecha_inicio:
+                sol.fecha_inicio = datetime.datetime.now(datetime.timezone.utc)
+        
+        # Actualizar último consecutivo en GrupoReferencia
+        grupo = db.get(GrupoReferencia, request.grupo_id)
+        if grupo:
+            if request.consecutivo > (grupo.ultimo_consecutivo or 0):
+                grupo.ultimo_consecutivo = request.consecutivo
+                
+        db.commit()
+        return {"detail": "Factura registrada con éxito", "referencia_id": request.referencia_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/solicitudes/{solicitud_id}/referencias")
+def get_solicitud_referencias(solicitud_id: int, db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    try:
+        stmt = text("""
+            SELECT r.referencia_id, r.consecutivo_grupo, r.referencia_portal, r.importe, es.codigo as estado_codigo
+            FROM sar_produccion.referencia r
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            WHERE r.solicitud_id = :sol_id
+            ORDER BY r.consecutivo_grupo ASC
+        """)
+        rows = db.execute(stmt, {"sol_id": solicitud_id}).fetchall()
+        return [
+            {
+                "referencia_id": r.referencia_id,
+                "consecutivo_grupo": r.consecutivo_grupo,
+                "referencia_portal": r.referencia_portal,
+                "importe": float(r.importe) if r.importe is not None else 0.0,
+                "estado_codigo": r.estado_codigo
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class UpdateReferenciaEstadoRequest(BaseModel):
+    estado_codigo: str
+    consecutivo: int
+    solicitud_id: int
+    grupo_id: int
+
+@router.put("/referencias/{referencia_id}/estado")
+def update_referencia_estado(referencia_id: int, request: UpdateReferenciaEstadoRequest, db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    import datetime
+    from sar.src.storage.models import Referencia, Solicitud, GrupoReferencia
+    try:
+        stmt_status = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = :codigo LIMIT 1")
+        ref_status_id = db.execute(stmt_status, {"codigo": request.estado_codigo}).scalar()
+        if not ref_status_id:
+            ins_ref_stmt = text("""
+                INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
+                VALUES ('referencia', :codigo, :desc)
+                RETURNING estado_id
+            """)
+            ref_status_id = db.execute(ins_ref_stmt, {
+                "codigo": request.estado_codigo,
+                "desc": f"Estado {request.estado_codigo} de referencia"
+            }).scalar()
+            db.flush()
+        
+        ref = db.get(Referencia, referencia_id)
+        if ref:
+            ref.estado_id = ref_status_id
+            
+        sol = db.get(Solicitud, request.solicitud_id)
+        if sol:
+            sol.ultimo_consecutivo = request.consecutivo
+            if not sol.fecha_inicio:
+                sol.fecha_inicio = datetime.datetime.now(datetime.timezone.utc)
+            if request.consecutivo >= sol.consecutivo_fin:
+                sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
+                
+        grupo = db.get(GrupoReferencia, request.grupo_id)
+        if grupo:
+            if request.consecutivo > (grupo.ultimo_consecutivo or 0):
+                grupo.ultimo_consecutivo = request.consecutivo
+                
+        db.commit()
+        return {"detail": "Estado de referencia actualizado"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

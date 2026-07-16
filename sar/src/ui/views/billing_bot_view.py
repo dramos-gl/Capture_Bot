@@ -31,17 +31,24 @@ class BillingBotView(QWidget):
         self.current_bot_context = None
         
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 16, 16, 16)
-        self.main_layout.setSpacing(16)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setSpacing(10)
+        
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         # Load default RUTA_DERECHOS parameter
         self.default_output_dir = "storage"
         try:
-            with self.db_connector.get_session() as session:
-                repo = ConfigRepository(session)
-                db_dir = repo.get_parametro("RUTA_DERECHOS")
-                if db_dir:
-                    self.default_output_dir = db_dir
+            if self.api_client.connect_via_api:
+                res = self.api_client.request("GET", "/api/docs/config/parametro/RUTA_DERECHOS")
+                db_dir = res.get("valor")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ConfigRepository(session)
+                    db_dir = repo.get_parametro("RUTA_DERECHOS")
+            if db_dir:
+                self.default_output_dir = db_dir
         except Exception as e:
             print("Error loading default output dir:", e)
         
@@ -96,10 +103,14 @@ class BillingBotView(QWidget):
         # Get Portal URL from DB parameter or fallback
         portal_url = "https://shacienda.qroo.gob.mx/tributanet/"
         try:
-            with self.db_connector.get_session() as session:
-                repo = ConfigRepository(session)
-                db_url = repo.get_parametro("SATQ_URL")
-                if db_url: portal_url = db_url
+            if self.api_client.connect_via_api:
+                res = self.api_client.request("GET", "/api/docs/config/parametro/SATQ_URL")
+                db_url = res.get("valor")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ConfigRepository(session)
+                    db_url = repo.get_parametro("SATQ_URL")
+            if db_url: portal_url = db_url
         except:
             pass
             
@@ -115,11 +126,18 @@ class BillingBotView(QWidget):
         username = "Operador"
         try:
             if self.usuario_id:
-                with self.db_connector.get_session() as session:
-                    from sar.src.storage.models import Usuario
-                    db_user = session.get(Usuario, self.usuario_id)
-                    if db_user:
-                        username = db_user.nombre
+                if self.api_client.connect_via_api:
+                    users = self.api_client.request("GET", "/api/auth/users")
+                    for u in users:
+                        if u["usuario_id"] == self.usuario_id:
+                            username = u["nombre"]
+                            break
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.models import Usuario
+                        db_user = session.get(Usuario, self.usuario_id)
+                        if db_user:
+                            username = db_user.nombre
         except:
             pass
             
@@ -215,7 +233,7 @@ class BillingBotView(QWidget):
         
         m_layout.addLayout(grid_m)
         m_layout.addStretch()
-        top_layout.addWidget(metricas_frame, stretch=2)
+        top_layout.addWidget(metricas_frame, stretch=1)
         
         # 3. Monitoreo en Tiempo Real
         monitoreo_frame = QFrame()
@@ -296,6 +314,8 @@ class BillingBotView(QWidget):
         self.table = StyledDataTable(headers, parent=self)
         self.table.setObjectName("botTable")
         self.table.doubleClicked.connect(lambda index: self._on_cargar_solicitud())
+        self.table.setMinimumHeight(150)
+        self.table.setMaximumHeight(200)
         layout.addWidget(self.table)
         
         self.main_layout.addWidget(panel, stretch=2)
@@ -311,6 +331,8 @@ class BillingBotView(QWidget):
         self.console = QTextEdit()
         self.console.setObjectName("console")
         self.console.setReadOnly(True)
+        self.console.setMinimumHeight(100)
+        self.console.setMaximumHeight(140)
         layout.addWidget(self.console)
         
         self.log("Sistema listo. Esperando carga de solicitud...")
@@ -324,12 +346,15 @@ class BillingBotView(QWidget):
     def _load_solicitudes(self):
         self.log("Actualizando tabla de solicitudes asignadas...")
         try:
-            with self.db_connector.get_session() as session:
-                u_id = self.usuario_id if self.usuario_id else 1
-                
-                repo = OperacionRepository(session)
-                ver_todas = self.chk_ver_todas.isChecked() if hasattr(self, 'chk_ver_todas') else False
-                solicitudes = repo.get_solicitudes_facturacion(u_id, ver_facturadas=ver_todas)
+            u_id = self.usuario_id if self.usuario_id else 1
+            ver_todas = self.chk_ver_todas.isChecked() if hasattr(self, 'chk_ver_todas') else False
+            
+            if self.api_client.connect_via_api:
+                solicitudes = self.api_client.request("GET", f"/api/docs/solicitudes/facturacion/{u_id}", data={"ver_facturadas": ver_todas})
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = OperacionRepository(session)
+                    solicitudes = repo.get_solicitudes_facturacion(u_id, ver_facturadas=ver_todas)
                 
                 data_rows = []
                 for s in solicitudes:
@@ -376,42 +401,44 @@ class BillingBotView(QWidget):
         self.log(f"Cargando contexto para Solicitud {sol_id}...")
         
         try:
-            with self.db_connector.get_session() as session:
-                repo = OperacionRepository(session)
-                ctx = repo.get_solicitud_bot_context(sol_id)
+            u_id = self.usuario_id if self.usuario_id else 1
+            if self.api_client.connect_via_api:
+                ctx = self.api_client.request("GET", f"/api/docs/solicitudes/{sol_id}/bot-context")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = OperacionRepository(session)
+                    ctx = repo.get_solicitud_bot_context(sol_id)
                 
-                u_id = self.usuario_id if self.usuario_id else 1
+            ctx["usuario_id"] = u_id
+            self.current_bot_context = ctx
                 
-                ctx["usuario_id"] = u_id
-                self.current_bot_context = ctx
-                
-                # Update UI labels
-                razon_social_clean = self._clean_razon_social(ctx['razon_social'])
-                self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {razon_social_clean}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}")
-                
-                # --- Resetear métricas antes de calcular para evitar residuos de cargas previas ---
-                self.box_pendientes.set_value("0")
-                self.box_exitosos.set_value("0")
-                self.box_errores.set_value("0")
-                
-                total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
-                # Facturas ya procesadas/timbradas exitosamente.
-                facturadas = ctx["facturas_procesadas"]
-                errores = ctx.get("referencias_con_error", 0)
-                # Referencias autorizadas pendientes de facturar (total autorizado menos lo ya facturado y lo que falló)
-                autorizadas_pendientes = total - facturadas - errores
-                
-                # Tarjeta "Autorizadas": muestra cuántas referencias aún están por facturar
-                self.box_pendientes.set_value(str(max(0, autorizadas_pendientes)))
-                # Tarjeta "Facturadas": muestra cuántas ya fueron timbradas en sesiones previas
-                self.box_exitosos.set_value(str(max(0, facturadas)))
-                # Tarjeta "Errores": muestra cuántas fallaron previamente
-                self.box_errores.set_value(str(max(0, errores)))
-                
-                self.log(f"ÉXITO: Contexto de {ctx['rfc']} cargado para facturación.")
-                self.log(f"Concepto: {ctx['concepto_nombre']} | Rango de Facturación: {ctx['consecutivo_inicio']} al {ctx['consecutivo_fin']}")
-                
-                QMessageBox.information(self, "Contexto Listo", "Datos cargados en memoria.\nEl Bot de Facturación está listo para iniciar.")
+            # Update UI labels
+            razon_social_clean = self._clean_razon_social(ctx['razon_social'])
+            self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {razon_social_clean}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}")
+            
+            # --- Resetear métricas antes de calcular para evitar residuos de cargas previas ---
+            self.box_pendientes.set_value("0")
+            self.box_exitosos.set_value("0")
+            self.box_errores.set_value("0")
+            
+            total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
+            # Facturas ya procesadas/timbradas exitosamente.
+            facturadas = ctx["facturas_procesadas"]
+            errores = ctx.get("referencias_con_error", 0)
+            # Referencias autorizadas pendientes de facturar (total autorizado menos lo ya facturado y lo que falló)
+            autorizadas_pendientes = total - facturadas - errores
+            
+            # Tarjeta "Autorizadas": muestra cuántas referencias aún están por facturar
+            self.box_pendientes.set_value(str(max(0, autorizadas_pendientes)))
+            # Tarjeta "Facturadas": muestra cuántas ya fueron timbradas en sesiones previas
+            self.box_exitosos.set_value(str(max(0, facturadas)))
+            # Tarjeta "Errores": muestra cuántas fallaron previamente
+            self.box_errores.set_value(str(max(0, errores)))
+            
+            self.log(f"ÉXITO: Contexto de {ctx['rfc']} cargado para facturación.")
+            self.log(f"Concepto: {ctx['concepto_nombre']} | Rango de Facturación: {ctx['consecutivo_inicio']} al {ctx['consecutivo_fin']}")
+            
+            QMessageBox.information(self, "Contexto Listo", "Datos cargados en memoria.\nEl Bot de Facturación está listo para iniciar.")
                 
         except Exception as e:
             self.log(f"ERROR al cargar caché: {str(e)}")
@@ -430,36 +457,47 @@ class BillingBotView(QWidget):
             
         sol_id = self.current_bot_context.get("solicitud_id")
         try:
-            with self.db_connector.get_session() as session:
-                sol = session.get(Solicitud, sol_id)
-                if sol:
-                    state_code = session.execute(
-                        text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
-                        {"eid": sol.estado_id}
-                    ).scalar()
-                    valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "PROCESANDO", "ERROR", "ERROR_VALIDACION", "FACTURADA_PARCIAL")
-                    if state_code not in valid_states:
-                        QMessageBox.warning(
-                            self, 
-                            "Atención", 
-                            f"El estado de la solicitud es '{state_code}' y no se puede procesar.\n"
-                            f"El robot solo puede iniciar solicitudes en estado: {', '.join(valid_states)}."
-                        )
-                        self.current_bot_context = None
-                        self._load_solicitudes()
+            state_code = None
+            if self.api_client.connect_via_api:
+                u_id = self.usuario_id if self.usuario_id else 1
+                sols = self.api_client.request("GET", f"/api/docs/solicitudes/facturacion/{u_id}", data={"ver_facturadas": True})
+                for s in sols:
+                    if s["solicitud_id"] == sol_id:
+                        state_code = s["estado"].upper()
+                        break
+            else:
+                with self.db_connector.get_session() as session:
+                    sol = session.get(Solicitud, sol_id)
+                    if sol:
+                        state_code = session.execute(
+                            text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
+                            {"eid": sol.estado_id}
+                        ).scalar()
+            
+            if state_code:
+                valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "PROCESANDO", "ERROR", "ERROR_VALIDACION", "FACTURADA_PARCIAL")
+                if state_code not in valid_states:
+                    QMessageBox.warning(
+                        self, 
+                        "Atención", 
+                        f"El estado de la solicitud es '{state_code}' y no se puede procesar.\n"
+                        f"El robot solo puede iniciar solicitudes en estado: {', '.join(valid_states)}."
+                    )
+                    self.current_bot_context = None
+                    self._load_solicitudes()
+                    return
+                if state_code == "PROCESANDO":
+                    reply_proc = QMessageBox.warning(
+                        self,
+                        "Colisión Detectada",
+                        "Esta solicitud está actualmente en estado PROCESANDO (posiblemente por otro bot o una ejecución previa no cerrada correctamente).\n\nSi fuerzas el inicio podrías duplicar operaciones y causar errores.\n\n¿Estás seguro de forzar el inicio?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No
+                    )
+                    if reply_proc == QMessageBox.StandardButton.No:
                         return
-                    if state_code == "PROCESANDO":
-                        reply_proc = QMessageBox.warning(
-                            self,
-                            "Colisión Detectada",
-                            "Esta solicitud está actualmente en estado PROCESANDO (posiblemente por otro bot o una ejecución previa no cerrada correctamente).\n\nSi fuerzas el inicio podrías duplicar operaciones y causar errores.\n\n¿Estás seguro de forzar el inicio?",
-                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                            QMessageBox.StandardButton.No
-                        )
-                        if reply_proc == QMessageBox.StandardButton.No:
-                            return
         except Exception as e:
-            self.log(f"Advertencia al validar estado de solicitud en BD: {str(e)}")
+            self.log(f"Advertencia al validar estado de solicitud: {str(e)}")
             
         razon_social = self.current_bot_context.get("razon_social", "Desconocido")
         concepto = self.current_bot_context.get("concepto_nombre", "Desconocido")

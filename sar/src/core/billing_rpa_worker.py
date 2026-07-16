@@ -35,6 +35,9 @@ class BillingRpaWorker(QThread):
         self.custom_output_dir = custom_output_dir
         self.omitir_ya_generadas = omitir_ya_generadas
         self._stop_requested = False
+        
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
 
     def stop(self):
         """Safely requests the worker to stop processing between loops."""
@@ -48,23 +51,23 @@ class BillingRpaWorker(QThread):
         context = None
         
         try:
-            # 1. Load Parameters and Locators from DB
-            self.status_changed.emit("Cargando parámetros y localizadores de la base de datos...")
-            with self.db_connector.get_session() as db_session:
-                config_repo = ConfigRepository(db_session)
-                audit_repo = AuditRepository(db_session)
-                
-                # Fetch System Parameters
-                satq_url = config_repo.get_parametro("SATQ_URL") or "https://shacienda.qroo.gob.mx/tributanet/"
-                retries_str = config_repo.get_parametro("REINTENTOS_AUTOMATICOS")
-                max_retries = int(retries_str) if retries_str else 4
-                
-                # Fetch RUTA_DERECHOS
-                self.default_output_dir = config_repo.get_parametro("RUTA_DERECHOS") or "storage"
-                
-                # Fetch Portal Locators and extract values
-                db_locators = config_repo.get_localizadores()
-                locators = {k: v.valor_selector for k, v in db_locators.items()}
+            # 1. Load Parameters and Locators from DB/API
+            self.status_changed.emit("Cargando parámetros y localizadores...")
+            if self.api_client.connect_via_api:
+                satq_url = self.api_client.request("GET", "/api/docs/config/parametro/SATQ_URL").get("valor") or "https://shacienda.qroo.gob.mx/tributanet/"
+                retries_str = self.api_client.request("GET", "/api/docs/config/parametro/REINTENTOS_AUTOMATICOS").get("valor")
+                self.default_output_dir = self.api_client.request("GET", "/api/docs/config/parametro/RUTA_DERECHOS").get("valor") or "storage"
+                locators = self.api_client.request("GET", "/api/docs/config/localizadores")
+            else:
+                with self.db_connector.get_session() as db_session:
+                    config_repo = ConfigRepository(db_session)
+                    satq_url = config_repo.get_parametro("SATQ_URL") or "https://shacienda.qroo.gob.mx/tributanet/"
+                    retries_str = config_repo.get_parametro("REINTENTOS_AUTOMATICOS")
+                    self.default_output_dir = config_repo.get_parametro("RUTA_DERECHOS") or "storage"
+                    db_locators = config_repo.get_localizadores()
+                    locators = {k: v.valor_selector for k, v in db_locators.items()}
+            
+            max_retries = int(retries_str) if retries_str else 4
                 
             self._log_event_db("PROCESAR_FACTURACION", f"Inicio procesamiento lote facturación solicitud {self.ctx['solicitud_id']}", detalle={"consecutivo_inicio": self.ctx['consecutivo_inicio'], "consecutivo_fin": self.ctx['consecutivo_fin']})
             
@@ -115,18 +118,24 @@ class BillingRpaWorker(QThread):
             facturas_procesadas = self.ctx.get("facturas_procesadas", 0)
             total_items = self.ctx["consecutivo_fin"] - self.ctx["consecutivo_inicio"] + 1
             
-            with self.db_connector.get_session() as db_session:
-                status_filter = "('AUTORIZADA', 'ERROR', 'ERROR_VALIDACION')" if self.omitir_ya_generadas else "('AUTORIZADA', 'FACTURADA', 'ERROR', 'ERROR_VALIDACION')"
-                stmt = text(f"""
-                    SELECT r.consecutivo_grupo
-                    FROM sar_produccion.referencia r
-                    JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
-                    WHERE r.solicitud_id = :solicitud_id 
-                      AND es.codigo IN {status_filter}
-                    ORDER BY r.consecutivo_grupo ASC
-                """)
-                rows = db_session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"]}).fetchall()
-                consecutivos_to_process = [row[0] for row in rows]
+            if self.api_client.connect_via_api:
+                # Query all references via API once and filter in Python memory
+                refs_data = self.api_client.request("GET", f"/api/docs/solicitudes/{self.ctx['solicitud_id']}/referencias")
+                status_filter_list = ['AUTORIZADA', 'ERROR', 'ERROR_VALIDACION'] if self.omitir_ya_generadas else ['AUTORIZADA', 'FACTURADA', 'ERROR', 'ERROR_VALIDACION']
+                consecutivos_to_process = [r["consecutivo_grupo"] for r in refs_data if r["estado_codigo"] in status_filter_list]
+            else:
+                with self.db_connector.get_session() as db_session:
+                    status_filter = "('AUTORIZADA', 'ERROR', 'ERROR_VALIDACION')" if self.omitir_ya_generadas else "('AUTORIZADA', 'FACTURADA', 'ERROR', 'ERROR_VALIDACION')"
+                    stmt = text(f"""
+                        SELECT r.consecutivo_grupo
+                        FROM sar_produccion.referencia r
+                        JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                        WHERE r.solicitud_id = :solicitud_id 
+                          AND es.codigo IN {status_filter}
+                        ORDER BY r.consecutivo_grupo ASC
+                    """)
+                    rows = db_session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"]}).fetchall()
+                    consecutivos_to_process = [row[0] for row in rows]
                 
             success_count = facturas_procesadas
             error_count = 0
@@ -141,26 +150,41 @@ class BillingRpaWorker(QThread):
                     self.status_changed.emit("Proceso detenido por el usuario.")
                     break
                 
-                # Fetch reference portal string from database
+                # Fetch reference portal string from database/API
                 referencia_portal = None
                 referencia_id = None
                 importe = 0.0
-                with self.db_connector.get_session() as db_session:
-                    stmt = text("""
-                        SELECT r.referencia_id, r.referencia_portal, r.importe, es.codigo as estado_codigo
-                        FROM sar_produccion.referencia r
-                        JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
-                        WHERE r.solicitud_id = :solicitud_id 
-                          AND r.consecutivo_grupo = :consecutivo
-                    """)
-                    row = db_session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"], "consecutivo": current}).fetchone()
-                    if row:
-                        if row.estado_codigo == 'FACTURADA' and self.omitir_ya_generadas:
+                if self.api_client.connect_via_api:
+                    # Find reference inside our pre-fetched list
+                    ref_obj = None
+                    for r in refs_data:
+                        if r["consecutivo_grupo"] == current:
+                            ref_obj = r
+                            break
+                    if ref_obj:
+                        if ref_obj["estado_codigo"] == 'FACTURADA' and self.omitir_ya_generadas:
                             self.status_changed.emit(f"Consecutivo {current} ya está FACTURADA y opción 'Omitir' está activa. Saltando...")
                         else:
-                            referencia_id = row.referencia_id
-                            referencia_portal = row.referencia_portal
-                            importe = float(row.importe) if row.importe else 0.0
+                            referencia_id = ref_obj["referencia_id"]
+                            referencia_portal = ref_obj["referencia_portal"]
+                            importe = ref_obj["importe"]
+                else:
+                    with self.db_connector.get_session() as db_session:
+                        stmt = text("""
+                            SELECT r.referencia_id, r.referencia_portal, r.importe, es.codigo as estado_codigo
+                            FROM sar_produccion.referencia r
+                            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                            WHERE r.solicitud_id = :solicitud_id 
+                              AND r.consecutivo_grupo = :consecutivo
+                        """)
+                        row = db_session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"], "consecutivo": current}).fetchone()
+                        if row:
+                            if row.estado_codigo == 'FACTURADA' and self.omitir_ya_generadas:
+                                self.status_changed.emit(f"Consecutivo {current} ya está FACTURADA y opción 'Omitir' está activa. Saltando...")
+                            else:
+                                referencia_id = row.referencia_id
+                                referencia_portal = row.referencia_portal
+                                importe = float(row.importe) if row.importe else 0.0
                 
                 if not referencia_portal:
                     if not row or (row and row.estado_codigo != 'FACTURADA'):
@@ -519,42 +543,50 @@ class BillingRpaWorker(QThread):
             # Final state update
             final_status = "AUTORIZADA"
             try:
-                with self.db_connector.get_session() as session:
-                    stmt = text("""
-                        SELECT es.codigo, COUNT(r.referencia_id)
-                        FROM sar_produccion.referencia r
-                        JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
-                        WHERE r.solicitud_id = :solicitud_id
-                        GROUP BY es.codigo
-                    """)
-                    rows = session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"]}).fetchall()
+                if self.api_client.connect_via_api:
+                    refs_data = self.api_client.request("GET", f"/api/docs/solicitudes/{self.ctx['solicitud_id']}/referencias")
+                    status_counts = {}
+                    for r in refs_data:
+                        code = r["estado_codigo"]
+                        status_counts[code] = status_counts.get(code, 0) + 1
+                else:
+                    with self.db_connector.get_session() as session:
+                        stmt = text("""
+                            SELECT es.codigo, COUNT(r.referencia_id)
+                            FROM sar_produccion.referencia r
+                            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                            WHERE r.solicitud_id = :solicitud_id
+                            GROUP BY es.codigo
+                        """)
+                        rows = session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"]}).fetchall()
+                        status_counts = {row[0]: row[1] for row in rows}
                     
-                    status_counts = {row[0]: row[1] for row in rows}
-                    total_refs = sum(status_counts.values())
-                    
-                    facturadas = status_counts.get("FACTURADA", 0)
-                    validaciones = status_counts.get("ERROR_VALIDACION", 0)
-                    errores = status_counts.get("ERROR", 0)
-                    total_errores = validaciones + errores
-                    autorizadas = status_counts.get("AUTORIZADA", 0)
-                    rechazadas = status_counts.get("RECHAZADA", 0)
-                    pendientes = autorizadas
-                    
-                    original_state = "AUTORIZACION_PARCIAL" if rechazadas > 0 else "AUTORIZADA"
-                    
-                    if total_refs > 0:
-                        if pendientes > 0 or total_errores > 0:
-                            if facturadas > 0:
-                                final_status = "FACTURADA_PARCIAL"
-                            else:
-                                final_status = "ERROR_VALIDACION" if validaciones > 0 else ("ERROR" if errores > 0 else original_state)
+                status_counts = {k.upper(): v for k, v in status_counts.items()}
+                total_refs = sum(status_counts.values())
+                
+                facturadas = status_counts.get("FACTURADA", 0)
+                validaciones = status_counts.get("ERROR_VALIDACION", 0)
+                errores = status_counts.get("ERROR", 0)
+                total_errores = validaciones + errores
+                autorizadas = status_counts.get("AUTORIZADA", 0)
+                rechazadas = status_counts.get("RECHAZADA", 0)
+                pendientes = autorizadas
+                
+                original_state = "AUTORIZACION_PARCIAL" if rechazadas > 0 else "AUTORIZADA"
+                
+                if total_refs > 0:
+                    if pendientes > 0 or total_errores > 0:
+                        if facturadas > 0:
+                            final_status = "FACTURADA_PARCIAL"
                         else:
-                            # Ya se terminaron de procesar todas las AUTORIZADAS, ERROR, etc (todo es facturado)
-                            final_status = "FACTURADA_PARCIAL" if rechazadas > 0 else "FACTURADA"
+                            final_status = "ERROR_VALIDACION" if validaciones > 0 else ("ERROR" if errores > 0 else original_state)
                     else:
-                        final_status = "AUTORIZADA"
+                        # Ya se terminaron de procesar todas las AUTORIZADAS, ERROR, etc (todo es facturado)
+                        final_status = "FACTURADA_PARCIAL" if rechazadas > 0 else "FACTURADA"
+                else:
+                    final_status = "AUTORIZADA"
             except Exception as db_err:
-                self.status_changed.emit(f"Advertencia al calcular estado final de la solicitud en BD: {db_err}")
+                self.status_changed.emit(f"Advertencia al calcular estado final de la solicitud: {db_err}")
             
             self._finalize_solicitud_in_db(final_status)
             
@@ -572,35 +604,43 @@ class BillingRpaWorker(QThread):
             # Calculate final status dynamically instead of hardcoding "ERROR"
             final_status = "AUTORIZADA"
             try:
-                with self.db_connector.get_session() as session:
-                    stmt = text("""
-                        SELECT es.codigo, COUNT(r.referencia_id)
-                        FROM sar_produccion.referencia r
-                        JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
-                        WHERE r.solicitud_id = :solicitud_id
-                        GROUP BY es.codigo
-                    """)
-                    rows = session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"]}).fetchall()
-                    status_counts = {row[0]: row[1] for row in rows}
-                    total_refs = sum(status_counts.values())
-                    facturadas = status_counts.get("FACTURADA", 0)
-                    validaciones = status_counts.get("ERROR_VALIDACION", 0)
-                    errores = status_counts.get("ERROR", 0)
-                    total_errores = validaciones + errores
-                    autorizadas = status_counts.get("AUTORIZADA", 0)
-                    rechazadas = status_counts.get("RECHAZADA", 0)
-                    pendientes = autorizadas
-                    
-                    original_state = "AUTORIZACION_PARCIAL" if rechazadas > 0 else "AUTORIZADA"
-                    
-                    if total_refs > 0:
-                        if pendientes > 0 or total_errores > 0:
-                            if facturadas > 0:
-                                final_status = "FACTURADA_PARCIAL"
-                            else:
-                                final_status = "ERROR_VALIDACION" if validaciones > 0 else ("ERROR" if errores > 0 else original_state)
+                if self.api_client.connect_via_api:
+                    refs_data = self.api_client.request("GET", f"/api/docs/solicitudes/{self.ctx['solicitud_id']}/referencias")
+                    status_counts = {}
+                    for r in refs_data:
+                        code = r["estado_codigo"]
+                        status_counts[code] = status_counts.get(code, 0) + 1
+                else:
+                    with self.db_connector.get_session() as session:
+                        stmt = text("""
+                            SELECT es.codigo, COUNT(r.referencia_id)
+                            FROM sar_produccion.referencia r
+                            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+                            WHERE r.solicitud_id = :solicitud_id
+                            GROUP BY es.codigo
+                        """)
+                        rows = session.execute(stmt, {"solicitud_id": self.ctx["solicitud_id"]}).fetchall()
+                        status_counts = {row[0]: row[1] for row in rows}
+                status_counts = {k.upper(): v for k, v in status_counts.items()}
+                total_refs = sum(status_counts.values())
+                facturadas = status_counts.get("FACTURADA", 0)
+                validaciones = status_counts.get("ERROR_VALIDACION", 0)
+                errores = status_counts.get("ERROR", 0)
+                total_errores = validaciones + errores
+                autorizadas = status_counts.get("AUTORIZADA", 0)
+                rechazadas = status_counts.get("RECHAZADA", 0)
+                pendientes = autorizadas
+                
+                original_state = "AUTORIZACION_PARCIAL" if rechazadas > 0 else "AUTORIZADA"
+                
+                if total_refs > 0:
+                    if pendientes > 0 or total_errores > 0:
+                        if facturadas > 0:
+                            final_status = "FACTURADA_PARCIAL"
                         else:
-                            final_status = "FACTURADA_PARCIAL" if rechazadas > 0 else "FACTURADA"
+                            final_status = "ERROR_VALIDACION" if validaciones > 0 else ("ERROR" if errores > 0 else original_state)
+                    else:
+                        final_status = "FACTURADA_PARCIAL" if rechazadas > 0 else "FACTURADA"
             except:
                 pass
             
@@ -624,84 +664,89 @@ class BillingRpaWorker(QThread):
                 pass
 
     def _save_facturas_db(self, referencia_id: int, pdf_paths: list, consecutivo: int):
-        """Persiste los registros de factura para una referencia con múltiples archivos PDF.
-        
-        Cada referencia puede tener hasta 2 facturas (pdf_paths[0] y pdf_paths[1]).
-        El primer PDF se guarda en pdf_path, el segundo en xml_path (campo reutilizado).
-        Si ya existe un registro para esta referencia, se actualiza con las rutas correctas.
-        """
-        with self.db_connector.get_session() as session:
-            # Verificar si ya existe un registro de factura para esta referencia
-            dup_stmt = text("SELECT factura_id FROM sar_archivo.factura WHERE referencia_id = :rid LIMIT 1")
-            dup_id = session.execute(dup_stmt, {"rid": referencia_id}).scalar()
-            
-            pdf_path_1 = pdf_paths[0] if len(pdf_paths) > 0 else None
-            pdf_path_2 = pdf_paths[1] if len(pdf_paths) > 1 else None
-            filename_1 = os.path.basename(pdf_path_1) if pdf_path_1 else ""
-            
-            if not dup_id:
-                # Insertar nuevo registro de factura
-                factura_uuid = str(uuid.uuid4())
-                ins_factura = text("""
-                    INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, xml_path, estado)
-                    VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :xml, :estado)
-                """)
-                session.execute(ins_factura, {
-                    "rid": referencia_id,
-                    "uuid": factura_uuid,
-                    "folio": filename_1.replace(".pdf", ""),
-                    "rfc_emisor": self.ctx["rfc"],
-                    "fecha": datetime.datetime.now(datetime.timezone.utc),
-                    "pdf": pdf_path_1,
-                    # xml_path reutilizado para almacenar la ruta de la 2da factura hasta refactorizar el esquema
-                    "xml": pdf_path_2,
-                    "estado": "TIMBRADA"
-                })
-            else:
-                # Actualizar rutas de PDFs si ya existe el registro
-                upd_stmt = text("""
-                    UPDATE sar_archivo.factura
-                    SET pdf_path = :pdf, xml_path = :xml, estado = 'TIMBRADA'
-                    WHERE factura_id = :fid
-                """)
-                session.execute(upd_stmt, {
-                    "pdf": pdf_path_1,
-                    "xml": pdf_path_2,
-                    "fid": dup_id
-                })
-            
-            # Actualizar estado de la referencia a FACTURADA
-            stmt_status = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = 'FACTURADA' LIMIT 1")
-            ref_status_id = session.execute(stmt_status).scalar()
-            if not ref_status_id:
-                ins_ref_stmt = text("""
-                    INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
-                    VALUES ('referencia', 'FACTURADA', 'FACTURADA')
-                    RETURNING estado_id
-                """)
-                ref_status_id = session.execute(ins_ref_stmt).scalar()
-                session.flush()
+        """Persiste los registros de factura para una referencia con múltiples archivos PDF."""
+        if self.api_client.connect_via_api:
+            payload = {
+                "referencia_id": referencia_id,
+                "pdf_paths": pdf_paths,
+                "rfc_emisor": self.ctx["rfc"],
+                "consecutivo": consecutivo,
+                "solicitud_id": self.ctx["solicitud_id"],
+                "grupo_id": self.ctx["grupo_id"]
+            }
+            self.api_client.request("POST", "/api/docs/facturas/bot", data=payload)
+        else:
+            with self.db_connector.get_session() as session:
+                # Verificar si ya existe un registro de factura para esta referencia
+                dup_stmt = text("SELECT factura_id FROM sar_archivo.factura WHERE referencia_id = :rid LIMIT 1")
+                dup_id = session.execute(dup_stmt, {"rid": referencia_id}).scalar()
                 
-            ref = session.get(Referencia, referencia_id)
-            if ref:
-                ref.estado_id = ref_status_id
-            
-            # Actualizar último consecutivo en Solicitud
-            sol = session.get(Solicitud, self.ctx["solicitud_id"])
-            if sol:
-                sol.ultimo_consecutivo = consecutivo
-                if consecutivo >= self.ctx["consecutivo_fin"]:
-                    sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
-                if not sol.fecha_inicio:
-                    sol.fecha_inicio = datetime.datetime.now(datetime.timezone.utc)
-            
-            # Actualizar último consecutivo en GrupoReferencia
-            grupo = session.get(GrupoReferencia, self.ctx["grupo_id"])
-            if grupo:
-                if consecutivo > (grupo.ultimo_consecutivo or 0):
-                    grupo.ultimo_consecutivo = consecutivo
+                pdf_path_1 = pdf_paths[0] if len(pdf_paths) > 0 else None
+                pdf_path_2 = pdf_paths[1] if len(pdf_paths) > 1 else None
+                filename_1 = os.path.basename(pdf_path_1) if pdf_path_1 else ""
+                
+                if not dup_id:
+                    # Insertar nuevo registro de factura
+                    factura_uuid = str(uuid.uuid4())
+                    ins_factura = text("""
+                        INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, xml_path, estado)
+                        VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :xml, :estado)
+                    """)
+                    session.execute(ins_factura, {
+                        "rid": referencia_id,
+                        "uuid": factura_uuid,
+                        "folio": filename_1.replace(".pdf", ""),
+                        "rfc_emisor": self.ctx["rfc"],
+                        "fecha": datetime.datetime.now(datetime.timezone.utc),
+                        "pdf": pdf_path_1,
+                        "xml": pdf_path_2,
+                        "estado": "TIMBRADA"
+                    })
+                else:
+                    # Actualizar rutas de PDFs si ya existe el registro
+                    upd_stmt = text("""
+                        UPDATE sar_archivo.factura
+                        SET pdf_path = :pdf, xml_path = :xml, estado = 'TIMBRADA'
+                        WHERE factura_id = :fid
+                    """)
+                    session.execute(upd_stmt, {
+                        "pdf": pdf_path_1,
+                        "xml": pdf_path_2,
+                        "fid": dup_id
+                    })
+                
+                # Actualizar estado de la referencia a FACTURADA
+                stmt_status = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = 'FACTURADA' LIMIT 1")
+                ref_status_id = session.execute(stmt_status).scalar()
+                if not ref_status_id:
+                    ins_ref_stmt = text("""
+                        INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
+                        VALUES ('referencia', 'FACTURADA', 'FACTURADA')
+                        RETURNING estado_id
+                    """)
+                    ref_status_id = session.execute(ins_ref_stmt).scalar()
+                    session.flush()
                     
-            session.commit()
+                ref = session.get(Referencia, referencia_id)
+                if ref:
+                    ref.estado_id = ref_status_id
+                
+                # Actualizar último consecutivo en Solicitud
+                sol = session.get(Solicitud, self.ctx["solicitud_id"])
+                if sol:
+                    sol.ultimo_consecutivo = consecutivo
+                    if consecutivo >= self.ctx["consecutivo_fin"]:
+                        sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
+                    if not sol.fecha_inicio:
+                        sol.fecha_inicio = datetime.datetime.now(datetime.timezone.utc)
+                
+                # Actualizar último consecutivo en GrupoReferencia
+                grupo = session.get(GrupoReferencia, self.ctx["grupo_id"])
+                if grupo:
+                    if consecutivo > (grupo.ultimo_consecutivo or 0):
+                        grupo.ultimo_consecutivo = consecutivo
+                        
+                session.commit()
     
     def _save_factura_db(self, referencia_id: int, pdf_path: str, filename: str, consecutivo: int):
         """Compatibilidad hacia atrás: delega a _save_facturas_db con una sola ruta."""
@@ -709,97 +754,123 @@ class BillingRpaWorker(QThread):
 
     def _update_solicitud_estado(self, status_code: str):
         try:
-            with self.db_connector.get_session() as session:
-                stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'solicitud' AND codigo = :codigo LIMIT 1")
-                eid = session.execute(stmt, {"codigo": status_code}).scalar()
-                if not eid:
-                    ins_stmt = text("""
-                        INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
-                        VALUES ('solicitud', :codigo, :desc)
-                        RETURNING estado_id
-                    """)
-                    eid = session.execute(ins_stmt, {
-                        "codigo": status_code,
-                        "desc": f"Estado {status_code} de solicitud"
-                    }).scalar()
-                    session.flush()
-                
-                sol = session.get(Solicitud, self.ctx["solicitud_id"])
-                if sol:
-                    sol.estado_id = eid
-                    session.commit()
+            if self.api_client.connect_via_api:
+                self.api_client.request("POST", f"/api/docs/solicitudes/{self.ctx['solicitud_id']}/estado", data={"status_code": status_code})
+            else:
+                with self.db_connector.get_session() as session:
+                    stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'solicitud' AND codigo = :codigo LIMIT 1")
+                    eid = session.execute(stmt, {"codigo": status_code}).scalar()
+                    if not eid:
+                        ins_stmt = text("""
+                            INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
+                            VALUES ('solicitud', :codigo, :desc)
+                            RETURNING estado_id
+                        """)
+                        eid = session.execute(ins_stmt, {
+                            "codigo": status_code,
+                            "desc": f"Estado {status_code} de solicitud"
+                        }).scalar()
+                        session.flush()
+                    
+                    sol = session.get(Solicitud, self.ctx["solicitud_id"])
+                    if sol:
+                        sol.estado_id = eid
+                        session.commit()
         except Exception as e:
             self.status_changed.emit(f"Error actualizando estado de solicitud a {status_code}: {str(e)}")
 
     def _finalize_solicitud_in_db(self, status_code: str):
         try:
-            with self.db_connector.get_session() as session:
-                # Update Solicitud Status
-                stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'solicitud' AND codigo = :codigo LIMIT 1")
-                sol_status_id = session.execute(stmt, {"codigo": status_code}).scalar()
-                if not sol_status_id:
-                    ins_stmt = text("""
-                        INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
-                        VALUES ('solicitud', :codigo, :desc)
-                        RETURNING estado_id
-                    """)
-                    sol_status_id = session.execute(ins_stmt, {
-                        "codigo": status_code,
-                        "desc": f"Estado {status_code} de solicitud"
-                    }).scalar()
-                    session.flush()
-                    
-                sol = session.get(Solicitud, self.ctx["solicitud_id"])
-                if sol:
-                    sol.estado_id = sol_status_id
-                    sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
-                    session.commit()
+            if self.api_client.connect_via_api:
+                self.api_client.request("POST", f"/api/docs/solicitudes/{self.ctx['solicitud_id']}/finalizar", data={"status_code": status_code})
+            else:
+                with self.db_connector.get_session() as session:
+                    # Update Solicitud Status
+                    stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'solicitud' AND codigo = :codigo LIMIT 1")
+                    sol_status_id = session.execute(stmt, {"codigo": status_code}).scalar()
+                    if not sol_status_id:
+                        ins_stmt = text("""
+                            INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
+                            VALUES ('solicitud', :codigo, :desc)
+                            RETURNING estado_id
+                        """)
+                        sol_status_id = session.execute(ins_stmt, {
+                            "codigo": status_code,
+                            "desc": f"Estado {status_code} de solicitud"
+                        }).scalar()
+                        session.flush()
+                        
+                    sol = session.get(Solicitud, self.ctx["solicitud_id"])
+                    if sol:
+                        sol.estado_id = sol_status_id
+                        sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
+                        session.commit()
         except Exception as e:
             self.status_changed.emit(f"Error finalizando solicitud en DB: {str(e)}")
 
     def _log_event_db(self, modulo: str, mensaje: str, detalle: Optional[dict] = None):
         try:
-            from sar.src.storage.models import EventoSistema
-            import json
-            with self.db_connector.get_session() as session:
-                stmt_event = text("SELECT evento_id FROM sar_catalogo.evento_sistema WHERE codigo = 'PROCESAR_SOLICITUD' LIMIT 1")
-                event_id = session.execute(stmt_event).scalar()
-                if not event_id:
-                    event_id = 1
-                
-                # Insert event trace log manually or using models
-                ins_stmt = text("""
-                    INSERT INTO sar_auditoria.auditoria_evento (evento_id, usuario_id, sesion_id, fecha, modulo, detalle)
-                    VALUES (:eid, :uid, :sid, :fecha, :modulo, :detalle)
-                """)
-                session.execute(ins_stmt, {
-                    "eid": event_id,
-                    "uid": self.ctx.get("usuario_id", 1),
-                    "sid": None,
-                    "fecha": datetime.datetime.now(datetime.timezone.utc),
+            if self.api_client.connect_via_api:
+                payload = {
+                    "evento_codigo": "PROCESAR_SOLICITUD",
                     "modulo": modulo,
-                    "detalle": json.dumps(detalle) if detalle else None
-                })
-                session.commit()
+                    "usuario_id": self.ctx.get("usuario_id", 1),
+                    "sesion_id": None,
+                    "detalle": detalle
+                }
+                self.api_client.request("POST", "/api/docs/audit/evento", data=payload)
+            else:
+                from sar.src.storage.models import EventoSistema
+                import json
+                with self.db_connector.get_session() as session:
+                    stmt_event = text("SELECT evento_id FROM sar_catalogo.evento_sistema WHERE codigo = 'PROCESAR_SOLICITUD' LIMIT 1")
+                    event_id = session.execute(stmt_event).scalar()
+                    if not event_id:
+                        event_id = 1
+                    
+                    # Insert event trace log manually or using models
+                    ins_stmt = text("""
+                        INSERT INTO sar_auditoria.auditoria_evento (evento_id, usuario_id, sesion_id, fecha, modulo, detalle)
+                        VALUES (:eid, :uid, :sid, :fecha, :modulo, :detalle)
+                    """)
+                    session.execute(ins_stmt, {
+                        "eid": event_id,
+                        "uid": self.ctx.get("usuario_id", 1),
+                        "sid": None,
+                        "fecha": datetime.datetime.now(datetime.timezone.utc),
+                        "modulo": modulo,
+                        "detalle": json.dumps(detalle) if detalle else None
+                    })
+                    session.commit()
         except Exception as e:
             print("DB logging event error:", e)
 
     def _log_error_db(self, mensaje: str, trace: str):
         try:
-            with self.db_connector.get_session() as session:
-                ins_stmt = text("""
-                    INSERT INTO sar_auditoria.auditoria_error (usuario_id, sesion_id, modulo, mensaje, stack_trace, fecha)
-                    VALUES (:uid, :sid, :mod, :msg, :trace, :fecha)
-                """)
-                session.execute(ins_stmt, {
-                    "uid": self.ctx.get("usuario_id", 1),
-                    "sid": None,
-                    "mod": "BOT_FACTURACION",
-                    "msg": mensaje,
-                    "trace": trace,
-                    "fecha": datetime.datetime.now(datetime.timezone.utc)
-                })
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.ctx.get("usuario_id", 1),
+                    "sesion_id": None,
+                    "modulo": "BOT_FACTURACION",
+                    "mensaje": mensaje,
+                    "stack_trace": trace
+                }
+                self.api_client.request("POST", "/api/docs/audit/error", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    ins_stmt = text("""
+                        INSERT INTO sar_auditoria.auditoria_error (usuario_id, sesion_id, modulo, mensaje, stack_trace, fecha)
+                        VALUES (:uid, :sid, :mod, :msg, :trace, :fecha)
+                    """)
+                    session.execute(ins_stmt, {
+                        "uid": self.ctx.get("usuario_id", 1),
+                        "sid": None,
+                        "mod": "BOT_FACTURACION",
+                        "msg": mensaje,
+                        "trace": trace,
+                        "fecha": datetime.datetime.now(datetime.timezone.utc)
+                    })
+                    session.commit()
         except Exception as e:
             print("DB logging error failed:", e)
 
@@ -819,43 +890,52 @@ class BillingRpaWorker(QThread):
 
     def _mark_referencia_estado(self, referencia_id: int, estado_codigo: str, consecutivo: int):
         try:
-            with self.db_connector.get_session() as session:
-                # Get or create status in estado_sistema
-                stmt_status = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = :codigo LIMIT 1")
-                ref_status_id = session.execute(stmt_status, {"codigo": estado_codigo}).scalar()
-                if not ref_status_id:
-                    ins_ref_stmt = text("""
-                        INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
-                        VALUES ('referencia', :codigo, :desc)
-                        RETURNING estado_id
-                    """)
-                    ref_status_id = session.execute(ins_ref_stmt, {
-                        "codigo": estado_codigo,
-                        "desc": f"Estado {estado_codigo} de referencia"
-                    }).scalar()
-                    session.flush()
-                
-                # Update reference status
-                ref = session.get(Referencia, referencia_id)
-                if ref:
-                    ref.estado_id = ref_status_id
-                
-                # Update last consecutive in Solicitud
-                sol = session.get(Solicitud, self.ctx["solicitud_id"])
-                if sol:
-                    sol.ultimo_consecutivo = consecutivo
-                    if not sol.fecha_inicio:
-                        sol.fecha_inicio = datetime.datetime.now(datetime.timezone.utc)
-                    if consecutivo >= self.ctx["consecutivo_fin"]:
-                        sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
-                        
-                # Update last consecutive in GrupoReferencia
-                grupo = session.get(GrupoReferencia, self.ctx["grupo_id"])
-                if grupo:
-                    if consecutivo > (grupo.ultimo_consecutivo or 0):
-                        grupo.ultimo_consecutivo = consecutivo
-                        
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "estado_codigo": estado_codigo,
+                    "consecutivo": consecutivo,
+                    "solicitud_id": self.ctx["solicitud_id"],
+                    "grupo_id": self.ctx["grupo_id"]
+                }
+                self.api_client.request("PUT", f"/api/docs/referencias/{referencia_id}/estado", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    # Get or create status in estado_sistema
+                    stmt_status = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = :codigo LIMIT 1")
+                    ref_status_id = session.execute(stmt_status, {"codigo": estado_codigo}).scalar()
+                    if not ref_status_id:
+                        ins_ref_stmt = text("""
+                            INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
+                            VALUES ('referencia', :codigo, :desc)
+                            RETURNING estado_id
+                        """)
+                        ref_status_id = session.execute(ins_ref_stmt, {
+                            "codigo": estado_codigo,
+                            "desc": f"Estado {estado_codigo} of referencia"
+                        }).scalar()
+                        session.flush()
+                    
+                    # Update reference status
+                    ref = session.get(Referencia, referencia_id)
+                    if ref:
+                        ref.estado_id = ref_status_id
+                    
+                    # Update last consecutive in Solicitud
+                    sol = session.get(Solicitud, self.ctx["solicitud_id"])
+                    if sol:
+                        sol.ultimo_consecutivo = consecutivo
+                        if not sol.fecha_inicio:
+                            sol.fecha_inicio = datetime.datetime.now(datetime.timezone.utc)
+                        if consecutivo >= self.ctx["consecutivo_fin"]:
+                            sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
+                            
+                    # Update last consecutive in GrupoReferencia
+                    grupo = session.get(GrupoReferencia, self.ctx["grupo_id"])
+                    if grupo:
+                        if consecutivo > (grupo.ultimo_consecutivo or 0):
+                            grupo.ultimo_consecutivo = consecutivo
+                            
+                    session.commit()
         except Exception as e:
             self.status_changed.emit(f"Error al registrar estado {estado_codigo} para referencia {referencia_id}: {str(e)}")
 

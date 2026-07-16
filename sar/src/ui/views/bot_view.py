@@ -224,7 +224,7 @@ class BotView(QWidget):
         grid_m.addWidget(self.lbl_rfc_info, 1, 0, 1, 3)
         
         m_layout.addLayout(grid_m)
-        top_layout.addWidget(metricas_frame, stretch=2)
+        top_layout.addWidget(metricas_frame, stretch=1)
         
         # 3. Monitoreo en Tiempo Real
         monitoreo_frame = QFrame()
