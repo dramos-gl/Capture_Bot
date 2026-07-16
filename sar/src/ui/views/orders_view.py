@@ -17,6 +17,8 @@ class OrdersView(QWidget):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(24, 24, 24, 24)
@@ -206,25 +208,43 @@ class OrdersView(QWidget):
             
     def _load_catalogs(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = CatalogoRepository(session)
-                rfcs = [(r.rfc_id, r.rfc) for r in repo.get_rfcs_activos()]
-                conceptos = [(c.concepto_id, c.nombre) for c in repo.get_conceptos_activos()]
-                delegaciones = [(d.delegacion_id, d.nombre) for d in repo.get_delegaciones_activas()]
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/ops/catalogos")
+                rfcs = [(r["rfc_id"], r["rfc"]) for r in data["rfcs"]]
+                conceptos = [(c["concepto_id"], c["nombre"]) for c in data["conceptos"]]
+                delegaciones = [(d["delegacion_id"], d["nombre"]) for d in data["delegaciones"]]
                 
                 self.grid.set_catalogs(rfcs, conceptos, delegaciones)
                 
-                # Load municipios to combo_municipio
-                municipios = [m for m in repo.get_all_municipios() if m.activo]
+                municipios = data["municipios"]
                 self.combo_municipio.clear()
                 default_index = 0
                 for idx, m in enumerate(municipios):
-                    self.combo_municipio.addItem(m.nombre, m.municipio_id)
-                    # Benito Juárez is typically ID 2 or has 'BENITO' in the name
-                    if m.municipio_id == 2 or "BENITO" in m.nombre.upper():
-                        default_index = idx
+                    if m["activo"]:
+                        self.combo_municipio.addItem(m["nombre"], m["municipio_id"])
+                        if m["municipio_id"] == 2 or "BENITO" in m["nombre"].upper():
+                            default_index = self.combo_municipio.count() - 1
                 self.combo_municipio.setCurrentIndex(default_index)
-                
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = CatalogoRepository(session)
+                    rfcs = [(r.rfc_id, r.rfc) for r in repo.get_rfcs_activos()]
+                    conceptos = [(c.concepto_id, c.nombre) for c in repo.get_conceptos_activos()]
+                    delegaciones = [(d.delegacion_id, d.nombre) for d in repo.get_delegaciones_activas()]
+                    
+                    self.grid.set_catalogs(rfcs, conceptos, delegaciones)
+                    
+                    # Load municipios to combo_municipio
+                    municipios = [m for m in repo.get_all_municipios() if m.activo]
+                    self.combo_municipio.clear()
+                    default_index = 0
+                    for idx, m in enumerate(municipios):
+                        self.combo_municipio.addItem(m.nombre, m.municipio_id)
+                        # Benito Juárez is typically ID 2 or has 'BENITO' in the name
+                        if m.municipio_id == 2 or "BENITO" in m.nombre.upper():
+                            default_index = idx
+                    self.combo_municipio.setCurrentIndex(default_index)
+                    
         except Exception as e:
             QMessageBox.critical(self, "Error de Catálogos", f"No se pudieron cargar los catálogos.\n{str(e)}")
             
@@ -272,58 +292,83 @@ class OrdersView(QWidget):
         # For this desktop app, we fetch user_id from the current session.
         main_window = self.window()
         current_sesion_id = getattr(main_window, 'current_sesion_id', None)
+        current_usuario_id = getattr(main_window, 'current_usuario_id', 1)
         
         try:
-            with self.db_connector.get_session() as session:
-                # Get current user
-                from sar.src.storage.models import Sesion
-                db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
-                usuario_id = db_sesion.usuario_id if db_sesion else 1 # Fallback to 1 for dev if no session
-                
-                service = OrdenesService(session)
-                nueva_orden = service.crear_orden_manual(
-                    usuario_id=usuario_id,
-                    sesion_id=current_sesion_id,
-                    descripcion=desc,
-                    municipio_id=municipio_id,
-                    renglones=data
-                )
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": current_usuario_id,
+                    "sesion_id": current_sesion_id,
+                    "descripcion": desc,
+                    "municipio_id": municipio_id,
+                    "renglones": data
+                }
+                res = self.api_client.request("POST", "/api/ops/ordenes", data=payload)
+                folio = res["folio"]
                 
                 QMessageBox.information(
                     self, "Éxito", 
-                    f"Orden {nueva_orden.folio} creada correctamente con {len(data)} grupos."
+                    f"Orden {folio} creada correctamente con {len(data)} grupos."
                 )
                 
                 # Reset Form
                 self.desc_input.setText("")
                 self.grid.clear()
                 self.grid.add_row()
+            else:
+                with self.db_connector.get_session() as session:
+                    # Get current user
+                    from sar.src.storage.models import Sesion
+                    db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
+                    usuario_id = db_sesion.usuario_id if db_sesion else 1 # Fallback to 1 for dev if no session
+                    
+                    service = OrdenesService(session)
+                    nueva_orden = service.crear_orden_manual(
+                        usuario_id=usuario_id,
+                        sesion_id=current_sesion_id,
+                        descripcion=desc,
+                        municipio_id=municipio_id,
+                        renglones=data
+                    )
+                    
+                    QMessageBox.information(
+                        self, "Éxito", 
+                        f"Orden {nueva_orden.folio} creada correctamente con {len(data)} grupos."
+                    )
+                    
+                    # Reset Form
+                    self.desc_input.setText("")
+                    self.grid.clear()
+                    self.grid.add_row()
                 
         except Exception as e:
             QMessageBox.critical(self, "Error al Guardar", f"Hubo un problema al crear la orden:\n{str(e)}")
 
     def refresh_historial(self):
         try:
-            from sar.src.storage.repositories import ProduccionRepository
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                self._all_ordenes_data = repo.get_ordenes()
+            if self.api_client.connect_via_api:
+                self._all_ordenes_data = self.api_client.request("GET", "/api/ops/ordenes")
+            else:
+                from sar.src.storage.repositories import ProduccionRepository
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    self._all_ordenes_data = repo.get_ordenes()
                 
-                data_rows = []
-                for o in self._all_ordenes_data:
-                    data_rows.append([
-                        str(o["orden_id"]),
-                        o["folio"],
-                        o["descripcion"],
-                        o["estado"],
-                        o["creador"],
-                        o["fecha_creacion"],
-                        str(o["total_solicitadas"]),
-                        str(o["total_generadas"])
-                    ])
-                    
-                self.table_historial.populate_rows(data_rows, checkable_first_col=False)
-                self._apply_historial_filters()
+            data_rows = []
+            for o in self._all_ordenes_data:
+                data_rows.append([
+                    str(o["orden_id"]),
+                    o["folio"],
+                    o["descripcion"],
+                    o["estado"],
+                    o["creador"],
+                    o["fecha_creacion"],
+                    str(o["total_solicitadas"]),
+                    str(o["total_generadas"])
+                ])
+                
+            self.table_historial.populate_rows(data_rows, checkable_first_col=False)
+            self._apply_historial_filters()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo cargar el historial de órdenes:\n{str(e)}")
     
@@ -390,11 +435,9 @@ class OrdersView(QWidget):
 
         total_referencias_acumuladas = 0
         try:
-            from sar.src.storage.repositories import ProduccionRepository
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
+            if self.api_client.connect_via_api:
                 for oid in orden_ids:
-                    res = repo.check_orden_ready_for_masivo(oid)
+                    res = self.api_client.request("GET", f"/api/ops/ordenes/{oid}/check-ready")
                     if not res["ready"]:
                         QMessageBox.warning(
                             self, 
@@ -406,6 +449,23 @@ class OrdersView(QWidget):
                         )
                         return
                     total_referencias_acumuladas += res.get("total_referencias", 0)
+            else:
+                from sar.src.storage.repositories import ProduccionRepository
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    for oid in orden_ids:
+                        res = repo.check_orden_ready_for_masivo(oid)
+                        if not res["ready"]:
+                            QMessageBox.warning(
+                                self, 
+                                "Acción Inválida", 
+                                f"No se puede aplicar la acción masiva sobre la orden ID {oid}:\n\n"
+                                f"{res['reason']}\n\n"
+                                f"Sugerencia: Vaya al módulo 'Procesar Solicitud de la Orden' "
+                                f"haciendo doble clic sobre la orden para realizar un procesamiento parcial."
+                            )
+                            return
+                        total_referencias_acumuladas += res.get("total_referencias", 0)
         except Exception as e:
             QMessageBox.critical(self, "Error de Validación", f"No se pudo validar el estado de las órdenes:\n{str(e)}")
             return
@@ -420,17 +480,28 @@ class OrdersView(QWidget):
             
         if reply == QMessageBox.Yes:
             try:
-                from sar.src.storage.repositories import ProduccionRepository
                 main_window = self.window()
                 current_sesion_id = getattr(main_window, 'current_sesion_id', None)
-                with self.db_connector.get_session() as session:
-                    from sar.src.storage.models import Sesion
-                    db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
-                    usuario_id = db_sesion.usuario_id if db_sesion else 1
-
-                    repo = ProduccionRepository(session)
+                current_usuario_id = getattr(main_window, 'current_usuario_id', 1)
+                
+                if self.api_client.connect_via_api:
+                    payload = {
+                        "usuario_id": current_usuario_id,
+                        "sesion_id": current_sesion_id,
+                        "estado_codigo": estado_codigo
+                    }
                     for oid in orden_ids:
-                        repo.update_orden_estado_masivo(oid, estado_codigo, usuario_id=usuario_id, sesion_id=current_sesion_id)
+                        self.api_client.request("POST", f"/api/ops/ordenes/{oid}/estado-masivo", data=payload)
+                else:
+                    from sar.src.storage.repositories import ProduccionRepository
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.models import Sesion
+                        db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
+                        usuario_id = db_sesion.usuario_id if db_sesion else 1
+                        
+                        repo = ProduccionRepository(session)
+                        for oid in orden_ids:
+                            repo.update_orden_estado_masivo(oid, estado_codigo, usuario_id=usuario_id, sesion_id=current_sesion_id)
                 QMessageBox.information(self, "Éxito", f"Las órdenes fueron procesadas como {estado_codigo} con éxito.")
                 self.refresh_historial()
             except Exception as e:
@@ -455,18 +526,29 @@ class OrdersView(QWidget):
             
         if reply == QMessageBox.Yes:
             try:
-                from sar.src.storage.repositories import ProduccionRepository
                 main_window = self.window()
                 current_sesion_id = getattr(main_window, 'current_sesion_id', None)
-                with self.db_connector.get_session() as session:
-                    from sar.src.storage.models import Sesion
-                    db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
-                    usuario_id = db_sesion.usuario_id if db_sesion else 1
-
-                    repo = ProduccionRepository(session)
+                current_usuario_id = getattr(main_window, 'current_usuario_id', 1)
+                
+                if self.api_client.connect_via_api:
+                    payload = {
+                        "usuario_id": current_usuario_id,
+                        "sesion_id": current_sesion_id,
+                        "estado_codigo": "CANCELADA"
+                    }
                     for oid in orden_ids:
-                        repo.cancelar_orden_transaccional(oid, usuario_id=usuario_id, sesion_id=current_sesion_id)
-                    session.commit()
+                        self.api_client.request("POST", f"/api/ops/ordenes/{oid}/cancelar", data=payload)
+                else:
+                    from sar.src.storage.repositories import ProduccionRepository
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.models import Sesion
+                        db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
+                        usuario_id = db_sesion.usuario_id if db_sesion else 1
+
+                        repo = ProduccionRepository(session)
+                        for oid in orden_ids:
+                            repo.cancelar_orden_transaccional(oid, usuario_id=usuario_id, sesion_id=current_sesion_id)
+                        session.commit()
                 QMessageBox.information(self, "Éxito", f"Las órdenes fueron canceladas con éxito.")
                 self.refresh_historial()
             except Exception as e:

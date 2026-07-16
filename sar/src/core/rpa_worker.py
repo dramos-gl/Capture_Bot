@@ -31,6 +31,9 @@ class RpaWorker(QThread):
         self.headless = headless
         self.custom_output_dir = custom_output_dir
         self._stop_requested = False
+        
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
 
     def stop(self):
         """Safely requests the worker to stop processing between loops."""
@@ -44,23 +47,29 @@ class RpaWorker(QThread):
         context = None
         
         try:
-            # 1. Load Parameters and Locators from DB
-            self.status_changed.emit("Cargando parámetros y localizadores de la base de datos...")
-            with self.db_connector.get_session() as db_session:
-                config_repo = ConfigRepository(db_session)
-                audit_repo = AuditRepository(db_session)
+            # 1. Load Parameters and Locators
+            self.status_changed.emit("Cargando parámetros y localizadores...")
+            if self.api_client.connect_via_api:
+                res_url = self.api_client.request("GET", "/api/docs/config/parametro/TRIBUTANET_RPP_URL")
+                rpp_url = res_url.get("valor") or "https://shacienda.qroo.gob.mx/tributanet/rpp/dec_rpp_control.php?tipo_declaracion=1"
                 
-                # Fetch System Parameters
-                rpp_url = config_repo.get_parametro("TRIBUTANET_RPP_URL") or "https://shacienda.qroo.gob.mx/tributanet/rpp/dec_rpp_control.php?tipo_declaracion=1"
-                retries_str = config_repo.get_parametro("REINTENTOS_AUTOMATICOS")
+                res_retries = self.api_client.request("GET", "/api/docs/config/parametro/REINTENTOS_AUTOMATICOS")
+                retries_str = res_retries.get("valor")
                 max_retries = int(retries_str) if retries_str else 3
                 
-                # Fetch RUTA_DERECHOS
-                self.default_output_dir = config_repo.get_parametro("RUTA_DERECHOS") or "storage"
+                res_ruta = self.api_client.request("GET", "/api/docs/config/parametro/RUTA_DERECHOS")
+                self.default_output_dir = res_ruta.get("valor") or "storage"
                 
-                # Fetch Portal Locators and extract values to decouple from SQLAlchemy Session
-                db_locators = config_repo.get_localizadores()
-                locators = {k: v.valor_selector for k, v in db_locators.items()}
+                locators = self.api_client.request("GET", "/api/docs/config/localizadores")
+            else:
+                with self.db_connector.get_session() as db_session:
+                    config_repo = ConfigRepository(db_session)
+                    rpp_url = config_repo.get_parametro("TRIBUTANET_RPP_URL") or "https://shacienda.qroo.gob.mx/tributanet/rpp/dec_rpp_control.php?tipo_declaracion=1"
+                    retries_str = config_repo.get_parametro("REINTENTOS_AUTOMATICOS")
+                    max_retries = int(retries_str) if retries_str else 3
+                    self.default_output_dir = config_repo.get_parametro("RUTA_DERECHOS") or "storage"
+                    db_locators = config_repo.get_localizadores()
+                    locators = {k: v.valor_selector for k, v in db_locators.items()}
                 
             # Log Start of Batch in Audit Event
             self._log_event_db("PROCESAR_SOLICITUD", f"Inicio procesamiento lote solicitud {self.ctx['solicitud_id']}", detalle={"consecutivo_inicio": self.ctx['consecutivo_inicio'], "consecutivo_fin": self.ctx['consecutivo_fin']})
@@ -313,198 +322,225 @@ class RpaWorker(QThread):
 
     # Helper Database Transactions
     def _save_referencia_db(self, consecutivo: int, ref_portal: str, importe: float, fecha_vig: Optional[datetime.date], filename: str, path: str, sha256: str, size: int):
-        with self.db_connector.get_session() as session:
-            # Query status ID
-            state_stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = 'GENERADA' LIMIT 1")
-            state_id = session.execute(state_stmt).scalar()
-            if not state_id:
-                # Fallback to general default if not found
-                state_id = session.execute(text("SELECT estado_id FROM sar_catalogo.estado_sistema LIMIT 1")).scalar() or 1
-                
-            # Create Referencia model
-            ref = Referencia(
-                grupo_id=self.ctx["grupo_id"],
-                solicitud_id=self.ctx["solicitud_id"],
-                consecutivo_grupo=consecutivo,
-                referencia_portal=ref_portal,
-                importe=importe,
-                fecha_generacion=datetime.datetime.now(datetime.timezone.utc),
-                fecha_vigencia=fecha_vig,
-                estado_id=state_id,
-                usuario_asignado=self.ctx.get("usuario_id")
-            )
-            session.add(ref)
-            session.flush()
-            
-            # Create ArchivoPDF model
-            pdf = ArchivoPDF(
-                referencia_id=ref.referencia_id,
-                tipo_archivo="BOLETA_PAGO",
-                estado_archivo="DESCARGADO",
-                nombre_archivo=filename,
-                ruta_archivo=path,
-                hash_sha256=sha256,
-                tamano_bytes=size
-            )
-            session.add(pdf)
-            
-            # Update last consecutivo and generated count on Solicitud
-            sol = session.get(Solicitud, self.ctx["solicitud_id"])
-            if sol:
-                sol.ultimo_consecutivo = consecutivo
-                sol.cantidad_generada = (sol.cantidad_generada or 0) + 1
-                # If finished, set dates
-                if consecutivo >= self.ctx["consecutivo_fin"]:
-                    sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
-                if not sol.fecha_inicio:
-                    sol.fecha_inicio = datetime.datetime.now(datetime.timezone.utc)
+        if self.api_client.connect_via_api:
+            fecha_vig_str = fecha_vig.strftime("%Y-%m-%d") if fecha_vig else None
+            payload = {
+                "solicitud_id": self.ctx["solicitud_id"],
+                "grupo_id": self.ctx["grupo_id"],
+                "consecutivo": consecutivo,
+                "referencia_portal": ref_portal,
+                "importe": importe,
+                "fecha_vigencia": fecha_vig_str,
+                "usuario_id": self.ctx.get("usuario_id") or 1,
+                "pdf_filename": filename,
+                "pdf_path": path,
+                "pdf_hash": sha256,
+                "pdf_size": size
+            }
+            self.api_client.request("POST", "/api/docs/referencias/bot", data=payload)
+        else:
+            with self.db_connector.get_session() as session:
+                state_stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'referencia' AND codigo = 'GENERADA' LIMIT 1")
+                state_id = session.execute(state_stmt).scalar()
+                if not state_id:
+                    state_id = session.execute(text("SELECT estado_id FROM sar_catalogo.estado_sistema LIMIT 1")).scalar() or 1
                     
-            # Update last consecutivo on GrupoReferencia
-            grupo = session.get(GrupoReferencia, self.ctx["grupo_id"])
-            if grupo:
-                # Safely update if this is higher than current
-                if consecutivo > (grupo.ultimo_consecutivo or 0):
-                    grupo.ultimo_consecutivo = consecutivo
-                # Update generated references counter
-                grupo.cantidad_generada = (grupo.cantidad_generada or 0) + 1
+                ref = Referencia(
+                    grupo_id=self.ctx["grupo_id"],
+                    solicitud_id=self.ctx["solicitud_id"],
+                    consecutivo_grupo=consecutivo,
+                    referencia_portal=ref_portal,
+                    importe=importe,
+                    fecha_generacion=datetime.datetime.now(datetime.timezone.utc),
+                    fecha_vigencia=fecha_vig,
+                    estado_id=state_id,
+                    usuario_asignado=self.ctx.get("usuario_id")
+                )
+                session.add(ref)
+                session.flush()
                 
-            session.commit()
+                pdf = ArchivoPDF(
+                    referencia_id=ref.referencia_id,
+                    tipo_archivo="BOLETA_PAGO",
+                    estado_archivo="DESCARGADO",
+                    nombre_archivo=filename,
+                    ruta_archivo=path,
+                    hash_sha256=sha256,
+                    tamano_bytes=size
+                )
+                session.add(pdf)
+                
+                sol = session.get(Solicitud, self.ctx["solicitud_id"])
+                if sol:
+                    sol.ultimo_consecutivo = consecutivo
+                    sol.cantidad_generada = (sol.cantidad_generada or 0) + 1
+                    if consecutivo >= self.ctx["consecutivo_fin"]:
+                        sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
+                    if not sol.fecha_inicio:
+                        sol.fecha_inicio = datetime.datetime.now(datetime.timezone.utc)
+                        
+                grupo = session.get(GrupoReferencia, self.ctx["grupo_id"])
+                if grupo:
+                    if consecutivo > (grupo.ultimo_consecutivo or 0):
+                        grupo.ultimo_consecutivo = consecutivo
+                    grupo.cantidad_generada = (grupo.cantidad_generada or 0) + 1
+                    
+                session.commit()
 
     def _update_solicitud_estado(self, status_code: str):
         try:
-            with self.db_connector.get_session() as session:
-                # Helper to get or create status ID
-                def get_or_create_status(entidad: str, codigo: str) -> int:
-                    stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = :entidad AND codigo = :codigo LIMIT 1")
-                    eid = session.execute(stmt, {"entidad": entidad, "codigo": codigo}).scalar()
-                    if not eid:
-                        ins_stmt = text("""
-                            INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
-                            VALUES (:entidad, :codigo, :desc)
-                            RETURNING estado_id
-                        """)
-                        eid = session.execute(ins_stmt, {
-                            "entidad": entidad,
-                            "codigo": codigo,
-                            "desc": f"Estado {codigo} de {entidad}"
-                        }).scalar()
-                        session.flush()
-                    return eid
+            if self.api_client.connect_via_api:
+                self.api_client.request("POST", f"/api/docs/solicitudes/{self.ctx['solicitud_id']}/estado", data={"status_code": status_code})
+            else:
+                with self.db_connector.get_session() as session:
+                    def get_or_create_status(entidad: str, codigo: str) -> int:
+                        stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = :entidad AND codigo = :codigo LIMIT 1")
+                        eid = session.execute(stmt, {"entidad": entidad, "codigo": codigo}).scalar()
+                        if not eid:
+                            ins_stmt = text("""
+                                INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
+                                VALUES (:entidad, :codigo, :desc)
+                                RETURNING estado_id
+                            """)
+                            eid = session.execute(ins_stmt, {
+                                "entidad": entidad,
+                                "codigo": codigo,
+                                "desc": f"Estado {codigo} de {entidad}"
+                            }).scalar()
+                            session.flush()
+                        return eid
 
-                state_id = get_or_create_status("solicitud", status_code)
-                sol = session.get(Solicitud, self.ctx["solicitud_id"])
-                if sol:
-                    sol.estado_id = state_id
-                    session.commit()
+                    state_id = get_or_create_status("solicitud", status_code)
+                    sol = session.get(Solicitud, self.ctx["solicitud_id"])
+                    if sol:
+                        sol.estado_id = state_id
+                        session.commit()
         except Exception as e:
             self.status_changed.emit(f"Error actualizando estado a {status_code}: {str(e)}")
 
     def _finalize_solicitud_in_db(self, status_code: str):
         """Updates status of Solicitud, checks group status, and cascades up to OrdenGeneracion if all done."""
         try:
-            with self.db_connector.get_session() as session:
-                # Helper to get or create status ID
-                def get_or_create_status(entidad: str, codigo: str) -> int:
-                    stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = :entidad AND codigo = :codigo LIMIT 1")
-                    eid = session.execute(stmt, {"entidad": entidad, "codigo": codigo}).scalar()
-                    if not eid:
-                        ins_stmt = text("""
-                            INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
-                            VALUES (:entidad, :codigo, :desc)
-                            RETURNING estado_id
-                        """)
-                        eid = session.execute(ins_stmt, {
-                            "entidad": entidad,
-                            "codigo": codigo,
-                            "desc": f"Estado {codigo} de {entidad}"
-                        }).scalar()
-                        session.flush()
-                    return eid
+            if self.api_client.connect_via_api:
+                self.api_client.request("POST", f"/api/docs/solicitudes/{self.ctx['solicitud_id']}/finalizar", data={"status_code": status_code})
+            else:
+                with self.db_connector.get_session() as session:
+                    def get_or_create_status(entidad: str, codigo: str) -> int:
+                        stmt = text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = :entidad AND codigo = :codigo LIMIT 1")
+                        eid = session.execute(stmt, {"entidad": entidad, "codigo": codigo}).scalar()
+                        if not eid:
+                            ins_stmt = text("""
+                                INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion)
+                                VALUES (:entidad, :codigo, :desc)
+                                RETURNING estado_id
+                            """)
+                            eid = session.execute(ins_stmt, {
+                                "entidad": entidad,
+                                "codigo": codigo,
+                                "desc": f"Estado {codigo} de {entidad}"
+                            }).scalar()
+                            session.flush()
+                        return eid
 
-                # 1. Update Solicitud Status
-                sol_status_id = get_or_create_status("solicitud", status_code)
-                sol = session.get(Solicitud, self.ctx["solicitud_id"])
-                if sol:
-                    sol.estado_id = sol_status_id
-                    sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
-                    session.flush()
-                    
-                    # Transición automática de todas las referencias generadas por esta solicitud a 'PENDIENTE_AUTORIZACION'
-                    if status_code == "COMPLETADA":
-                        pending_auth_status_id = get_or_create_status("referencia", "PENDIENTE_AUTORIZACION")
-                        upd_ref_stmt = text("""
-                            UPDATE sar_produccion.referencia
-                            SET estado_id = :new_state
-                            WHERE solicitud_id = :sol_id
-                        """)
-                        session.execute(upd_ref_stmt, {"new_state": pending_auth_status_id, "sol_id": self.ctx["solicitud_id"]})
+                    sol_status_id = get_or_create_status("solicitud", status_code)
+                    sol = session.get(Solicitud, self.ctx["solicitud_id"])
+                    if sol:
+                        sol.estado_id = sol_status_id
+                        sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
                         session.flush()
-
-                    # 2. Check and Update GrupoReferencia
-                    grupo = session.get(GrupoReferencia, sol.grupo_id)
-                    if grupo:
-                        # Count pending solicitudes of this group
-                        all_sol_stm = text("""
-                            SELECT COUNT(*) FROM sar_produccion.solicitud s
-                            JOIN sar_catalogo.estado_sistema es ON s.estado_id = es.estado_id
-                            WHERE s.grupo_id = :grupo_id AND es.codigo != 'COMPLETADA'
-                        """)
-                        pending_sols = session.execute(all_sol_stm, {"grupo_id": grupo.grupo_id}).scalar()
                         
-                        if pending_sols == 0 or (grupo.cantidad_generada or 0) >= grupo.cantidad_solicitada:
-                            grupo_status_id = get_or_create_status("grupo_referencia", "COMPLETADO")
-                            grupo.estado_id = grupo_status_id
+                        if status_code == "COMPLETADA":
+                            pending_auth_status_id = get_or_create_status("referencia", "PENDIENTE_AUTORIZACION")
+                            upd_ref_stmt = text("""
+                                UPDATE sar_produccion.referencia
+                                SET estado_id = :new_state
+                                WHERE solicitud_id = :sol_id
+                            """)
+                            session.execute(upd_ref_stmt, {"new_state": pending_auth_status_id, "sol_id": self.ctx["solicitud_id"]})
                             session.flush()
 
-                        # 3. Check and Update OrdenGeneracion
-                        orden = session.get(OrdenGeneracion, grupo.orden_id)
-                        if orden:
-                            all_grupo_stm = text("""
-                                SELECT COUNT(*) FROM sar_produccion.grupo_referencia gr
-                                JOIN sar_catalogo.estado_sistema es ON gr.estado_id = es.estado_id
-                                WHERE gr.orden_id = :orden_id AND es.codigo != 'COMPLETADO'
+                        grupo = session.get(GrupoReferencia, sol.grupo_id)
+                        if grupo:
+                            all_sol_stm = text("""
+                                SELECT COUNT(*) FROM sar_produccion.solicitud s
+                                JOIN sar_catalogo.estado_sistema es ON s.estado_id = es.estado_id
+                                WHERE s.grupo_id = :grupo_id AND es.codigo != 'COMPLETADA'
                             """)
-                            pending_grupos = session.execute(all_grupo_stm, {"orden_id": orden.orden_id}).scalar()
+                            pending_sols = session.execute(all_sol_stm, {"grupo_id": grupo.grupo_id}).scalar()
                             
-                            total_req_stm = text("SELECT SUM(cantidad_solicitada), SUM(cantidad_generada) FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id")
-                            tot_req, tot_gen = session.execute(total_req_stm, {"orden_id": orden.orden_id}).fetchone()
-                            
-                            if pending_grupos == 0 or (tot_gen and tot_req and tot_gen >= tot_req):
-                                orden_status_id = get_or_create_status("orden_generacion", "COMPLETADO")
-                                orden.estado_id = orden_status_id
+                            if pending_sols == 0 or (grupo.cantidad_generada or 0) >= grupo.cantidad_solicitada:
+                                grupo_status_id = get_or_create_status("grupo_referencia", "COMPLETADO")
+                                grupo.estado_id = grupo_status_id
                                 session.flush()
-                
-                session.commit()
+
+                            orden = session.get(OrdenGeneracion, grupo.orden_id)
+                            if orden:
+                                all_grupo_stm = text("""
+                                    SELECT COUNT(*) FROM sar_produccion.grupo_referencia gr
+                                    JOIN sar_catalogo.estado_sistema es ON gr.estado_id = es.estado_id
+                                    WHERE gr.orden_id = :orden_id AND es.codigo != 'COMPLETADO'
+                                """)
+                                pending_grupos = session.execute(all_grupo_stm, {"orden_id": orden.orden_id}).scalar()
+                                
+                                total_req_stm = text("SELECT SUM(cantidad_solicitada), SUM(cantidad_generada) FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id")
+                                tot_req, tot_gen = session.execute(total_req_stm, {"orden_id": orden.orden_id}).fetchone()
+                                
+                                if pending_grupos == 0 or (tot_gen and tot_req and tot_gen >= tot_req):
+                                    orden_status_id = get_or_create_status("orden_generacion", "COMPLETADO")
+                                    orden.estado_id = orden_status_id
+                                    session.flush()
+                    
+                    session.commit()
         except Exception as e:
             self.status_changed.emit(f"Error al finalizar la solicitud en la base de datos: {str(e)}")
 
     def _log_event_db(self, event_code: str, message: str, detalle: Optional[dict] = None):
         try:
-            with self.db_connector.get_session() as session:
-                repo = AuditRepository(session)
-                repo.log_evento(
-                    evento_codigo=event_code,
-                    modulo="BOT_FACE_A",
-                    usuario_id=1,  # Default system/operator ID
-                    sesion_id=None,
-                    detalle=detalle
-                )
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "evento_codigo": event_code,
+                    "modulo": "BOT_FACE_A",
+                    "usuario_id": self.ctx.get("usuario_id") or 1,
+                    "sesion_id": None,
+                    "detalle": detalle
+                }
+                self.api_client.request("POST", "/api/docs/audit/evento", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = AuditRepository(session)
+                    repo.log_evento(
+                        evento_codigo=event_code,
+                        modulo="BOT_FACE_A",
+                        usuario_id=1,
+                        sesion_id=None,
+                        detalle=detalle
+                    )
+                    session.commit()
         except:
             pass
 
     def _log_error_db(self, message: str, traceback_str: str):
         try:
-            with self.db_connector.get_session() as session:
-                repo = AuditRepository(session)
-                repo.log_error(
-                    usuario_id=1,
-                    sesion_id=None,
-                    modulo="BOT_FACE_A",
-                    mensaje=message,
-                    stack_trace=traceback_str
-                )
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.ctx.get("usuario_id") or 1,
+                    "sesion_id": None,
+                    "modulo": "BOT_FACE_A",
+                    "mensaje": message,
+                    "stack_trace": traceback_str
+                }
+                self.api_client.request("POST", "/api/docs/audit/error", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = AuditRepository(session)
+                    repo.log_error(
+                        usuario_id=1,
+                        sesion_id=None,
+                        modulo="BOT_FACE_A",
+                        mensaje=message,
+                        stack_trace=traceback_str
+                    )
+                    session.commit()
         except Exception as ex:
             self.status_changed.emit(f"Error escribiendo logs de error en BD: {str(ex)}")
 

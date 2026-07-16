@@ -128,3 +128,41 @@ def check_module_access(usuario_id: int, module_code: str, db: Session = Depends
     security_service = SecurityService(db)
     has_access = security_service.has_app_module_access(usuario_id, module_code)
     return {"has_access": bool(has_access)}
+
+@router.get("/users")
+def get_all_users(db: Session = Depends(get_db)):
+    """Retorna la lista de usuarios activos para asignación."""
+    from sar.src.storage.repositories import UsuarioRepository
+    try:
+        repo = UsuarioRepository(db)
+        users = repo.get_all_usuarios()
+        return [{"usuario_id": u.usuario_id, "nombre": u.nombre, "username": u.username} for u in users]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al obtener usuarios: {str(e)}"
+        )
+
+@router.get("/permissions/{usuario_id}")
+def get_user_permissions(usuario_id: int, db: Session = Depends(get_db)):
+    """Retorna la matriz de permisos para todos los módulos clave del usuario."""
+    from sar.src.services.security_service import SecurityService
+    try:
+        sec_service = SecurityService(db)
+        modules = ["DASHBOARD", "ORDENES", "SOLICITUDES", "REFERENCIAS", "SEGURIDAD"]
+        perms = {}
+        for mod in modules:
+            perms[mod] = {
+                "LEER": bool(sec_service.has_permission(usuario_id, mod, "LEER")),
+                "CREAR": bool(sec_service.has_permission(usuario_id, mod, "CREAR")),
+                "EDITAR": bool(sec_service.has_permission(usuario_id, mod, "EDITAR")),
+                "ELIMINAR": bool(sec_service.has_permission(usuario_id, mod, "ELIMINAR")),
+                "ASIGNAR": bool(sec_service.has_permission(usuario_id, mod, "ASIGNAR")),
+                "EJECUTAR": bool(sec_service.has_permission(usuario_id, mod, "EJECUTAR")),
+            }
+        return perms
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al obtener permisos: {str(e)}"
+        )

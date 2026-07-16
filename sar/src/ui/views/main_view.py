@@ -1,14 +1,8 @@
 """Main shell coordinator view."""
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QStackedWidget
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 from sar.src.ui.design_system.components import NavigationSidebar, CustomLabel
-from sar.src.ui.views.dashboard_view import DashboardView
-from sar.src.ui.views.orders_view import OrdersView
-from sar.src.ui.views.requests_view import RequestsView
-from sar.src.ui.views.referencias_view import ReferenciasView
-from sar.src.ui.views.inventory_view import InventoryView
-from sar.src.ui.views.admin_view import AdminWindow
 
 class MainView(QWidget):
     """Main Application Window layout binding Sidebar navigation and stack views."""
@@ -22,6 +16,8 @@ class MainView(QWidget):
         self.db_connector = db_connector
         self.is_dark_theme = True
         self.admin_window = None
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -36,20 +32,17 @@ class MainView(QWidget):
         self.stacked_widget = QStackedWidget(self)
         self.layout.addWidget(self.stacked_widget)
         
-        # Setup child views
-        self.dashboard_view = DashboardView(self.db_connector, self)
-        self.stacked_widget.addWidget(self.dashboard_view)
+        # Setup child views lazily
+        self.dashboard_view = None
+        self.orders_view = None
+        self.requests_view = None
+        self.refs_view = None
+        self.inventory_view = None
         
-        # Placeholder views for other sections
-        self.orders_view = OrdersView(self.db_connector, self)
-        self.requests_view = RequestsView(self.db_connector, self)
-        self.refs_view = ReferenciasView(self.db_connector, self)
-        self.inventory_view = InventoryView(self.db_connector, self)
-        
-        self.stacked_widget.addWidget(self.orders_view)
-        self.stacked_widget.addWidget(self.requests_view)
-        self.stacked_widget.addWidget(self.refs_view)
-        self.stacked_widget.addWidget(self.inventory_view)
+        from PySide6.QtWidgets import QLabel
+        self.placeholder_lbl = QLabel("Cargando...", self)
+        self.placeholder_lbl.setAlignment(Qt.AlignCenter)
+        self.stacked_widget.addWidget(self.placeholder_lbl)
         
         # Connect sidebar navigation selection
         self.sidebar.nav_selected.connect(self._on_navigation)
@@ -71,31 +64,47 @@ class MainView(QWidget):
             if not usuario_id:
                 return
 
-            with self.db_connector.get_session() as session:
-                from sar.src.services.security_service import SecurityService
-                sec_service = SecurityService(session)
+            if self.api_client.connect_via_api:
+                perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                has_dashboard = perms.get("DASHBOARD", {}).get("LEER", False)
+                has_ordenes = perms.get("ORDENES", {}).get("LEER", False)
+                has_solicitudes = perms.get("SOLICITUDES", {}).get("LEER", False)
+                has_referencias = perms.get("REFERENCIAS", {}).get("LEER", False)
+                has_seguridad = perms.get("SEGURIDAD", {}).get("LEER", False)
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.services.security_service import SecurityService
+                    sec_service = SecurityService(session)
+                    has_dashboard = sec_service.has_permission(usuario_id, "DASHBOARD", "LEER")
+                    has_ordenes = sec_service.has_permission(usuario_id, "ORDENES", "LEER")
+                    has_solicitudes = sec_service.has_permission(usuario_id, "SOLICITUDES", "LEER")
+                    has_referencias = sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
+                    has_seguridad = sec_service.has_permission(usuario_id, "SEGURIDAD", "LEER")
                 
-                # Check each module LEER permission
-                has_dashboard = sec_service.has_permission(usuario_id, "DASHBOARD", "LEER")
-                has_ordenes = sec_service.has_permission(usuario_id, "ORDENES", "LEER")
-                has_solicitudes = sec_service.has_permission(usuario_id, "SOLICITUDES", "LEER")
-                has_referencias = sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
-                has_seguridad = sec_service.has_permission(usuario_id, "SEGURIDAD", "LEER")
-                
-                if has_dashboard:
-                    self.sidebar.show_item("dashboard")
-                if has_ordenes:
-                    self.sidebar.show_item("ordenes")
-                    self.sidebar.show_item("ordenes_capturadas")
-                    self.sidebar.show_item("capturar_orden")
-                    self.sidebar.submenu_container.show()
-                if has_solicitudes:
-                    self.sidebar.show_item("solicitudes")
-                if has_referencias:
-                    self.sidebar.show_item("referencias")
-                    self.sidebar.show_item("inventario")
-                if has_seguridad:
-                    self.sidebar.show_item("configuracion")
+            default_item = None
+
+            if has_dashboard:
+                self.sidebar.show_item("dashboard")
+                if not default_item: default_item = "dashboard"
+            if has_ordenes:
+                self.sidebar.show_item("ordenes")
+                self.sidebar.show_item("ordenes_capturadas")
+                self.sidebar.show_item("capturar_orden")
+                self.sidebar.submenu_container.show()
+                if not default_item: default_item = "ordenes"
+            if has_solicitudes:
+                self.sidebar.show_item("solicitudes")
+                if not default_item: default_item = "solicitudes"
+            if has_referencias:
+                self.sidebar.show_item("referencias")
+                self.sidebar.show_item("inventario")
+                if not default_item: default_item = "referencias"
+            if has_seguridad:
+                self.sidebar.show_item("configuracion")
+                if not default_item: default_item = "configuracion"
+
+            if default_item:
+                self.sidebar.select_item(default_item)
         except Exception as e:
             print(f"Error applying permissions in MainView: {e}")
 
@@ -117,23 +126,29 @@ class MainView(QWidget):
             if not usuario_id:
                 return
 
-            with self.db_connector.get_session() as session:
-                from sar.src.services.security_service import SecurityService
-                sec_service = SecurityService(session)
+            mod_mapping = {
+                "dashboard": "DASHBOARD",
+                "ordenes": "ORDENES",
+                "ordenes_capturadas": "ORDENES",
+                "capturar_orden": "ORDENES",
+                "solicitudes": "SOLICITUDES",
+                "referencias": "REFERENCIAS",
+                "inventario": "REFERENCIAS",
+                "configuracion": "SEGURIDAD"
+            }
+            
+            req_mod = mod_mapping.get(view_key)
+            if req_mod:
+                if self.api_client.connect_via_api:
+                    perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                    has_permission = perms.get(req_mod, {}).get("LEER", False)
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.services.security_service import SecurityService
+                        sec_service = SecurityService(session)
+                        has_permission = sec_service.has_permission(usuario_id, req_mod, "LEER")
                 
-                mod_mapping = {
-                    "dashboard": "DASHBOARD",
-                    "ordenes": "ORDENES",
-                    "ordenes_capturadas": "ORDENES",
-                    "capturar_orden": "ORDENES",
-                    "solicitudes": "SOLICITUDES",
-                    "referencias": "REFERENCIAS",
-                    "inventario": "REFERENCIAS",
-                    "configuracion": "SEGURIDAD"
-                }
-                
-                req_mod = mod_mapping.get(view_key)
-                if req_mod and not sec_service.has_permission(usuario_id, req_mod, "LEER"):
+                if not has_permission:
                     from PySide6.QtWidgets import QMessageBox
                     QMessageBox.warning(self, "Acceso Denegado", f"No tiene permisos para acceder al módulo {req_mod}.")
                     return
@@ -142,9 +157,17 @@ class MainView(QWidget):
             return
 
         if view_key == "dashboard":
+            if not self.dashboard_view:
+                from sar.src.ui.views.dashboard_view import DashboardView
+                self.dashboard_view = DashboardView(self.db_connector, self)
+                self.stacked_widget.addWidget(self.dashboard_view)
             self.stacked_widget.setCurrentWidget(self.dashboard_view)
             self.dashboard_view.refresh_data()
         elif view_key in ["ordenes", "ordenes_capturadas", "capturar_orden"]:
+            if not self.orders_view:
+                from sar.src.ui.views.orders_view import OrdersView
+                self.orders_view = OrdersView(self.db_connector, self)
+                self.stacked_widget.addWidget(self.orders_view)
             self.stacked_widget.setCurrentWidget(self.orders_view)
             self.orders_view.refresh_historial()
             if view_key == "ordenes_capturadas":
@@ -152,16 +175,29 @@ class MainView(QWidget):
             elif view_key == "capturar_orden":
                 self.orders_view.tabs.setCurrentIndex(0)
         elif view_key == "solicitudes":
+            if not self.requests_view:
+                from sar.src.ui.views.requests_view import RequestsView
+                self.requests_view = RequestsView(self.db_connector, self)
+                self.stacked_widget.addWidget(self.requests_view)
             self.stacked_widget.setCurrentWidget(self.requests_view)
             self.requests_view.refresh_data()
         elif view_key == "referencias":
+            if not self.refs_view:
+                from sar.src.ui.views.referencias_view import ReferenciasView
+                self.refs_view = ReferenciasView(self.db_connector, self)
+                self.stacked_widget.addWidget(self.refs_view)
             self.stacked_widget.setCurrentWidget(self.refs_view)
             self.refs_view.refresh_data()
         elif view_key == "inventario":
+            if not self.inventory_view:
+                from sar.src.ui.views.inventory_view import InventoryView
+                self.inventory_view = InventoryView(self.db_connector, self)
+                self.stacked_widget.addWidget(self.inventory_view)
             self.stacked_widget.setCurrentWidget(self.inventory_view)
             self.inventory_view.refresh_all()
         elif view_key == "configuracion":
             if not self.admin_window:
+                from sar.src.ui.views.admin_view import AdminWindow
                 parent_window = self.window()
                 uid = getattr(parent_window, 'current_usuario_id', None)
                 sid = getattr(parent_window, 'current_sesion_id', None)
@@ -187,11 +223,18 @@ class MainView(QWidget):
         self.sidebar.hide_item("configuracion")
 
     def _get_username_string(self) -> str:
-        """Helper to fetch the current user's username from the physical database."""
+        """Helper to fetch the current user's username."""
         try:
+            parent_window = self.window()
+            username = getattr(parent_window, 'current_username', None)
+            if username:
+                return username
+                
+            if self.api_client.connect_via_api:
+                return "Usuario API"
+
             with self.db_connector.get_session() as session:
                 from sar.src.storage.models import Sesion, Usuario
-                parent_window = self.window()
                 sesion_id = getattr(parent_window, 'current_sesion_id', None)
                 if sesion_id:
                     db_sesion = session.get(Sesion, sesion_id)

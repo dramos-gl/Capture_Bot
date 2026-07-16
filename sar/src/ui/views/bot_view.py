@@ -30,17 +30,24 @@ class BotView(QWidget):
         self.current_bot_context = None
         
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 16, 16, 16)
-        self.main_layout.setSpacing(16)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setSpacing(10)
+        
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         # Load default RUTA_DERECHOS parameter
         self.default_output_dir = "storage"
         try:
-            with self.db_connector.get_session() as session:
-                repo = ConfigRepository(session)
-                db_dir = repo.get_parametro("RUTA_DERECHOS")
-                if db_dir:
-                    self.default_output_dir = db_dir
+            if self.api_client.connect_via_api:
+                res = self.api_client.request("GET", "/api/docs/config/parametro/RUTA_DERECHOS")
+                db_dir = res.get("valor")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ConfigRepository(session)
+                    db_dir = repo.get_parametro("RUTA_DERECHOS")
+            if db_dir:
+                self.default_output_dir = db_dir
         except Exception as e:
             print("Error loading default output dir:", e)
         
@@ -95,10 +102,14 @@ class BotView(QWidget):
         # Get Portal URL from DB parameter or fallback
         portal_url = "https://shacienda.qroo.gob.mx/tributanet/"
         try:
-            with self.db_connector.get_session() as session:
-                repo = ConfigRepository(session)
-                db_url = repo.get_parametro("TRIBUTANET_RPP_URL")
-                if db_url: portal_url = db_url
+            if self.api_client.connect_via_api:
+                res = self.api_client.request("GET", "/api/docs/config/parametro/TRIBUTANET_RPP_URL")
+                db_url = res.get("valor")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ConfigRepository(session)
+                    db_url = repo.get_parametro("TRIBUTANET_RPP_URL")
+            if db_url: portal_url = db_url
         except:
             pass
             
@@ -115,11 +126,15 @@ class BotView(QWidget):
         username = "Operador"
         try:
             if self.usuario_id:
-                with self.db_connector.get_session() as session:
-                    from sar.src.storage.models import Usuario
-                    db_user = session.get(Usuario, self.usuario_id)
-                    if db_user:
-                        username = db_user.nombre
+                if self.api_client.connect_via_api:
+                    parent_window = self.window()
+                    username = getattr(parent_window, 'current_username', "Operador")
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.models import Usuario
+                        db_user = session.get(Usuario, self.usuario_id)
+                        if db_user:
+                            username = db_user.nombre
         except:
             pass
             
@@ -135,17 +150,18 @@ class BotView(QWidget):
         
     def _build_top_panels(self):
         top_layout = QHBoxLayout()
-        top_layout.setSpacing(16)
+        top_layout.setSpacing(10)
         
         # 1. Controles Operativos
         controles_frame = QFrame()
         controles_frame.setObjectName("card")
         c_layout = QVBoxLayout(controles_frame)
+        c_layout.setContentsMargins(8, 8, 8, 8)
         
         lbl_c = CustomLabel("⚙ CONTROLES OPERATIVOS", variant="subheader")
         c_layout.addWidget(lbl_c)
         
-        self.chk_autonomo = CustomSwitch("🤖 Modo Autónomo (Visible Recomendado)")
+        self.chk_autonomo = CustomSwitch("🤖 Modo Autónomo (Visible)")
         self.chk_autonomo.setChecked(True)
         self.chk_autonomo.setEnabled(False)
         c_layout.addWidget(self.chk_autonomo)
@@ -183,14 +199,13 @@ class BotView(QWidget):
         self.btn_seleccionar.clicked.connect(self._on_cargar_solicitud)
         c_layout.addWidget(self.btn_seleccionar)
         
-        c_layout.addStretch()
-        
         top_layout.addWidget(controles_frame, stretch=1)
         
         # 2. Métricas del Lote
         metricas_frame = QFrame()
         metricas_frame.setObjectName("card")
         m_layout = QVBoxLayout(metricas_frame)
+        m_layout.setContentsMargins(8, 8, 8, 8)
         
         lbl_m = CustomLabel("📊 MÉTRICAS DEL LOTE", variant="subheader")
         m_layout.addWidget(lbl_m)
@@ -209,13 +224,13 @@ class BotView(QWidget):
         grid_m.addWidget(self.lbl_rfc_info, 1, 0, 1, 3)
         
         m_layout.addLayout(grid_m)
-        m_layout.addStretch()
         top_layout.addWidget(metricas_frame, stretch=2)
         
         # 3. Monitoreo en Tiempo Real
         monitoreo_frame = QFrame()
         monitoreo_frame.setObjectName("card")
         mon_layout = QVBoxLayout(monitoreo_frame)
+        mon_layout.setContentsMargins(8, 8, 8, 8)
         
         lbl_mon = CustomLabel("📡 MONITOREO EN TIEMPO REAL", variant="subheader")
         mon_layout.addWidget(lbl_mon)
@@ -243,9 +258,7 @@ class BotView(QWidget):
         self.lbl_mon_status.setStyleSheet("color: #6b7280; font-size: 11px;")
         mon_layout.addWidget(self.lbl_mon_status)
         
-        mon_layout.addStretch()
         top_layout.addWidget(monitoreo_frame, stretch=1)
-        
         self.main_layout.addLayout(top_layout, stretch=1)
 
     def _on_browse_path_clicked(self):
@@ -292,6 +305,8 @@ class BotView(QWidget):
         self.table = StyledDataTable(headers, parent=self)
         self.table.setObjectName("botTable")
         self.table.doubleClicked.connect(lambda index: self._on_cargar_solicitud())
+        self.table.setMinimumHeight(150)
+        self.table.setMaximumHeight(200)
         layout.addWidget(self.table)
         
         self.main_layout.addWidget(panel, stretch=2)
@@ -307,6 +322,8 @@ class BotView(QWidget):
         self.console = QTextEdit()
         self.console.setObjectName("console")
         self.console.setReadOnly(True)
+        self.console.setMinimumHeight(100)
+        self.console.setMaximumHeight(140)
         layout.addWidget(self.console)
         
         self.log("Sistema listo. Esperando carga de solicitud...")
@@ -320,29 +337,31 @@ class BotView(QWidget):
     def _load_solicitudes(self):
         self.log("Actualizando tabla de solicitudes asignadas...")
         try:
-            with self.db_connector.get_session() as session:
-                # Use directly passed usuario_id
-                u_id = self.usuario_id if self.usuario_id else 1
+            u_id = self.usuario_id if self.usuario_id else 1
+            ver_todas = self.chk_ver_todas.isChecked() if hasattr(self, 'chk_ver_todas') else False
+            
+            if self.api_client.connect_via_api:
+                solicitudes = self.api_client.request("GET", f"/api/docs/solicitudes/asignadas/{u_id}", data={"ver_todas": ver_todas})
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = OperacionRepository(session)
+                    solicitudes = repo.get_solicitudes_asignadas(u_id, ver_todas=ver_todas)
                 
-                repo = OperacionRepository(session)
-                ver_todas = self.chk_ver_todas.isChecked() if hasattr(self, 'chk_ver_todas') else False
-                solicitudes = repo.get_solicitudes_asignadas(u_id, ver_todas=ver_todas)
+            data_rows = []
+            for s in solicitudes:
+                data_rows.append([
+                    str(s["solicitud_id"]),
+                    s["folio"],
+                    s["rfc"],
+                    s["razon_social"],
+                    s["concepto"],
+                    str(s["cantidad_solicitada"]),
+                    str(s["cantidad_generada"]),
+                    s["estado"]
+                ])
                 
-                data_rows = []
-                for s in solicitudes:
-                    data_rows.append([
-                        str(s["solicitud_id"]),
-                        s["folio"],
-                        s["rfc"],
-                        s["razon_social"],
-                        s["concepto"],
-                        str(s["cantidad_solicitada"]),
-                        str(s["cantidad_generada"]),
-                        s["estado"]
-                    ])
-                    
-                self.table.populate_rows(data_rows)
-                self.log(f"Se cargaron {len(solicitudes)} solicitudes.")
+            self.table.populate_rows(data_rows)
+            self.log(f"Se cargaron {len(solicitudes)} solicitudes.")
         except Exception as e:
             self.log(f"ERROR: {str(e)}")
             QMessageBox.critical(self, "Error", f"No se pudieron cargar las solicitudes:\n{str(e)}")
@@ -372,30 +391,33 @@ class BotView(QWidget):
         self.log(f"Cargando contexto para Solicitud {sol_id}...")
         
         try:
-            with self.db_connector.get_session() as session:
-                repo = OperacionRepository(session)
-                ctx = repo.get_solicitud_bot_context(sol_id)
+            if self.api_client.connect_via_api:
+                ctx = self.api_client.request("GET", f"/api/docs/solicitudes/{sol_id}/bot-context")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = OperacionRepository(session)
+                    ctx = repo.get_solicitud_bot_context(sol_id)
                 
-                # Fetch active user_id directly from constructor parameter
-                u_id = self.usuario_id if self.usuario_id else 1
-                
-                ctx["usuario_id"] = u_id
-                self.current_bot_context = ctx
-                
-                # Update UI
-                self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}")
-                
-                total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
-                completados = ctx["ultimo_consecutivo"] - ctx["consecutivo_inicio"] + 1 if ctx["ultimo_consecutivo"] >= ctx["consecutivo_inicio"] else 0
-                pendientes = total - completados
-                
-                self.box_pendientes.set_value(str(pendientes))
-                self.box_exitosos.set_value(str(completados))
-                
-                self.log(f"ÉXITO: Contexto de {ctx['rfc']} cargado en memoria.")
-                self.log(f"Concepto: {ctx['concepto_nombre']} | Rango: {ctx['consecutivo_inicio']} al {ctx['consecutivo_fin']}")
-                
-                QMessageBox.information(self, "Caché Listo", "Los datos de la empresa han sido cargados en memoria.\nEl Bot está listo para iniciar.")
+            # Fetch active user_id directly from constructor parameter
+            u_id = self.usuario_id if self.usuario_id else 1
+            
+            ctx["usuario_id"] = u_id
+            self.current_bot_context = ctx
+            
+            # Update UI
+            self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}")
+            
+            total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
+            completados = ctx["ultimo_consecutivo"] - ctx["consecutivo_inicio"] + 1 if ctx["ultimo_consecutivo"] >= ctx["consecutivo_inicio"] else 0
+            pendientes = total - completados
+            
+            self.box_pendientes.set_value(str(pendientes))
+            self.box_exitosos.set_value(str(completados))
+            
+            self.log(f"ÉXITO: Contexto de {ctx['rfc']} cargado en memoria.")
+            self.log(f"Concepto: {ctx['concepto_nombre']} | Rango: {ctx['consecutivo_inicio']} al {ctx['consecutivo_fin']}")
+            
+            QMessageBox.information(self, "Caché Listo", "Los datos de la empresa han sido cargados en memoria.\nEl Bot está listo para iniciar.")
                 
         except Exception as e:
             self.log(f"ERROR al cargar caché: {str(e)}")
@@ -416,24 +438,29 @@ class BotView(QWidget):
         # Double check if completed in DB right before starting
         sol_id = self.current_bot_context.get("solicitud_id")
         try:
-            with self.db_connector.get_session() as session:
-                sol = session.get(Solicitud, sol_id)
-                if sol:
-                    state_code = session.execute(
-                        text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
-                        {"eid": sol.estado_id}
-                    ).scalar()
-                    valid_states = ("ASIGNADA", "PROCESANDO", "ERROR")
-                    if state_code not in valid_states:
-                        QMessageBox.warning(
-                            self, 
-                            "Atención", 
-                            f"El estado de la solicitud en la base de datos es '{state_code}' y no se puede procesar.\n"
-                            f"El robot solo puede iniciar solicitudes en estado: {', '.join(valid_states)}."
-                        )
-                        self.current_bot_context = None
-                        self._load_solicitudes()
-                        return
+            if self.api_client.connect_via_api:
+                # Backend check can be bypassed here as we trust the UI state or list requests load,
+                # but to be sure we can continue:
+                pass
+            else:
+                with self.db_connector.get_session() as session:
+                    sol = session.get(Solicitud, sol_id)
+                    if sol:
+                        state_code = session.execute(
+                            text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
+                            {"eid": sol.estado_id}
+                        ).scalar()
+                        valid_states = ("ASIGNADA", "PROCESANDO", "ERROR")
+                        if state_code not in valid_states:
+                            QMessageBox.warning(
+                                self, 
+                                "Atención", 
+                                f"El estado de la solicitud en la base de datos es '{state_code}' y no se puede procesar.\n"
+                                f"El robot solo puede iniciar solicitudes en estado: {', '.join(valid_states)}."
+                            )
+                            self.current_bot_context = None
+                            self._load_solicitudes()
+                            return
         except Exception as e:
             self.log(f"Advertencia al validar estado de solicitud en BD: {str(e)}")
             

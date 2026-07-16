@@ -25,16 +25,30 @@ class DashboardReferencesLoadWorker(QThread):
         
     def run(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                res, total_count = repo.get_referencias_paginated(
-                    limit=self.limit,
-                    offset=self.offset,
-                    search_text=self.search_text,
-                    estado_filter="Todos",
-                    orden_ids=self.orden_ids
-                )
-                self.result_ready.emit(res, total_count)
+            from sar.src.storage.api_client import APIClient
+            api_client = APIClient()
+            if api_client.connect_via_api:
+                orden_ids_str = ",".join([str(x) for x in self.orden_ids]) if self.orden_ids else None
+                payload = {
+                    "limit": self.limit,
+                    "offset": self.offset,
+                    "search_text": self.search_text,
+                    "estado_filter": "Todos",
+                    "orden_ids": orden_ids_str
+                }
+                res = api_client.request("GET", "/api/docs/referencias", data=payload)
+                self.result_ready.emit(res["records"], res["total_count"])
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    res, total_count = repo.get_referencias_paginated(
+                        limit=self.limit,
+                        offset=self.offset,
+                        search_text=self.search_text,
+                        estado_filter="Todos",
+                        orden_ids=self.orden_ids
+                    )
+                    self.result_ready.emit(res, total_count)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -46,6 +60,8 @@ class DashboardView(QWidget):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(24, 24, 24, 24)
@@ -236,14 +252,18 @@ class DashboardView(QWidget):
         self._load_available_orders(preserve_selection=True)
         
         try:
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                kpis = repo.get_dashboard_kpis(self.selected_orden_ids)
+            if self.api_client.connect_via_api:
+                orden_ids_str = ",".join([str(x) for x in self.selected_orden_ids]) if self.selected_orden_ids else ""
+                kpis = self.api_client.request("GET", "/api/ops/dashboard-kpis", data={"orden_ids": orden_ids_str})
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    kpis = repo.get_dashboard_kpis(self.selected_orden_ids)
                 
-                self.card_generadas.set_value(str(kpis.get("total_generadas", 0)))
-                self.card_pendientes.set_value(str(kpis.get("pendientes", 0)))
-                self.card_autorizadas.set_value(str(kpis.get("autorizadas", 0)))
-                self.card_error.set_value(str(kpis.get("con_error", 0)))
+            self.card_generadas.set_value(str(kpis.get("total_generadas", 0)))
+            self.card_pendientes.set_value(str(kpis.get("pendientes", 0)))
+            self.card_autorizadas.set_value(str(kpis.get("autorizadas", 0)))
+            self.card_error.set_value(str(kpis.get("con_error", 0)))
         except Exception as e:
             print("Error refreshing dashboard KPIs:", e)
             
@@ -253,7 +273,11 @@ class DashboardView(QWidget):
         """Starts background thread to fetch dashboard references."""
         # Cancel active thread if running
         if self.active_worker and self.active_worker.isRunning():
-            self.active_worker.disconnect()
+            try:
+                self.active_worker.result_ready.disconnect()
+                self.active_worker.error_occurred.disconnect()
+            except RuntimeError:
+                pass
             self.active_worker.terminate()
             self.active_worker.wait()
 
@@ -381,9 +405,12 @@ class DashboardView(QWidget):
 
     def _load_available_orders(self, preserve_selection=False):
         try:
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                self.todas_las_ordenes = repo.get_ordenes()
+            if self.api_client.connect_via_api:
+                self.todas_las_ordenes = self.api_client.request("GET", "/api/ops/ordenes")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    self.todas_las_ordenes = repo.get_ordenes()
                 
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}

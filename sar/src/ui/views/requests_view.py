@@ -74,6 +74,8 @@ class RequestsView(QWidget):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(24, 24, 24, 24)
@@ -190,12 +192,16 @@ class RequestsView(QWidget):
             sol_id = int(item.text())
             
             try:
-                with self.db_connector.get_session() as session:
-                    from sar.src.storage.models import Solicitud
-                    sol = session.get(Solicitud, sol_id)
-                    if not sol or not sol.grupo:
-                        return
-                    orden_id = sol.grupo.orden_id
+                if self.api_client.connect_via_api:
+                    data = self.api_client.request("GET", f"/api/docs/solicitudes/{sol_id}/orden-id")
+                    orden_id = data["orden_id"]
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.models import Solicitud
+                        sol = session.get(Solicitud, sol_id)
+                        if not sol or not sol.grupo:
+                            return
+                        orden_id = sol.grupo.orden_id
                     
                 from sar.src.ui.views.order_processing_dialog import OrderProcessingDialog
                 dialog = OrderProcessingDialog(self.db_connector, orden_id, self)
@@ -208,18 +214,23 @@ class RequestsView(QWidget):
         """Helper to get the default directory configured in parametro_sistema, pointing to 'boletas'."""
         import os
         try:
-            from sar.src.storage.repositories import ConfigRepository
-            with self.db_connector.get_session() as session:
-                config_repo = ConfigRepository(session)
-                base_path = config_repo.get_parametro("RUTA_DERECHOS")
-                if base_path:
-                    # Look for boletas/BOLETAS subfolder
-                    for sub in ["boletas", "BOLETAS"]:
-                        sub_path = os.path.join(base_path, sub)
-                        if os.path.exists(sub_path):
-                            return os.path.abspath(sub_path)
-                    if os.path.exists(base_path):
-                        return os.path.abspath(base_path)
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/docs/config/ruta-derechos")
+                base_path = data.get("ruta_derechos")
+            else:
+                from sar.src.storage.repositories import ConfigRepository
+                with self.db_connector.get_session() as session:
+                    config_repo = ConfigRepository(session)
+                    base_path = config_repo.get_parametro("RUTA_DERECHOS")
+            
+            if base_path:
+                # Look for boletas/BOLETAS subfolder
+                for sub in ["boletas", "BOLETAS"]:
+                    sub_path = os.path.join(base_path, sub)
+                    if os.path.exists(sub_path):
+                        return os.path.abspath(sub_path)
+                if os.path.exists(base_path):
+                    return os.path.abspath(base_path)
         except Exception:
             pass
         return ""
@@ -371,19 +382,27 @@ class RequestsView(QWidget):
         if sol_id == -1: return
         
         try:
-            with self.db_connector.get_session() as session:
-                from sar.src.storage.repositories import UsuarioRepository
-                u_repo = UsuarioRepository(session)
-                usuarios = u_repo.get_all_usuarios()
-                
-                if not usuarios:
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/auth/users")
+                if not data:
                     QMessageBox.warning(self, "Sin Usuarios", "No hay usuarios disponibles.")
                     return
+                items = [f"{u['usuario_id']} - {u['nombre']} ({u['username']})" for u in data]
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.storage.repositories import UsuarioRepository
+                    u_repo = UsuarioRepository(session)
+                    usuarios = u_repo.get_all_usuarios()
                     
-                items = [f"{u.usuario_id} - {u.nombre} ({u.username})" for u in usuarios]
-                from PySide6.QtWidgets import QInputDialog
-                item, ok = QInputDialog.getItem(self, "Asignar Solicitud", "Selecciona el usuario:", items, 0, False)
-                
+                    if not usuarios:
+                        QMessageBox.warning(self, "Sin Usuarios", "No hay usuarios disponibles.")
+                        return
+                        
+                    items = [f"{u.usuario_id} - {u.nombre} ({u.username})" for u in usuarios]
+                    
+            from PySide6.QtWidgets import QInputDialog
+            item, ok = QInputDialog.getItem(self, "Asignar Solicitud", "Selecciona el usuario:", items, 0, False)
+                 
             if ok and item:
                 u_id = int(item.split(" - ")[0])
                 u_nombre = item.split(" - ")[1]
@@ -396,9 +415,12 @@ class RequestsView(QWidget):
                     QMessageBox.Yes | QMessageBox.No
                 )
                 if confirm == QMessageBox.Yes:
-                    with self.db_connector.get_session() as session:
-                        repo = OperacionRepository(session)
-                        repo.asignar_solicitud(sol_id, u_id)
+                    if self.api_client.connect_via_api:
+                        self.api_client.request("POST", f"/api/docs/solicitudes/{sol_id}/asignar", data={"usuario_id": u_id})
+                    else:
+                        with self.db_connector.get_session() as session:
+                            repo = OperacionRepository(session)
+                            repo.asignar_solicitud(sol_id, u_id)
                     QMessageBox.information(self, "Éxito", "Solicitud asignada correctamente.")
                     self.refresh_data()
         except Exception as e:
@@ -431,9 +453,12 @@ class RequestsView(QWidget):
             )
             if confirm == QMessageBox.Yes:
                 try:
-                    with self.db_connector.get_session() as session:
-                        repo = OperacionRepository(session)
-                        repo.editar_cantidad_solicitud(sol_id, qty)
+                    if self.api_client.connect_via_api:
+                        self.api_client.request("PUT", f"/api/docs/solicitudes/{sol_id}/cantidad", data={"nueva_cantidad": qty})
+                    else:
+                        with self.db_connector.get_session() as session:
+                            repo = OperacionRepository(session)
+                            repo.editar_cantidad_solicitud(sol_id, qty)
                     QMessageBox.information(self, "Éxito", "Cantidad actualizada correctamente.")
                     self.refresh_data()
                 except Exception as e:
@@ -447,40 +472,47 @@ class RequestsView(QWidget):
         
         if reply == QMessageBox.Yes:
             try:
-                with self.db_connector.get_session() as session:
-                    repo = OperacionRepository(session)
-                    repo.cancelar_solicitud(sol_id)
+                if self.api_client.connect_via_api:
+                    self.api_client.request("POST", f"/api/docs/solicitudes/{sol_id}/cancelar")
+                else:
+                    with self.db_connector.get_session() as session:
+                        repo = OperacionRepository(session)
+                        repo.cancelar_solicitud(sol_id)
                 QMessageBox.information(self, "Éxito", "Solicitud cancelada correctamente.")
                 self.refresh_data()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error al cancelar: {str(e)}")
         
     def refresh_data(self):
-        """Fetches the latest Solicitudes from the database."""
+        """Fetches the latest Solicitudes."""
         self._load_available_orders(preserve_selection=True)
         try:
-            with self.db_connector.get_session() as session:
-                repo = OperacionRepository(session)
-                orden_ids = getattr(self, 'selected_orden_ids', [])
-                solicitudes = repo.get_solicitudes(orden_ids=orden_ids)
+            orden_ids = getattr(self, 'selected_orden_ids', [])
+            if self.api_client.connect_via_api:
+                payload = {"orden_ids": ",".join([str(x) for x in orden_ids])} if orden_ids else {}
+                solicitudes = self.api_client.request("GET", "/api/docs/solicitudes", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = OperacionRepository(session)
+                    solicitudes = repo.get_solicitudes(orden_ids=orden_ids)
                 
-                data_rows = []
-                for s in solicitudes:
-                    data_rows.append([
-                        str(s["solicitud_id"]),
-                        str(s["grupo_id"]),
-                        s["folio"],
-                        s["rfc"],
-                        s["concepto"],
-                        s["delegacion"],
-                        str(s["cantidad_solicitada"]),
-                        str(s["cantidad_generada"]),
-                        s["estado"],
-                        s["usuario_asignado"]
-                    ])
-                    
-                self.table.populate_rows(data_rows)
-                self._apply_filters()
+            data_rows = []
+            for s in solicitudes:
+                data_rows.append([
+                    str(s["solicitud_id"]),
+                    str(s["grupo_id"]),
+                    s["folio"],
+                    s["rfc"],
+                    s["concepto"],
+                    s["delegacion"],
+                    str(s["cantidad_solicitada"]),
+                    str(s["cantidad_generada"]),
+                    s["estado"],
+                    s["usuario_asignado"]
+                ])
+                
+            self.table.populate_rows(data_rows)
+            self._apply_filters()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo cargar la bandeja de trabajo:\n{str(e)}")
 
@@ -526,10 +558,13 @@ class RequestsView(QWidget):
 
     def _load_available_orders(self, preserve_selection=False):
         try:
-            with self.db_connector.get_session() as session:
-                from sar.src.storage.repositories import ProduccionRepository
-                repo = ProduccionRepository(session)
-                self.todas_las_ordenes = repo.get_ordenes()
+            if self.api_client.connect_via_api:
+                self.todas_las_ordenes = self.api_client.request("GET", "/api/ops/ordenes")
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.storage.repositories import ProduccionRepository
+                    repo = ProduccionRepository(session)
+                    self.todas_las_ordenes = repo.get_ordenes()
                 
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}

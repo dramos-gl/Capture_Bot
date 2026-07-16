@@ -13,6 +13,9 @@ from PySide6.QtGui import QIcon
 from sar.src.ui.design_system.theme_manager import ThemeManager
 from sar.src.ui.views.login_view import LoginView
 from sar.src.ui.views.main_view import MainView
+from sar.src.ui.views.bot_view import BotView
+from sar.src.ui.views.billing_bot_view import BillingBotWindow
+from sar.src.ui.views.admin_view import AdminWindow
 from sar.src.storage.db_connector import DatabaseConnector
 from sar.src.services.security_service import SecurityService
 from sqlalchemy.exc import OperationalError
@@ -110,9 +113,6 @@ class MainWindow(QMainWindow):
             self.login_view.user_input.clear_error()
             self.login_view.pass_input.clear_error()
             
-            # Hide login window
-            self.hide()
-                    
             if selected_mod_code == "ADMIN":
                 from sar.src.ui.views.admin_view import AdminWindow
                 self.active_module = AdminWindow(
@@ -126,6 +126,7 @@ class MainWindow(QMainWindow):
                 self.active_module = QMainWindow()
                 self.active_module.current_sesion_id = self.current_sesion_id
                 self.active_module.current_usuario_id = self.current_usuario_id
+                self.active_module.current_username = getattr(self, 'current_username', None)
                 self.active_module.setWindowTitle("SAR - Control de Referencias")
                 self.active_module.resize(1100, 750)
                 
@@ -141,7 +142,7 @@ class MainWindow(QMainWindow):
                 self.active_module = QMainWindow()
                 self.active_module.current_sesion_id = self.current_sesion_id
                 self.active_module.setWindowTitle("SAR - Bot Face A (Automático)")
-                self.active_module.resize(1100, 750)
+                self.active_module.resize(1100, 660)
                 
                 bot_view_widget = BotView(self.db_connector, self.current_sesion_id, self.current_usuario_id, self.active_module)
                 self.active_module.setCentralWidget(bot_view_widget)
@@ -152,6 +153,7 @@ class MainWindow(QMainWindow):
                 from sar.src.ui.views.billing_bot_view import BillingBotWindow
                 self.active_module = BillingBotWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
                 self.active_module.current_sesion_id = self.current_sesion_id
+                self.active_module.resize(1100, 660)
                 
                 # Hook up logout for BillingBotWindow
                 self.active_module.logout_requested.connect(self._handle_logout)
@@ -167,8 +169,17 @@ class MainWindow(QMainWindow):
                 
             if selected_mod_code in ("BOT_FACE_A", "BOT_C"):
                 self.active_module.show()
+                # Center window on primary screen
+                screen_geometry = QApplication.primaryScreen().geometry()
+                window_geometry = self.active_module.frameGeometry()
+                x = (screen_geometry.width() - window_geometry.width()) // 2
+                y = (screen_geometry.height() - window_geometry.height()) // 2
+                self.active_module.move(x, y)
             else:
                 self.active_module.showMaximized()
+
+            # Hide login window ONLY after active module successfully initializes
+            self.hide()
         except OperationalError:
             self.login_view.set_login_error("Error: No se pudo conectar a la base de datos física.")
         except Exception as e:

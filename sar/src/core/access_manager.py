@@ -17,7 +17,7 @@ def check_write_access(path_str: str) -> tuple[bool, str]:
     Returns (has_access: bool, error_message: str)
     """
     try:
-        path = Path(path_str).resolve()
+        path = Path(path_str).absolute()
         
         # 1. Attempt to create directory if not exists
         if not path.exists():
@@ -62,6 +62,9 @@ class SyncContingencyThread(QThread):
         super().__init__(parent)
         self.db_connector = db_connector
         self.default_output_dir = default_output_dir
+        
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
 
     def run(self):
         self.progress_msg.emit("Iniciando sincronización de contingencia local...")
@@ -106,26 +109,24 @@ class SyncContingencyThread(QThread):
                     migrated_count += 1
                     
                     # 2. Update physical path in database
-                    # Database holds either:
-                    # - sar_archivo.archivo_pdf (boletas): where nombre_archivo = file
-                    # - sar_archivo.factura (facturas): where pdf_path contains file name
-                    with self.db_connector.get_session() as session:
-                        # Try update boleta path
-                        upd_pdf = text("""
-                            UPDATE sar_archivo.archivo_pdf
-                            SET ruta_archivo = :new_path
-                            WHERE nombre_archivo = :filename
-                        """)
-                        session.execute(upd_pdf, {"new_path": dest_filepath, "filename": file})
-                        
-                        # Try update factura path
-                        upd_fact = text("""
-                            UPDATE sar_archivo.factura
-                            SET pdf_path = :new_path
-                            WHERE pdf_path LIKE :pattern
-                        """)
-                        session.execute(upd_fact, {"new_path": dest_filepath, "pattern": f"%{file}"})
-                        session.commit()
+                    if self.api_client.connect_via_api:
+                        self.api_client.request("POST", "/api/docs/contingency/sync-paths", data={"filename": file, "new_path": dest_filepath})
+                    else:
+                        with self.db_connector.get_session() as session:
+                            upd_pdf = text("""
+                                UPDATE sar_archivo.archivo_pdf
+                                SET ruta_archivo = :new_path
+                                WHERE nombre_archivo = :filename
+                            """)
+                            session.execute(upd_pdf, {"new_path": dest_filepath, "filename": file})
+                            
+                            upd_fact = text("""
+                                UPDATE sar_archivo.factura
+                                SET pdf_path = :new_path
+                                WHERE pdf_path LIKE :pattern
+                            """)
+                            session.execute(upd_fact, {"new_path": dest_filepath, "pattern": f"%{file}"})
+                            session.commit()
             
             # Clean up empty subdirs in contingency
             try:

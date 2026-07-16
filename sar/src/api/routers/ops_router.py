@@ -77,6 +77,16 @@ def create_orden(request: OrdenCrearRequest, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al crear la orden: {str(e)}")
 
+@router.get("/ordenes/{orden_id}/check-ready")
+def check_orden_ready(orden_id: int, db: Session = Depends(get_db)):
+    """Verifica si una orden está lista para procesamiento masivo y retorna metadatos."""
+    repo = ProduccionRepository(db)
+    try:
+        res = repo.check_orden_ready_for_masivo(orden_id)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/ordenes/{orden_id}/estado-masivo")
 def change_orden_estado_masivo(orden_id: int, request: EstadoChangeRequest, db: Session = Depends(get_db)):
     """Cambia el estado de una orden de manera masiva (Autorizar/Rechazar)."""
@@ -112,3 +122,14 @@ def cancelar_orden(orden_id: int, request: EstadoChangeRequest, db: Session = De
         return {"detail": f"Orden {orden_id} cancelada correctamente"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al cancelar la orden: {str(e)}")
+
+@router.get("/dashboard-kpis")
+def get_dashboard_kpis(orden_ids: Optional[str] = None, db: Session = Depends(get_db)):
+    """Retorna los contadores KPI del tablero de control."""
+    repo = ProduccionRepository(db)
+    try:
+        parsed_ids = [int(x) for x in orden_ids.split(",")] if orden_ids else []
+        kpis = repo.get_dashboard_kpis(parsed_ids)
+        return kpis
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener KPIs: {str(e)}")

@@ -41,6 +41,15 @@ class FaseBService:
         if not solicitud_ids:
             return []
             
+        from sar.src.storage.api_client import APIClient
+        api_client = APIClient()
+        if api_client.connect_via_api:
+            from types import SimpleNamespace
+            sol_ids_str = ",".join([str(x) for x in solicitud_ids])
+            payload = {"solicitud_ids": sol_ids_str}
+            data = api_client.request("GET", "/api/docs/solicitudes/references-metadata", data=payload)
+            return [SimpleNamespace(**item) for item in data]
+            
         with self.db_connector.get_session() as session:
             query = text("""
                 SELECT 

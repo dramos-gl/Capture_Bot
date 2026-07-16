@@ -21,16 +21,30 @@ class ReferencesLoadWorker(QThread):
         
     def run(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                res, total_count = repo.get_referencias_paginated(
-                    limit=self.limit,
-                    offset=self.offset,
-                    search_text=self.search_text,
-                    estado_filter=self.estado_filter,
-                    orden_ids=self.orden_ids
-                )
-                self.result_ready.emit(res, total_count)
+            from sar.src.storage.api_client import APIClient
+            api_client = APIClient()
+            if api_client.connect_via_api:
+                orden_ids_str = ",".join([str(x) for x in self.orden_ids]) if self.orden_ids else None
+                payload = {
+                    "limit": self.limit,
+                    "offset": self.offset,
+                    "search_text": self.search_text,
+                    "estado_filter": self.estado_filter,
+                    "orden_ids": orden_ids_str
+                }
+                res = api_client.request("GET", "/api/docs/referencias", data=payload)
+                self.result_ready.emit(res["records"], res["total_count"])
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    res, total_count = repo.get_referencias_paginated(
+                        limit=self.limit,
+                        offset=self.offset,
+                        search_text=self.search_text,
+                        estado_filter=self.estado_filter,
+                        orden_ids=self.orden_ids
+                    )
+                    self.result_ready.emit(res, total_count)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -42,6 +56,8 @@ class ReferenciasView(QWidget):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(24, 24, 24, 24)
@@ -333,7 +349,11 @@ class ReferenciasView(QWidget):
         self._load_available_orders(preserve_selection=True)
         # Cancel active thread if running
         if self.active_worker and self.active_worker.isRunning():
-            self.active_worker.disconnect()
+            try:
+                self.active_worker.result_ready.disconnect()
+                self.active_worker.error_occurred.disconnect()
+            except RuntimeError:
+                pass
             self.active_worker.terminate()
             self.active_worker.wait()
 
@@ -486,9 +506,12 @@ class ReferenciasView(QWidget):
 
     def _load_available_orders(self, preserve_selection=False):
         try:
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                self.todas_las_ordenes = repo.get_ordenes()
+            if self.api_client.connect_via_api:
+                self.todas_las_ordenes = self.api_client.request("GET", "/api/ops/ordenes")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    self.todas_las_ordenes = repo.get_ordenes()
                 
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}

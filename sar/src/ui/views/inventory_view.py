@@ -50,6 +50,8 @@ class InventoryView(QWidget):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(24, 24, 24, 24)
@@ -103,6 +105,8 @@ class InventoryView(QWidget):
         self.refresh_all()
 
     def refresh_all(self):
+        if self.api_client.connect_via_api:
+            return
         self._load_catalogs_data()
         self.refresh_visor_data()
 
@@ -194,7 +198,11 @@ class InventoryView(QWidget):
 
     def refresh_visor_data(self):
         if self.active_worker and self.active_worker.isRunning():
-            self.active_worker.disconnect()
+            try:
+                self.active_worker.result_ready.disconnect()
+                self.active_worker.error_occurred.disconnect()
+            except RuntimeError:
+                pass
             self.active_worker.terminate()
             self.active_worker.wait()
 
@@ -628,8 +636,6 @@ class InventoryView(QWidget):
         add_des_form.addRow("Delegación:", self.cb_deleg_desarrollo)
         
         btn_add_desarrollo = CustomButton("Agregar Desarrollo")
-        btn_add_desarrollo.clicked.connect(self._on_add_desarrollo)
-        
         col_des_layout.addLayout(add_des_form)
         col_des_layout.addWidget(btn_add_desarrollo)
         card_des.layout.addLayout(col_des_layout)
@@ -647,18 +653,17 @@ class InventoryView(QWidget):
                 from sar.src.storage.models import Concepto
                 from sqlalchemy import select
                 concepts = session.execute(select(Concepto).where(Concepto.activo == True)).scalars().all()
-                delegations = repo.session.execute(select(Concepto.nombre).select_from(Concepto)).scalars().all() # wait, we need delegaciones
                 
                 # Fetch delegaciones
                 from sar.src.storage.models import Delegacion
                 delegations = session.execute(select(Delegacion)).scalars().all()
-
-            # Store mapping dictionaries
-            self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
-            self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
-            self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
-            self._delegations_map = {dg.nombre: dg.delegacion_id for dg in delegations}
-            self._concepts_map = {cp.nombre: cp.concepto_id for cp in concepts}
+                
+                # Store mapping dictionaries INSIDE the session to prevent detached instance access
+                self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
+                self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
+                self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
+                self._delegations_map = {dg.nombre: dg.delegacion_id for dg in delegations}
+                self._concepts_map = {cp.nombre: cp.concepto_id for cp in concepts}
 
             # Populate combo boxes
             self.cb_notarias_masivo.clear()
