@@ -9,6 +9,7 @@ from sar.src.ui.design_system.components import CustomLabel, CustomButton, Style
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import ProduccionRepository
+from sar.src.storage.api_client import APIClient
 
 class OrderProcessingDialog(QDialog):
     """Modal dialog to authorize or reject granular Solicitudes and references under an Order."""
@@ -19,6 +20,7 @@ class OrderProcessingDialog(QDialog):
         self.orden_id = orden_id
         self.solicitudes_data = []
         self.orden_estado = ""
+        self.api_client = APIClient()
         
         self.setWindowTitle("Procesar Referencias por Solicitud")
         self.resize(1000, 680)
@@ -217,12 +219,22 @@ class OrderProcessingDialog(QDialog):
         self._load_data()
 
     def _load_data(self):
-        """Loads or refreshes solicitudes data for the order from the database."""
+        """Loads or refreshes solicitudes data for the order. Uses API or direct DB based on CONNECT_VIA_API."""
         try:
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                self.solicitudes_data = repo.get_solicitudes_detalle_by_orden(self.orden_id)
-                self.orden_estado = repo.get_orden_estado(self.orden_id)
+            if self.api_client.connect_via_api:
+                # Use dedicated API endpoints
+                self.solicitudes_data = self.api_client.request(
+                    "GET", f"/api/docs/ordenes/{self.orden_id}/solicitudes-detalle"
+                )
+                estado_resp = self.api_client.request(
+                    "GET", f"/api/docs/ordenes/{self.orden_id}/estado"
+                )
+                self.orden_estado = estado_resp.get("estado", "")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    self.solicitudes_data = repo.get_solicitudes_detalle_by_orden(self.orden_id)
+                    self.orden_estado = repo.get_orden_estado(self.orden_id)
                 
             self._populate_table()
             self._update_metrics_and_summary()
@@ -449,18 +461,27 @@ class OrderProcessingDialog(QDialog):
         
         if reply == QMessageBox.Yes:
             try:
-                with self.db_connector.get_session() as session:
-                    repo = ProduccionRepository(session)
-                    res = repo.procesar_estado_solicitudes_seleccionadas(valid_ids, nuevo_estado)
-                    session.commit()
+                if self.api_client.connect_via_api:
+                    res = self.api_client.request(
+                        "POST",
+                        f"/api/docs/ordenes/{self.orden_id}/procesar-solicitudes",
+                        json={"solicitud_ids": valid_ids, "nuevo_estado": nuevo_estado}
+                    )
+                    rows_updated = res.get("rows_updated", len(valid_ids))
+                else:
+                    with self.db_connector.get_session() as session:
+                        repo = ProduccionRepository(session)
+                        res = repo.procesar_estado_solicitudes_seleccionadas(valid_ids, nuevo_estado)
+                        session.commit()
+                    rows_updated = res["rows_updated"]
                     
                 QMessageBox.information(
                     self, "Éxito", 
-                    f"Se procesaron con éxito {len(valid_ids)} solicitudes ({res['rows_updated']} referencias actualizadas)."
+                    f"Se procesaron con éxito {len(valid_ids)} solicitudes ({rows_updated} referencias actualizadas)."
                 )
                 self._load_data()
                 if self.parent() and hasattr(self.parent(), 'refresh_historial'):
-                    self.parent().refresh_historial() # Update main view order list
+                    self.parent().refresh_historial()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Ocurrió un error al procesar las solicitudes:\n{str(e)}")
 
@@ -474,29 +495,34 @@ class OrderProcessingDialog(QDialog):
         """Helper to get the default directory configured in parametro_sistema, pointing to 'boletas' and order subfolder."""
         import os
         try:
-            from sar.src.storage.repositories import ConfigRepository
-            with self.db_connector.get_session() as session:
-                config_repo = ConfigRepository(session)
-                base_path = config_repo.get_parametro("RUTA_DERECHOS")
-                if base_path:
-                    # Obtener folio de la orden de los datos de solicitudes
-                    folio = self.solicitudes_data[0]["folio_orden"] if self.solicitudes_data else ""
-                    folio_clean = "".join(c for c in folio if c.isalnum() or c in ("-", "_")).strip()
-                    
-                    for sub in ["boletas", "BOLETAS"]:
-                        sub_path = os.path.join(base_path, sub)
-                        if os.path.exists(sub_path):
-                            if folio_clean:
-                                order_path = os.path.join(sub_path, folio_clean)
-                                os.makedirs(order_path, exist_ok=True)
-                                return os.path.abspath(order_path)
-                            return os.path.abspath(sub_path)
-                    if os.path.exists(base_path):
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/docs/config/ruta-derechos")
+                base_path = data.get("ruta_derechos")
+            else:
+                from sar.src.storage.repositories import ConfigRepository
+                with self.db_connector.get_session() as session:
+                    config_repo = ConfigRepository(session)
+                    base_path = config_repo.get_parametro("RUTA_DERECHOS")
+            
+            if base_path:
+                # Obtener folio de la orden de los datos de solicitudes
+                folio = self.solicitudes_data[0]["folio_orden"] if self.solicitudes_data else ""
+                folio_clean = "".join(c for c in folio if c.isalnum() or c in ("-", "_")).strip()
+                
+                for sub in ["boletas", "BOLETAS"]:
+                    sub_path = os.path.join(base_path, sub)
+                    if os.path.exists(sub_path):
                         if folio_clean:
-                            order_path = os.path.join(base_path, folio_clean)
+                            order_path = os.path.join(sub_path, folio_clean)
                             os.makedirs(order_path, exist_ok=True)
                             return os.path.abspath(order_path)
-                        return os.path.abspath(base_path)
+                        return os.path.abspath(sub_path)
+                if os.path.exists(base_path):
+                    if folio_clean:
+                        order_path = os.path.join(base_path, folio_clean)
+                        os.makedirs(order_path, exist_ok=True)
+                        return os.path.abspath(order_path)
+                    return os.path.abspath(base_path)
         except Exception:
             pass
         return ""

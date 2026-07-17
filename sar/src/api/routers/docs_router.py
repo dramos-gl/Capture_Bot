@@ -250,6 +250,49 @@ def get_solicitud_orden_id(solicitud_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- OrderProcessingDialog endpoints ---
+
+@router.get("/ordenes/{orden_id}/estado")
+def get_orden_estado(orden_id: int, db: Session = Depends(get_db)):
+    """Retorna el código de estado de una orden (ACTIVA, CANCELADA, etc.)."""
+    try:
+        from sar.src.storage.repositories import ProduccionRepository
+        repo = ProduccionRepository(db)
+        return {"estado": repo.get_orden_estado(orden_id)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/ordenes/{orden_id}/solicitudes-detalle")
+def get_solicitudes_detalle_by_orden(orden_id: int, db: Session = Depends(get_db)):
+    """Retorna el detalle completo de solicitudes de una orden para el diálogo de procesamiento."""
+    try:
+        from sar.src.storage.repositories import ProduccionRepository
+        repo = ProduccionRepository(db)
+        return repo.get_solicitudes_detalle_by_orden(orden_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ProcesarSolicitudesRequest(BaseModel):
+    solicitud_ids: List[int]
+    nuevo_estado: str  # AUTORIZADA | RECHAZADA
+
+@router.post("/ordenes/{orden_id}/procesar-solicitudes")
+def procesar_solicitudes_seleccionadas(
+    orden_id: int,
+    request: ProcesarSolicitudesRequest,
+    db: Session = Depends(get_db)
+):
+    """Autoriza o rechaza las solicitudes seleccionadas de una orden y actualiza sus referencias pendientes."""
+    try:
+        from sar.src.storage.repositories import ProduccionRepository
+        repo = ProduccionRepository(db)
+        res = repo.procesar_estado_solicitudes_seleccionadas(request.solicitud_ids, request.nuevo_estado)
+        db.commit()
+        return {"rows_updated": res["rows_updated"], "detail": f"{len(request.solicitud_ids)} solicitudes procesadas como {request.nuevo_estado}"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Bot-A endpoints
 
 @router.get("/config/parametro/{nombre}")
