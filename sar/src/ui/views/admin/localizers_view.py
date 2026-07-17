@@ -16,6 +16,9 @@ class LocalizersView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -60,7 +63,7 @@ class LocalizersView(QWidget):
         dialog.btn_save.clicked.connect(lambda: self._save_loc(dialog))
         
         return dialog
-
+ 
     def _on_new_loc(self):
         self.current_loc_id = None
         dialog = self._create_dialog("Nuevo Localizador")
@@ -80,7 +83,7 @@ class LocalizersView(QWidget):
         
         self.inp_l_clave.set_focus()
         dialog.exec()
-
+ 
     def _save_loc(self, dialog: CustomDialog):
         data = {
             "localizador_id": self.current_loc_id,
@@ -92,10 +95,18 @@ class LocalizersView(QWidget):
         }
         
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_localizador(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/localizadores", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_localizador(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Localizador guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -104,10 +115,14 @@ class LocalizersView(QWidget):
             
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = ConfigRepository(session)
-                items = repo.get_all_localizadores_list()
-                data = [{"localizador_id": i.localizador_id, "nombre_clave": i.nombre_clave, "label_visible": i.label_visible, "estrategia_selector": i.estrategia_selector, "valor_selector": i.valor_selector, "activo": i.activo} for i in items]
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/admin/data/localizadores")
                 self.tbl_locs.populate(data)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ConfigRepository(session)
+                    items = repo.get_all_localizadores_list()
+                    data = [{"localizador_id": i.localizador_id, "nombre_clave": i.nombre_clave, "label_visible": i.label_visible, "estrategia_selector": i.estrategia_selector, "valor_selector": i.valor_selector, "activo": i.activo} for i in items]
+                    self.tbl_locs.populate(data)
         except Exception as e:
             print("Error refreshing localizadores:", e)

@@ -34,6 +34,9 @@ class AdminWindow(QMainWindow):
         self.current_usuario_id = current_usuario_id
         self.current_sesion_id = current_sesion_id
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         # Window setup
         self.setWindowTitle("Configuración del Sistema")
         self.resize(1000, 700)
@@ -96,6 +99,8 @@ class AdminWindow(QMainWindow):
         if self.current_usuario_id:
             return self.current_usuario_id
         try:
+            if self.api_client.connect_via_api:
+                return 1
             with self.db_connector.get_session() as session:
                 from sar.src.storage.models import Sesion
                 sesion_id = self._get_current_session()
@@ -110,11 +115,17 @@ class AdminWindow(QMainWindow):
     def _get_username_string(self):
         uid = self._get_current_user()
         try:
-            with self.db_connector.get_session() as session:
-                from sar.src.storage.models import Usuario
-                user_obj = session.get(Usuario, uid)
-                if user_obj:
-                    return f"Usuario: {user_obj.username}"
+            if self.api_client.connect_via_api:
+                users = self.api_client.request("GET", "/api/auth/users")
+                for u in users:
+                    if u["usuario_id"] == uid:
+                        return f"Usuario: {u['username']}"
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.storage.models import Usuario
+                    user_obj = session.get(Usuario, uid)
+                    if user_obj:
+                        return f"Usuario: {user_obj.username}"
         except Exception:
             pass
         return "Usuario: admin"
@@ -122,10 +133,14 @@ class AdminWindow(QMainWindow):
     def _load_permissions(self):
         uid = self._get_current_user()
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
-                perms = repo.get_user_permissions(uid)
-                self.user_permissions = set(perms)
+            if self.api_client.connect_via_api:
+                perms_list = self.api_client.request("GET", f"/api/admin/permissions-for-user/{uid}")
+                self.user_permissions = {(p[0], p[1]) for p in perms_list}
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    perms = repo.get_user_permissions(uid)
+                    self.user_permissions = set(perms)
         except Exception:
             pass
             

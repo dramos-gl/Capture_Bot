@@ -10,6 +10,7 @@ from sar.src.storage.db_connector import DatabaseConnector
 from sar.src.api.routers.security_router import router as security_router
 from sar.src.api.routers.ops_router import router as ops_router
 from sar.src.api.routers.docs_router import router as docs_router
+from sar.src.api.routers.admin_router import router as admin_router
 
 app = FastAPI(
     title="SAR - Servidor API",
@@ -30,6 +31,7 @@ app.add_middleware(
 app.include_router(security_router)
 app.include_router(ops_router)
 app.include_router(docs_router)
+app.include_router(admin_router)
 
 # Inicializar conector de base de datos del servidor
 db_connector = DatabaseConnector()

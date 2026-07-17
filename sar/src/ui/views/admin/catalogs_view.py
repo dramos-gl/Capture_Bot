@@ -16,6 +16,9 @@ class CatalogsView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -58,7 +61,7 @@ class CatalogsView(QWidget):
         dialog.btn_save.clicked.connect(lambda: self._save_concepto(dialog))
         
         return dialog
-
+ 
     def _on_new_concepto(self):
         self.current_concepto_id = None
         dialog = self._create_dialog("Nuevo Concepto")
@@ -76,7 +79,7 @@ class CatalogsView(QWidget):
         
         self.inp_c_nombre.set_focus()
         dialog.exec()
-
+ 
     def _save_concepto(self, dialog: CustomDialog):
         data = {
             "concepto_id": self.current_concepto_id,
@@ -91,10 +94,18 @@ class CatalogsView(QWidget):
             return
             
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_concepto(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/conceptos", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_concepto(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Concepto guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -103,10 +114,14 @@ class CatalogsView(QWidget):
             
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = CatalogoRepository(session)
-                items = repo.get_all_conceptos()
-                data = [{"concepto_id": c.concepto_id, "codigo_portal": c.codigo_portal, "nombre": c.nombre, "alias": c.alias, "activo": c.activo} for c in items]
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/admin/data/conceptos")
                 self.tbl_conceptos.populate(data)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = CatalogoRepository(session)
+                    items = repo.get_all_conceptos()
+                    data = [{"concepto_id": c.concepto_id, "codigo_portal": c.codigo_portal, "nombre": c.nombre, "alias": c.alias, "activo": c.activo} for c in items]
+                    self.tbl_conceptos.populate(data)
         except Exception as e:
             print("Error refreshing conceptos:", e)

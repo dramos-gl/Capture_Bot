@@ -15,6 +15,9 @@ class ActionsView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -55,7 +58,7 @@ class ActionsView(QWidget):
         dialog.btn_save.clicked.disconnect()
         dialog.btn_save.clicked.connect(lambda: self._save(dialog))
         return dialog
-
+ 
     def _on_new(self):
         self.current_accion_id = None
         dialog = self._create_dialog("Nueva Acción")
@@ -73,7 +76,7 @@ class ActionsView(QWidget):
         
         self.inp_codigo.set_focus()
         dialog.exec()
-
+ 
     def _save(self, dialog: CustomDialog):
         data = {
             "accion_id": self.current_accion_id,
@@ -84,10 +87,18 @@ class ActionsView(QWidget):
         }
         
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_accion(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/acciones", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_accion(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Acción guardada correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -96,10 +107,16 @@ class ActionsView(QWidget):
             
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
-                items = repo.get_all_acciones()
-                data = [{"accion_id": i.accion_id, "codigo": i.codigo, "nombre": i.nombre, "descripcion": i.descripcion, "activo": i.activo} for i in items]
+            if self.api_client.connect_via_api:
+                acciones = self.api_client.request("GET", "/api/admin/data/acciones")
+                # format for table expects accion_id
+                data = [{"accion_id": i["id"], "codigo": i.get("codigo", ""), "nombre": i["nombre"], "descripcion": i.get("descripcion", ""), "activo": i.get("activo", True)} for i in acciones]
                 self.tbl_acciones.populate(data)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    items = repo.get_all_acciones()
+                    data = [{"accion_id": i.accion_id, "codigo": i.codigo, "nombre": i.nombre, "descripcion": i.descripcion, "activo": i.activo} for i in items]
+                    self.tbl_acciones.populate(data)
         except Exception as e:
             print("Error refreshing acciones:", e)

@@ -17,6 +17,9 @@ class RolesView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -139,18 +142,29 @@ class RolesView(QWidget):
         
         # Load permissions
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
-                permisos = repo.get_permisos_for_rol(self.current_rol_id)
-                permisos_set = set(permisos)
+            if self.api_client.connect_via_api:
+                permisos = self.api_client.request("GET", f"/api/admin/permisos-for-rol/{self.current_rol_id}")
+                permisos_set = {(p[0], p[1]) for p in permisos}
                 for (m_id, a_id), chk in self.checkboxes_matrix.items():
                     chk.setChecked((m_id, a_id) in permisos_set)
                     
-                # Cargar módulos de aplicación autorizados
-                app_mods = repo.get_app_modulos_for_rol(self.current_rol_id)
+                app_mods = self.api_client.request("GET", f"/api/admin/app-modulos-for-rol/{self.current_rol_id}")
                 app_mods_set = set(app_mods)
                 for am_id, chk in self.checkboxes_apps.items():
                     chk.setChecked(am_id in app_mods_set)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    permisos = repo.get_permisos_for_rol(self.current_rol_id)
+                    permisos_set = set(permisos)
+                    for (m_id, a_id), chk in self.checkboxes_matrix.items():
+                        chk.setChecked((m_id, a_id) in permisos_set)
+                        
+                    # Cargar módulos de aplicación autorizados
+                    app_mods = repo.get_app_modulos_for_rol(self.current_rol_id)
+                    app_mods_set = set(app_mods)
+                    for am_id, chk in self.checkboxes_apps.items():
+                        chk.setChecked(am_id in app_mods_set)
         except Exception as e:
             print("Error loading permissions:", e)
         
@@ -172,10 +186,18 @@ class RolesView(QWidget):
         }
         
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_rol(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/roles", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_rol(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Rol guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -184,16 +206,24 @@ class RolesView(QWidget):
             
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
+            if self.api_client.connect_via_api:
+                self.modulos = self.api_client.request("GET", "/api/admin/data/modulos")
+                self.acciones = self.api_client.request("GET", "/api/admin/data/acciones")
+                self.app_modulos = self.api_client.request("GET", "/api/admin/data/app_modulos")
                 
-                # Load matrix headers
-                self.modulos = [{"id": m.modulo_id, "nombre": m.nombre} for m in repo.get_all_modulos()]
-                self.acciones = [{"id": a.accion_id, "nombre": a.nombre} for a in repo.get_all_acciones()]
-                self.app_modulos = [{"id": am.app_modulo_id, "nombre": am.nombre} for am in repo.get_all_app_modulos()]
-                
-                items = repo.get_all_roles()
-                data = [{"rol_id": i.rol_id, "codigo": i.codigo, "nombre": i.nombre, "activo": i.activo} for i in items]
-                self.tbl_roles.populate(data)
+                roles = self.api_client.request("GET", "/api/admin/data/roles")
+                self.tbl_roles.populate(roles)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    
+                    # Load matrix headers
+                    self.modulos = [{"id": m.modulo_id, "nombre": m.nombre} for m in repo.get_all_modulos()]
+                    self.acciones = [{"id": a.accion_id, "nombre": a.nombre} for a in repo.get_all_acciones()]
+                    self.app_modulos = [{"id": am.app_modulo_id, "nombre": am.nombre} for am in repo.get_all_app_modulos()]
+                    
+                    items = repo.get_all_roles()
+                    data = [{"rol_id": i.rol_id, "codigo": i.codigo, "nombre": i.nombre, "activo": i.activo} for i in items]
+                    self.tbl_roles.populate(data)
         except Exception as e:
             print("Error refreshing roles:", e)

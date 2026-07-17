@@ -16,6 +16,9 @@ class GeographyView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -64,7 +67,7 @@ class GeographyView(QWidget):
         dialog.btn_save.clicked.connect(lambda: self._save_mun(dialog))
         
         return dialog
-
+ 
     def _on_new_mun(self):
         self.current_mun_id_edit = None
         dialog = self._create_dialog("Nuevo Municipio")
@@ -88,7 +91,7 @@ class GeographyView(QWidget):
         
         self.inp_m_nombre.set_focus()
         dialog.exec()
-
+ 
     def _save_mun(self, dialog: CustomDialog):
         data = {
             "municipio_id": self.current_mun_id_edit,
@@ -97,10 +100,18 @@ class GeographyView(QWidget):
             "activo": self.chk_m_activo.isChecked()
         }
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_municipio(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/municipios", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_municipio(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Municipio guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -126,7 +137,7 @@ class GeographyView(QWidget):
         dialog.btn_save.clicked.disconnect()
         dialog.btn_save.clicked.connect(lambda: self._save_del(dialog))
         return dialog
-
+ 
     def _on_new_del(self):
         if not self.current_mun_id: return
         self.current_del_id = None
@@ -142,7 +153,7 @@ class GeographyView(QWidget):
         self.chk_d_activo.setChecked(bool(data.get("activo", False)))
         self.inp_d_nombre.set_focus()
         dialog.exec()
-
+ 
     def _save_del(self, dialog: CustomDialog):
         if not self.current_mun_id: return
         data = {
@@ -153,10 +164,18 @@ class GeographyView(QWidget):
             "activo": self.chk_d_activo.isChecked()
         }
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_delegacion(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/delegaciones", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_delegacion(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Delegación guardada.")
             dialog.accept()
             self.refresh_delegaciones()
@@ -165,21 +184,31 @@ class GeographyView(QWidget):
             
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = CatalogoRepository(session)
-                items = repo.get_all_municipios()
-                data = [{"municipio_id": i.municipio_id, "codigo_portal": i.codigo_portal, "nombre": i.nombre, "activo": i.activo} for i in items]
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/admin/data/municipios")
                 self.tbl_muns.populate(data)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = CatalogoRepository(session)
+                    items = repo.get_all_municipios()
+                    data = [{"municipio_id": i.municipio_id, "codigo_portal": i.codigo_portal, "nombre": i.nombre, "activo": i.activo} for i in items]
+                    self.tbl_muns.populate(data)
         except Exception as e:
             print("Error refreshing geografía:", e)
-
+ 
     def refresh_delegaciones(self):
         if not self.current_mun_id: return
         try:
-            with self.db_connector.get_session() as session:
-                repo = CatalogoRepository(session)
-                items = repo.get_delegaciones_por_municipio(self.current_mun_id)
-                data = [{"delegacion_id": i.delegacion_id, "codigo_portal": i.codigo_portal, "nombre": i.nombre, "activo": i.activo} for i in items]
-                self.tbl_dels.populate(data)
+            if self.api_client.connect_via_api:
+                all_dels = self.api_client.request("GET", "/api/admin/data/delegaciones")
+                # Filter delegaciones locally by current_mun_id
+                filtered_dels = [d for d in all_dels if d["municipio_id"] == self.current_mun_id]
+                self.tbl_dels.populate(filtered_dels)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = CatalogoRepository(session)
+                    items = repo.get_delegaciones_por_municipio(self.current_mun_id)
+                    data = [{"delegacion_id": i.delegacion_id, "codigo_portal": i.codigo_portal, "nombre": i.nombre, "activo": i.activo} for i in items]
+                    self.tbl_dels.populate(data)
         except Exception as e:
             print("Error refreshing delegaciones:", e)

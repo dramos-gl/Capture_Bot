@@ -19,6 +19,9 @@ class PermissionsView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.roles = []
         self.modulos = []
         self.acciones = []
@@ -77,19 +80,29 @@ class PermissionsView(QWidget):
         
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
+            if self.api_client.connect_via_api:
+                roles_items = self.api_client.request("GET", "/api/admin/data/roles")
+                self.roles = [{"id": r["rol_id"], "nombre": r["nombre"]} for r in roles_items if r.get("activo", True)]
                 
-                # Load roles
-                roles_items = repo.get_all_roles()
-                self.roles = [{"id": r.rol_id, "nombre": r.nombre} for r in roles_items if r.activo]
+                mod_items = self.api_client.request("GET", "/api/admin/data/modulos")
+                self.modulos = [{"id": m["id"], "nombre": m["nombre"]} for m in mod_items]
                 
-                # Load matrix headers
-                mod_items = repo.get_all_modulos()
-                self.modulos = [{"id": m.modulo_id, "nombre": m.nombre} for m in mod_items if m.activo]
-                
-                acc_items = repo.get_all_acciones()
-                self.acciones = [{"id": a.accion_id, "nombre": a.nombre} for a in acc_items if a.activo]
+                acc_items = self.api_client.request("GET", "/api/admin/data/acciones")
+                self.acciones = [{"id": a["id"], "nombre": a["nombre"]} for a in acc_items]
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    
+                    # Load roles
+                    roles_items = repo.get_all_roles()
+                    self.roles = [{"id": r.rol_id, "nombre": r.nombre} for r in roles_items if r.activo]
+                    
+                    # Load matrix headers
+                    mod_items = repo.get_all_modulos()
+                    self.modulos = [{"id": m.modulo_id, "nombre": m.nombre} for m in mod_items if m.activo]
+                    
+                    acc_items = repo.get_all_acciones()
+                    self.acciones = [{"id": a.accion_id, "nombre": a.nombre} for a in acc_items if a.activo]
                 
         except Exception as e:
             print("Error loading initial data:", e)
@@ -152,16 +165,23 @@ class PermissionsView(QWidget):
             
         # Load permissions for this rol
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
-                permisos = repo.get_permisos_for_rol(rol_id)
-                permisos_set = set(permisos)
+            if self.api_client.connect_via_api:
+                permisos = self.api_client.request("GET", f"/api/admin/permisos-for-rol/{rol_id}")
+                permisos_set = {(p[0], p[1]) for p in permisos}
                 for (m_id, a_id), chk in self.checkboxes_matrix.items():
                     if (m_id, a_id) in permisos_set:
                         chk.setChecked(True)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    permisos = repo.get_permisos_for_rol(rol_id)
+                    permisos_set = set(permisos)
+                    for (m_id, a_id), chk in self.checkboxes_matrix.items():
+                        if (m_id, a_id) in permisos_set:
+                            chk.setChecked(True)
         except Exception as e:
             print("Error loading permissions for rol:", e)
-
+ 
     def _save_permissions(self):
         index = self.cmb_roles.currentIndex()
         if index < 0: return
@@ -169,30 +189,45 @@ class PermissionsView(QWidget):
         
         permisos_matrix = [(m_id, a_id) for (m_id, a_id), chk in self.checkboxes_matrix.items() if chk.isChecked()]
         
-        data = {
-            "rol_id": rol_id,
-            "permisos_matrix": permisos_matrix
-        }
-        
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                # We need a save_rol_permisos method or just reuse save_rol by updating only permisos
-                # Since save_rol updates the whole role including its permissions, we should fetch it first
-                repo = UsuarioRepository(session)
-                from sar.src.storage.models import Rol
-                rol = session.get(Rol, rol_id)
+            if self.api_client.connect_via_api:
+                # Fetch target rol details to preserve code/name/active fields
+                all_roles = self.api_client.request("GET", "/api/admin/data/roles")
+                target_rol = next((r for r in all_roles if r["rol_id"] == rol_id), None)
+                if not target_rol:
+                    raise Exception("Rol no encontrado")
                 
                 full_data = {
-                    "rol_id": rol.rol_id,
-                    "codigo": rol.codigo,
-                    "nombre": rol.nombre,
-                    "activo": rol.activo,
+                    "rol_id": rol_id,
+                    "codigo": target_rol["codigo"],
+                    "nombre": target_rol["nombre"],
+                    "activo": target_rol.get("activo", True),
                     "permisos_matrix": permisos_matrix
                 }
                 
-                service.save_rol(self.current_user_id, self.current_sesion_id, full_data)
-                session.commit()
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": full_data
+                }
+                self.api_client.request("POST", "/api/admin/save/roles", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    repo = UsuarioRepository(session)
+                    from sar.src.storage.models import Rol
+                    rol = session.get(Rol, rol_id)
+                    
+                    full_data = {
+                        "rol_id": rol.rol_id,
+                        "codigo": rol.codigo,
+                        "nombre": rol.nombre,
+                        "activo": rol.activo,
+                        "permisos_matrix": permisos_matrix
+                    }
+                    
+                    service.save_rol(self.current_user_id, self.current_sesion_id, full_data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Permisos actualizados correctamente.")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))

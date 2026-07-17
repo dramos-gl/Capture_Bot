@@ -15,6 +15,9 @@ class RfcsView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -96,7 +99,7 @@ class RfcsView(QWidget):
         dialog.btn_save.clicked.disconnect()
         dialog.btn_save.clicked.connect(lambda: self._save(dialog))
         return dialog
-
+ 
     def _on_new(self):
         self.current_rfc_id = None
         dialog = self._create_dialog("Nuevo RFC")
@@ -121,7 +124,7 @@ class RfcsView(QWidget):
         
         self.inp_rfc.set_focus()
         dialog.exec()
-
+ 
     def _save(self, dialog: CustomDialog):
         data = {
             "rfc_id": self.current_rfc_id,
@@ -139,10 +142,18 @@ class RfcsView(QWidget):
         }
         
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_rfc(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/rfcs", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_rfc(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "RFC guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -151,23 +162,27 @@ class RfcsView(QWidget):
             
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = CatalogoRepository(session)
-                items = repo.get_all_rfcs()
-                data = [{
-                    "rfc_id": i.rfc_id, 
-                    "rfc": i.rfc, 
-                    "razon_social": i.razon_social, 
-                    "calle": i.calle,
-                    "no_exterior": i.no_exterior,
-                    "no_interior": i.no_interior,
-                    "colonia": i.colonia,
-                    "codigo_postal": i.codigo_postal,
-                    "localidad": i.localidad,
-                    "municipio": i.municipio,
-                    "estado": i.estado,
-                    "activo": i.activo
-                } for i in items]
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/admin/data/rfcs")
                 self.tbl_rfcs.populate(data)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = CatalogoRepository(session)
+                    items = repo.get_all_rfcs()
+                    data = [{
+                        "rfc_id": i.rfc_id, 
+                        "rfc": i.rfc, 
+                        "razon_social": i.razon_social, 
+                        "calle": i.calle,
+                        "no_exterior": i.no_exterior,
+                        "no_interior": i.no_interior,
+                        "colonia": i.colonia,
+                        "codigo_postal": i.codigo_postal,
+                        "localidad": i.localidad,
+                        "municipio": i.municipio,
+                        "estado": i.estado,
+                        "activo": i.activo
+                    } for i in items]
+                    self.tbl_rfcs.populate(data)
         except Exception as e:
             print("Error refreshing RFCs:", e)

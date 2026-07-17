@@ -17,6 +17,9 @@ class UsersView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -107,15 +110,22 @@ class UsersView(QWidget):
         self.chk_u_activo.setChecked(bool(data.get("activo", False)))
         
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
-                user_roles = repo.get_roles_for_user(self.current_usuario_id)
+            if self.api_client.connect_via_api:
+                user_roles = self.api_client.request("GET", f"/api/admin/roles-for-user/{self.current_usuario_id}")
                 if user_roles:
-                    # Select the first role since it's a dropdown now
                     first_role_id = user_roles[0]
                     index = self.cmb_roles.findData(first_role_id)
                     if index >= 0:
                         self.cmb_roles.setCurrentIndex(index)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    user_roles = repo.get_roles_for_user(self.current_usuario_id)
+                    if user_roles:
+                        first_role_id = user_roles[0]
+                        index = self.cmb_roles.findData(first_role_id)
+                        if index >= 0:
+                            self.cmb_roles.setCurrentIndex(index)
         except Exception as e:
             print("Error loading roles:", e)
         
@@ -138,20 +148,34 @@ class UsersView(QWidget):
             return
             
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
-                existing = repo.get_by_username(data["username"])
-                
+            if self.api_client.connect_via_api:
                 # Check Uniqueness
-                if existing and existing.usuario_id != self.current_usuario_id:
-                    self.inp_u_username.show_error("Este nombre de usuario ya está en uso.")
-                    return
-                else:
-                    self.inp_u_username.clear_error()
-                    
-                service = AdminService(session)
-                service.save_usuario(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+                existing_users = self.api_client.request("GET", "/api/admin/data/usuarios")
+                for u in existing_users:
+                    if u["username"] == data["username"] and u["usuario_id"] != self.current_usuario_id:
+                        self.inp_u_username.show_error("Este nombre de usuario ya está en uso.")
+                        return
+                self.inp_u_username.clear_error()
+                
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/usuarios", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    existing = repo.get_by_username(data["username"])
+                    if existing and existing.usuario_id != self.current_usuario_id:
+                        self.inp_u_username.show_error("Este nombre de usuario ya está en uso.")
+                        return
+                    else:
+                        self.inp_u_username.clear_error()
+                        
+                    service = AdminService(session)
+                    service.save_usuario(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Usuario guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -160,15 +184,20 @@ class UsersView(QWidget):
             
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
+            if self.api_client.connect_via_api:
+                roles = self.api_client.request("GET", "/api/admin/data/roles")
+                self.all_roles = [{"id": r["rol_id"], "nombre": r["nombre"]} for r in roles]
                 
-                # Update all roles
-                roles = repo.get_all_roles()
-                self.all_roles = [{"id": r.rol_id, "nombre": r.nombre} for r in roles]
-                
-                users = repo.get_all_usuarios()
-                data = [{"usuario_id": u.usuario_id, "username": u.username, "nombre": u.nombre, "correo": u.correo, "activo": u.activo} for u in users]
-                self.tbl_usuarios.populate(data)
+                users = self.api_client.request("GET", "/api/admin/data/usuarios")
+                self.tbl_usuarios.populate(users)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    roles = repo.get_all_roles()
+                    self.all_roles = [{"id": r.rol_id, "nombre": r.nombre} for r in roles]
+                    
+                    users = repo.get_all_usuarios()
+                    data = [{"usuario_id": u.usuario_id, "username": u.username, "nombre": u.nombre, "correo": u.correo, "activo": u.activo} for u in users]
+                    self.tbl_usuarios.populate(data)
         except Exception as e:
             print("Error refreshing users:", e)

@@ -15,6 +15,9 @@ class ModulesView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -107,10 +110,18 @@ class ModulesView(QWidget):
             "activo": self.chk_a_act.isChecked()
         }
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_app_modulo(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/app_modulos", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_app_modulo(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -142,10 +153,18 @@ class ModulesView(QWidget):
             "activo": self.chk_m_act.isChecked()
         }
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_modulo(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/modulos", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_modulo(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -154,14 +173,23 @@ class ModulesView(QWidget):
 
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = UsuarioRepository(session)
-                app_mods = repo.get_all_app_modulos()
-                data_app = [{"app_modulo_id": i.app_modulo_id, "codigo": i.codigo, "nombre": i.nombre, "activo": i.activo} for i in app_mods]
+            if self.api_client.connect_via_api:
+                app_mods = self.api_client.request("GET", "/api/admin/data/app_modulos")
+                data_app = [{"app_modulo_id": i["id"], "codigo": i.get("codigo", ""), "nombre": i["nombre"], "activo": i.get("activo", True)} for i in app_mods]
                 self.tbl_app.populate(data_app)
                 
-                mods = repo.get_all_modulos()
-                data_mod = [{"modulo_id": i.modulo_id, "codigo": i.codigo, "nombre": i.nombre, "descripcion": i.descripcion, "activo": i.activo} for i in mods]
+                mods = self.api_client.request("GET", "/api/admin/data/modulos")
+                data_mod = [{"modulo_id": i["id"], "codigo": i.get("codigo", ""), "nombre": i["nombre"], "descripcion": i.get("descripcion", ""), "activo": i.get("activo", True)} for i in mods]
                 self.tbl_mod.populate(data_mod)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    app_mods = repo.get_all_app_modulos()
+                    data_app = [{"app_modulo_id": i.app_modulo_id, "codigo": i.codigo, "nombre": i.nombre, "activo": i.activo} for i in app_mods]
+                    self.tbl_app.populate(data_app)
+                    
+                    mods = repo.get_all_modulos()
+                    data_mod = [{"modulo_id": i.modulo_id, "codigo": i.codigo, "nombre": i.nombre, "descripcion": i.descripcion, "activo": i.activo} for i in mods]
+                    self.tbl_mod.populate(data_mod)
         except Exception as e:
             print("Error refreshing modules:", e)

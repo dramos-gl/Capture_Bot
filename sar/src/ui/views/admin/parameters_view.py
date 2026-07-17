@@ -16,6 +16,9 @@ class ParametersView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -54,7 +57,7 @@ class ParametersView(QWidget):
         dialog.btn_save.clicked.connect(lambda: self._save_param(dialog))
         
         return dialog
-
+ 
     def _on_new_param(self):
         self.current_param_id = None
         dialog = self._create_dialog("Nuevo Parámetro")
@@ -71,7 +74,7 @@ class ParametersView(QWidget):
         
         self.inp_p_codigo.set_focus()
         dialog.exec()
-
+ 
     def _save_param(self, dialog: CustomDialog):
         data = {
             "parametro_id": self.current_param_id,
@@ -85,10 +88,18 @@ class ParametersView(QWidget):
             return
             
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_parametro(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/parametros", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_parametro(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Parámetro guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -97,10 +108,14 @@ class ParametersView(QWidget):
             
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = ConfigRepository(session)
-                items = repo.get_all_parametros()
-                data = [{"parametro_id": p.parametro_id, "codigo": p.codigo, "valor": p.valor, "activo": p.activo} for p in items]
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/admin/data/parametros")
                 self.tbl_parametros.populate(data)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ConfigRepository(session)
+                    items = repo.get_all_parametros()
+                    data = [{"parametro_id": p.parametro_id, "codigo": p.codigo, "valor": p.valor, "activo": p.activo} for p in items]
+                    self.tbl_parametros.populate(data)
         except Exception as e:
             print("Error refreshing parametros:", e)

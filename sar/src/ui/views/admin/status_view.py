@@ -15,6 +15,9 @@ class StatusView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -51,7 +54,7 @@ class StatusView(QWidget):
         dialog.btn_save.clicked.disconnect()
         dialog.btn_save.clicked.connect(lambda: self._save(dialog))
         return dialog
-
+ 
     def _on_new(self):
         self.current_estado_id = None
         dialog = self._create_dialog("Nuevo Estado de Sistema")
@@ -68,7 +71,7 @@ class StatusView(QWidget):
         
         self.inp_entidad.set_focus()
         dialog.exec()
-
+ 
     def _save(self, dialog: CustomDialog):
         data = {
             "estado_id": self.current_estado_id,
@@ -78,10 +81,18 @@ class StatusView(QWidget):
         }
         
         try:
-            with self.db_connector.get_session() as session:
-                service = AdminService(session)
-                service.save_estado_sistema(self.current_user_id, self.current_sesion_id, data)
-                session.commit()
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.current_user_id,
+                    "sesion_id": self.current_sesion_id,
+                    "data": data
+                }
+                self.api_client.request("POST", "/api/admin/save/estados", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_estado_sistema(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
             QMessageBox.information(self, "Éxito", "Estado guardado correctamente.")
             dialog.accept()
             self.refresh_data()
@@ -90,10 +101,14 @@ class StatusView(QWidget):
             
     def refresh_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = CatalogoRepository(session)
-                items = repo.get_all_estados_sistema()
-                data = [{"estado_id": i.estado_id, "entidad": i.entidad, "codigo": i.codigo, "descripcion": i.descripcion} for i in items]
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/admin/data/estados")
                 self.tbl_status.populate(data)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = CatalogoRepository(session)
+                    items = repo.get_all_estados_sistema()
+                    data = [{"estado_id": i.estado_id, "entidad": i.entidad, "codigo": i.codigo, "descripcion": i.descripcion} for i in items]
+                    self.tbl_status.populate(data)
         except Exception as e:
             print("Error refreshing estados:", e)

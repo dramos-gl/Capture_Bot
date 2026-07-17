@@ -76,9 +76,9 @@ C:\tools\nssm.exe install SAR_API
 Esto abrirá la interfaz gráfica de NSSM. Configure los siguientes parámetros:
 
 * **Tab: Application**
-  * **Path:** `C:\SAR_System\.venv\Scripts\uvicorn.exe`
+  * **Path:** `C:\SAR_System\.venv\Scripts\python.exe`
   * **Startup directory:** `C:\SAR_System`
-  * **Arguments:** `sar.main_api:app --host 0.0.0.0 --port 8000 --workers 4`
+  * **Arguments:** `-m uvicorn sar.main_api:app --host 0.0.0.0 --port 8000 --workers 4`
 * **Tab: Details**
   * **Display name:** Sistema SAR - Servidor API
   * **Description:** Backend API REST en FastAPI para la gestión de referencias y control de accesos del robot SAR.
@@ -94,6 +94,8 @@ Desde la misma terminal de PowerShell, inicialice el servicio:
 Start-Service SAR_API
 # Verificar el estado del servicio
 Get-Service SAR_API
+netstat -ano | findstr :8000 #Revisar si esta en modo LISTENING
+Test-NetConnection -ComputerName 10.11.8.151 -Port 8000 #Verificar la conexión al servidor desde el cliente de pruebas
 ```
 
 ### 4.4. Inicio Manual del Servidor (Modo Desarrollo/Pruebas)
@@ -115,14 +117,14 @@ El Firewall de Windows Defender en la máquina Servidor (`10.11.8.151`) debe per
 ### 5.1. Regla de Entrada para la API (Puerto 8000)
 Autorice al equipo cliente (`10.11.8.108`) a conectarse a la API de FastAPI en los perfiles `Domain,Private`:
 ```powershell
-New-NetFirewallRule -DisplayName "SAR - Servidor API (Cliente 10.11.8.108)" `
+New-NetFirewallRule -DisplayName "API SAR - Solo Clientes Autorizados" `
     -Direction Inbound `
     -Action Allow `
     -Protocol TCP `
     -LocalPort 8000 `
-    -Profile Domain,Private `
-    -RemoteAddress 10.11.8.108
-```
+    -RemoteAddress "10.11.9.19", "10.11.4.2"
+
+#Revisar la lista del centro firewall y busca cualquier regla que se llame "python" y desactivarlo
 
 ### 5.2. Regla de Entrada para PostgreSQL (Puerto 5432)
 Autorice al equipo cliente (`10.11.8.108`) a conectarse directamente a la Base de Datos PostgreSQL en los perfiles `Domain,Private`:

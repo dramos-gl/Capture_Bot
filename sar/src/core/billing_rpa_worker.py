@@ -12,6 +12,7 @@ import re
 from typing import Optional, Dict, Any, List
 from PySide6.QtCore import QThread, Signal
 from playwright.sync_api import sync_playwright
+from sar.src.core.playwright_setup import resolve_chromium_executable
 from sqlalchemy import text
 
 from sar.src.storage.repositories import ReferenciaRepository, AuditRepository, ConfigRepository
@@ -76,7 +77,7 @@ class BillingRpaWorker(QThread):
             self._update_solicitud_estado("PROCESANDO")
             
             # 3. Launch Playwright
-            self.status_changed.emit("Iniciando navegador Playwright (Headed)...")
+            self.status_changed.emit("Verificando navegador Playwright...")
             playwright_inst = sync_playwright().start()
             
             # Persist profile to save cache
@@ -86,9 +87,13 @@ class BillingRpaWorker(QThread):
             playwright_downloads = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "playwright_downloads_facturacion")
             os.makedirs(playwright_downloads, exist_ok=True)
             
+            # Resolve browser executable (handles frozen PyInstaller deployments)
+            executable_path = resolve_chromium_executable(
+                progress_callback=lambda msg: self.status_changed.emit(msg)
+            )
+            
             # launch_persistent_context espejando la estrategia del bot legacy (perfil persistente + anti-detección)
-            context = playwright_inst.chromium.launch_persistent_context(
-                user_data_dir,
+            launch_persistent_kwargs = dict(
                 headless=self.headless,
                 accept_downloads=True,
                 downloads_path=playwright_downloads,
@@ -101,6 +106,13 @@ class BillingRpaWorker(QThread):
                     "--no-sandbox",
                     "--disable-setuid-sandbox"
                 ]
+            )
+            if executable_path:
+                launch_persistent_kwargs["executable_path"] = executable_path
+            
+            context = playwright_inst.chromium.launch_persistent_context(
+                user_data_dir,
+                **launch_persistent_kwargs
             )
             
             # Eliminar marca de webdriver para evitar detección de bots por el portal

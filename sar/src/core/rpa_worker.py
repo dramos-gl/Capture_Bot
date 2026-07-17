@@ -9,6 +9,7 @@ import shutil
 from typing import Optional, Dict, Any
 from PySide6.QtCore import QThread, Signal
 from playwright.sync_api import sync_playwright
+from sar.src.core.playwright_setup import resolve_chromium_executable
 from sqlalchemy import text
 
 from sar.src.storage.repositories import ReferenciaRepository, AuditRepository, ConfigRepository
@@ -76,8 +77,13 @@ class RpaWorker(QThread):
             self._update_solicitud_estado("PROCESANDO")
             
             # 2. Launch Playwright (Synchronous mode)
-            self.status_changed.emit("Iniciando navegador Playwright...")
+            self.status_changed.emit("Verificando navegador Playwright...")
             playwright_inst = sync_playwright().start()
+            
+            # Resolve browser executable (handles frozen PyInstaller deployments)
+            executable_path = resolve_chromium_executable(
+                progress_callback=lambda msg: self.status_changed.emit(msg)
+            )
             
             # Browser setup with stealth arguments
             launch_args = [
@@ -87,10 +93,14 @@ class RpaWorker(QThread):
                 "--disable-infobars",
                 "--ignore-certificate-errors",
             ]
-            browser = playwright_inst.chromium.launch(
-                headless=self.headless,
-                args=launch_args
-            )
+            launch_kwargs = {
+                "headless": self.headless,
+                "args": launch_args,
+            }
+            if executable_path:
+                launch_kwargs["executable_path"] = executable_path
+            
+            browser = playwright_inst.chromium.launch(**launch_kwargs)
             
             context = browser.new_context(
                 viewport={"width": 1280, "height": 800},
