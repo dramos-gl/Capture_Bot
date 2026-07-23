@@ -17,27 +17,45 @@ class InventoryLoadWorker(QThread):
     result_ready = Signal(list, int) # data, total_count
     error_occurred = Signal(str)
     
-    def __init__(self, db_connector, limit: int, offset: int, search_text: str, concepto_id: int, filter_assigned: str):
+    def __init__(self, db_connector, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str):
         super().__init__()
         self.db_connector = db_connector
         self.limit = limit
         self.offset = offset
         self.search_text = search_text
         self.concepto_id = concepto_id
+        self.rfc_id = rfc_id
         self.filter_assigned = filter_assigned
         
     def run(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                res, total_count = repo.get_referencias_facturadas_paginated(
-                    limit=self.limit,
-                    offset=self.offset,
-                    search_text=self.search_text,
-                    concepto_id=self.concepto_id,
-                    filter_assigned=self.filter_assigned
-                )
-                self.result_ready.emit(res, total_count)
+            from sar.src.storage.api_client import APIClient
+            api_client = APIClient()
+            if api_client.connect_via_api:
+                payload = {
+                    "limit": self.limit,
+                    "offset": self.offset,
+                    "search_text": self.search_text,
+                    "filter_assigned": self.filter_assigned
+                }
+                if self.concepto_id:
+                    payload["concepto_id"] = self.concepto_id
+                if self.rfc_id:
+                    payload["rfc_id"] = self.rfc_id
+                res = api_client.request("GET", "/api/docs/inventario/referencias-facturadas", data=payload)
+                self.result_ready.emit(res["records"], res["total_count"])
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    res, total_count = repo.get_referencias_facturadas_paginated(
+                        limit=self.limit,
+                        offset=self.offset,
+                        search_text=self.search_text,
+                        concepto_id=self.concepto_id,
+                        rfc_id=self.rfc_id,
+                        filter_assigned=self.filter_assigned
+                    )
+                    self.result_ready.emit(res, total_count)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -99,15 +117,26 @@ class InventoryView(QWidget):
         self._setup_tab_catalogos()
         self.tabs.addTab(self.tab_catalogos, "⚙ Gestión de Catálogos")
 
+        # Hide tab bar headers to act as a QStackedWidget
+        self.tabs.tabBar().hide()
+
         self.main_layout.addWidget(self.tabs)
         
         # Initial data loading
         self.refresh_all()
 
-    def refresh_all(self):
-        if self.api_client.connect_via_api:
-            return
-        self._load_catalogs_data()
+    def set_active_tab(self, tab_key: str):
+        """Switches active widget based on sidebar submenu navigation key."""
+        if tab_key == "inventario_facturas":
+            self.tabs.setCurrentWidget(self.tab_visor)
+        elif tab_key == "inventario_masivo":
+            self.tabs.setCurrentWidget(self.tab_masivo)
+        elif tab_key == "inventario_catalogos":
+            self.tabs.setCurrentWidget(self.tab_catalogos)
+
+    def refresh_all(self, load_catalogs=True):
+        if load_catalogs:
+            self._load_catalogs_data()
         self.refresh_visor_data()
 
     # =========================================================================
@@ -129,11 +158,18 @@ class InventoryView(QWidget):
             parent=self
         )
         
-        # Add Concept combo filter to filter bar
-        self.cb_concept_filter = CustomComboBox(self)
-        self.cb_concept_filter.addItems(["Todos los conceptos"])
+        # Add Labeled Concept combo filter to filter bar
+        from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
+        self.labeled_concept = LabeledComboBox("Concepto", ["Todos los conceptos"])
+        self.cb_concept_filter = self.labeled_concept.combo
         self.cb_concept_filter.currentTextChanged.connect(self._on_concept_filter_visor)
-        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.cb_concept_filter)
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.labeled_concept)
+
+        # Add Labeled Empresa combo filter to filter bar
+        self.labeled_empresa = LabeledComboBox("Empresa", ["Todas las empresas"])
+        self.cb_empresa_filter = self.labeled_empresa.combo
+        self.cb_empresa_filter.currentTextChanged.connect(self._on_empresa_filter_visor)
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.labeled_empresa)
         
         layout.addWidget(self.filter_bar)
 
@@ -193,14 +229,18 @@ class InventoryView(QWidget):
         self._current_search_text = ""
         self._current_estado_filter = "Todos"
         self._current_concepto_id = None
+        self._current_rfc_id = None
         
         self.table.itemChanged.connect(self._on_table_item_changed)
 
     def refresh_visor_data(self):
         if self.active_worker and self.active_worker.isRunning():
             try:
-                self.active_worker.result_ready.disconnect()
-                self.active_worker.error_occurred.disconnect()
+                self.active_worker.result_ready.disconnect(self._on_visor_data_loaded)
+            except RuntimeError:
+                pass
+            try:
+                self.active_worker.error_occurred.disconnect(self._on_visor_load_error)
             except RuntimeError:
                 pass
             self.active_worker.terminate()
@@ -217,6 +257,7 @@ class InventoryView(QWidget):
             offset=offset,
             search_text=self._current_search_text,
             concepto_id=self._current_concepto_id,
+            rfc_id=self._current_rfc_id,
             filter_assigned=self._current_estado_filter
         )
         self.active_worker.result_ready.connect(self._on_visor_data_loaded)
@@ -232,7 +273,7 @@ class InventoryView(QWidget):
     def _on_visor_load_error(self, err):
         self.pagination_widget.setEnabled(True)
         self.lbl_pagination_info.setText("Error al cargar inventario.")
-        QMessageBox.critical(self, "Error de Datos", f"Fallo al conectar base de datos:\n{err}")
+        QMessageBox.critical(self, "Error de Datos", f"Fallo al conectar con el servidor:\n{err}")
 
     def _populate_visor_table(self):
         rows_data = []
@@ -310,6 +351,14 @@ class InventoryView(QWidget):
         self.current_page = 1
         self.refresh_visor_data()
 
+    def _on_empresa_filter_visor(self, text):
+        if text == "Todas las empresas" or not hasattr(self, '_rfcs_map'):
+            self._current_rfc_id = None
+        else:
+            self._current_rfc_id = self._rfcs_map.get(text)
+        self.current_page = 1
+        self.refresh_visor_data()
+
     def _on_page_size_changed(self, text):
         if "50" in text: self.page_size = 50
         elif "100" in text: self.page_size = 100
@@ -374,6 +423,9 @@ class InventoryView(QWidget):
         self.cb_colaboradores_masivo = CustomComboBox(self)
         form_layout.addRow("Colaborador:", self.cb_colaboradores_masivo)
 
+        self.cb_empresa_masivo = CustomComboBox(self)
+        form_layout.addRow("Empresa por Defecto:", self.cb_empresa_masivo)
+
         self.txt_solicitante_masivo = QLineEdit(self)
         self.txt_solicitante_masivo.setPlaceholderText("Ej. Pedro Gómez")
         form_layout.addRow("Solicitante Externo (Persona):", self.txt_solicitante_masivo)
@@ -386,9 +438,15 @@ class InventoryView(QWidget):
         file_layout = QHBoxLayout()
         self.lbl_excel_path = QLabel("Ningún archivo seleccionado", self)
         self.lbl_excel_path.setStyleSheet("color: #64748B; font-style: italic;")
+        
         btn_pick_excel = CustomButton("Seleccionar Excel de Control", is_secondary=True)
         btn_pick_excel.clicked.connect(self._on_pick_excel_masivo)
+        
+        btn_download_template = CustomButton("Descargar Plantilla", is_secondary=True)
+        btn_download_template.clicked.connect(self._on_download_template)
+        
         file_layout.addWidget(btn_pick_excel)
+        file_layout.addWidget(btn_download_template)
         file_layout.addWidget(self.lbl_excel_path)
         file_layout.addStretch()
         form_layout.addRow("Archivo Excel:", file_layout)
@@ -404,6 +462,9 @@ class InventoryView(QWidget):
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
+        self.btn_limpiar_preview = CustomButton("Limpiar Previsualización", is_secondary=True)
+        self.btn_limpiar_preview.clicked.connect(self._on_limpiar_preview)
+        btn_layout.addWidget(self.btn_limpiar_preview)
         self.btn_confirmar_masivo = CustomButton("Confirmar e Importar Lote de Asignación")
         self.btn_confirmar_masivo.setEnabled(False)
         self.btn_confirmar_masivo.clicked.connect(self._on_confirmar_masivo)
@@ -443,6 +504,30 @@ class InventoryView(QWidget):
             self.txt_solicitante_masivo.setEnabled(False)
             self.txt_solicitante_masivo.clear()
 
+    def _on_download_template(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar Plantilla de Importación",
+            "Plantilla_Control_Inventario.xlsx",
+            "Excel Files (*.xlsx)"
+        )
+        if not file_path:
+            return
+        try:
+            ExcelInventoryHandler.generate_blank_template(file_path)
+            QMessageBox.information(self, "Plantilla Descargada", f"Se ha generado la plantilla Excel con éxito en:\n{file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo generar la plantilla Excel:\n{str(e)}")
+
+    def _on_limpiar_preview(self):
+        self.parsed_records = []
+        self.validated_records = []
+        self.lbl_excel_path.setText("Ningún archivo seleccionado")
+        self.preview_table.clearContents()
+        self.preview_table.setRowCount(0)
+        self.btn_confirmar_masivo.setEnabled(False)
+        if hasattr(self, "_excel_file_path"):
+            del self._excel_file_path
+
     def _on_pick_excel_masivo(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel de Control", "", "Excel Files (*.xlsx)")
         if not file_path:
@@ -458,9 +543,17 @@ class InventoryView(QWidget):
                 QMessageBox.warning(self, "Excel Vacío", "No se encontraron filas con clientes o referencias válidas en el Excel.")
                 return
 
+            # Get selected default RFC/Empresa from dropdown
+            default_rfc_id = None
+            default_empresa_txt = self.cb_empresa_masivo.currentText()
+            if default_empresa_txt != "Seleccione empresa..." and hasattr(self, "_rfcs_map"):
+                default_rfc_id = self._rfcs_map.get(default_empresa_txt)
+
             # Validate rows against database
             with self.db_connector.get_session() as session:
-                self.validated_records = ExcelInventoryHandler.validate_parsed_rows(session, self.parsed_records)
+                self.validated_records = ExcelInventoryHandler.validate_parsed_rows(
+                    session, self.parsed_records, default_rfc_id=default_rfc_id
+                )
 
             # Populate preview table
             preview_rows = []
@@ -498,6 +591,8 @@ class InventoryView(QWidget):
                 QMessageBox.warning(self, "Errores Detectados", "El Excel contiene referencias con errores (delegación incorrecta, concepto cruzado o no facturada). Se omitirán o corregirán antes de continuar.")
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             QMessageBox.critical(self, "Error de Lectura", f"Fallo al abrir o leer el Excel:\n{str(e)}")
 
     def _on_confirmar_masivo(self):
@@ -552,18 +647,50 @@ class InventoryView(QWidget):
             parent_window = self.window()
             usuario_id = getattr(parent_window, "current_usuario_id", 1) # Default admin
 
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                lote_id = repo.crear_lote_asignacion(
-                    tipo_destino=tipo_destino,
-                    notaria_id=notaria_id,
-                    colaborador_id=colaborador_id,
-                    solicitante_externo=solicitante_externo,
-                    observaciones=observaciones,
-                    usuario_creacion=usuario_id,
-                    detalles_list=valid_details
-                )
-                session.commit()
+            if self.api_client.connect_via_api:
+                # Prepare payload
+                detalles_payload = []
+                for det in valid_details:
+                    det_dict = {
+                        "cliente": det["cliente"],
+                        "desarrollo_id": det["desarrollo_id"],
+                        "concepto_solicitado": det["concepto_solicitado"],
+                        "referencia_asignada": det["referencia_asignada"],
+                        "referencia_id": det.get("referencia_id"),
+                        "mz": det.get("mz"),
+                        "lote": det.get("lote"),
+                        "edif": det.get("edif"),
+                        "viv": det.get("viv"),
+                        "folio_electronico": det.get("folio_electronico"),
+                        "estatus_primer_aviso": det.get("estatus_primer_aviso"),
+                        "fecha_solicitud": det["fecha_solicitud"].strftime("%Y-%m-%d") if det.get("fecha_solicitud") else None
+                    }
+                    detalles_payload.append(det_dict)
+
+                payload = {
+                    "tipo_destino": tipo_destino,
+                    "notaria_id": notaria_id,
+                    "colaborador_id": colaborador_id,
+                    "solicitante_externo": solicitante_externo,
+                    "observaciones": observaciones,
+                    "usuario_creacion": usuario_id,
+                    "detalles": detalles_payload
+                }
+                res = self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
+                lote_id = res["lote_id"]
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    lote_id = repo.crear_lote_asignacion(
+                        tipo_destino=tipo_destino,
+                        notaria_id=notaria_id,
+                        colaborador_id=colaborador_id,
+                        solicitante_externo=solicitante_externo,
+                        observaciones=observaciones,
+                        usuario_creacion=usuario_id,
+                        detalles_list=valid_details
+                    )
+                    session.commit()
 
             QMessageBox.information(self, "Lote Guardado", f"Se ha registrado exitosamente el lote ID {lote_id} con {len(valid_details)} asignaciones.")
             
@@ -636,6 +763,8 @@ class InventoryView(QWidget):
         add_des_form.addRow("Delegación:", self.cb_deleg_desarrollo)
         
         btn_add_desarrollo = CustomButton("Agregar Desarrollo")
+        btn_add_desarrollo.clicked.connect(self._on_add_desarrollo)
+        
         col_des_layout.addLayout(add_des_form)
         col_des_layout.addWidget(btn_add_desarrollo)
         card_des.layout.addLayout(col_des_layout)
@@ -643,27 +772,40 @@ class InventoryView(QWidget):
 
     def _load_catalogs_data(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                notarias = repo.get_notarias()
-                colaboradores = repo.get_colaboradores()
-                desarrollos = repo.get_desarrollos()
+            if self.api_client.connect_via_api:
+                notarias = self.api_client.request("GET", "/api/docs/inventario/notarias")
+                colaboradores = self.api_client.request("GET", "/api/docs/inventario/colaboradores")
+                desarrollos = self.api_client.request("GET", "/api/docs/inventario/desarrollos")
+                cats = self.api_client.request("GET", "/api/ops/catalogos")
+                concepts_list = cats["conceptos"]
+                delegations_list = cats["delegaciones"]
+                rfcs_list = cats.get("rfcs", [])
                 
-                # Load concepts for Tab 1 Filter combobox
-                from sar.src.storage.models import Concepto
-                from sqlalchemy import select
-                concepts = session.execute(select(Concepto).where(Concepto.activo == True)).scalars().all()
-                
-                # Fetch delegaciones
-                from sar.src.storage.models import Delegacion
-                delegations = session.execute(select(Delegacion)).scalars().all()
-                
-                # Store mapping dictionaries INSIDE the session to prevent detached instance access
                 self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
                 self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
                 self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
-                self._delegations_map = {dg.nombre: dg.delegacion_id for dg in delegations}
-                self._concepts_map = {cp.nombre: cp.concepto_id for cp in concepts}
+                self._delegations_map = {dg["nombre"]: dg["delegacion_id"] for dg in delegations_list}
+                self._concepts_map = {cp["nombre"]: cp["concepto_id"] for cp in concepts_list}
+                self._rfcs_map = {r["razon_social"]: r["rfc_id"] for r in rfcs_list}
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    notarias = repo.get_notarias()
+                    colaboradores = repo.get_colaboradores()
+                    desarrollos = repo.get_desarrollos()
+                    
+                    from sar.src.storage.models import Concepto, Delegacion, Rfc
+                    from sqlalchemy import select
+                    concepts = session.execute(select(Concepto).where(Concepto.activo == True)).scalars().all()
+                    delegations = session.execute(select(Delegacion)).scalars().all()
+                    rfcs = session.execute(select(Rfc).where(Rfc.activo == True)).scalars().all()
+                    
+                    self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
+                    self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
+                    self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
+                    self._delegations_map = {dg.nombre: dg.delegacion_id for dg in delegations}
+                    self._concepts_map = {cp.nombre: cp.concepto_id for cp in concepts}
+                    self._rfcs_map = {r.razon_social: r.rfc_id for r in rfcs}
 
             # Populate combo boxes
             self.cb_notarias_masivo.clear()
@@ -671,6 +813,10 @@ class InventoryView(QWidget):
 
             self.cb_colaboradores_masivo.clear()
             self.cb_colaboradores_masivo.addItems(list(self._colaboradores_map.keys()))
+
+            self.cb_empresa_masivo.clear()
+            self.cb_empresa_masivo.addItem("Seleccione empresa...")
+            self.cb_empresa_masivo.addItems(list(self._rfcs_map.keys()))
 
             self.cb_deleg_desarrollo.clear()
             self.cb_deleg_desarrollo.addItems(list(self._delegations_map.keys()))
@@ -682,10 +828,25 @@ class InventoryView(QWidget):
             if current_concept_txt in self._concepts_map:
                 self.cb_concept_filter.setCurrentText(current_concept_txt)
 
+            current_empresa_txt = self.cb_empresa_filter.currentText()
+            self.cb_empresa_filter.clear()
+            self.cb_empresa_filter.addItem("Todas las empresas")
+            self.cb_empresa_filter.addItems(list(self._rfcs_map.keys()))
+            if current_empresa_txt in self._rfcs_map:
+                self.cb_empresa_filter.setCurrentText(current_empresa_txt)
+
             # Populate tables in Tab 3
             self.table_notarias.populate_rows([[str(n["notaria_id"]), n["nombre"]] for n in notarias])
             self.table_colaboradores.populate_rows([[str(c["colaborador_id"]), c["nombre"]] for c in colaboradores])
-            self.table_desarrollos.populate_rows([[str(d["desarrollo_id"]), d["nombre"], d["delegacion_nombre"]] for d in desarrollos])
+            
+            des_rows = []
+            for d in desarrollos:
+                des_rows.append([
+                    str(d["desarrollo_id"]),
+                    d["nombre"],
+                    d.get("delegacion_nombre") or d.get("delegacion", "")
+                ])
+            self.table_desarrollos.populate_rows(des_rows)
 
         except Exception as e:
             print("Error loading catalog data for inventory view:", e)
@@ -695,10 +856,13 @@ class InventoryView(QWidget):
         if not name:
             return
         try:
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                repo.save_notaria(name)
-                session.commit()
+            if self.api_client.connect_via_api:
+                self.api_client.request("POST", "/api/docs/inventario/notarias", data={"nombre": name})
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    repo.save_notaria(name)
+                    session.commit()
             self.txt_add_notaria.clear()
             self._load_catalogs_data()
         except Exception as e:
@@ -709,10 +873,13 @@ class InventoryView(QWidget):
         if not name:
             return
         try:
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                repo.save_colaborador(name)
-                session.commit()
+            if self.api_client.connect_via_api:
+                self.api_client.request("POST", "/api/docs/inventario/colaboradores", data={"nombre": name})
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    repo.save_colaborador(name)
+                    session.commit()
             self.txt_add_colaborador.clear()
             self._load_catalogs_data()
         except Exception as e:
@@ -726,10 +893,13 @@ class InventoryView(QWidget):
         if not name or not deleg_id:
             return
         try:
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                repo.save_desarrollo(name, deleg_id)
-                session.commit()
+            if self.api_client.connect_via_api:
+                self.api_client.request("POST", "/api/docs/inventario/desarrollos", data={"nombre": name, "delegacion_id": deleg_id})
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    repo.save_desarrollo(name, deleg_id)
+                    session.commit()
             self.txt_add_desarrollo.clear()
             self._load_catalogs_data()
         except Exception as e:
@@ -746,6 +916,8 @@ class ManualAssignmentDialog(QDialog):
         super().__init__(parent)
         self.db_connector = db_connector
         self.ref_ids = ref_ids
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         self.setWindowTitle("Asignar Factura Manualmente")
         self.setMinimumWidth(400)
@@ -846,11 +1018,16 @@ class ManualAssignmentDialog(QDialog):
 
     def _load_catalogs(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                notarias = repo.get_notarias()
-                colaboradores = repo.get_colaboradores()
-                desarrollos = repo.get_desarrollos()
+            if self.api_client.connect_via_api:
+                notarias = self.api_client.request("GET", "/api/docs/inventario/notarias")
+                colaboradores = self.api_client.request("GET", "/api/docs/inventario/colaboradores")
+                desarrollos = self.api_client.request("GET", "/api/docs/inventario/desarrollos")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    notarias = repo.get_notarias()
+                    colaboradores = repo.get_colaboradores()
+                    desarrollos = repo.get_desarrollos()
 
             self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
             self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
@@ -898,9 +1075,8 @@ class ManualAssignmentDialog(QDialog):
 
         # Prepare details (same values for all selected references)
         detalles_list = []
-        for r_id, r_port in zip(self.ref_ids, self.ref_ids): # We pass list of ids
+        for r_id in self.ref_ids:
             # Find the actual portal code for references
-            # Wait, let's load references from table
             portal_code = ""
             for r in range(self.parent().table.rowCount()):
                 if int(self.parent().table.item(r, 1).text()) == r_id:
@@ -926,18 +1102,37 @@ class ManualAssignmentDialog(QDialog):
             parent_window = self.parent().window()
             usuario_id = getattr(parent_window, "current_usuario_id", 1)
 
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                repo.crear_lote_asignacion(
-                    tipo_destino=tipo_destino,
-                    notaria_id=notaria_id,
-                    colaborador_id=colaborador_id,
-                    solicitante_externo=solicitante_externo,
-                    observaciones=self.txt_obs.toPlainText().strip(),
-                    usuario_creacion=usuario_id,
-                    detalles_list=detalles_list
-                )
-                session.commit()
+            if self.api_client.connect_via_api:
+                detalles_payload = []
+                for det in detalles_list:
+                    det_dict = dict(det)
+                    if det_dict.get("fecha_solicitud"):
+                        det_dict["fecha_solicitud"] = det_dict["fecha_solicitud"].strftime("%Y-%m-%d")
+                    detalles_payload.append(det_dict)
+
+                payload = {
+                    "tipo_destino": tipo_destino,
+                    "notaria_id": notaria_id,
+                    "colaborador_id": colaborador_id,
+                    "solicitante_externo": solicitante_externo,
+                    "observaciones": self.txt_obs.toPlainText().strip(),
+                    "usuario_creacion": usuario_id,
+                    "detalles": detalles_payload
+                }
+                self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    repo.crear_lote_asignacion(
+                        tipo_destino=tipo_destino,
+                        notaria_id=notaria_id,
+                        colaborador_id=colaborador_id,
+                        solicitante_externo=solicitante_externo,
+                        observaciones=self.txt_obs.toPlainText().strip(),
+                        usuario_creacion=usuario_id,
+                        detalles_list=detalles_list
+                    )
+                    session.commit()
 
             QMessageBox.information(self, "Éxito", f"Se asignaron exitosamente {len(self.ref_ids)} facturas.")
             self.accept()
@@ -951,6 +1146,8 @@ class ExportLotesDialog(QDialog):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         self.setWindowTitle("Exportar Reporte de Asignación")
         self.setMinimumSize(600, 400)
@@ -978,9 +1175,12 @@ class ExportLotesDialog(QDialog):
 
     def _load_lotes(self):
         try:
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                self.lotes = repo.get_lotes_asignacion()
+            if self.api_client.connect_via_api:
+                self.lotes = self.api_client.request("GET", "/api/docs/inventario/lotes")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    self.lotes = repo.get_lotes_asignacion()
                 
             rows = []
             for l in self.lotes:
@@ -1019,9 +1219,12 @@ class ExportLotesDialog(QDialog):
             return
 
         try:
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                details = repo.get_lote_detalles(lote_id)
+            if self.api_client.connect_via_api:
+                details = self.api_client.request("GET", f"/api/docs/inventario/lotes/{lote_id}/detalles")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    details = repo.get_lote_detalles(lote_id)
 
             # Generate Styled Excel
             title = f"ENTREGA DE DERECHOS"

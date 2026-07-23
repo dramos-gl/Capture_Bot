@@ -27,22 +27,24 @@ class ExcelInventoryHandler:
         # Find header indices
         headers = [str(h).strip().upper() for h in rows[0]]
         
-        def get_idx(name):
-            try:
-                return headers.index(name)
-            except ValueError:
-                return -1
+        def get_idx(*names):
+            for name in names:
+                name_upper = name.strip().upper()
+                if name_upper in headers:
+                    return headers.index(name_upper)
+            return -1
 
-        idx_cliente = get_idx("CLIENTE")
+        idx_cliente = get_idx("CLIENTE", "NOMBRE CLIENTE", "NOMBRE")
         idx_desarrollo = get_idx("DESARROLLO")
-        idx_fecha_sol = get_idx("FECHA_SOLICITUD")
-        idx_ubicacion = get_idx("UBICACION")
-        idx_mz = get_idx("MZ")
-        idx_lote = get_idx("LOTE")
-        idx_edif = get_idx("EDIF")
-        idx_viv = get_idx("VIV")
+        idx_empresa = get_idx("EMPRESA", "RFC", "EMPRESA FACTURADORA")
+        idx_fecha_sol = get_idx("FECHA_SOLICITUD", "FECHA SOLICITUD", "FECHA")
+        idx_ubicacion = get_idx("UBICACION", "UBICACIÓN")
+        idx_mz = get_idx("MZ", "MANZANA")
+        idx_lote = get_idx("LOTE", "LT")
+        idx_edif = get_idx("EDIF", "EDIFICIO")
+        idx_viv = get_idx("VIV", "VIVIENDA")
         idx_folio = get_idx("FOLIO")
-        idx_estatus_aviso = get_idx("ESTATUS_PRIMER_AVISO")
+        idx_estatus_aviso = get_idx("ESTATUS_PRIMER_AVISO", "ESTATUS RPP")
         
         # Concept reference columns
         concept_cols = {
@@ -67,6 +69,7 @@ class ExcelInventoryHandler:
                 continue # Skip rows without client name
 
             desarrollo = str(row[idx_desarrollo]).strip().upper() if idx_desarrollo != -1 and row[idx_desarrollo] is not None else "GENERICO"
+            empresa = str(row[idx_empresa]).strip().upper() if idx_empresa != -1 and row[idx_empresa] is not None else ""
             
             # Format date
             fecha_sol = None
@@ -108,14 +111,19 @@ class ExcelInventoryHandler:
                 if col_idx != -1 and row[col_idx] is not None:
                     ref_val = str(row[col_idx]).strip()
                     # Skip empty/None references or headers accidentally repeated
-                    if not ref_val or ref_val.upper() in ("NONE", "NULL", "-"):
+                    if not ref_val or ref_val.upper() in ("NONE", "NULL", "-", ""):
                         continue
+                    
+                    is_indicator = False
+                    if len(ref_val) <= 4 or ref_val.upper() in ("X", "SI", "S", "1", "YES", "OK", "X/"):
+                        is_indicator = True
                     
                     # Store record
                     parsed_records.append({
                         "excel_row": row_num,
                         "cliente": cliente,
                         "desarrollo": desarrollo,
+                        "empresa": empresa,
                         "fecha_solicitud": fecha_sol,
                         "mz": mz,
                         "lote": lote,
@@ -124,33 +132,44 @@ class ExcelInventoryHandler:
                         "folio_electronico": folio,
                         "estatus_primer_aviso": estatus_aviso,
                         "concepto_solicitado": concept_name,
-                        "referencia_asignada": ref_val
+                        "referencia_asignada": "" if is_indicator else ref_val,
+                        "requiere_autovincular": is_indicator
                     })
 
         return parsed_records
 
     @staticmethod
-    def validate_parsed_rows(session, parsed_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def validate_parsed_rows(session, parsed_rows: List[Dict[str, Any]], default_rfc_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Validates parsed rows against the database, enforcing:
-        1. Reference exists and is FACTURADA.
+        1. Reference exists and is FACTURADA (or auto-assigns an available one if empty).
         2. Reference is not already assigned.
         3. Concept matching (CLG, AVISO, etc.).
         4. Geolocation match (desarrollo delegation == reference delegation).
+        5. Company (RFC) matching for autolink and validation.
         """
-        from sar.src.storage.models import Referencia, EstadoSistema, Desarrollo, Delegacion, GrupoReferencia, Concepto, Solicitud
+        from sar.src.storage.models import Referencia, EstadoSistema, Desarrollo, Delegacion, GrupoReferencia, Concepto, Solicitud, Rfc
+        from sqlalchemy import select
         
         # Cache concepts mapping
         concepto_stmt = select(Concepto)
         concepts = session.execute(concepto_stmt).scalars().all()
-        # Map aliases: 'CLG' -> Concepto(alias='CLG')
         concept_alias_map = {c.alias: c for c in concepts if c.alias}
+
+        # Cache RFCs mapping (razon_social and rfc strings to id)
+        rfcs_stmt = select(Rfc).where(Rfc.activo == True)
+        rfcs = session.execute(rfcs_stmt).scalars().all()
+        rfcs_map = {r.razon_social.strip().upper(): r.rfc_id for r in rfcs}
+        rfcs_map.update({r.rfc.strip().upper(): r.rfc_id for r in rfcs})
         
         validated_rows = []
+        allocated_ref_ids = set()
 
         for row in parsed_rows:
             ref_str = row["referencia_asignada"]
             concept_req = row["concepto_solicitado"]
             desarrollo_name = row["desarrollo"]
+            row_empresa = row.get("empresa", "").strip().upper()
+            req_autolink = row.get("requiere_autovincular", False)
             
             row_result = dict(row)
             row_result["status"] = "PENDIENTE" # default
@@ -158,19 +177,31 @@ class ExcelInventoryHandler:
             row_result["referencia_id"] = None
             row_result["desarrollo_id"] = None
             row_result["delegacion_nombre"] = ""
+            row_result["rfc_id"] = None
+            
+            # Resolve Company (RFC)
+            resolved_rfc_id = None
+            if row_empresa:
+                resolved_rfc_id = rfcs_map.get(row_empresa)
+                if not resolved_rfc_id:
+                    row_result["status"] = "ERROR"
+                    row_result["error_message"] = f"La empresa '{row_empresa}' no está registrada o no está activa."
+                    validated_rows.append(row_result)
+                    continue
+            else:
+                resolved_rfc_id = default_rfc_id
+
+            row_result["rfc_id"] = resolved_rfc_id
             
             # 1. Lookup/register Desarrollo first
             des_stmt = select(Desarrollo).where(Desarrollo.nombre == desarrollo_name)
             desarrollo = session.execute(des_stmt).scalars().first()
             
             if not desarrollo:
-                # Try fallback: register it temporarily under CANCUN (delegacion_id=2) or PLAYA (delegacion_id=3)
-                # Let's infer based on name:
                 deleg_id = 2 # default Cancun
                 if "PLAYA" in desarrollo_name or "TULUM" in desarrollo_name:
                     deleg_id = 3 # Playa del Carmen
                 
-                # We can dynamically register the development
                 desarrollo = Desarrollo(nombre=desarrollo_name, delegacion_id=deleg_id, activo=True)
                 session.add(desarrollo)
                 session.flush()
@@ -181,6 +212,52 @@ class ExcelInventoryHandler:
             deleg_stmt = select(Delegacion.nombre).where(Delegacion.delegacion_id == desarrollo.delegacion_id)
             deleg_name = session.execute(deleg_stmt).scalar()
             row_result["delegacion_nombre"] = deleg_name
+
+            # Handle automatic reference assignment
+            if req_autolink or not ref_str:
+                if not resolved_rfc_id:
+                    row_result["status"] = "ERROR"
+                    row_result["error_message"] = "Debe especificar la Empresa en el Excel o seleccionar una Empresa por Defecto en la pantalla."
+                    validated_rows.append(row_result)
+                    continue
+
+                expected_aliases = []
+                if concept_req == "CLG": expected_aliases = ["CLG"]
+                elif concept_req in ("AVISO", "NUEVO_DERECHO_AVISO"): expected_aliases = ["AVISO PREVENTIVO"]
+                elif concept_req == "ANALISIS": expected_aliases = ["ANALISIS"]
+                else: expected_aliases = [concept_req]
+
+                # Find a reference in FACTURADA state for this concept, delegation, and company
+                available_stmt = (
+                    select(Referencia)
+                    .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+                    .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
+                    .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
+                    .join(Solicitud, Referencia.solicitud_id == Solicitud.solicitud_id)
+                    .where(
+                        EstadoSistema.entidad == 'referencia',
+                        EstadoSistema.codigo == 'FACTURADA',
+                        Concepto.alias.in_(expected_aliases),
+                        Solicitud.delegacion_id == desarrollo.delegacion_id,
+                        GrupoReferencia.rfc_id == resolved_rfc_id
+                    )
+                )
+                if allocated_ref_ids:
+                    available_stmt = available_stmt.where(Referencia.referencia_id.not_in(list(allocated_ref_ids)))
+
+                ref_obj = session.execute(available_stmt).scalars().first()
+                if not ref_obj:
+                    row_result["status"] = "ERROR"
+                    row_result["error_message"] = f"No hay facturas disponibles ('FACTURADA') para '{concept_req}' de la empresa seleccionada en '{deleg_name}'."
+                    validated_rows.append(row_result)
+                    continue
+
+                row_result["referencia_id"] = ref_obj.referencia_id
+                row_result["referencia_asignada"] = ref_obj.referencia_portal
+                allocated_ref_ids.add(ref_obj.referencia_id)
+                row_result["status"] = "CORRECTO"
+                validated_rows.append(row_result)
+                continue
 
             # 2. Query reference details
             ref_stmt = (
@@ -363,3 +440,48 @@ class ExcelInventoryHandler:
             ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
 
         wb.save(dest_path)
+
+    @staticmethod
+    def generate_blank_template(dest_path: str):
+        """Generates a blank styled Excel sheet containing the correct columns for bulk import."""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Hoja1"
+
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        
+        font_header = Font(name="Calibri", size=10, bold=True, color="000000")
+        fill_header = PatternFill(start_color="86C232", end_color="86C232", fill_type="solid") # Sleek green
+        border_thin = Side(border_style="thin", color="D3D3D3")
+
+        headers = [
+            "CLIENTE", "DESARROLLO", "EMPRESA", "FECHA_SOLICITUD", "UBICACION", "MZ", "LOTE", "EDIF", "VIV", 
+            "FOLIO", "ESTATUS_PRIMER_AVISO", "ANALISIS", "AVISO", "CLG", "CANC_1ER _AVISO", "CANC_2DO_AVISO", "NUEVO_DERECHO_AVISO"
+        ]
+        
+        ws.row_dimensions[1].height = 25
+        for col_idx, text_header in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col_idx, value=text_header)
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=Side(border_style="medium", color="000000"))
+
+        # Add a mock row as a reference example for users
+        ws.row_dimensions[2].height = 18
+        mock_data = [
+            "JUAN PEREZ", "ALDEA TULUM", "PROMOTORA RESIDENCIAL", "2026-07-21", "MZ 10 LT 5 VIV 3", "10", "5", "", "3",
+            "123456", "NUEVO INGRESO", "", "70028350819888101", "", "", "", ""
+        ]
+        for col_idx, val in enumerate(mock_data, start=1):
+            cell = ws.cell(row=2, column=col_idx, value=val)
+            cell.font = Font(name="Calibri", size=10, italic=True)
+            cell.border = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
+
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or '')) for cell in col)
+            col_letter = openpyxl.utils.get_column_letter(col[0].column)
+            ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+        wb.save(dest_path)
+

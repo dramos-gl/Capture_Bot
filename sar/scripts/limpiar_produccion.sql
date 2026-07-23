@@ -13,7 +13,8 @@ BEGIN;
 -- 'RESTART IDENTITY' reinicia las secuencias (IDs autoincrementales) a 1.
 -- 'CASCADE' asegura la integridad referencial en cascada si hubiera dependencias ocultas.
 TRUNCATE TABLE 
-    sar_archivo.asignacion,
+    sar_archivo.lote_detalle,
+    sar_archivo.lote_asignacion,
     sar_archivo.factura,
     sar_archivo.archivo_pdf,
     sar_produccion.referencia,

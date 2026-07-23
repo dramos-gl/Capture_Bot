@@ -355,23 +355,23 @@ class BillingBotView(QWidget):
                 with self.db_connector.get_session() as session:
                     repo = OperacionRepository(session)
                     solicitudes = repo.get_solicitudes_facturacion(u_id, ver_facturadas=ver_todas)
+            
+            data_rows = []
+            for s in solicitudes:
+                data_rows.append([
+                    str(s["solicitud_id"]),
+                    s["folio"],
+                    s["rfc"],
+                    s["razon_social"],
+                    s["concepto"],
+                    str(s["cantidad_solicitada"]),
+                    str(s.get("cantidad_autorizada", 0)),
+                    str(s.get("cantidad_facturada", 0)),
+                    s["estado"]
+                ])
                 
-                data_rows = []
-                for s in solicitudes:
-                    data_rows.append([
-                        str(s["solicitud_id"]),
-                        s["folio"],
-                        s["rfc"],
-                        s["razon_social"],
-                        s["concepto"],
-                        str(s["cantidad_solicitada"]),
-                        str(s.get("cantidad_autorizada", 0)),
-                        str(s.get("cantidad_facturada", 0)),
-                        s["estado"]
-                    ])
-                    
-                self.table.populate_rows(data_rows)
-                self.log(f"Se cargaron {len(solicitudes)} solicitudes.")
+            self.table.populate_rows(data_rows)
+            self.log(f"Se cargaron {len(solicitudes)} solicitudes.")
         except Exception as e:
             self.log(f"ERROR: {str(e)}")
             QMessageBox.critical(self, "Error", f"No se pudieron cargar las solicitudes:\n{str(e)}")

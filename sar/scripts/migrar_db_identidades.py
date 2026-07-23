@@ -32,7 +32,6 @@ TABLES_TO_MIGRATE = [
     
     ("sar_archivo.archivo_pdf", "archivo_id"),
     ("sar_archivo.factura", "factura_id"),
-    ("sar_archivo.asignacion", "asignacion_id"),
     
     ("sar_auditoria.auditoria_login", "login_id"),
     ("sar_auditoria.auditoria_evento", "evento_auditoria_id"),

@@ -742,3 +742,138 @@ def update_referencia_estado(referencia_id: int, request: UpdateReferenciaEstado
         return {"detail": "Estado de referencia actualizado"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- ENDPOINTS DE CONTROL DE INVENTARIO ---
+
+class NotariaCreateRequest(BaseModel):
+    nombre: str
+
+class ColaboradorCreateRequest(BaseModel):
+    nombre: str
+
+class DesarrolloCreateRequest(BaseModel):
+    nombre: str
+    delegacion_id: int
+
+class LoteDetalleItem(BaseModel):
+    cliente: str
+    desarrollo_id: int
+    fecha_solicitud: Optional[str] = None
+    mz: Optional[str] = None
+    lote: Optional[str] = None
+    edif: Optional[str] = None
+    viv: Optional[str] = None
+    folio_electronico: Optional[str] = None
+    estatus_primer_aviso: Optional[str] = None
+    concepto_solicitado: str
+    referencia_id: Optional[int] = None
+    referencia_asignada: str
+
+class LoteAsignacionCreateRequest(BaseModel):
+    tipo_destino: str
+    notaria_id: Optional[int] = None
+    colaborador_id: Optional[int] = None
+    solicitante_externo: Optional[str] = None
+    observaciones: Optional[str] = None
+    usuario_creacion: int
+    detalles: List[LoteDetalleItem]
+
+@router.get("/inventario/notarias")
+def get_notarias(db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    return InventarioRepository(db).get_notarias()
+
+@router.post("/inventario/notarias")
+def save_notaria(request: NotariaCreateRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        res = InventarioRepository(db).save_notaria(request.nombre)
+        db.commit()
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/inventario/colaboradores")
+def get_colaboradores(db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    return InventarioRepository(db).get_colaboradores()
+
+@router.post("/inventario/colaboradores")
+def save_colaborador(request: ColaboradorCreateRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        res = InventarioRepository(db).save_colaborador(request.nombre)
+        db.commit()
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/inventario/desarrollos")
+def get_desarrollos(db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    return InventarioRepository(db).get_desarrollos()
+
+@router.post("/inventario/desarrollos")
+def save_desarrollo(request: DesarrolloCreateRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        res = InventarioRepository(db).save_desarrollo(request.nombre, request.delegacion_id)
+        db.commit()
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/inventario/referencias-facturadas")
+def get_referencias_facturadas(
+    limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None, filter_assigned: str = "Todos",
+    db: Session = Depends(get_db)
+):
+    from sar.src.storage.repositories import InventarioRepository
+    repo = InventarioRepository(db)
+    records, total = repo.get_referencias_facturadas_paginated(
+        limit=limit, offset=offset, search_text=search_text, concepto_id=concepto_id, rfc_id=rfc_id, filter_assigned=filter_assigned
+    )
+    return {"records": records, "total_count": total}
+
+@router.post("/inventario/lotes")
+def create_lote_asignacion(request: LoteAsignacionCreateRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    import datetime
+    try:
+        # Convert string date to datetime.date object
+        detalles_converted = []
+        for det in request.detalles:
+            d_dict = det.model_dump()
+            if d_dict.get("fecha_solicitud"):
+                try:
+                    d_dict["fecha_solicitud"] = datetime.datetime.strptime(d_dict["fecha_solicitud"].split()[0], "%Y-%m-%d").date()
+                except:
+                    d_dict["fecha_solicitud"] = None
+            detalles_converted.append(d_dict)
+            
+        repo = InventarioRepository(db)
+        lote_id = repo.crear_lote_asignacion(
+            tipo_destino=request.tipo_destino,
+            notaria_id=request.notaria_id,
+            colaborador_id=request.colaborador_id,
+            solicitante_externo=request.solicitante_externo,
+            observaciones=request.observaciones,
+            usuario_creacion=request.usuario_creacion,
+            detalles_list=detalles_converted
+        )
+        db.commit()
+        return {"lote_id": lote_id, "detail": "Lote de asignación creado con éxito"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/lotes")
+def get_lotes_asignacion(db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    return InventarioRepository(db).get_lotes_asignacion()
+
+@router.get("/inventario/lotes/{lote_id}/detalles")
+def get_lote_detalles(lote_id: int, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    return InventarioRepository(db).get_lote_detalles(lote_id)
+

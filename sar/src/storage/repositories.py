@@ -1503,7 +1503,7 @@ class InventarioRepository(BaseRepository):
         return {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "delegacion_id": d.delegacion_id}
 
     def get_referencias_facturadas_paginated(
-        self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, filter_assigned: str = "Todos"
+        self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, rfc_id: int = None, filter_assigned: str = "Todos"
     ) -> tuple[List[dict], int]:
         from sqlalchemy import text
         
@@ -1516,6 +1516,9 @@ class InventarioRepository(BaseRepository):
         if concepto_id:
             conditions.append("concepto_id = :concepto_id")
             params["concepto_id"] = concepto_id
+
+        if rfc_id:
+            params["rfc_id"] = rfc_id
             
         if filter_assigned == "Disponible":
             conditions.append("referencia_id NOT IN (SELECT ld.referencia_id FROM sar_archivo.lote_detalle ld WHERE ld.referencia_id IS NOT NULL)")
@@ -1565,6 +1568,8 @@ class InventarioRepository(BaseRepository):
         conditions_sql.append("es.codigo = 'FACTURADA'")
         if concepto_id:
             conditions_sql.append("gr.concepto_id = :concepto_id")
+        if rfc_id:
+            conditions_sql.append("gr.rfc_id = :rfc_id")
         if filter_assigned == "Disponible":
             conditions_sql.append("ld.lote_detalle_id IS NULL")
         elif filter_assigned == "Asignada":

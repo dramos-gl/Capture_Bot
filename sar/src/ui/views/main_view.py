@@ -98,6 +98,9 @@ class MainView(QWidget):
             if has_referencias:
                 self.sidebar.show_item("referencias")
                 self.sidebar.show_item("inventario")
+                self.sidebar.show_item("inventario_facturas")
+                self.sidebar.show_item("inventario_masivo")
+                self.sidebar.show_item("inventario_catalogos")
                 if not default_item: default_item = "referencias"
             if has_seguridad:
                 self.sidebar.show_item("configuracion")
@@ -134,6 +137,9 @@ class MainView(QWidget):
                 "solicitudes": "SOLICITUDES",
                 "referencias": "REFERENCIAS",
                 "inventario": "REFERENCIAS",
+                "inventario_facturas": "REFERENCIAS",
+                "inventario_masivo": "REFERENCIAS",
+                "inventario_catalogos": "REFERENCIAS",
                 "configuracion": "SEGURIDAD"
             }
             
@@ -188,13 +194,21 @@ class MainView(QWidget):
                 self.stacked_widget.addWidget(self.refs_view)
             self.stacked_widget.setCurrentWidget(self.refs_view)
             self.refs_view.refresh_data()
-        elif view_key == "inventario":
+        elif view_key in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
             if not self.inventory_view:
                 from sar.src.ui.views.inventory_view import InventoryView
                 self.inventory_view = InventoryView(self.db_connector, self)
                 self.stacked_widget.addWidget(self.inventory_view)
             self.stacked_widget.setCurrentWidget(self.inventory_view)
-            self.inventory_view.refresh_all()
+            
+            # Load catalogs only if entering mass assignment or catalog tabs
+            load_cats = view_key in ["inventario_masivo", "inventario_catalogos"]
+            self.inventory_view.refresh_all(load_catalogs=load_cats)
+            
+            if view_key == "inventario":
+                self.inventory_view.set_active_tab("inventario_facturas")
+            else:
+                self.inventory_view.set_active_tab(view_key)
         elif view_key == "configuracion":
             if not self.admin_window:
                 from sar.src.ui.views.admin_view import AdminWindow

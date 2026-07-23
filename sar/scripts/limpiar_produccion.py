@@ -17,7 +17,8 @@ def limpiar_produccion():
     
     # Lista de tablas a truncar y reiniciar sus llaves primarias seriales
     tablas_limpiar = [
-        "sar_archivo.asignacion",
+        "sar_archivo.lote_detalle",
+        "sar_archivo.lote_asignacion",
         "sar_archivo.factura",
         "sar_archivo.archivo_pdf",
         "sar_produccion.referencia",
