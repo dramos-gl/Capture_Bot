@@ -43,6 +43,7 @@ class MainWindow(QMainWindow):
         # Connect login signal
         self.login_view.login_requested.connect(self._handle_login)
 
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._drag_pos = event.globalPosition().toPoint()
@@ -157,6 +158,7 @@ class MainWindow(QMainWindow):
                 
                 # Hook up logout for BillingBotWindow
                 self.active_module.logout_requested.connect(self._handle_logout)
+
             else:
                 # Placeholder for other modules
                 from PySide6.QtWidgets import QLabel

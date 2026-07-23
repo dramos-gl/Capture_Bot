@@ -54,6 +54,12 @@ class OrdersView(QWidget):
         # Pre-load catalogs and data
         self._current_search_text = ""
         self._current_estado_filter = "Todas"
+        
+        # Edit mode state variables
+        self._edit_mode = False
+        self._editing_order_id = None
+        self._editing_folio = None
+
         self._load_catalogs()
         self.refresh_historial()
         
@@ -86,6 +92,8 @@ class OrdersView(QWidget):
         self.table_historial = StyledDataTable(headers, parent=self)
         self.table_historial.setColumnHidden(0, True) # Ocultar ID interno
         self.table_historial.cellDoubleClicked.connect(self._on_row_double_clicked)
+        self.table_historial.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_historial.customContextMenuRequested.connect(self._show_context_menu)
         
         self.historial_card.add_widget(self.table_historial)
         
@@ -101,9 +109,13 @@ class OrdersView(QWidget):
         self.btn_cancelar_orden = CustomButton("Cancelar Orden", is_secondary=True)
         self.btn_cancelar_orden.clicked.connect(self._on_cancelar_orden)
         
+        self.btn_editar_orden = CustomButton("Editar Orden", is_secondary=True)
+        self.btn_editar_orden.clicked.connect(self._on_editar_orden_clicked)
+        
         actions_layout.addWidget(self.btn_autorizar_orden)
         actions_layout.addWidget(self.btn_rechazar_orden)
         actions_layout.addWidget(self.btn_cancelar_orden)
+        actions_layout.addWidget(self.btn_editar_orden)
         
         self.historial_card.layout.addLayout(actions_layout)
         
@@ -133,6 +145,23 @@ class OrdersView(QWidget):
         card_header_layout.addLayout(card_title_vbox)
         card_header_layout.addStretch()
         
+        # Previous total box (only shown in edit mode)
+        self.total_anterior_frame = QFrame()
+        self.total_anterior_frame.setObjectName("totalAnteriorFrame")
+        total_anterior_layout = QHBoxLayout(self.total_anterior_frame)
+        total_anterior_layout.setContentsMargins(6, 6, 6, 6)
+        total_anterior_layout.setSpacing(12)
+        
+        lbl_tot_ant_text = CustomLabel("Total Anterior:", variant="body")
+        lbl_tot_ant_text.setObjectName("totalAnteriorTitle")
+        self.lbl_tot_ant_val = CustomLabel("0", variant="header")
+        self.lbl_tot_ant_val.setObjectName("totalAnteriorValue")
+        
+        total_anterior_layout.addWidget(lbl_tot_ant_text)
+        total_anterior_layout.addWidget(self.lbl_tot_ant_val)
+        card_header_layout.addWidget(self.total_anterior_frame)
+        self.total_anterior_frame.setVisible(False)
+
         # General total box
         self.total_general_frame = QFrame()
         self.total_general_frame.setObjectName("totalGeneralFrame")
@@ -189,6 +218,7 @@ class OrdersView(QWidget):
         self.grid = InteractiveGrid(self)
         self.grid.data_changed.connect(self._update_summary)
         self.grid.save_triggered.connect(self._on_guardar_orden)
+        self.grid.cancel_triggered.connect(self._on_cancelar_edicion)
         card_layout.addWidget(self.grid)
         
         layout.addWidget(self.card)
@@ -279,13 +309,93 @@ class OrdersView(QWidget):
             seen_combinations.add(key)
             
         # Confirmation Dialog
-        reply = QMessageBox.question(
-            self, "Confirmar Guardar",
-            "¿Estás seguro de que deseas guardar esta orden?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        if reply != QMessageBox.Yes:
-            return
+        if self._edit_mode:
+            changes_summary = []
+            original_map = {}
+            for r in getattr(self, "_original_renglones", []):
+                key = (r["rfc_id"], r["concepto_id"], r["delegacion_id"])
+                original_map[key] = r
+                
+            current_keys = set()
+            has_increased_completed = False
+            
+            for row in data:
+                key = (row["rfc_id"], row["concepto_id"], row["delegacion_id"])
+                current_keys.add(key)
+                
+                rfc_txt = self.grid.get_rfc_text(row["rfc_id"]) or str(row["rfc_id"])
+                concept_txt = self.grid.get_concepto_text(row["concepto_id"]) or str(row["concepto_id"])
+                del_txt = self.grid.get_delegacion_text(row["delegacion_id"]) or str(row["delegacion_id"])
+                
+                if key in original_map:
+                    orig_row = original_map[key]
+                    orig_cant = orig_row["cantidad"]
+                    curr_cant = row["cantidad"]
+                    
+                    if orig_row.get("cantidad_generada", 0) > 0 and curr_cant > orig_row.get("cantidad_generada", 0):
+                        has_increased_completed = True
+                    
+                    if curr_cant != orig_cant:
+                        changes_summary.append(
+                            f"• {rfc_txt} - {concept_txt} ({del_txt}):\n"
+                            f"  Cant. Anterior: {orig_cant} → Cant. Actual: {curr_cant}"
+                        )
+                else:
+                    curr_cant = row["cantidad"]
+                    changes_summary.append(
+                        f"• [NUEVA] {rfc_txt} - {concept_txt} ({del_txt}):\n"
+                        f"  Cant. Anterior: 0 → Cant. Actual: {curr_cant}"
+                    )
+            
+            # Check deleted rows
+            for key, orig_row in original_map.items():
+                if key not in current_keys:
+                    rfc_txt = self.grid.get_rfc_text(orig_row["rfc_id"]) or str(orig_row["rfc_id"])
+                    concept_txt = self.grid.get_concepto_text(orig_row["concepto_id"]) or str(orig_row["concepto_id"])
+                    del_txt = self.grid.get_delegacion_text(orig_row["delegacion_id"]) or str(orig_row["delegacion_id"])
+                    orig_cant = orig_row["cantidad"]
+                    changes_summary.append(
+                        f"• [ELIMINADA] {rfc_txt} - {concept_txt} ({del_txt}):\n"
+                        f"  Cant. Anterior: {orig_cant} → Cant. Actual: 0 (Eliminada)"
+                    )
+                    
+            if changes_summary:
+                summary_text = "\n".join(changes_summary)
+                completed_warning = ""
+                if has_increased_completed:
+                    completed_warning = (
+                        "⚠️ IMPORTANTE: Has incrementado la cantidad en partidas que ya fueron procesadas por el bot.\n"
+                        "Se generará una nueva solicitud pendiente por la cantidad adicional.\n\n"
+                    )
+                    
+                reply = QMessageBox.question(
+                    self, "Resumen de Cambios a la Orden",
+                    f"{completed_warning}"
+                    f"Se realizarán los siguientes cambios en las partidas:\n\n"
+                    f"{summary_text}\n\n"
+                    f"¿Deseas continuar con la actualización?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return
+            else:
+                # No changes in rows, just confirm update header
+                reply = QMessageBox.question(
+                    self, "Confirmar Actualizar",
+                    "¿Estás seguro de que deseas actualizar esta orden (encabezado)?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return
+        else:
+            action_title = "Confirmar Guardar"
+            action_msg = "¿Estás seguro de que deseas guardar esta orden?"
+            reply = QMessageBox.question(
+                self, action_title, action_msg,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
                 
         # Main Window should have the current session id and user id, but we might only have session id.
         # We can extract the user_id by querying the session in the DB, or just pass it down.
@@ -295,51 +405,86 @@ class OrdersView(QWidget):
         current_usuario_id = getattr(main_window, 'current_usuario_id', 1)
         
         try:
-            if self.api_client.connect_via_api:
-                payload = {
-                    "usuario_id": current_usuario_id,
-                    "sesion_id": current_sesion_id,
-                    "descripcion": desc,
-                    "municipio_id": municipio_id,
-                    "renglones": data
-                }
-                res = self.api_client.request("POST", "/api/ops/ordenes", data=payload)
-                folio = res["folio"]
-                
+            if self._edit_mode:
+                if self.api_client.connect_via_api:
+                    payload = {
+                        "usuario_id": current_usuario_id,
+                        "sesion_id": current_sesion_id,
+                        "descripcion": desc,
+                        "municipio_id": municipio_id,
+                        "renglones": data
+                    }
+                    res = self.api_client.request("PUT", f"/api/ops/ordenes/{self._editing_order_id}", data=payload)
+                    folio = res["folio"]
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.models import Sesion
+                        db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
+                        usuario_id = db_sesion.usuario_id if db_sesion else 1
+                        
+                        service = OrdenesService(session)
+                        nueva_orden = service.actualizar_orden_manual(
+                            orden_id=self._editing_order_id,
+                            usuario_id=usuario_id,
+                            sesion_id=current_sesion_id,
+                            descripcion=desc,
+                            municipio_id=municipio_id,
+                            renglones=data
+                        )
+                        session.commit()
+                        folio = nueva_orden.folio
+                        
                 QMessageBox.information(
                     self, "Éxito", 
-                    f"Orden {folio} creada correctamente con {len(data)} grupos."
+                    f"Orden {folio} actualizada correctamente."
                 )
-                
-                # Reset Form
-                self.desc_input.setText("")
-                self.grid.clear()
-                self.grid.add_row()
+                self._on_cancelar_edicion()
             else:
-                with self.db_connector.get_session() as session:
-                    # Get current user
-                    from sar.src.storage.models import Sesion
-                    db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
-                    usuario_id = db_sesion.usuario_id if db_sesion else 1 # Fallback to 1 for dev if no session
-                    
-                    service = OrdenesService(session)
-                    nueva_orden = service.crear_orden_manual(
-                        usuario_id=usuario_id,
-                        sesion_id=current_sesion_id,
-                        descripcion=desc,
-                        municipio_id=municipio_id,
-                        renglones=data
-                    )
+                if self.api_client.connect_via_api:
+                    payload = {
+                        "usuario_id": current_usuario_id,
+                        "sesion_id": current_sesion_id,
+                        "descripcion": desc,
+                        "municipio_id": municipio_id,
+                        "renglones": data
+                    }
+                    res = self.api_client.request("POST", "/api/ops/ordenes", data=payload)
+                    folio = res["folio"]
                     
                     QMessageBox.information(
                         self, "Éxito", 
-                        f"Orden {nueva_orden.folio} creada correctamente con {len(data)} grupos."
+                        f"Orden {folio} creada correctamente con {len(data)} grupos."
                     )
                     
                     # Reset Form
                     self.desc_input.setText("")
                     self.grid.clear()
                     self.grid.add_row()
+                else:
+                    with self.db_connector.get_session() as session:
+                        # Get current user
+                        from sar.src.storage.models import Sesion
+                        db_sesion = session.get(Sesion, current_sesion_id) if current_sesion_id else None
+                        usuario_id = db_sesion.usuario_id if db_sesion else 1 # Fallback to 1 for dev if no session
+                        
+                        service = OrdenesService(session)
+                        nueva_orden = service.crear_orden_manual(
+                            usuario_id=usuario_id,
+                            sesion_id=current_sesion_id,
+                            descripcion=desc,
+                            municipio_id=municipio_id,
+                            renglones=data
+                        )
+                        
+                        QMessageBox.information(
+                            self, "Éxito", 
+                            f"Orden {nueva_orden.folio} creada correctamente con {len(data)} grupos."
+                        )
+                        
+                        # Reset Form
+                        self.desc_input.setText("")
+                        self.grid.clear()
+                        self.grid.add_row()
                 
         except Exception as e:
             QMessageBox.critical(self, "Error al Guardar", f"Hubo un problema al crear la orden:\n{str(e)}")
@@ -553,3 +698,124 @@ class OrdersView(QWidget):
                 self.refresh_historial()
             except Exception as e:
                 QMessageBox.critical(self, "Error al Cancelar", f"No se pudo cancelar la orden:\n{str(e)}")
+
+    def _show_context_menu(self, position):
+        from PySide6.QtWidgets import QMenu
+        row = self.table_historial.rowAt(position.y())
+        if row < 0:
+            return
+            
+        menu = QMenu(self)
+        action_procesar = menu.addAction("Procesar referencias (Doble clic)")
+        action_editar = menu.addAction("Editar orden")
+        
+        id_item = self.table_historial.item(row, 0)
+        
+        action = menu.exec(self.table_historial.viewport().mapToGlobal(position))
+        if action == action_procesar:
+            self._on_row_double_clicked(row, 0)
+        elif action == action_editar:
+            if id_item:
+                orden_id = int(id_item.text())
+                self.load_order_for_editing(orden_id)
+
+    def _on_editar_orden_clicked(self):
+        selected_ids = self._get_selected_ordenes()
+        if not selected_ids:
+            QMessageBox.warning(self, "Selección Requerida", "Selecciona una orden para editar.")
+            return
+        if len(selected_ids) > 1:
+            QMessageBox.warning(self, "Selección Inválida", "Solo puedes editar una orden a la vez.")
+            return
+            
+        orden_id = selected_ids[0]
+        self.load_order_for_editing(orden_id)
+
+    def load_order_for_editing(self, orden_id: int):
+        try:
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", f"/api/ops/ordenes/{orden_id}")
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.storage.repositories import ProduccionRepository
+                    repo = ProduccionRepository(session)
+                    data = repo.get_orden_detalle_edicion(orden_id)
+            
+            if not data["editable"]:
+                QMessageBox.warning(
+                    self, 
+                    "No Editable", 
+                    f"No se puede editar la orden {data['folio']}.\n\n"
+                    f"Razón: Solo se pueden editar órdenes en estado PENDIENTE o BORRADOR "
+                    f"donde todas sus solicitudes estén en estado PENDIENTE, ASIGNADA o COMPLETADA, "
+                    f"y que la orden no esté cancelada."
+                )
+                return
+                
+            # Set edit mode
+            self._edit_mode = True
+            self._editing_order_id = data["orden_id"]
+            self._editing_folio = data["folio"]
+            
+            # Update UI header
+            self.lbl_card_title.setText(f"Editar Orden: {data['folio']}")
+            self.lbl_card_subtitle.setText("Modifica los datos y partidas de la orden")
+            self.grid.btn_save.setText("Actualizar Orden")
+            self.grid.btn_cancel.setVisible(True)
+            
+            # Calculate total anterior and display it
+            total_anterior = sum(r["cantidad"] for r in data["renglones"])
+            self.lbl_tot_ant_val.setText(str(total_anterior))
+            self.total_anterior_frame.setVisible(True)
+            
+            # Fill inputs
+            self.desc_input.setText(data["descripcion"] or "")
+            
+            # Find and set municipio
+            idx_mun = self.combo_municipio.findData(data["municipio_id"])
+            if idx_mun >= 0:
+                self.combo_municipio.setCurrentIndex(idx_mun)
+                
+            # Clear and populate grid
+            self.grid.clear()
+            self._original_renglones = [dict(r) for r in data["renglones"]]
+            for r in data["renglones"]:
+                self.grid.add_row_with_data(
+                    rfc_id=r["rfc_id"],
+                    concepto_id=r["concepto_id"],
+                    delegacion_id=r["delegacion_id"],
+                    cantidad=r["cantidad"],
+                    cantidad_generada=r.get("cantidad_generada", 0)
+                )
+                
+            # Switch to Capture tab (0)
+            self.tabs.setCurrentIndex(0)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error al Cargar", f"No se pudieron obtener los detalles de la orden:\n{str(e)}")
+
+    def _on_cancelar_edicion(self):
+        # Reset mode
+        self._edit_mode = False
+        self._editing_order_id = None
+        self._editing_folio = None
+        
+        # Reset UI
+        self.lbl_card_title.setText("Configuración de la Orden")
+        self.lbl_card_subtitle.setText("Completa los datos para crear una nueva orden")
+        self.grid.btn_save.setText("Guardar Orden")
+        self.grid.btn_cancel.setVisible(False)
+        self.total_anterior_frame.setVisible(False)
+        self.lbl_tot_ant_val.setText("0")
+        
+        self.desc_input.setText("")
+        self._load_catalogs() # Re-selects default municipio
+        
+        self.grid.clear()
+        self.grid.add_row()
+        
+        # Refresh history
+        self.refresh_historial()
+        
+        # Switch to history tab (1)
+        self.tabs.setCurrentIndex(1)

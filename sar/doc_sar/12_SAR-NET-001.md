@@ -108,7 +108,21 @@ python -m uvicorn sar.main_api:app --host 0.0.0.0 --port 8000 --reload
 * **`--port 8000`**: Puerto de escucha del servidor.
 * **`--reload`**: Reinicia automáticamente el servidor al detectar cambios en el código de Python.
 
+### 4.5. Administrador del Servidor (SAR_Servidor)
+El administrador del sistema puede controlar el estatus del servicio, consultar las sesiones activas, modificar parámetros y visualizar logs en tiempo real mediante el módulo del Administrador del Servidor.
+
+#### 1. Mediante Script de Python:
+```powershell
+.venv_sar\Scripts\python sar/main_server_manager.py
+```
+
+#### 2. Compilar a .exe independiente:
+```powershell
+.venv_sar\Scripts\pyinstaller --noconfirm --onedir --windowed --paths=. --add-data "sar/src/ui/assets;sar/src/ui/assets" --name="SAR_Servidor" sar/main_server_manager.py
+```
+
 ---
+
 
 ## 5. Fase 3: Configuración del Firewall de Windows (Servidor)
 

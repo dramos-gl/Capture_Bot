@@ -1436,6 +1436,74 @@ class ProduccionRepository(BaseRepository):
             "con_error": con_error
         }
 
+    def get_orden_detalle_edicion(self, orden_id: int) -> dict:
+        from sqlalchemy import text
+        from sar.src.storage.models import OrdenGeneracion
+        
+        orden = self.session.get(OrdenGeneracion, orden_id)
+        if not orden:
+            raise ValueError(f"No se encontró la orden con ID {orden_id}")
+            
+        estado_codigo = self.get_orden_estado(orden_id)
+        
+        stmt = text("""
+            SELECT 
+                gr.rfc_id, 
+                gr.concepto_id, 
+                s.delegacion_id, 
+                SUM(s.cantidad_solicitada) as cantidad,
+                COALESCE(SUM(s.cantidad_generada), 0) as cantidad_generada
+            FROM sar_produccion.grupo_referencia gr
+            JOIN sar_produccion.solicitud s ON gr.grupo_id = s.grupo_id
+            WHERE gr.orden_id = :orden_id
+            GROUP BY gr.rfc_id, gr.concepto_id, s.delegacion_id
+            ORDER BY gr.rfc_id ASC, gr.concepto_id ASC, s.delegacion_id ASC
+        """)
+        
+        result = self.session.execute(stmt, {"orden_id": orden_id})
+        renglones = []
+        for row in result:
+            renglones.append({
+                "rfc_id": row.rfc_id,
+                "concepto_id": row.concepto_id,
+                "delegacion_id": row.delegacion_id,
+                "cantidad": int(row.cantidad),
+                "cantidad_generada": int(row.cantidad_generada)
+            })
+            
+        # Check if all solicitudes are in state PENDIENTE, ASIGNADA, or COMPLETADA
+        stmt_states = text("""
+            SELECT es.codigo, COUNT(*)
+            FROM sar_produccion.solicitud s
+            JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
+            JOIN sar_catalogo.estado_sistema es ON s.estado_id = es.estado_id
+            WHERE gr.orden_id = :orden_id
+            GROUP BY es.codigo
+        """)
+        states_result = self.session.execute(stmt_states, {"orden_id": orden_id}).fetchall()
+        
+        # Valid states for editing
+        allowed_states = {"PENDIENTE", "ASIGNADA", "COMPLETADA", "COMPLETADO"}
+        editable = True
+        for state_code, count in states_result:
+            if state_code not in allowed_states:
+                editable = False
+                break
+                
+        # Also check if order itself is already cancelled
+        if estado_codigo == "CANCELADA":
+            editable = False
+            
+        return {
+            "orden_id": orden.orden_id,
+            "folio": orden.folio,
+            "descripcion": orden.descripcion,
+            "municipio_id": orden.municipio_id,
+            "estado": estado_codigo,
+            "editable": editable,
+            "renglones": renglones
+        }
+
 
 class InventarioRepository(BaseRepository):
     """Handles persistence operations for notary/collaborator catalogs and assignments."""

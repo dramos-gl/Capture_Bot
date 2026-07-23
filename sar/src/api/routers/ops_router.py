@@ -133,3 +133,38 @@ def get_dashboard_kpis(orden_ids: Optional[str] = None, db: Session = Depends(ge
         return kpis
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener KPIs: {str(e)}")
+
+@router.get("/ordenes/{orden_id}")
+def get_orden_detalle(orden_id: int, db: Session = Depends(get_db)):
+    """Obtiene el detalle completo y estado de edición de una orden específica."""
+    repo = ProduccionRepository(db)
+    try:
+        data = repo.get_orden_detalle_edicion(orden_id)
+        return data
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/ordenes/{orden_id}")
+def update_orden(orden_id: int, request: OrdenCrearRequest, db: Session = Depends(get_db)):
+    """Actualiza una orden existente modificando sus partidas."""
+    service = OrdenesService(db)
+    try:
+        orden = service.actualizar_orden_manual(
+            orden_id=orden_id,
+            usuario_id=request.usuario_id,
+            sesion_id=request.sesion_id,
+            descripcion=request.descripcion,
+            municipio_id=request.municipio_id,
+            renglones=request.renglones
+        )
+        return {
+            "folio": orden.folio,
+            "orden_id": orden.orden_id,
+            "estado_id": orden.estado_id
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al actualizar la orden: {str(e)}")

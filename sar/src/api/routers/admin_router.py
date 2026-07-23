@@ -209,3 +209,68 @@ def get_user_permissions(user_id: int, db: Session = Depends(get_db)):
         return [[p[0], p[1]] for p in perms]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/active-sessions")
+def get_active_sessions(db: Session = Depends(get_db)):
+    try:
+        from sar.src.storage.models import Sesion, Usuario
+        stmt = (
+            select(
+                Sesion.sesion_id,
+                Usuario.username,
+                Sesion.equipo_nombre,
+                Sesion.ip_equipo,
+                Sesion.fecha_inicio,
+                Sesion.ultimo_heartbeat,
+                Sesion.estado
+            )
+            .join(Usuario, Sesion.usuario_id == Usuario.usuario_id)
+            .where(Sesion.estado == "ACTIVA")
+            .order_by(Sesion.fecha_inicio.desc())
+        )
+        results = db.execute(stmt).all()
+        return [
+            {
+                "sesion_id": r.sesion_id,
+                "username": r.username,
+                "equipo_nombre": r.equipo_nombre,
+                "ip_equipo": r.ip_equipo,
+                "fecha_inicio": r.fecha_inicio.isoformat() if r.fecha_inicio else None,
+                "ultimo_heartbeat": r.ultimo_heartbeat.isoformat() if r.ultimo_heartbeat else None,
+                "estado": r.estado
+            }
+            for r in results
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/operations-log")
+def get_operations_log(db: Session = Depends(get_db)):
+    try:
+        from sar.src.storage.models import AuditoriaEvento, Usuario
+        stmt = (
+            select(
+                AuditoriaEvento.evento_auditoria_id,
+                Usuario.username,
+                AuditoriaEvento.fecha,
+                AuditoriaEvento.modulo,
+                AuditoriaEvento.detalle
+            )
+            .outerjoin(Usuario, AuditoriaEvento.usuario_id == Usuario.usuario_id)
+            .order_by(AuditoriaEvento.fecha.desc())
+            .limit(200)
+        )
+        results = db.execute(stmt).all()
+        return [
+            {
+                "evento_auditoria_id": r.evento_auditoria_id,
+                "username": r.username or "Sistema",
+                "fecha": r.fecha.isoformat() if r.fecha else None,
+                "modulo": r.modulo,
+                "detalle": r.detalle
+            }
+            for r in results
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

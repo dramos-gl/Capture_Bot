@@ -52,7 +52,11 @@ Gestión de requerimientos solicitados por la administración para procesar lote
 
 - **`CREAR`**: Registrar una nueva Orden de Generación con su folio y descripción.
 - **`LEER`**: Consultar el listado histórico de órdenes, filtrar por folio y exportar reportes resumidos.
-- **`EDITAR`**: Modificar el folio o descripción de una orden (solo si su estado es `BORRADOR`).
+- **`EDITAR`**: Permite la edición completa de una orden (abriendo la orden en la pestaña de captura en modo edición) bajo las siguientes reglas de seguridad y consistencia:
+  - Solo se permite si la orden no está cancelada y **todas** sus solicitudes asociadas se encuentran en estados `PENDIENTE`, `ASIGNADA` o `COMPLETADA`.
+  - Para partidas que ya cuenten con referencias generadas por el bot (`cantidad_generada > 0`), se bloquea la edición de los campos clave (RFC, Concepto, Delegación), se impide su eliminación y su cantidad solo se puede incrementar.
+  - Los incrementos de cantidad en partidas ya procesadas generan nuevas solicitudes pendientes por el volumen restante.
+  - Antes de aplicar los cambios, el sistema muestra un resumen detallado de modificaciones (`Cantidad Anterior → Cantidad Actual`) y una advertencia explícita si se modifican partidas procesadas.
 - **`ELIMINAR`**: Cancelar de forma definitiva una orden completa (cambia su estado a `CANCELADA` y cancela sus grupos dependientes).
 - *Otras Acciones*: No aplican.
 

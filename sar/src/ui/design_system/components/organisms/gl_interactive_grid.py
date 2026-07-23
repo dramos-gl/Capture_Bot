@@ -71,12 +71,46 @@ class InteractiveGridRow(QFrame):
         for d_id, d_text in delegaciones:
             self.combo_delegacion.addItem(d_text, d_id)
 
+    def set_values(self, rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada=0):
+        """Pre-selects options and sets quantity on row creation/loading."""
+        self._cantidad_generada = cantidad_generada
+        
+        idx_rfc = self.combo_rfc.findData(rfc_id)
+        if idx_rfc >= 0:
+            self.combo_rfc.setCurrentIndex(idx_rfc)
+            
+        idx_concepto = self.combo_concepto.findData(concepto_id)
+        if idx_concepto >= 0:
+            self.combo_concepto.setCurrentIndex(idx_concepto)
+            
+        idx_delegacion = self.combo_delegacion.findData(delegacion_id)
+        if idx_delegacion >= 0:
+            self.combo_delegacion.setCurrentIndex(idx_delegacion)
+            
+        self.spin_cantidad.setValue(cantidad)
+        
+        # If references have already been generated, lock fields
+        if cantidad_generada > 0:
+            self.combo_rfc.setEnabled(False)
+            self.combo_concepto.setEnabled(False)
+            self.combo_delegacion.setEnabled(False)
+            self.btn_delete.setEnabled(False)
+            # Only allow increasing the quantity (minimum is the current quantity)
+            self.spin_cantidad.setMinimum(cantidad)
+        else:
+            self.combo_rfc.setEnabled(True)
+            self.combo_concepto.setEnabled(True)
+            self.combo_delegacion.setEnabled(True)
+            self.btn_delete.setEnabled(True)
+            self.spin_cantidad.setMinimum(1)
+
     def get_data(self) -> dict:
         return {
             "rfc_id": self.combo_rfc.currentData(),
             "concepto_id": self.combo_concepto.currentData(),
             "delegacion_id": self.combo_delegacion.currentData(),
-            "cantidad": self.spin_cantidad.value()
+            "cantidad": self.spin_cantidad.value(),
+            "cantidad_generada": getattr(self, "_cantidad_generada", 0)
         }
 
 
@@ -85,6 +119,7 @@ class InteractiveGrid(QWidget):
     
     data_changed = Signal()
     save_triggered = Signal()
+    cancel_triggered = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -113,12 +148,19 @@ class InteractiveGrid(QWidget):
         self.btn_add.setMinimumHeight(35)
         self.btn_add.clicked.connect(self.add_row)
         
+        self.btn_cancel = QPushButton("Cancelar Edición", self)
+        self.btn_cancel.setObjectName("secondaryBtn")
+        self.btn_cancel.setMinimumHeight(35)
+        self.btn_cancel.setVisible(False)
+        self.btn_cancel.clicked.connect(self.cancel_triggered.emit)
+        
         self.btn_save = QPushButton("Guardar Orden", self)
         self.btn_save.setObjectName("primaryBtn")
         self.btn_save.setMinimumHeight(35)
         self.btn_save.clicked.connect(self.save_triggered.emit)
         
         self.header_layout.addWidget(self.btn_add)
+        self.header_layout.addWidget(self.btn_cancel)
         self.header_layout.addWidget(self.btn_save)
         
         self.main_layout.addLayout(self.header_layout)
@@ -178,6 +220,17 @@ class InteractiveGrid(QWidget):
     def add_row(self):
         row_widget = InteractiveGridRow(self.rows_container)
         row_widget.populate(self._rfcs, self._conceptos, self._delegaciones)
+        row_widget.deleted.connect(self._remove_row)
+        row_widget.changed.connect(self.data_changed.emit)
+        
+        self.rows_layout.addWidget(row_widget)
+        self.rows.append(row_widget)
+        self.data_changed.emit()
+
+    def add_row_with_data(self, rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada=0):
+        row_widget = InteractiveGridRow(self.rows_container)
+        row_widget.populate(self._rfcs, self._conceptos, self._delegaciones)
+        row_widget.set_values(rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada)
         row_widget.deleted.connect(self._remove_row)
         row_widget.changed.connect(self.data_changed.emit)
         

@@ -14,16 +14,9 @@ class DatabaseConnector:
     def __init__(self):
         # Intentar cargar variables desde settings.json si existe
         import json
-        import sys
+        from sar.src.paths import get_settings_path
         
-        # Resolver ruta robusta de settings.json (soporte para PyInstaller)
-        if getattr(sys, 'frozen', False):
-            # En producción (.exe), buscar al lado del archivo ejecutable
-            settings_path = os.path.abspath(os.path.join(os.path.dirname(sys.executable), "settings.json"))
-        else:
-            # En desarrollo, buscar en la carpeta 'sar'
-            settings_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "settings.json"))
-            
+        settings_path = get_settings_path()
         settings_data = {}
         if os.path.exists(settings_path):
             try:
@@ -32,11 +25,11 @@ class DatabaseConnector:
             except Exception as e:
                 print(f"Advertencia: No se pudo cargar settings.json: {e}")
 
-        self.db_user = settings_data.get("DB_USER", os.getenv("DB_USER", "postgres"))
-        self.db_password = settings_data.get("DB_PASSWORD", os.getenv("DB_PASSWORD", ""))
-        self.db_host = settings_data.get("DB_HOST", os.getenv("DB_HOST", "localhost"))
-        self.db_port = settings_data.get("DB_PORT", os.getenv("DB_PORT", "5432"))
-        self.db_name = settings_data.get("DB_NAME", os.getenv("DB_NAME", "db_sar"))
+        self.db_user = os.getenv("DB_USER") or settings_data.get("DB_USER", "postgres")
+        self.db_password = os.getenv("DB_PASSWORD") or settings_data.get("DB_PASSWORD", "")
+        self.db_host = os.getenv("DB_HOST") or settings_data.get("DB_HOST", "localhost")
+        self.db_port = os.getenv("DB_PORT") or settings_data.get("DB_PORT", "5432")
+        self.db_name = os.getenv("DB_NAME") or settings_data.get("DB_NAME", "db_sar")
 
         # Construir URL de conexión para PostgreSQL usando psycopg2
         self.database_url = (
