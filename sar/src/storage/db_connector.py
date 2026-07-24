@@ -14,7 +14,7 @@ class DatabaseConnector:
     def __init__(self):
         # Intentar cargar variables desde settings.json si existe
         import json
-        from sar.src.paths import get_settings_path
+        from sar.src.paths import get_settings_path, deobfuscate_password
         
         settings_path = get_settings_path()
         settings_data = {}
@@ -26,7 +26,7 @@ class DatabaseConnector:
                 print(f"Advertencia: No se pudo cargar settings.json: {e}")
 
         self.db_user = os.getenv("DB_USER") or settings_data.get("DB_USER", "postgres")
-        self.db_password = os.getenv("DB_PASSWORD") or settings_data.get("DB_PASSWORD", "")
+        self.db_password = os.getenv("DB_PASSWORD") or deobfuscate_password(settings_data.get("DB_PASSWORD", ""))
         self.db_host = os.getenv("DB_HOST") or settings_data.get("DB_HOST", "localhost")
         self.db_port = os.getenv("DB_PORT") or settings_data.get("DB_PORT", "5432")
         self.db_name = os.getenv("DB_NAME") or settings_data.get("DB_NAME", "db_sar")

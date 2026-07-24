@@ -39,7 +39,7 @@ def main():
     window = APIServerWindow(db_connector)
     
     # Center window on screen and show in normal size (no full screen/maximized)
-    window.resize(900, 600)
+    window.resize(800, 470)
     screen_geometry = QApplication.primaryScreen().geometry()
     window_geometry = window.frameGeometry()
     x = (screen_geometry.width() - window_geometry.width()) // 2

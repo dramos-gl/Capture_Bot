@@ -1,6 +1,7 @@
 """Global paths definition for the SAR system."""
 import os
 import sys
+import base64
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -29,3 +30,32 @@ def get_settings_path() -> str:
         return candidate_cwd
 
     return candidate_dev
+
+def obfuscate_password(val: str) -> str:
+    """Obfuscates a database password string using Base64 and XOR."""
+    if not val:
+        return ""
+    if val.startswith("OBF:"):
+        return val
+    try:
+        encoded = val.encode('utf-8')
+        key = b"sar_secure_key_123"
+        ciphered = bytes([encoded[i] ^ key[i % len(key)] for i in range(len(encoded))])
+        return "OBF:" + base64.b64encode(ciphered).decode('utf-8')
+    except Exception:
+        return val
+
+def deobfuscate_password(val: str) -> str:
+    """Deobfuscates an obfuscated database password string."""
+    if not val:
+        return ""
+    if not val.startswith("OBF:"):
+        return val
+    try:
+        raw_val = val[4:]
+        ciphered = base64.b64decode(raw_val.encode('utf-8'))
+        key = b"sar_secure_key_123"
+        decrypted = bytes([ciphered[i] ^ key[i % len(key)] for i in range(len(ciphered))])
+        return decrypted.decode('utf-8')
+    except Exception:
+        return val

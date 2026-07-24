@@ -84,22 +84,22 @@ class APIServerWindow(QMainWindow):
         
         # Window setup
         self.setWindowTitle("Servidor de Aplicaciones API_SAR")
-        self.resize(900, 600)
+        self.resize(800, 470)
         
         # Main Layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         
         self.main_layout = QVBoxLayout(self.central_widget)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
-        self.main_layout.setSpacing(10)
+        self.main_layout.setContentsMargins(6, 6, 6, 6)
+        self.main_layout.setSpacing(6)
         
         # Header / Brand Title
         self._setup_header()
         
         # Middle Split: Sidebar Left + Content Right
         self.middle_layout = QHBoxLayout()
-        self.middle_layout.setSpacing(15)
+        self.middle_layout.setSpacing(8)
         
         self._setup_sidebar()
         self._setup_content_area()
@@ -132,30 +132,30 @@ class APIServerWindow(QMainWindow):
         self.header_widget.setStyleSheet("background-color: #2C3E50; border-radius: 6px;")
         
         layout = QHBoxLayout(self.header_widget)
-        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setContentsMargins(10, 5, 10, 5)
         
         title_lbl = QLabel("Servidor de Aplicaciones API_SAR ®")
-        title_lbl.setStyleSheet("color: white; font-size: 18px; font-weight: bold; font-family: 'Segoe UI';")
+        title_lbl.setStyleSheet("color: white; font-size: 13px; font-weight: bold; font-family: 'Segoe UI';")
         layout.addWidget(title_lbl)
         
         layout.addStretch()
         
         brand_lbl = QLabel("SYSTEM SAR")
-        brand_lbl.setStyleSheet("color: #E8EEF5; font-size: 16px; font-weight: bold; font-style: italic;")
+        brand_lbl.setStyleSheet("color: #E8EEF5; font-size: 11px; font-weight: bold; font-style: italic;")
         layout.addWidget(brand_lbl)
         
         self.main_layout.addWidget(self.header_widget)
     def _setup_sidebar(self):
         self.sidebar_card = CustomCard(parent=self)
-        self.sidebar_card.setFixedWidth(220)
+        self.sidebar_card.setFixedWidth(160)
         self.sidebar_card.setStyleSheet("background-color: #FFFFFF; border: 1px solid #D2D6DC;")
         
         sidebar_layout = self.sidebar_card.layout
-        sidebar_layout.setContentsMargins(10, 15, 10, 15)
-        sidebar_layout.setSpacing(10)
+        sidebar_layout.setContentsMargins(6, 8, 6, 8)
+        sidebar_layout.setSpacing(6)
         
         title = CustomLabel("Opciones", variant="header")
-        title.setStyleSheet("font-size: 15px; font-weight: bold; color: #2C3E50; margin-bottom: 10px;")
+        title.setStyleSheet("font-size: 12px; font-weight: bold; color: #2C3E50; margin-bottom: 5px;")
         sidebar_layout.addWidget(title)
         
         # Buttons list
@@ -176,9 +176,9 @@ class APIServerWindow(QMainWindow):
                     background-color: transparent;
                     color: #475569;
                     border: none;
-                    padding: 8px 12px;
+                    padding: 5px 8px;
                     text-align: left;
-                    font-size: 13px;
+                    font-size: 11px;
                     font-weight: 500;
                     border-radius: 4px;
                 }
@@ -200,7 +200,7 @@ class APIServerWindow(QMainWindow):
     def _setup_content_area(self):
         self.content_card = CustomCard(parent=self)
         self.content_layout = self.content_card.layout
-        self.content_layout.setContentsMargins(15, 15, 15, 15)
+        self.content_layout.setContentsMargins(8, 8, 8, 8)
         
         self.stacked_widget = QStackedWidget()
         self.content_layout.addWidget(self.stacked_widget)
@@ -215,7 +215,7 @@ class APIServerWindow(QMainWindow):
     def _create_general_tab(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setSpacing(20)
+        layout.setSpacing(10)
         
         title = CustomLabel("Información General del Servidor", variant="header")
         layout.addWidget(title)
@@ -223,7 +223,7 @@ class APIServerWindow(QMainWindow):
         self.general_info_card = CustomCard()
         info_widget = QWidget()
         info_layout = QFormLayout(info_widget)
-        info_layout.setSpacing(15)
+        info_layout.setSpacing(10)
         info_layout.setLabelAlignment(Qt.AlignRight)
         
         self.lbl_host_name = CustomLabel(socket.gethostname(), variant="body")
@@ -260,7 +260,7 @@ class APIServerWindow(QMainWindow):
     def _create_consola_tab(self):
         widget = QWidget()
         layout = QHBoxLayout(widget)
-        layout.setSpacing(15)
+        layout.setSpacing(10)
         
         # Console output
         left_layout = QVBoxLayout()
@@ -277,8 +277,8 @@ class APIServerWindow(QMainWindow):
         
         # Action buttons right side
         buttons_layout = QVBoxLayout()
-        buttons_layout.setSpacing(12)
-        buttons_layout.addSpacing(35)
+        buttons_layout.setSpacing(6)
+        buttons_layout.addSpacing(15)
         
         btn_limpiar = CustomButton("Limpiar", is_secondary=True)
         btn_limpiar.clicked.connect(self._clear_console)
@@ -317,14 +317,14 @@ class APIServerWindow(QMainWindow):
     def _create_usuarios_tab(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setSpacing(15)
+        layout.setSpacing(8)
         
         title = CustomLabel("Usuarios Conectados al Sistema (Sesiones Activas)", variant="header")
         layout.addWidget(title)
         
         headers = ["ID Sesión", "Usuario", "Equipo", "Dirección IP", "Fecha Inicio", "Último Heartbeat"]
         self.users_table = StyledDataTable(headers, parent=self)
-        self.users_table.setMinimumHeight(400)
+        self.users_table.setMinimumHeight(180)
         layout.addWidget(self.users_table)
         
         actions = QHBoxLayout()
@@ -347,7 +347,7 @@ class APIServerWindow(QMainWindow):
         form_card = CustomCard()
         form_widget = QWidget()
         form_layout = QFormLayout(form_widget)
-        form_layout.setSpacing(12)
+        form_layout.setSpacing(8)
         
         self.txt_api_url = QLineEdit()
         self.txt_api_url.setText(self.api_client.settings_data.get("API_URL", ""))
@@ -392,8 +392,9 @@ class APIServerWindow(QMainWindow):
             except Exception:
                 pass
 
+        from sar.src.paths import deobfuscate_password
         db_user_default = os.getenv("DB_USER") or nssm_user or self.api_client.settings_data.get("DB_USER", "postgres")
-        db_pass_default = os.getenv("DB_PASSWORD") or nssm_pass or self.api_client.settings_data.get("DB_PASSWORD", "")
+        db_pass_default = os.getenv("DB_PASSWORD") or nssm_pass or deobfuscate_password(self.api_client.settings_data.get("DB_PASSWORD", ""))
         
         self.txt_db_user = QLineEdit()
         self.txt_db_user.setText(db_user_default)
@@ -420,7 +421,7 @@ class APIServerWindow(QMainWindow):
     def _create_actualizacion_tab(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setSpacing(20)
+        layout.setSpacing(8)
         
         title = CustomLabel("Servicio de Actualización del Sistema", variant="header")
         layout.addWidget(title)
@@ -428,7 +429,7 @@ class APIServerWindow(QMainWindow):
         info_card = CustomCard()
         info_widget = QWidget()
         info_layout = QVBoxLayout(info_widget)
-        info_layout.setSpacing(15)
+        info_layout.setSpacing(8)
         
         version_lbl = CustomLabel("Versión Instalada: 2.0 (Despliegue NSSM)", variant="body")
         info_layout.addWidget(version_lbl)
@@ -444,7 +445,7 @@ class APIServerWindow(QMainWindow):
     def _setup_bottom_bar(self):
         self.bottom_bar = QWidget()
         layout = QHBoxLayout(self.bottom_bar)
-        layout.setContentsMargins(0, 10, 0, 0)
+        layout.setContentsMargins(0, 5, 0, 0)
         
         btn_ayuda = CustomButton("Ayuda", is_secondary=True)
         btn_ayuda.clicked.connect(self._show_help)
@@ -585,13 +586,13 @@ class APIServerWindow(QMainWindow):
             self.api_client.settings_data["DB_PORT"] = self.txt_db_port.text()
             self.api_client.settings_data["DB_NAME"] = self.txt_db_name.text()
             self.api_client.settings_data["DB_USER"] = self.txt_db_user.text()
-            # Do NOT store DB_PASSWORD in settings.json to avoid plain text risk
-            self.api_client.settings_data["DB_PASSWORD"] = ""
-            
             # Save to settings.json
             import json
-            from sar.src.paths import get_settings_path
+            from sar.src.paths import get_settings_path, obfuscate_password
             settings_path = get_settings_path()
+            
+            # Obfuscate DB_PASSWORD in settings.json for simple but persistent security
+            self.api_client.settings_data["DB_PASSWORD"] = obfuscate_password(self.txt_db_password.text())
                 
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(self.api_client.settings_data, f, indent=2)
