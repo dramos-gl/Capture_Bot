@@ -90,7 +90,6 @@ class MainView(QWidget):
                 self.sidebar.show_item("ordenes")
                 self.sidebar.show_item("ordenes_capturadas")
                 self.sidebar.show_item("capturar_orden")
-                self.sidebar.submenu_container.show()
                 if not default_item: default_item = "ordenes"
             if has_solicitudes:
                 self.sidebar.show_item("solicitudes")

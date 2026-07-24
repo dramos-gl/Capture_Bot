@@ -333,6 +333,8 @@ class NavigationSidebar(QFrame):
         if clicked_key in ["ordenes_capturadas", "capturar_orden"]:
             self.buttons["ordenes"].setChecked(True)
             self.chevron_label.setPixmap(Icons.chevron_up("#2563EB").pixmap(12, 12))
+            self.submenu_visible = True
+            self.submenu_container.setVisible(True)
             
             # Uncheck all other parent items except ordenes
             for key, btn in self.buttons.items():
@@ -355,6 +357,8 @@ class NavigationSidebar(QFrame):
         elif clicked_key in ["inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
             self.buttons["inventario"].setChecked(True)
             self.chevron_label2.setPixmap(Icons.chevron_up("#2563EB").pixmap(12, 12))
+            self.inv_submenu_visible = True
+            self.inv_submenu_container.setVisible(True)
             
             # Uncheck all other parent items except inventario
             for key, btn in self.buttons.items():

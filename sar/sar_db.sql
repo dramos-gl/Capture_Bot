@@ -442,6 +442,10 @@ CREATE TABLE sar_configuracion.localizador_portal (
 -- INDICES DE RENDIMIENTO (PERFORMANCE INDEXES)
 -- ===========================================================================
 
+-- Habilitar extensión para búsquedas con ILIKE veloces
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+
 -- 1. Esquema: sar_seguridad
 CREATE INDEX IF NOT EXISTS idx_usuario_rol_rol_id ON sar_seguridad.usuario_rol (rol_id);
 CREATE INDEX IF NOT EXISTS idx_sesion_usuario_id ON sar_seguridad.sesion (usuario_id);
@@ -459,6 +463,8 @@ CREATE INDEX IF NOT EXISTS idx_referencia_grupo_id ON sar_produccion.referencia 
 CREATE INDEX IF NOT EXISTS idx_referencia_solicitud_id ON sar_produccion.referencia (solicitud_id);
 CREATE INDEX IF NOT EXISTS idx_referencia_estado_id ON sar_produccion.referencia (estado_id);
 CREATE INDEX IF NOT EXISTS idx_referencia_fecha_vigencia ON sar_produccion.referencia (fecha_vigencia);
+CREATE INDEX IF NOT EXISTS idx_referencia_portal_trgm ON sar_produccion.referencia USING gin (referencia_portal gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_orden_folio_trgm ON sar_produccion.orden_generacion USING gin (folio gin_trgm_ops);
 
 -- 3. Esquema: sar_archivo
 CREATE INDEX IF NOT EXISTS idx_archivo_pdf_referencia_id ON sar_archivo.archivo_pdf (referencia_id);

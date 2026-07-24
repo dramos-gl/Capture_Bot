@@ -750,18 +750,23 @@ class ProduccionRepository(BaseRepository):
             params["estado"] = estado_filter
             
         if search_text:
-            search_conds = [
-                "CAST(referencia_id AS TEXT) ILIKE :search",
-                "referencia_portal ILIKE :search",
-                "CAST(consecutivo_grupo AS TEXT) ILIKE :search",
-                "CAST(importe AS TEXT) ILIKE :search",
-                "folio_orden ILIKE :search",
-                "rfc_razon_social ILIKE :search",
-                "concepto_nombre ILIKE :search",
-                "delegacion_nombre ILIKE :search",
-                "estado_codigo ILIKE :search",
-                "usuario_asignado_nombre ILIKE :search"
-            ]
+            if search_text.isdigit():
+                search_conds = [
+                    "referencia_id = :search_int",
+                    "consecutivo_grupo = :search_int",
+                    "referencia_portal ILIKE :search"
+                ]
+                params["search_int"] = int(search_text)
+            else:
+                search_conds = [
+                    "referencia_portal ILIKE :search",
+                    "folio_orden ILIKE :search",
+                    "rfc_razon_social ILIKE :search",
+                    "concepto_nombre ILIKE :search",
+                    "delegacion_nombre ILIKE :search",
+                    "estado_codigo ILIKE :search",
+                    "usuario_asignado_nombre ILIKE :search"
+                ]
             conditions.append(f"({' OR '.join(search_conds)})")
             params["search"] = f"%{search_text}%"
             
