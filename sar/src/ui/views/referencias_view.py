@@ -2,53 +2,45 @@
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QPushButton
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from sar.src.services.referencias_service import ReferenciasService
 from sar.src.ui.design_system.components import CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomLabel
-from sar.src.storage.repositories import ProduccionRepository
 
 class ReferencesLoadWorker(QThread):
     """Background worker thread to load references from the DB dynamically with pagination."""
     result_ready = Signal(list, int) # data, total_count
     error_occurred = Signal(str)
     
-    def __init__(self, db_connector, limit: int, offset: int, search_text: str, estado_filter: str, orden_ids: list = None):
+    def __init__(self, referencias_service, limit: int, offset: int, search_text: str, estado_filter: str, orden_ids: list = None):
         super().__init__()
-        self.db_connector = db_connector
+        self.referencias_service = referencias_service
         self.limit = limit
         self.offset = offset
         self.search_text = search_text
         self.estado_filter = estado_filter
         self.orden_ids = orden_ids
+        self._is_cancelled = False
+        
+    def cancel(self):
+        self._is_cancelled = True
         
     def run(self):
         try:
-            from sar.src.storage.api_client import APIClient
-            api_client = APIClient()
-            if api_client.connect_via_api:
-                orden_ids_str = ",".join([str(x) for x in self.orden_ids]) if self.orden_ids else None
-                payload = {
-                    "limit": self.limit,
-                    "offset": self.offset,
-                    "search_text": self.search_text,
-                    "estado_filter": self.estado_filter,
-                    "orden_ids": orden_ids_str
-                }
-                res = api_client.request("GET", "/api/docs/referencias", data=payload)
-                self.result_ready.emit(res["records"], res["total_count"])
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = ProduccionRepository(session)
-                    res, total_count = repo.get_referencias_paginated(
-                        limit=self.limit,
-                        offset=self.offset,
-                        search_text=self.search_text,
-                        estado_filter=self.estado_filter,
-                        orden_ids=self.orden_ids
-                    )
-                    self.result_ready.emit(res, total_count)
+            if self._is_cancelled:
+                return
+            res, total_count = self.referencias_service.get_referencias_paginated(
+                limit=self.limit,
+                offset=self.offset,
+                search_text=self.search_text,
+                estado_filter=self.estado_filter,
+                orden_ids=self.orden_ids
+            )
+            if not self._is_cancelled:
+                self.result_ready.emit(res, total_count)
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self.error_occurred.emit(str(e))
+            if not self._is_cancelled:
+                import traceback
+                traceback.print_exc()
+                self.error_occurred.emit(str(e))
 
 class ReferenciasView(QWidget):
     """View to consult the final generated Referencias."""
@@ -56,8 +48,7 @@ class ReferenciasView(QWidget):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
-        from sar.src.storage.api_client import APIClient
-        self.api_client = APIClient()
+        self.referencias_service = ReferenciasService(self.db_connector)
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(24, 24, 24, 24)
@@ -82,7 +73,8 @@ class ReferenciasView(QWidget):
         # Table Organism
         headers = ["✔", "ID", "Consecutivo", "Referencia", "Importe", "Folio Orden", "Grupo", "Empresa", "Concepto", "Delegación", "Estado", "Procesado Por", "Fecha Gen.", "Vigencia"]
         self.table = StyledDataTable(headers, parent=self)
-        self.table.setMinimumHeight(400)
+        self.table.setMinimumHeight(200)
+        self.table.setMinimumWidth(200)
         self.table.setColumnHidden(1, True) # Ocultamos el ID Interno
         
         self.card.add_widget(self.table)
@@ -270,64 +262,45 @@ class ReferenciasView(QWidget):
         
         if ok and item:
             try:
-                from sqlalchemy import text
                 rechazar_restantes = False
+                stats = self.referencias_service.get_pending_authorization_stats(selected_ids)
+                total_pendientes = stats.get("total_pendientes", 0)
                 
-                with self.db_connector.get_session() as session:
-                    # Buscar solicitudes asociadas
-                    stmt_sols = text("""
-                        SELECT DISTINCT solicitud_id FROM sar_produccion.referencia
-                        WHERE referencia_id IN :ref_ids
-                    """)
-                    sol_rows = session.execute(stmt_sols, {"ref_ids": tuple(selected_ids)}).fetchall()
-                    sol_ids = [r[0] for r in sol_rows if r[0]]
+                if total_pendientes > 0:
+                    remaining_pending = total_pendientes - len(selected_ids)
                     
-                    if sol_ids:
-                        # Contar total pendientes de autorización en esas solicitudes
-                        stmt_pending = text("""
-                            SELECT COUNT(*) FROM sar_produccion.referencia r
-                            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
-                            WHERE r.solicitud_id IN :sol_ids AND es.codigo = 'PENDIENTE_AUTORIZACION'
-                        """)
-                        total_pendientes = session.execute(stmt_pending, {"sol_ids": tuple(sol_ids)}).scalar()
-                        remaining_pending = total_pendientes - len(selected_ids)
+                    if remaining_pending > 0:
+                        # Mostrar diálogo de confirmación personalizado
+                        msg_box = QMessageBox(self)
+                        msg_box.setWindowTitle("Confirmar Acción Parcial")
+                        msg_box.setIcon(QMessageBox.Question)
+                        msg_box.setText(
+                            f"Ha seleccionado {len(selected_ids)} referencias de un total de {total_pendientes} pendientes en la(s) solicitud(es) vinculada(s).\n\n"
+                            f"¿Desea cambiar el estado de las {len(selected_ids)} seleccionadas a {item} y RECHAZAR automáticamente las {remaining_pending} restantes?"
+                        )
+                        btn_yes = msg_box.addButton("Sí (Procesar y Rechazar Restantes)", QMessageBox.YesRole)
+                        btn_no = msg_box.addButton("No (Solo Procesar Seleccionadas)", QMessageBox.NoRole)
+                        btn_cancel = msg_box.addButton("Cancelar", QMessageBox.RejectRole)
+                        msg_box.setDefaultButton(btn_no)
                         
-                        if remaining_pending > 0:
-                            # Mostrar diálogo de confirmación personalizado
-                            msg_box = QMessageBox(self)
-                            msg_box.setWindowTitle("Confirmar Acción Parcial")
-                            msg_box.setIcon(QMessageBox.Question)
-                            msg_box.setText(
-                                f"Ha seleccionado {len(selected_ids)} referencias de un total de {total_pendientes} pendientes en la(s) solicitud(es) vinculada(s).\n\n"
-                                f"¿Desea cambiar el estado de las {len(selected_ids)} seleccionadas a {item} y RECHAZAR automáticamente las {remaining_pending} restantes?"
-                            )
-                            btn_yes = msg_box.addButton("Sí (Procesar y Rechazar Restantes)", QMessageBox.YesRole)
-                            btn_no = msg_box.addButton("No (Solo Procesar Seleccionadas)", QMessageBox.NoRole)
-                            btn_cancel = msg_box.addButton("Cancelar", QMessageBox.RejectRole)
-                            msg_box.setDefaultButton(btn_no)
-                            
-                            msg_box.exec()
-                            clicked = msg_box.clickedButton()
-                            
-                            if clicked == btn_cancel:
-                                return
-                            rechazar_restantes = (clicked == btn_yes)
-                        else:
-                            # Confirmación simple
-                            reply = QMessageBox.question(
-                                self, "Confirmar Cambio",
-                                f"¿Estás seguro de que deseas marcar las {len(selected_ids)} referencias seleccionadas como {item}?",
-                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-                            )
-                            if reply == QMessageBox.No:
-                                return
+                        msg_box.exec()
+                        clicked = msg_box.clickedButton()
+                        
+                        if clicked == btn_cancel:
+                            return
+                        rechazar_restantes = (clicked == btn_yes)
+                    else:
+                        # Confirmación simple
+                        reply = QMessageBox.question(
+                            self, "Confirmar Cambio",
+                            f"¿Estás seguro de que deseas marcar las {len(selected_ids)} referencias seleccionadas como {item}?",
+                            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                        )
+                        if reply == QMessageBox.No:
+                            return
 
-                # Ejecutar actualización transaccional
-                from sar.src.storage.repositories import ProduccionRepository
-                with self.db_connector.get_session() as session:
-                    repo = ProduccionRepository(session)
-                    repo.update_referencias_estado_masivo(selected_ids, item, rechazar_restantes)
-                    session.commit()
+                # Ejecutar actualización transaccional a través del servicio
+                self.referencias_service.update_referencias_estado_masivo(selected_ids, item, rechazar_restantes)
                     
                 QMessageBox.information(self, "Éxito", f"{len(selected_ids)} referencias cambiadas a {item}.")
                 self.refresh_data()
@@ -337,7 +310,7 @@ class ReferenciasView(QWidget):
     def _on_ver_detalle(self):
         ref_ids = self._get_selected_referencia_ids()
         if not ref_ids: return
-        QMessageBox.information(self, "Detalle", f"Detalles de la referencia ID: {ref_ids[0]}\\n(Funcionalidad en desarrollo)")
+        QMessageBox.information(self, "Detalle", f"Detalles de la referencia ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")
         
     def _on_ver_pdf(self):
         ref_ids = self._get_selected_referencia_ids()
@@ -347,14 +320,14 @@ class ReferenciasView(QWidget):
     def refresh_data(self):
         """Starts background thread to fetch data matching filters and current offset."""
         self._load_available_orders(preserve_selection=True)
-        # Cancel active thread if running
+        # Cancel active thread if running safely
         if self.active_worker and self.active_worker.isRunning():
+            self.active_worker.cancel()
             try:
                 self.active_worker.result_ready.disconnect()
                 self.active_worker.error_occurred.disconnect()
             except RuntimeError:
                 pass
-            self.active_worker.terminate()
             self.active_worker.wait()
 
         # Visual feedback: set pagination info label to loading state
@@ -368,7 +341,7 @@ class ReferenciasView(QWidget):
         orden_ids = getattr(self, 'selected_orden_ids', [])
 
         self.active_worker = ReferencesLoadWorker(
-            db_connector=self.db_connector,
+            referencias_service=self.referencias_service,
             limit=self.page_size,
             offset=offset,
             search_text=search_text,
@@ -506,12 +479,7 @@ class ReferenciasView(QWidget):
 
     def _load_available_orders(self, preserve_selection=False):
         try:
-            if self.api_client.connect_via_api:
-                self.todas_las_ordenes = self.api_client.request("GET", "/api/ops/ordenes")
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = ProduccionRepository(session)
-                    self.todas_las_ordenes = repo.get_ordenes()
+            self.todas_las_ordenes = self.referencias_service.get_ordenes()
                 
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}

@@ -1,0 +1,10 @@
+{
+    "DB_HOST": "127.0.0.1",
+    "DB_PORT": "5432",
+    "DB_NAME": "db_cancunbot",
+    "DB_USER": "postgres",
+    "DB_PASSWORD": "",
+    "LOG_LEVEL": "INFO",
+    "PDF_DOWNLOAD_TEMP": "temp/downloads/",
+    "SESSION_STATE_DIR": "temp/sessions/"
+}

@@ -20,6 +20,7 @@ class NavigationSidebar(QFrame):
         super().__init__(parent)
         self.setObjectName("sidebarFrame")
         self.setFixedWidth(250)
+        self.setMinimumHeight(100)
         
         # Main outer layout to contain the QScrollArea
         outer_layout = QVBoxLayout(self)
@@ -29,6 +30,7 @@ class NavigationSidebar(QFrame):
         # Scroll Area for sidebar content
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setMinimumHeight(100)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.scroll_area.setStyleSheet("""
@@ -75,7 +77,29 @@ class NavigationSidebar(QFrame):
         self._setup_footer()
         
     def _setup_brand_area(self):
-        # 1. Brand Logo & Title Area
+        self.is_collapsed = False
+        
+        # 1. Brand Logo & Title Area + Hamburger Button
+        self.brand_outer_layout = QVBoxLayout()
+        self.brand_outer_layout.setContentsMargins(0, 0, 0, 0)
+        self.brand_outer_layout.setSpacing(10)
+        
+        # Row with Hamburger
+        self.hamburger_layout = QHBoxLayout()
+        self.hamburger_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.btn_hamburger = QPushButton()
+        self.btn_hamburger.setFixedSize(36, 36)
+        self.btn_hamburger.setObjectName("secondaryBtn")
+        self.btn_hamburger.setIcon(Icons.menu("#475569"))
+        self.btn_hamburger.setStyleSheet("border: none; background: transparent;")
+        self.btn_hamburger.clicked.connect(self.toggle_collapse)
+        
+        self.hamburger_layout.addStretch()
+        self.hamburger_layout.addWidget(self.btn_hamburger)
+        self.brand_outer_layout.addLayout(self.hamburger_layout)
+        
+        # Row with Brand info
         self.brand_layout = QHBoxLayout()
         self.brand_layout.setContentsMargins(0, 0, 0, 0)
         self.brand_layout.setSpacing(12)
@@ -102,7 +126,8 @@ class NavigationSidebar(QFrame):
         self.title_text_layout.addWidget(self.brand_subtitle)
         self.brand_layout.addLayout(self.title_text_layout)
         
-        self.layout.addLayout(self.brand_layout)
+        self.brand_outer_layout.addLayout(self.brand_layout)
+        self.layout.addLayout(self.brand_outer_layout)
         self.layout.addSpacing(24)
         
     def _setup_navigation(self):
@@ -293,6 +318,8 @@ class NavigationSidebar(QFrame):
         self.layout.addWidget(self.profile_widget)
 
     def _on_main_nav_clicked(self, clicked_key: str):
+        if self.is_collapsed:
+            self.toggle_collapse()
         if clicked_key == "ordenes":
             self.submenu_visible = not self.submenu_visible
             self.submenu_container.setVisible(self.submenu_visible)
@@ -394,7 +421,10 @@ class NavigationSidebar(QFrame):
     def show_item(self, key: str):
         """Shows a specific navigation item by its key."""
         if key in self.buttons:
-            self.buttons[key].setVisible(True)
+            if self.is_collapsed and key in ["ordenes_capturadas", "capturar_orden", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
+                self.buttons[key].setVisible(False)
+            else:
+                self.buttons[key].setVisible(True)
             
     def set_username(self, username: str):
         """Updates the username in the profile status widget."""
@@ -409,3 +439,64 @@ class NavigationSidebar(QFrame):
         )
         if reply == QMessageBox.Yes:
             self.logout_requested.emit()
+
+    def toggle_collapse(self):
+        """Toggles the sidebar between expanded (250px) and collapsed (70px) states."""
+        self.is_collapsed = not self.is_collapsed
+        if self.is_collapsed:
+            self.setFixedWidth(70)
+            self.logo_label.hide()
+            self.brand_title.hide()
+            self.brand_subtitle.hide()
+            
+            # Hide labels of parent buttons and center icons
+            for key, btn in self.buttons.items():
+                if key not in ["ordenes_capturadas", "capturar_orden", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
+                    btn.setText("")
+                    btn.setStyleSheet("padding: 12px 0px; text-align: center;")
+                else:
+                    btn.setVisible(False)
+                    
+            # Hide submenus
+            self.submenu_container.hide()
+            self.inv_submenu_container.hide()
+            self.chevron_label.hide()
+            self.chevron_label2.hide()
+            
+            # Hide profile text and bottom buttons texts
+            self.theme_btn.setText("")
+            self.theme_btn.setStyleSheet("padding: 12px 0px; text-align: center;")
+            self.logout_btn.setText("")
+            self.logout_btn.setStyleSheet("padding: 12px 0px; text-align: center;")
+            self.profile_widget.hide()
+        else:
+            self.setFixedWidth(250)
+            self.logo_label.show()
+            self.brand_title.show()
+            self.brand_subtitle.show()
+            
+            # Restore parent buttons texts and styles
+            for index, (text, key, icon_name) in enumerate(self.menu_items):
+                if key in self.buttons:
+                    self.buttons[key].setText(text)
+                    self.buttons[key].setStyleSheet("")
+            
+            self.chevron_label.show()
+            self.chevron_label2.show()
+            
+            # Restore submenu items if they were active
+            if self.submenu_visible:
+                self.submenu_container.show()
+                self.btn_ordenes_capturadas.setVisible(True)
+                self.btn_capturar_nueva.setVisible(True)
+            if self.inv_submenu_visible:
+                self.inv_submenu_container.show()
+                self.btn_inv_facturas.setVisible(True)
+                self.btn_inv_masivo.setVisible(True)
+                self.btn_inv_catalogos.setVisible(True)
+                
+            self.theme_btn.setText("Cambiar Tema")
+            self.theme_btn.setStyleSheet("")
+            self.logout_btn.setText(" Cerrar Sesión")
+            self.logout_btn.setStyleSheet("")
+            self.profile_widget.show()

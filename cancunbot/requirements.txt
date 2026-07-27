@@ -1,0 +1,29 @@
+# Dependencias del Proyecto CancunBot
+# Versión: 1.0 | Fecha: 2026
+#
+# NOTA: Este proyecto comparte el entorno virtual .venv_sar
+# ubicado en la raíz de Proyecto_CapturaBot.
+# Instalar con: .venv_sar\Scripts\pip install -r cancunbot\requirements.txt
+
+# === AUTOMATIZACIÓN WEB ===
+playwright>=1.45.0
+
+# === BASE DE DATOS ===
+SQLAlchemy>=2.0.0
+psycopg2-binary>=2.9.9
+
+# === PDF ===
+pdfplumber>=0.11.0
+pypdf>=4.0.0
+
+# === EXCEL ===
+openpyxl>=3.1.0
+
+# === UI DESKTOP ===
+PySide6>=6.7.0
+
+# === UTILIDADES ===
+python-dotenv>=1.0.0
+
+# === SEGURIDAD ===
+# (argon2-cffi si se implementa autenticación de usuarios en el futuro)

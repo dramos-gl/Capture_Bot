@@ -42,7 +42,7 @@ class StyledDataTable(QTableWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
         header.setHighlightSections(False)
-        header.setMinimumSectionSize(120)
+        header.setMinimumSectionSize(50)
         
         # Vertical header styling
         self.verticalHeader().setVisible(False)

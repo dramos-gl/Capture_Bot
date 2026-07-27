@@ -8,51 +8,68 @@ from sar.src.ui.design_system.components import CustomCard, CustomLabel, StyledD
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.tokens.colors import Colors
-from sar.src.storage.repositories import ProduccionRepository
+from sar.src.services.referencias_service import ReferenciasService
+
+class DashboardKPIsLoadWorker(QThread):
+    """Background worker thread to load KPI counts for the dashboard."""
+    result_ready = Signal(dict)
+    error_occurred = Signal(str)
+
+    def __init__(self, referencias_service, orden_ids: list = None):
+        super().__init__()
+        self.referencias_service = referencias_service
+        self.orden_ids = orden_ids
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        try:
+            if self._is_cancelled:
+                return
+            kpis = self.referencias_service.get_dashboard_kpis(self.orden_ids)
+            if not self._is_cancelled:
+                self.result_ready.emit(kpis)
+        except Exception as e:
+            if not self._is_cancelled:
+                self.error_occurred.emit(str(e))
 
 class DashboardReferencesLoadWorker(QThread):
     """Background worker thread to load dashboard references from the DB dynamically with pagination."""
     result_ready = Signal(list, int) # data, total_count
     error_occurred = Signal(str)
     
-    def __init__(self, db_connector, limit: int, offset: int, search_text: str, orden_ids: list = None):
+    def __init__(self, referencias_service, limit: int, offset: int, search_text: str, orden_ids: list = None):
         super().__init__()
-        self.db_connector = db_connector
+        self.referencias_service = referencias_service
         self.limit = limit
         self.offset = offset
         self.search_text = search_text
         self.orden_ids = orden_ids
+        self._is_cancelled = False
+        
+    def cancel(self):
+        self._is_cancelled = True
         
     def run(self):
         try:
-            from sar.src.storage.api_client import APIClient
-            api_client = APIClient()
-            if api_client.connect_via_api:
-                orden_ids_str = ",".join([str(x) for x in self.orden_ids]) if self.orden_ids else None
-                payload = {
-                    "limit": self.limit,
-                    "offset": self.offset,
-                    "search_text": self.search_text,
-                    "estado_filter": "Todos",
-                    "orden_ids": orden_ids_str
-                }
-                res = api_client.request("GET", "/api/docs/referencias", data=payload)
-                self.result_ready.emit(res["records"], res["total_count"])
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = ProduccionRepository(session)
-                    res, total_count = repo.get_referencias_paginated(
-                        limit=self.limit,
-                        offset=self.offset,
-                        search_text=self.search_text,
-                        estado_filter="Todos",
-                        orden_ids=self.orden_ids
-                    )
-                    self.result_ready.emit(res, total_count)
+            if self._is_cancelled:
+                return
+            res, total_count = self.referencias_service.get_referencias_paginated(
+                limit=self.limit,
+                offset=self.offset,
+                search_text=self.search_text,
+                estado_filter="Todos",
+                orden_ids=self.orden_ids
+            )
+            if not self._is_cancelled:
+                self.result_ready.emit(res, total_count)
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self.error_occurred.emit(str(e))
+            if not self._is_cancelled:
+                import traceback
+                traceback.print_exc()
+                self.error_occurred.emit(str(e))
 
 class DashboardView(QWidget):
     """Refactored Dashboard View reflecting the high-fidelity UI design mockup."""
@@ -60,8 +77,8 @@ class DashboardView(QWidget):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
-        from sar.src.storage.api_client import APIClient
-        self.api_client = APIClient()
+        self.referencias_service = ReferenciasService(self.db_connector)
+        self.active_kpis_worker = None
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(24, 24, 24, 24)
@@ -207,7 +224,8 @@ class DashboardView(QWidget):
         # Data Table
         headers = ["ID", "Consecutivo", "Referencia Portal", "Importe", "Fecha Generación", "Estado"]
         self.table = StyledDataTable(headers, parent=self)
-        self.table.setMinimumHeight(300)
+        self.table.setMinimumHeight(150)
+        self.table.setMinimumWidth(200)
         self.activity_layout.addWidget(self.table)
         
         # Table Footer Pagination Layout
@@ -240,10 +258,20 @@ class DashboardView(QWidget):
         
         self.btn_filter.clicked.connect(self._show_filter_menu)
         
+        self.card_generadas.mouseDoubleClickEvent = self._on_card_generadas_double_clicked
         self.layout.addWidget(self.activity_card)
         self._load_available_orders()
         self.refresh_data()
         
+    def _on_card_generadas_double_clicked(self, event):
+        from sar.src.ui.views.metrics_dashboard_dialog import MetricsDashboardDialog
+        dialog = MetricsDashboardDialog(
+            self.db_connector,
+            initial_orden_ids=list(self.selected_orden_ids),
+            parent=self
+        )
+        dialog.exec()
+
     def refresh_data(self):
         """Fetches latest KPI metrics and launches background thread for paginated references."""
         # Update timestamp label
@@ -251,34 +279,56 @@ class DashboardView(QWidget):
         
         self._load_available_orders(preserve_selection=True)
         
-        try:
-            if self.api_client.connect_via_api:
-                orden_ids_str = ",".join([str(x) for x in self.selected_orden_ids]) if self.selected_orden_ids else ""
-                kpis = self.api_client.request("GET", "/api/ops/dashboard-kpis", data={"orden_ids": orden_ids_str})
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = ProduccionRepository(session)
-                    kpis = repo.get_dashboard_kpis(self.selected_orden_ids)
-                
-            self.card_generadas.set_value(str(kpis.get("total_generadas", 0)))
-            self.card_pendientes.set_value(str(kpis.get("pendientes", 0)))
-            self.card_autorizadas.set_value(str(kpis.get("autorizadas", 0)))
-            self.card_error.set_value(str(kpis.get("con_error", 0)))
-        except Exception as e:
-            print("Error refreshing dashboard KPIs:", e)
+        # Cancel active KPIs worker if running
+        if self.active_kpis_worker and self.active_kpis_worker.isRunning():
+            self.active_kpis_worker.cancel()
+            try:
+                self.active_kpis_worker.result_ready.disconnect()
+                self.active_kpis_worker.error_occurred.disconnect()
+            except RuntimeError:
+                pass
+            self.active_kpis_worker.wait()
+
+        # Set visual feedback to loading state for KPIs
+        self.card_generadas.set_value("...")
+        self.card_pendientes.set_value("...")
+        self.card_autorizadas.set_value("...")
+        self.card_error.set_value("...")
+
+        # Start KPI background worker
+        self.active_kpis_worker = DashboardKPIsLoadWorker(
+            referencias_service=self.referencias_service,
+            orden_ids=self.selected_orden_ids
+        )
+        self.active_kpis_worker.result_ready.connect(self._on_kpis_loaded)
+        self.active_kpis_worker.error_occurred.connect(self._on_kpis_error)
+        self.active_kpis_worker.start()
             
         self.refresh_data_references()
 
+    def _on_kpis_loaded(self, kpis):
+        self.card_generadas.set_value(str(kpis.get("total_generadas", 0)))
+        self.card_pendientes.set_value(str(kpis.get("pendientes", 0)))
+        self.card_autorizadas.set_value(str(kpis.get("autorizadas", 0)))
+        self.card_error.set_value(str(kpis.get("con_error", 0)))
+
+    def _on_kpis_error(self, err_msg):
+        print("Error refreshing dashboard KPIs in background:", err_msg)
+        self.card_generadas.set_value("0")
+        self.card_pendientes.set_value("0")
+        self.card_autorizadas.set_value("0")
+        self.card_error.set_value("0")
+
     def refresh_data_references(self):
         """Starts background thread to fetch dashboard references."""
-        # Cancel active thread if running
+        # Cancel active thread if running safely
         if self.active_worker and self.active_worker.isRunning():
+            self.active_worker.cancel()
             try:
                 self.active_worker.result_ready.disconnect()
                 self.active_worker.error_occurred.disconnect()
             except RuntimeError:
                 pass
-            self.active_worker.terminate()
             self.active_worker.wait()
 
         self.lbl_pagination_info.setText("Cargando referencias...")
@@ -289,7 +339,7 @@ class DashboardView(QWidget):
         offset = (self.current_page - 1) * self.page_size
 
         self.active_worker = DashboardReferencesLoadWorker(
-            db_connector=self.db_connector,
+            referencias_service=self.referencias_service,
             limit=self.page_size,
             offset=offset,
             search_text=search_text,
@@ -405,12 +455,7 @@ class DashboardView(QWidget):
 
     def _load_available_orders(self, preserve_selection=False):
         try:
-            if self.api_client.connect_via_api:
-                self.todas_las_ordenes = self.api_client.request("GET", "/api/ops/ordenes")
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = ProduccionRepository(session)
-                    self.todas_las_ordenes = repo.get_ordenes()
+            self.todas_las_ordenes = self.referencias_service.get_ordenes()
                 
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}

@@ -9,7 +9,7 @@ from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
     LabeledComboBox, CustomLabel, CustomInput, CustomCheckBox
 )
-from sar.src.storage.repositories import InventarioRepository
+from sar.src.services.inventario_ui_service import InventarioUIService
 from sar.src.services.excel_inventory_handler import ExcelInventoryHandler
 
 class InventoryLoadWorker(QThread):
@@ -17,49 +17,39 @@ class InventoryLoadWorker(QThread):
     result_ready = Signal(list, int) # data, total_count
     error_occurred = Signal(str)
     
-    def __init__(self, db_connector, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str):
+    def __init__(self, inventario_ui_service, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str):
         super().__init__()
-        self.db_connector = db_connector
+        self.inventario_ui_service = inventario_ui_service
         self.limit = limit
         self.offset = offset
         self.search_text = search_text
         self.concepto_id = concepto_id
         self.rfc_id = rfc_id
         self.filter_assigned = filter_assigned
+        self._is_cancelled = False
+        
+    def cancel(self):
+        self._is_cancelled = True
         
     def run(self):
         try:
-            from sar.src.storage.api_client import APIClient
-            api_client = APIClient()
-            if api_client.connect_via_api:
-                payload = {
-                    "limit": self.limit,
-                    "offset": self.offset,
-                    "search_text": self.search_text,
-                    "filter_assigned": self.filter_assigned
-                }
-                if self.concepto_id:
-                    payload["concepto_id"] = self.concepto_id
-                if self.rfc_id:
-                    payload["rfc_id"] = self.rfc_id
-                res = api_client.request("GET", "/api/docs/inventario/referencias-facturadas", data=payload)
+            if self._is_cancelled:
+                return
+            res = self.inventario_ui_service.get_referencias_facturadas_paginated(
+                limit=self.limit,
+                offset=self.offset,
+                search_text=self.search_text,
+                concepto_id=self.concepto_id,
+                rfc_id=self.rfc_id,
+                filter_assigned=self.filter_assigned
+            )
+            if not self._is_cancelled:
                 self.result_ready.emit(res["records"], res["total_count"])
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    res, total_count = repo.get_referencias_facturadas_paginated(
-                        limit=self.limit,
-                        offset=self.offset,
-                        search_text=self.search_text,
-                        concepto_id=self.concepto_id,
-                        rfc_id=self.rfc_id,
-                        filter_assigned=self.filter_assigned
-                    )
-                    self.result_ready.emit(res, total_count)
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self.error_occurred.emit(str(e))
+            if not self._is_cancelled:
+                import traceback
+                traceback.print_exc()
+                self.error_occurred.emit(str(e))
 
 
 class InventoryView(QWidget):
@@ -68,8 +58,8 @@ class InventoryView(QWidget):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
-        from sar.src.storage.api_client import APIClient
-        self.api_client = APIClient()
+        self.inventario_ui_service = InventarioUIService(self.db_connector)
+        self.active_worker = None
         
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(24, 24, 24, 24)
@@ -178,7 +168,8 @@ class InventoryView(QWidget):
         
         headers = ["✔", "ID", "Referencia", "Concepto", "Empresa", "Importe", "Estado", "Asignado A", "Tipo", "Solicitante", "Desarrollo", "Cliente", "Mz", "Lt", "Edif", "Viv", "Folio Electrónico", "Fecha Asignación"]
         self.table = StyledDataTable(headers, parent=self)
-        self.table.setMinimumHeight(350)
+        self.table.setMinimumHeight(200)
+        self.table.setMinimumWidth(200)
         self.table.setColumnHidden(1, True) # Hide internal ID
         self.card.add_widget(self.table)
 
@@ -235,6 +226,7 @@ class InventoryView(QWidget):
 
     def refresh_visor_data(self):
         if self.active_worker and self.active_worker.isRunning():
+            self.active_worker.cancel()
             try:
                 self.active_worker.result_ready.disconnect(self._on_visor_data_loaded)
             except RuntimeError:
@@ -243,7 +235,6 @@ class InventoryView(QWidget):
                 self.active_worker.error_occurred.disconnect(self._on_visor_load_error)
             except RuntimeError:
                 pass
-            self.active_worker.terminate()
             self.active_worker.wait()
 
         self.lbl_pagination_info.setText("Cargando inventario...")
@@ -252,7 +243,7 @@ class InventoryView(QWidget):
         offset = (self.current_page - 1) * self.page_size
         
         self.active_worker = InventoryLoadWorker(
-            db_connector=self.db_connector,
+            inventario_ui_service=self.inventario_ui_service,
             limit=self.page_size,
             offset=offset,
             search_text=self._current_search_text,
@@ -457,7 +448,8 @@ class InventoryView(QWidget):
         # Preview list card
         self.card_preview = CustomCard(title="Previsualización de Coincidencias y Validaciones", parent=self)
         self.preview_table = StyledDataTable(["Fila Excel", "Cliente", "Desarrollo", "Delegación", "Concepto", "Referencia", "Ubicación", "Estatus Validation"], parent=self)
-        self.preview_table.setMinimumHeight(250)
+        self.preview_table.setMinimumHeight(150)
+        self.preview_table.setMinimumWidth(200)
         self.card_preview.add_widget(self.preview_table)
 
         btn_layout = QHBoxLayout()
@@ -711,13 +703,15 @@ class InventoryView(QWidget):
     # TAB 3: GESTIÓN DE CATALOGOS
     # =========================================================================
     def _setup_tab_catalogos(self):
-        layout = QHBoxLayout(self.tab_catalogos)
+        from PySide6.QtWidgets import QGridLayout
+        layout = QGridLayout(self.tab_catalogos)
         layout.setSpacing(24)
 
         # Left Column: Notarias Catalog
         card_notarias = CustomCard(title="Catálogo de Notarías", parent=self)
         col_not_layout = QVBoxLayout()
         self.table_notarias = StyledDataTable(["ID", "Nombre Notaría"], parent=self)
+        self.table_notarias.setMinimumWidth(100)
         col_not_layout.addWidget(self.table_notarias)
         
         add_not_layout = QHBoxLayout()
@@ -729,12 +723,13 @@ class InventoryView(QWidget):
         add_not_layout.addWidget(btn_add_notaria)
         col_not_layout.addLayout(add_not_layout)
         card_notarias.layout.addLayout(col_not_layout)
-        layout.addWidget(card_notarias)
+        layout.addWidget(card_notarias, 0, 0)
 
         # Middle Column: Colaboradores Catalog
         card_colabs = CustomCard(title="Catálogo de Colaboradores", parent=self)
         col_col_layout = QVBoxLayout()
         self.table_colaboradores = StyledDataTable(["ID", "Nombre Colaborador"], parent=self)
+        self.table_colaboradores.setMinimumWidth(100)
         col_col_layout.addWidget(self.table_colaboradores)
         
         add_col_layout = QHBoxLayout()
@@ -746,12 +741,13 @@ class InventoryView(QWidget):
         add_col_layout.addWidget(btn_add_colaborador)
         col_col_layout.addLayout(add_col_layout)
         card_colabs.layout.addLayout(col_col_layout)
-        layout.addWidget(card_colabs)
+        layout.addWidget(card_colabs, 0, 1)
 
         # Right Column: Desarrollos Catalog
         card_des = CustomCard(title="Catálogo de Desarrollos", parent=self)
         col_des_layout = QVBoxLayout()
         self.table_desarrollos = StyledDataTable(["ID", "Desarrollo", "Delegación"], parent=self)
+        self.table_desarrollos.setMinimumWidth(100)
         col_des_layout.addWidget(self.table_desarrollos)
         
         add_des_form = QFormLayout()
@@ -768,44 +764,24 @@ class InventoryView(QWidget):
         col_des_layout.addLayout(add_des_form)
         col_des_layout.addWidget(btn_add_desarrollo)
         card_des.layout.addLayout(col_des_layout)
-        layout.addWidget(card_des)
+        layout.addWidget(card_des, 1, 0, 1, 2)
 
     def _load_catalogs_data(self):
         try:
-            if self.api_client.connect_via_api:
-                notarias = self.api_client.request("GET", "/api/docs/inventario/notarias")
-                colaboradores = self.api_client.request("GET", "/api/docs/inventario/colaboradores")
-                desarrollos = self.api_client.request("GET", "/api/docs/inventario/desarrollos")
-                cats = self.api_client.request("GET", "/api/ops/catalogos")
-                concepts_list = cats["conceptos"]
-                delegations_list = cats["delegaciones"]
-                rfcs_list = cats.get("rfcs", [])
-                
-                self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
-                self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
-                self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
-                self._delegations_map = {dg["nombre"]: dg["delegacion_id"] for dg in delegations_list}
-                self._concepts_map = {cp["nombre"]: cp["concepto_id"] for cp in concepts_list}
-                self._rfcs_map = {r["razon_social"]: r["rfc_id"] for r in rfcs_list}
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    notarias = repo.get_notarias()
-                    colaboradores = repo.get_colaboradores()
-                    desarrollos = repo.get_desarrollos()
-                    
-                    from sar.src.storage.models import Concepto, Delegacion, Rfc
-                    from sqlalchemy import select
-                    concepts = session.execute(select(Concepto).where(Concepto.activo == True)).scalars().all()
-                    delegations = session.execute(select(Delegacion)).scalars().all()
-                    rfcs = session.execute(select(Rfc).where(Rfc.activo == True)).scalars().all()
-                    
-                    self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
-                    self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
-                    self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
-                    self._delegations_map = {dg.nombre: dg.delegacion_id for dg in delegations}
-                    self._concepts_map = {cp.nombre: cp.concepto_id for cp in concepts}
-                    self._rfcs_map = {r.razon_social: r.rfc_id for r in rfcs}
+            data = self.inventario_ui_service.get_catalogos_data()
+            notarias = data["notarias"]
+            colaboradores = data["colaboradores"]
+            desarrollos = data["desarrollos"]
+            concepts_list = data["conceptos"]
+            delegations_list = data["delegaciones"]
+            rfcs_list = data["rfcs"]
+            
+            self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
+            self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
+            self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
+            self._delegations_map = {dg["nombre"] if isinstance(dg, dict) else dg.nombre: dg["delegacion_id"] if isinstance(dg, dict) else dg.delegacion_id for dg in delegations_list}
+            self._concepts_map = {cp["nombre"] if isinstance(cp, dict) else cp.nombre: cp["concepto_id"] if isinstance(cp, dict) else cp.concepto_id for cp in concepts_list}
+            self._rfcs_map = {r["razon_social"] if isinstance(r, dict) else r.razon_social: r["rfc_id"] if isinstance(r, dict) else r.rfc_id for r in rfcs_list}
 
             # Populate combo boxes
             self.cb_notarias_masivo.clear()
@@ -856,13 +832,7 @@ class InventoryView(QWidget):
         if not name:
             return
         try:
-            if self.api_client.connect_via_api:
-                self.api_client.request("POST", "/api/docs/inventario/notarias", data={"nombre": name})
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    repo.save_notaria(name)
-                    session.commit()
+            self.inventario_ui_service.save_notaria(name)
             self.txt_add_notaria.clear()
             self._load_catalogs_data()
         except Exception as e:
@@ -873,13 +843,7 @@ class InventoryView(QWidget):
         if not name:
             return
         try:
-            if self.api_client.connect_via_api:
-                self.api_client.request("POST", "/api/docs/inventario/colaboradores", data={"nombre": name})
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    repo.save_colaborador(name)
-                    session.commit()
+            self.inventario_ui_service.save_colaborador(name)
             self.txt_add_colaborador.clear()
             self._load_catalogs_data()
         except Exception as e:
@@ -893,13 +857,7 @@ class InventoryView(QWidget):
         if not name or not deleg_id:
             return
         try:
-            if self.api_client.connect_via_api:
-                self.api_client.request("POST", "/api/docs/inventario/desarrollos", data={"nombre": name, "delegacion_id": deleg_id})
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    repo.save_desarrollo(name, deleg_id)
-                    session.commit()
+            self.inventario_ui_service.save_desarrollo(name, deleg_id)
             self.txt_add_desarrollo.clear()
             self._load_catalogs_data()
         except Exception as e:
@@ -916,8 +874,7 @@ class ManualAssignmentDialog(QDialog):
         super().__init__(parent)
         self.db_connector = db_connector
         self.ref_ids = ref_ids
-        from sar.src.storage.api_client import APIClient
-        self.api_client = APIClient()
+        self.inventario_ui_service = InventarioUIService(self.db_connector)
         
         self.setWindowTitle("Asignar Factura Manualmente")
         self.setMinimumWidth(400)
@@ -1018,16 +975,9 @@ class ManualAssignmentDialog(QDialog):
 
     def _load_catalogs(self):
         try:
-            if self.api_client.connect_via_api:
-                notarias = self.api_client.request("GET", "/api/docs/inventario/notarias")
-                colaboradores = self.api_client.request("GET", "/api/docs/inventario/colaboradores")
-                desarrollos = self.api_client.request("GET", "/api/docs/inventario/desarrollos")
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    notarias = repo.get_notarias()
-                    colaboradores = repo.get_colaboradores()
-                    desarrollos = repo.get_desarrollos()
+            notarias = self.inventario_ui_service.get_notarias()
+            colaboradores = self.inventario_ui_service.get_colaboradores()
+            desarrollos = self.inventario_ui_service.get_desarrollos()
 
             self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
             self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
@@ -1102,37 +1052,15 @@ class ManualAssignmentDialog(QDialog):
             parent_window = self.parent().window()
             usuario_id = getattr(parent_window, "current_usuario_id", 1)
 
-            if self.api_client.connect_via_api:
-                detalles_payload = []
-                for det in detalles_list:
-                    det_dict = dict(det)
-                    if det_dict.get("fecha_solicitud"):
-                        det_dict["fecha_solicitud"] = det_dict["fecha_solicitud"].strftime("%Y-%m-%d")
-                    detalles_payload.append(det_dict)
-
-                payload = {
-                    "tipo_destino": tipo_destino,
-                    "notaria_id": notaria_id,
-                    "colaborador_id": colaborador_id,
-                    "solicitante_externo": solicitante_externo,
-                    "observaciones": self.txt_obs.toPlainText().strip(),
-                    "usuario_creacion": usuario_id,
-                    "detalles": detalles_payload
-                }
-                self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    repo.crear_lote_asignacion(
-                        tipo_destino=tipo_destino,
-                        notaria_id=notaria_id,
-                        colaborador_id=colaborador_id,
-                        solicitante_externo=solicitante_externo,
-                        observaciones=self.txt_obs.toPlainText().strip(),
-                        usuario_creacion=usuario_id,
-                        detalles_list=detalles_list
-                    )
-                    session.commit()
+            self.inventario_ui_service.crear_lote_asignacion(
+                tipo_destino=tipo_destino,
+                notaria_id=notaria_id,
+                colaborador_id=colaborador_id,
+                solicitante_externo=solicitante_externo,
+                observaciones=self.txt_obs.toPlainText().strip(),
+                usuario_creacion=usuario_id,
+                detalles_list=detalles_list
+            )
 
             QMessageBox.information(self, "Éxito", f"Se asignaron exitosamente {len(self.ref_ids)} facturas.")
             self.accept()
@@ -1146,8 +1074,7 @@ class ExportLotesDialog(QDialog):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
-        from sar.src.storage.api_client import APIClient
-        self.api_client = APIClient()
+        self.inventario_ui_service = InventarioUIService(self.db_connector)
         
         self.setWindowTitle("Exportar Reporte de Asignación")
         self.setMinimumSize(600, 400)
@@ -1175,12 +1102,7 @@ class ExportLotesDialog(QDialog):
 
     def _load_lotes(self):
         try:
-            if self.api_client.connect_via_api:
-                self.lotes = self.api_client.request("GET", "/api/docs/inventario/lotes")
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    self.lotes = repo.get_lotes_asignacion()
+            self.lotes = self.inventario_ui_service.get_lotes_asignacion()
                 
             rows = []
             for l in self.lotes:
@@ -1219,12 +1141,7 @@ class ExportLotesDialog(QDialog):
             return
 
         try:
-            if self.api_client.connect_via_api:
-                details = self.api_client.request("GET", f"/api/docs/inventario/lotes/{lote_id}/detalles")
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    details = repo.get_lote_detalles(lote_id)
+            details = self.inventario_ui_service.get_lote_detalles(lote_id)
 
             # Generate Styled Excel
             title = f"ENTREGA DE DERECHOS"

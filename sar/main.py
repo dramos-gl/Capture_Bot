@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
                 self.active_module.current_usuario_id = self.current_usuario_id
                 self.active_module.current_username = getattr(self, 'current_username', None)
                 self.active_module.setWindowTitle("SAR - Control de Referencias")
-                self.active_module.resize(1100, 750)
+                self.active_module.resize(1000, 680)
                 
                 # Use the existing MainView (which has the sidebar and dashboard)
                 main_view_widget = MainView(ThemeManager, self.db_connector, self.active_module)
