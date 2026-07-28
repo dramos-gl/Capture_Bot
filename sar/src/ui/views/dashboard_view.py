@@ -74,6 +74,9 @@ class DashboardReferencesLoadWorker(QThread):
 class DashboardView(QWidget):
     """Refactored Dashboard View reflecting the high-fidelity UI design mockup."""
     
+    # Signal emitted when user double-clicks on the Total Generadas stat card
+    show_metrics_requested = Signal(list)
+    
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
@@ -264,13 +267,7 @@ class DashboardView(QWidget):
         self.refresh_data()
         
     def _on_card_generadas_double_clicked(self, event):
-        from sar.src.ui.views.metrics_dashboard_dialog import MetricsDashboardDialog
-        dialog = MetricsDashboardDialog(
-            self.db_connector,
-            initial_orden_ids=list(self.selected_orden_ids),
-            parent=self
-        )
-        dialog.exec()
+        self.show_metrics_requested.emit(list(self.selected_orden_ids))
 
     def refresh_data(self):
         """Fetches latest KPI metrics and launches background thread for paginated references."""

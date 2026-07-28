@@ -434,7 +434,13 @@ class R2FCancunView(QWidget):
                     continue
 
                 folios_texto_nuevos.add(val)
-                folios_mapeados.append((val, tipo))
+                folios_mapeados.append({
+                    "folio_electronico": f["folio_electronico"],
+                    "folio_pase_caja": f["folio_pase_caja"],
+                    "tipo_folio": tipo,
+                    "rfc_id": f.get("rfc_id"),
+                    "desarrollo_id": f.get("desarrollo_id")
+                })
 
             # Si no hay folios nuevos válidos que procesar
             if not folios_mapeados:
@@ -447,6 +453,10 @@ class R2FCancunView(QWidget):
                 QMessageBox.warning(self, "Importación Cancelada", msg_error)
                 return
 
+            # Contar resoluciones de catálogos
+            con_rfc = sum(1 for x in folios_mapeados if x["rfc_id"] is not None)
+            con_des = sum(1 for x in folios_mapeados if x["desarrollo_id"] is not None)
+
             # 3. Cuadro de Confirmación detallado antes de insertar en BD
             confirm_msg = (
                 f"Resumen del archivo Excel:\n\n"
@@ -454,6 +464,9 @@ class R2FCancunView(QWidget):
                 f"• Duplicados dentro del Excel (se omitirán): {duplicados_excel}\n"
                 f"• Ya registrados en Base de Datos (se omitirán): {duplicados_db}\n"
                 f"• Folios nuevos a importar: {len(folios_mapeados)}\n\n"
+                f"Asociación con Catálogos de SAR:\n"
+                f"• RFCs vinculados: {con_rfc} de {len(folios_mapeados)}\n"
+                f"• Desarrollos vinculados: {con_des} de {len(folios_mapeados)}\n\n"
                 f"¿Deseas confirmar la inserción y crear un nuevo Lote en la Base de Datos?"
             )
             
@@ -513,12 +526,19 @@ class R2FCancunView(QWidget):
             # Escribir encabezados oficiales requeridos por el importador
             ws.cell(row=1, column=1, value="FOLIO_ELECTRONICO")
             ws.cell(row=1, column=2, value="FOLIO_PASE_CAJA")
+            ws.cell(row=1, column=3, value="RFC")
+            ws.cell(row=1, column=4, value="DESARROLLO")
 
             # Ejemplo visual en la fila 2
             ws.cell(row=2, column=1, value="F-2026-615-31044")
             ws.cell(row=2, column=2, value="")
+            ws.cell(row=2, column=3, value="XAXX010101000")
+            ws.cell(row=2, column=4, value="VALMIRA LIVING")
+
             ws.cell(row=3, column=1, value="")
             ws.cell(row=3, column=2, value="987654321")
+            ws.cell(row=3, column=3, value="CIN010904D31")
+            ws.cell(row=3, column=4, value="")
 
             wb.save(file_path)
             QMessageBox.information(

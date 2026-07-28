@@ -8,6 +8,7 @@ from typing import Optional
 
 import openpyxl
 
+from sqlalchemy import text
 from sar.src.storage.repositories import ConfigRepository
 from sar.src.storage.db_connector import DatabaseConnector
 
@@ -87,6 +88,15 @@ class ExcelImporter:
                 idx_pase = headers_cleaned.index(fallback)
                 break
 
+        # Buscar coincidencia para RFC y DESARROLLO
+        idx_rfc: Optional[int] = None
+        idx_desarrollo: Optional[int] = None
+        for i, h in enumerate(headers_cleaned):
+            if h in ["RFC", "RFC_EMPRESA", "CLIENTE_RFC"]:
+                idx_rfc = i
+            elif h in ["DESARROLLO", "NOMBRE_DESARROLLO", "PROYECTO"]:
+                idx_desarrollo = i
+
         if idx_elec is None and idx_pase is None:
             raise ValueError(
                 f"El Excel no tiene las columnas esperadas.\n"
@@ -95,28 +105,50 @@ class ExcelImporter:
             )
 
         folios: list[dict] = []
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            folio_elec = str(row[idx_elec]).strip() if idx_elec is not None and row[idx_elec] else None
-            folio_pase = str(row[idx_pase]).strip() if idx_pase is not None and row[idx_pase] else None
+        db = DatabaseConnector()
+        with db.get_session() as session:
+            # Caché de catálogos en memoria para velocidad
+            res_rfc = session.execute(text("SELECT rfc_id, rfc FROM sar_catalogo.rfc WHERE activo = true")).fetchall()
+            rfc_cache = {row[1].strip().upper(): row[0] for row in res_rfc}
 
-            # Saltar filas vacías
-            if not folio_elec and not folio_pase:
-                continue
+            res_des = session.execute(text("SELECT desarrollo_id, nombre FROM sar_catalogo.desarrollo WHERE activo = true")).fetchall()
+            def _clean(val: str) -> str:
+                return val.strip().upper().replace(" ", "").replace("_", "").replace("-", "")
+            desarrollo_cache = {_clean(row[1]): row[0] for row in res_des}
 
-            # Determinar tipo de folio
-            if folio_elec:
-                tipo = "ELECTRONICO"
-            else:
-                tipo = "PASE_CAJA"
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if len(row) == 0:
+                    continue
+                folio_elec = str(row[idx_elec]).strip() if idx_elec is not None and row[idx_elec] is not None else None
+                folio_pase = str(row[idx_pase]).strip() if idx_pase is not None and row[idx_pase] is not None else None
 
-            folios.append({
-                "folio_electronico": folio_elec,
-                "folio_pase_caja": folio_pase,
-                "tipo_folio": tipo
-            })
+                # Saltar filas vacías
+                if not folio_elec and not folio_pase:
+                    continue
+
+                # Determinar tipo de folio
+                tipo = "ELECTRONICO" if folio_elec else "PASE_CAJA"
+
+                # Resolver RFC
+                rfc_val = str(row[idx_rfc]).strip().upper() if idx_rfc is not None and row[idx_rfc] is not None else None
+                rfc_id = rfc_cache.get(rfc_val) if rfc_val else None
+
+                # Resolver Desarrollo
+                des_val = str(row[idx_desarrollo]).strip() if idx_desarrollo is not None and row[idx_desarrollo] is not None else None
+                des_id = desarrollo_cache.get(_clean(des_val)) if des_val else None
+
+                folios.append({
+                    "folio_electronico": folio_elec,
+                    "folio_pase_caja": folio_pase,
+                    "tipo_folio": tipo,
+                    "rfc_id": rfc_id,
+                    "desarrollo_id": des_id,
+                    "excel_rfc": rfc_val,
+                    "excel_desarrollo": des_val
+                })
 
         wb.close()
-        logger.info(f"Importados {len(folios)} folios desde el Excel.")
+        logger.info(f"Importados {len(folios)} folios desde el Excel con resolución de catálogos.")
         return folios
 
     def validar_estructura(self, ruta_excel: str) -> tuple[bool, str]:

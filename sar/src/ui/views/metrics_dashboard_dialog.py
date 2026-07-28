@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QFrame,
     QPushButton, QMenu, QScrollArea, QSizePolicy
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QMargins
 from PySide6.QtGui import QPainter, QColor, QAction
 from PySide6.QtCharts import QChart, QChartView, QBarSet, QBarSeries, QBarCategoryAxis, QValueAxis
 
@@ -95,11 +95,14 @@ _DEFAULT_ESTADO = {"label": None, "icon": "file_text", "color": "#64748B"}
 
 
 # ---------------------------------------------------------------------------
-# Dialog
+# Dashboard View
 # ---------------------------------------------------------------------------
 
-class MetricsDashboardDialog(QDialog):
-    """Advanced Metrics Dashboard — KPI cards, bar charts, and consolidated table."""
+class MetricsDashboardDialog(QWidget):
+    """Advanced Metrics Dashboard View — Integrated inside MainView stacked container."""
+    
+    # Signal emitted when user wants to return to the main dashboard
+    back_requested = Signal()
 
     def __init__(self, db_connector, initial_orden_ids: list = None, parent=None):
         super().__init__(parent)
@@ -114,18 +117,6 @@ class MetricsDashboardDialog(QDialog):
 
         # Dict to hold estado StatCard widgets keyed by estado_codigo
         self._estado_cards: Dict[str, StatCard] = {}
-
-        self.setWindowTitle("Tablero de Métricas Avanzadas y Producción")
-        self.setMinimumSize(900, 600)
-        self.setWindowFlags(
-            Qt.WindowType.Window
-            | Qt.WindowType.WindowTitleHint
-            | Qt.WindowType.WindowCloseButtonHint
-            | Qt.WindowType.WindowMaximizeButtonHint
-            | Qt.WindowType.WindowMinimizeButtonHint
-        )
-        self.setWindowState(Qt.WindowState.WindowMaximized)
-        self.setStyleSheet(f"QDialog {{ background-color: {Colors.BG_LIGHT}; }}")
 
         # Scrollable root so everything fits on small screens
         scroll = QScrollArea(self)
@@ -159,6 +150,14 @@ class MetricsDashboardDialog(QDialog):
         header_layout = QHBoxLayout()
         header_layout.setSpacing(12)
 
+        # Botón Volver / Atrás minimalista
+        self.btn_back = QPushButton()
+        self.btn_back.setObjectName("secondaryBtn")
+        self.btn_back.setFixedSize(32, 32)
+        self.btn_back.setIcon(Icons.volver(Colors.TEXT_LIGHT_PRIMARY))
+        self.btn_back.clicked.connect(self.back_requested.emit)
+        header_layout.addWidget(self.btn_back)
+
         bar = QFrame(self)
         bar.setFixedWidth(4)
         bar.setFixedHeight(28)
@@ -172,54 +171,78 @@ class MetricsDashboardDialog(QDialog):
         txt.addWidget(CustomLabel("Reportes avanzados por empresa, conceptos y delegaciones", variant="muted"))
         header_layout.addLayout(txt)
         header_layout.addStretch()
+
+        # Botón Exportar PDF con estilo minimalista e icono
+        self.btn_export = QPushButton(" Exportar Reporte (PDF)")
+        self.btn_export.setObjectName("primaryBtn")
+        self.btn_export.setFixedHeight(32)
+        self.btn_export.setIcon(Icons.file_pdf("#FFFFFF"))
+        self.btn_export.clicked.connect(self._export_to_pdf)
+        header_layout.addWidget(self.btn_export)
+
         self.main_layout.addLayout(header_layout)
 
     # =========================================================================
     # Filters
     # =========================================================================
+    # =========================================================================
+    # Filters
+    # =========================================================================
     def _setup_filters(self):
         self.card_filters = CustomCard(title="Filtros Analíticos", parent=self)
+        # Ajustamos márgenes del layout interno para hacerlo más compacto
+        self.card_filters.layout.setContentsMargins(12, 4, 12, 8)
+        self.card_filters.layout.setSpacing(10)
+        
         fl = QHBoxLayout()
-        fl.setSpacing(16)
+        fl.setSpacing(14)
 
         # Orden
         v = QVBoxLayout()
+        v.setSpacing(4)
         v.addWidget(CustomLabel("Orden / Folio:", variant="body"))
         self.btn_orden_filter = QPushButton("  Seleccionar Orden")
         self.btn_orden_filter.setObjectName("secondaryBtn")
         self.btn_orden_filter.setIcon(Icons.filter_icon("#475569"))
-        self.btn_orden_filter.setFixedHeight(36)
+        self.btn_orden_filter.setFixedHeight(32)
         self.btn_orden_filter.clicked.connect(self._show_orden_filter_menu)
         v.addWidget(self.btn_orden_filter)
         fl.addLayout(v, stretch=1)
 
         # RFC
         v2 = QVBoxLayout()
+        v2.setSpacing(4)
         v2.addWidget(CustomLabel("Empresa (RFC):", variant="body"))
         self.cb_rfc = CustomComboBox(self)
+        self.cb_rfc.setFixedHeight(32)
         self.cb_rfc.currentIndexChanged.connect(self.refresh_metrics)
         v2.addWidget(self.cb_rfc)
         fl.addLayout(v2, stretch=1)
 
         # Concepto
         v3 = QVBoxLayout()
+        v3.setSpacing(4)
         v3.addWidget(CustomLabel("Concepto:", variant="body"))
         self.cb_concepto = CustomComboBox(self)
+        self.cb_concepto.setFixedHeight(32)
         self.cb_concepto.currentIndexChanged.connect(self.refresh_metrics)
         v3.addWidget(self.cb_concepto)
         fl.addLayout(v3, stretch=1)
 
         # Delegación
         v4 = QVBoxLayout()
+        v4.setSpacing(4)
         v4.addWidget(CustomLabel("Delegación:", variant="body"))
         self.cb_deleg = CustomComboBox(self)
+        self.cb_deleg.setFixedHeight(32)
         self.cb_deleg.currentIndexChanged.connect(self.refresh_metrics)
         v4.addWidget(self.cb_deleg)
         fl.addLayout(v4, stretch=1)
 
         # Reset
         btn_reset = CustomButton("Limpiar Filtros", is_secondary=True)
-        btn_reset.setFixedWidth(130)
+        btn_reset.setFixedWidth(120)
+        btn_reset.setFixedHeight(32)
         btn_reset.clicked.connect(self._reset_filters)
         fl.addWidget(btn_reset, alignment=Qt.AlignBottom)
 
@@ -235,7 +258,7 @@ class MetricsDashboardDialog(QDialog):
         kpi_widget.setStyleSheet("background: transparent;")
         self._kpi_layout = QHBoxLayout(kpi_widget)
         self._kpi_layout.setContentsMargins(0, 0, 0, 0)
-        self._kpi_layout.setSpacing(16)
+        self._kpi_layout.setSpacing(12)
 
         # Static "Total General" card (monto)
         self.card_total_monto = StatCard(
@@ -243,6 +266,7 @@ class MetricsDashboardDialog(QDialog):
             "$ 0",
             icon_name="file_text",
             color_hex=Colors.PRIMARY,
+            show_sparkline=False,
             parent=kpi_widget
         )
         self.card_total_monto.lbl_sub.setText("Monto acumulado filtrado")
@@ -254,6 +278,7 @@ class MetricsDashboardDialog(QDialog):
             "0",
             icon_name="file_text",
             color_hex=Colors.ACCENT,
+            show_sparkline=False,
             parent=kpi_widget
         )
         self.card_total_refs.lbl_sub.setText("Bajo los filtros activos")
@@ -298,7 +323,8 @@ class MetricsDashboardDialog(QDialog):
             count = vals["total"]
 
             if codigo not in self._estado_cards:
-                card = StatCard(label, str(count), icon_name=icon, color_hex=color,
+                # Ocultamos la sparkline en las tarjetas del diálogo para reducir la altura vertical del KPI a la mitad
+                card = StatCard(label, str(count), icon_name=icon, color_hex=color, show_sparkline=False,
                                 parent=self._kpi_estado_widget)
                 card.lbl_sub.setText(f"$ {vals['importe']:,.0f}")
                 self._estado_cards[codigo] = card
@@ -320,21 +346,34 @@ class MetricsDashboardDialog(QDialog):
         cl.setSpacing(20)
 
         self.card_chart_qty = CustomCard(title="Referencias por Delegación", parent=self)
+        # Aplicamos padding de contenido reducido para minimalismo
+        self.card_chart_qty.layout.setContentsMargins(8, 4, 8, 8)
+        
         self.chart_qty = QChart()
         self.chart_qty.setAnimationOptions(QChart.SeriesAnimations)
         self.chart_qty.legend().setVisible(False)
+        self.chart_qty.setBackgroundVisible(False)  # Fondo transparente moderno
+        self.chart_qty.setMargins(QMargins(10, 10, 10, 10))
+        
         self.chart_qty_view = QChartView(self.chart_qty)
         self.chart_qty_view.setRenderHint(QPainter.Antialiasing)
-        self.chart_qty_view.setMinimumHeight(240)
+        self.chart_qty_view.setMinimumHeight(200)
+        self.chart_qty_view.setStyleSheet("background: transparent;")
         self.card_chart_qty.add_widget(self.chart_qty_view)
 
         self.card_chart_amount = CustomCard(title="Importe Total por Delegación ($)", parent=self)
+        self.card_chart_amount.layout.setContentsMargins(8, 4, 8, 8)
+        
         self.chart_amount = QChart()
         self.chart_amount.setAnimationOptions(QChart.SeriesAnimations)
         self.chart_amount.legend().setVisible(False)
+        self.chart_amount.setBackgroundVisible(False)
+        self.chart_amount.setMargins(QMargins(10, 10, 10, 10))
+        
         self.chart_amount_view = QChartView(self.chart_amount)
         self.chart_amount_view.setRenderHint(QPainter.Antialiasing)
-        self.chart_amount_view.setMinimumHeight(240)
+        self.chart_amount_view.setMinimumHeight(200)
+        self.chart_amount_view.setStyleSheet("background: transparent;")
         self.card_chart_amount.add_widget(self.chart_amount_view)
 
         cl.addWidget(self.card_chart_qty, stretch=1)
@@ -346,9 +385,11 @@ class MetricsDashboardDialog(QDialog):
     # =========================================================================
     def _setup_table_area(self):
         self.card_table = CustomCard(title="Reporte de Consolidación Métrica", parent=self)
+        self.card_table.layout.setContentsMargins(8, 4, 8, 8)
+        
         headers = ["Empresa (RFC)", "Concepto", "Delegación", "Cantidad", "Monto Solicitado ($)"]
         self.table = StyledDataTable(headers, parent=self)
-        self.table.setMinimumHeight(160)
+        self.table.setMinimumHeight(150)
         self.card_table.add_widget(self.table)
         self.main_layout.addWidget(self.card_table, stretch=1)
 
@@ -511,6 +552,21 @@ class MetricsDashboardDialog(QDialog):
             for row in data
         ])
 
+        # Actualizar títulos de las tarjetas de gráficos dinámicamente
+        rfc_txt = self.cb_rfc.currentText()
+        if self.cb_rfc.currentIndex() == 0:
+            rfc_txt = "Todas"
+        
+        concepto_txt = self.cb_concepto.currentText()
+        if self.cb_concepto.currentIndex() == 0:
+            concepto_txt = "Todos"
+        else:
+            if len(concepto_txt) > 25:
+                concepto_txt = concepto_txt[:22] + "..."
+
+        self.card_chart_qty.header.setText(f"Referencias por Delegación ({rfc_txt} - {concepto_txt})")
+        self.card_chart_amount.header.setText(f"Importe por Delegación ({rfc_txt} - {concepto_txt})")
+
         # Aggregate by delegación for charts
         del_data: Dict[str, Dict] = {}
         for row in data:
@@ -584,3 +640,188 @@ class MetricsDashboardDialog(QDialog):
         )
         self._update_orden_filter_label()
         self.refresh_metrics()
+
+    # =========================================================================
+    # PDF Export Integration
+    # =========================================================================
+    def _export_to_pdf(self):
+        """Generates a professional PDF report containing active filters, KPIs, charts, and data table."""
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from PySide6.QtGui import QPixmap, QImage
+        import tempfile
+        import os
+
+        # 1. Ask user for destination file path
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exportar Reporte en PDF",
+            "Reporte_Analitica_Produccion.pdf",
+            "PDF Files (*.pdf)"
+        )
+        if not file_path:
+            return
+
+        try:
+            # 2. Capture charts as temporary image files
+            temp_dir = tempfile.gettempdir()
+            chart_qty_path = os.path.join(temp_dir, "temp_chart_qty.png")
+            chart_amount_path = os.path.join(temp_dir, "temp_chart_amount.png")
+
+            # Capture Chart 1
+            pixmap_qty = self.chart_qty_view.grab()
+            pixmap_qty.save(chart_qty_path, "PNG")
+
+            # Capture Chart 2
+            pixmap_amt = self.chart_amount_view.grab()
+            pixmap_amt.save(chart_amount_path, "PNG")
+
+            # 3. Gather filter information for the PDF header
+            orden_txt = self.btn_orden_filter.text().strip()
+            rfc_txt = self.cb_rfc.currentText()
+            concepto_txt = self.cb_concepto.currentText()
+            delegacion_txt = self.cb_deleg.currentText()
+
+            # 4. Gather KPI values
+            monto_kpi = self.card_total_monto.lbl_value.text()
+            refs_kpi = self.card_total_refs.lbl_value.text()
+            estados_info = []
+            for cod, card in self._estado_cards.items():
+                estados_info.append(f"{card.lbl_title.text()}: {card.lbl_value.text()} refs ({card.lbl_sub.text()})")
+
+            # 5. Gather data table records
+            table_rows = []
+            for r in range(self.table.rowCount()):
+                row_data = []
+                for c in range(self.table.columnCount()):
+                    item = self.table.item(r, c)
+                    row_data.append(item.text() if item else "")
+                table_rows.append(row_data)
+
+            # 6. Generate the PDF structure using pypdf
+            # Since ReportLab is not in the environment, we write a clean HTML/Print format or use PySide6 QPdfWriter.
+            # QPdfWriter is native, doesn't require third-party libraries, and renders perfectly on Windows.
+            from PySide6.QtGui import QPdfWriter, QPageLayout, QPageSize, QFont, QTextDocument
+            from PySide6.QtCore import QSizeF
+
+            writer = QPdfWriter(file_path)
+            writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+            writer.setPageOrientation(QPageLayout.Orientation.Portrait)
+            writer.setPageMargins(QMargins(20, 20, 20, 20))
+
+            # Build HTML layout for rendering to PDF
+            html_content = f"""
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: 'Segoe UI', sans-serif; color: #1E293B; margin: 20px; }}
+                    h1 {{ color: #2C3E50; font-size: 24px; border-bottom: 2px solid #2C3E50; padding-bottom: 6px; }}
+                    .section-title {{ color: #2C3E50; font-size: 16px; font-weight: bold; margin-top: 20px; margin-bottom: 10px; border-bottom: 1px solid #E2E8F0; padding-bottom: 4px; }}
+                    table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }}
+                    th {{ background-color: #F1F5F9; color: #475569; font-weight: bold; text-align: left; padding: 6px; border: 1px solid #E2E8F0; }}
+                    td {{ padding: 6px; border: 1px solid #E2E8F0; }}
+                    tr:nth-child(even) {{ background-color: #F8FAFC; }}
+                    .kpi-container {{ display: table; width: 100%; margin-top: 15px; margin-bottom: 15px; }}
+                    .kpi-box {{ display: table-cell; width: 50%; padding: 10px; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; text-align: center; }}
+                    .kpi-title {{ font-size: 12px; color: #64748B; font-weight: bold; }}
+                    .kpi-value {{ font-size: 20px; color: #2563EB; font-weight: bold; margin-top: 4px; }}
+                    .filter-info {{ background-color: #F8FAFC; border-left: 4px solid #2563EB; padding: 10px; font-size: 12px; margin-bottom: 15px; line-height: 1.5; }}
+                    .chart-container {{ text-align: center; margin-top: 20px; }}
+                    .chart-img {{ width: 45%; max-width: 320px; display: inline-block; margin: 10px; border: 1px solid #E2E8F0; border-radius: 6px; }}
+                </style>
+            </head>
+            <body>
+                <h1>Tablero de Métricas Avanzadas y Producción</h1>
+                
+                <div class="filter-info">
+                    <strong>Filtros aplicados al reporte:</strong><br/>
+                    • <strong>Orden/Folio:</strong> {orden_txt}<br/>
+                    • <strong>Empresa:</strong> {rfc_txt}<br/>
+                    • <strong>Concepto:</strong> {concepto_txt}<br/>
+                    • <strong>Delegación:</strong> {delegacion_txt}
+                </div>
+
+                <div class="section-title">Resumen de KPIs Generales</div>
+                <div class="kpi-container">
+                    <div class="kpi-box" style="border-right: none;">
+                        <div class="kpi-title">Monto Total General</div>
+                        <div class="kpi-value">{monto_kpi}</div>
+                    </div>
+                    <div class="kpi-box">
+                        <div class="kpi-title">Total Referencias</div>
+                        <div class="kpi-value">{refs_kpi}</div>
+                    </div>
+                </div>
+
+                <div style="font-size: 11px; margin-bottom: 15px; color: #475569;">
+                    <strong>Desglose de Estados:</strong> {', '.join(estados_info)}
+                </div>
+
+                <div class="section-title">Gráficos de Producción por Delegación</div>
+                <div class="chart-container">
+                    <img class="chart-img" src="{chart_qty_path}" />
+                    <img class="chart-img" src="{chart_amount_path}" />
+                </div>
+
+                <div style="page-break-before: always;"></div>
+
+                <div class="section-title">Tabla de Consolidación Métrica (Detalle Completo)</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Empresa (RFC)</th>
+                            <th>Concepto</th>
+                            <th>Delegación</th>
+                            <th style="text-align: right;">Cantidad</th>
+                            <th style="text-align: right;">Monto Solicitado ($)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            """
+
+            for row in table_rows:
+                html_content += f"""
+                        <tr>
+                            <td>{row[0]}</td>
+                            <td>{row[1]}</td>
+                            <td>{row[2]}</td>
+                            <td style="text-align: right;">{row[3]}</td>
+                            <td style="text-align: right;">{row[4]}</td>
+                        </tr>
+                """
+
+            html_content += """
+                    </tbody>
+                </table>
+            </body>
+            </html>
+            """
+
+            # 7. Render html structure directly to the QPdfWriter PDF document
+            doc = QTextDocument()
+            # Set document search path for local temp files (images)
+            doc.setDocumentLayout(doc.documentLayout())
+            doc.setHtml(html_content)
+            
+            # Print document to writer
+            doc.print_(writer)
+
+            # 8. Clean up temp images safely
+            try:
+                if os.path.exists(chart_qty_path): os.remove(chart_qty_path)
+                if os.path.exists(chart_amount_path): os.remove(chart_amount_path)
+            except Exception:
+                pass
+
+            QMessageBox.information(
+                self,
+                "Reporte Exportado",
+                f"El reporte de métricas y analítica se ha exportado exitosamente en PDF:\n{file_path}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error de Exportación",
+                f"No se pudo exportar el reporte PDF debido al siguiente detalle:\n{str(e)}"
+            )
+

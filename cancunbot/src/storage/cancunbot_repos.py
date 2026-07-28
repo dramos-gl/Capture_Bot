@@ -140,31 +140,33 @@ class FolioCancunRepository(BaseCancunRepository):
     def get_by_id(self, folio_id: int) -> Optional[FolioCancun]:
         return self.session.get(FolioCancun, folio_id)
 
-    def create_bulk(self, lote_id: int, folios_list: List[Tuple[str, str]]) -> int:
+    def create_bulk(self, lote_id: int, folios_list: List[dict]) -> int:
         """
         Inserts multiple folios into a batch.
         
         Args:
             lote_id: ID of the batch
-            folios_list: List of tuples (folio_text, tipo_folio)
+            folios_list: List of dicts representing imported excel records
         """
         estado_id = self._get_estado_id("folio_cancun", "PENDIENTE")
         count = 0
-        for folio_text, tipo in folios_list:
-            clean_text = folio_text.strip() if folio_text else ""
-            if not clean_text:
-                continue
-
+        for item in folios_list:
+            tipo = item["tipo_folio"]
+            folio_elec = item.get("folio_electronico")
+            folio_pase = item.get("folio_pase_caja")
+            
             folio = FolioCancun(
                 lote_id=lote_id,
                 tipo_folio=tipo,
                 estado_id=estado_id,
+                rfc_id=item.get("rfc_id"),
+                desarrollo_id=item.get("desarrollo_id"),
                 intentos=0
             )
-            if tipo == "ELECTRONICO":
-                folio.folio_electronico = clean_text
-            else:
-                folio.folio_pase_caja = clean_text
+            if folio_elec:
+                folio.folio_electronico = folio_elec.strip()
+            if folio_pase:
+                folio.folio_pase_caja = folio_pase.strip()
             
             self.session.add(folio)
             count += 1
@@ -230,6 +232,7 @@ class ReciboCancunRepository(BaseCancunRepository):
         recibo.correo_factura = data.get("correo_factura")
         recibo.padron = data.get("padron")
         recibo.clave_catastral = data.get("clave_catastral")
+        recibo.rfc_id = data.get("rfc_id")
         recibo.estado_id = estado_id
         recibo.updated_at = datetime.utcnow()
         

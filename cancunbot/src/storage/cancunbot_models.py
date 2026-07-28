@@ -60,6 +60,8 @@ class FolioCancun(Base):
     intentos: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     ultimo_error: Mapped[Optional[str]] = mapped_column(Text)
     estado_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.estado_sistema.estado_id"), nullable=False)
+    rfc_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_catalogo.rfc.rfc_id", ondelete="SET NULL"))
+    desarrollo_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
@@ -67,6 +69,10 @@ class FolioCancun(Base):
     lote: Mapped[LoteFolio] = relationship(back_populates="folios")
     estado: Mapped[EstadoSistema] = relationship()
     recibo: Mapped[Optional["ReciboCancun"]] = relationship(back_populates="folio", cascade="all, delete-orphan")
+    
+    # Importar relaciones del SAR dinámicamente o por cadena
+    rfc_asoc = relationship("Rfc", foreign_keys=[rfc_id])
+    desarrollo_asoc = relationship("Desarrollo", foreign_keys=[desarrollo_id])
 
 
 class ReciboCancun(Base):
@@ -95,6 +101,7 @@ class ReciboCancun(Base):
     padron: Mapped[Optional[str]] = mapped_column(String(100))
     clave_catastral: Mapped[Optional[str]] = mapped_column(String(100))
     estado_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.estado_sistema.estado_id"), nullable=False)
+    rfc_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_catalogo.rfc.rfc_id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
@@ -102,6 +109,7 @@ class ReciboCancun(Base):
     folio: Mapped[FolioCancun] = relationship(back_populates="recibo")
     estado: Mapped[EstadoSistema] = relationship()
     factura: Mapped[Optional["FacturaCancun"]] = relationship(back_populates="recibo", cascade="all, delete-orphan")
+    rfc_asoc = relationship("Rfc", foreign_keys=[rfc_id])
 
 
 class FacturaCancun(Base):

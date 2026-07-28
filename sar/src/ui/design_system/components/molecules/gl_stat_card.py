@@ -40,10 +40,10 @@ class SparklineWidget(QWidget):
 class StatCard(QFrame):
     """A molecular component representing a KPI stat card styled to match the target mockup design."""
     
-    def __init__(self, title: str, initial_value: str = "0", icon_name: str = None, color_hex: str = "#2563EB", parent=None):
+    def __init__(self, title: str, initial_value: str = "0", icon_name: str = None, color_hex: str = "#2563EB", show_sparkline: bool = True, parent=None):
         super().__init__(parent)
         self.setObjectName("cardFrame")
-        self.setMinimumWidth(200)
+        self.setMinimumWidth(160)
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(16, 16, 16, 12)
@@ -93,7 +93,7 @@ class StatCard(QFrame):
         self.lbl_title.setObjectName("statCardTitle")
         
         self.lbl_value = CustomLabel(initial_value, variant="header")
-        self.lbl_value.setStyleSheet(f"color: {color_hex}; font-size: 32px; font-weight: bold; background: transparent;")
+        self.lbl_value.setStyleSheet(f"color: {color_hex}; font-size: 26px; font-weight: bold; background: transparent;")
         
         self.lbl_sub = CustomLabel("Referencias", variant="muted")
         self.lbl_sub.setObjectName("statCardSub")
@@ -107,9 +107,12 @@ class StatCard(QFrame):
         
         self.layout.addLayout(self.header_layout)
         
-        # Bottom Sparkline wave graph
-        self.sparkline = SparklineWidget(color_hex, self)
-        self.layout.addWidget(self.sparkline)
+        # Bottom Sparkline wave graph (Conditional)
+        if show_sparkline:
+            self.sparkline = SparklineWidget(color_hex, self)
+            self.layout.addWidget(self.sparkline)
+        else:
+            self.sparkline = None
         
     def set_value(self, val: str):
         self.lbl_value.setText(val)

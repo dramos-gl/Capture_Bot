@@ -13,6 +13,7 @@ from typing import Optional, Dict
 from PySide6.QtCore import QThread, Signal
 from playwright.sync_api import sync_playwright
 
+from sqlalchemy import text
 from sar.src.core.playwright_setup import resolve_chromium_executable
 from sar.src.storage.db_connector import DatabaseConnector
 from sar.src.storage.repositories import ConfigRepository
@@ -113,7 +114,9 @@ class BotReciboCunWorker(QThread):
                             "tipo_folio": f.tipo_folio,
                             "folio_electronico": f.folio_electronico,
                             "folio_pase_caja": f.folio_pase_caja,
-                            "intentos": f.intentos
+                            "intentos": f.intentos,
+                            "rfc_id": f.rfc_id,
+                            "desarrollo_nombre": f.desarrollo_asoc.nombre if f.desarrollo_asoc else None
                         })
 
             total_items = len(folios_pendientes)
@@ -206,13 +209,19 @@ class BotReciboCunWorker(QThread):
 
                         # 1. Hacer clic en el botón "PDF" habilitado tras la consulta para abrir la vista previa
                         self.status_changed.emit("   -> Abriendo vista previa del PDF...")
-                        pom._resolver("CANCUN_RECIBO_BTN_DESCARGAR").click()  # Selecciona el botón 'PDF'
+                        btn_pdf = pom._resolver("CANCUN_RECIBO_BTN_DESCARGAR")
+                        btn_pdf.wait_for(state="visible", timeout=10000)
+                        btn_pdf.scroll_into_view_if_needed()
+                        btn_pdf.click()  # Selecciona el botón 'PDF'
                         page.wait_for_timeout(1500)  # Espera breve para renderizar la vista previa
 
                         # 2. Descargar PDF desde el botón 'Descargar PDF' que aparece en la vista previa
                         self.status_changed.emit("   -> Iniciando descarga del archivo...")
+                        btn_pdf_efectivo = pom._resolver("CANCUN_RECIBO_BTN_DESCARGAR_EFECTIVO")
+                        btn_pdf_efectivo.wait_for(state="visible", timeout=10000)
+                        btn_pdf_efectivo.scroll_into_view_if_needed()
                         with page.expect_download(timeout=timeout_ms) as dl_info:
-                            pom._resolver("CANCUN_RECIBO_BTN_DESCARGAR_EFECTIVO").click()  # Botón 'Descargar PDF'
+                            btn_pdf_efectivo.click()  # Botón 'Descargar PDF'
                         
                         download = dl_info.value
                         temp_pdf_path = download.path()
@@ -249,9 +258,25 @@ class BotReciboCunWorker(QThread):
                             datos_pdf = extractor.extraer(temp_pdf_path)
                             hash_file = extractor.calcular_hash(temp_pdf_path)
 
+                            # Definir subcarpeta de Desarrollo dinámicamente forzando subdirectorio \Recibos\
+                            des_name = folio_dict.get("desarrollo_nombre")
+                            des_folder = "".join([c if c.isalnum() or c in (" ", "_", "-") else "" for c in des_name]).strip() if des_name else "Sin_Desarrollo"
+                             
+                            # Si output_path ya termina con "Recibos", no lo duplicamos, de lo contrario lo añadimos
+                            if output_path.name.lower() == "recibos":
+                                target_des_dir = output_path / des_folder
+                            else:
+                                target_des_dir = output_path / "Recibos" / des_folder
+                              
+                            try:
+                                target_des_dir.mkdir(parents=True, exist_ok=True)
+                            except Exception as dir_err:
+                                logger.warning(f"No se pudo crear subcarpeta de desarrollo {target_des_dir}: {dir_err}. Usando raíz de salida.")
+                                target_des_dir = output_path
+
                             # Definir nombre de archivo y ruta organizada
                             pdf_name = f"Recibo_{folio_texto}_{int(datetime.now().timestamp())}.pdf"
-                            final_pdf_path = output_path / pdf_name
+                            final_pdf_path = target_des_dir / pdf_name
 
                             # Mover archivo
                             shutil.move(temp_pdf_path, final_pdf_path)
@@ -277,25 +302,61 @@ class BotReciboCunWorker(QThread):
                                 "correo_factura": datos_pdf.datos_adicionales.get("correo")
                             }
 
-                            # Guardar Recibo y actualizar Folio a RECIBO_OK
-                            rec = r_repo.save_extracted_receipt(folio_id, dict_recibo)
-                            
-                            # Alimentar de vuelta los folios extraídos al registro original de Folio (FolioCancun)
-                            db_folio = session.get(FolioCancun, folio_id)
-                            if db_folio:
-                                if dict_recibo["folio_electronico"]:
-                                    db_folio.folio_electronico = dict_recibo["folio_electronico"]
-                                if dict_recibo["folio_pase_caja"]:
-                                    db_folio.folio_pase_caja = dict_recibo["folio_pase_caja"]
+                            # Lógica de Validación de RFC
+                            rfc_pdf = (datos_pdf.rfc or "").strip().upper()
+                            rfc_id_final = folio_dict.get("rfc_id")
+                            error_rfc_detectado = False
 
-                            # Pasar el recibo a PENDIENTE_FACTURAR automáticamente para el siguiente bot
-                            r_repo.update_status(rec.recibo_id, "PENDIENTE_FACTURAR")
-                            f_repo.update_status(folio_id, "RECIBO_OK")
-                            session.commit()
-                            
-                            procesados_ok += 1
-                            self.metric_updated.emit("exitosos", procesados_ok)
-                            self.status_changed.emit("   ✅ Recibo capturado y guardado correctamente.")
+                            if rfc_pdf:
+                                # 1. Resolver el rfc_id real del PDF desde el catálogo maestro
+                                db_rfc_row = session.execute(
+                                    text("SELECT rfc_id FROM sar_catalogo.rfc WHERE rfc = :r AND activo = true"),
+                                    {"r": rfc_pdf}
+                                ).fetchone()
+                                
+                                rfc_id_catalogo = db_rfc_row[0] if db_rfc_row else None
+
+                                if rfc_id_catalogo:
+                                    # Coincide o se corrige al ID existente del catálogo
+                                    if rfc_id_final != rfc_id_catalogo:
+                                        if rfc_id_final is not None:
+                                            self.status_changed.emit(f"   ⚠️ Corrigiendo RFC: De base {rfc_id_final} a real {rfc_pdf} ({rfc_id_catalogo}).")
+                                        rfc_id_final = rfc_id_catalogo
+                                else:
+                                    # El RFC real no existe en el catálogo maestro
+                                    error_rfc_detectado = True
+                                    self.status_changed.emit(f"   ❌ ERROR: El RFC '{rfc_pdf}' extraído del PDF no está catalogado en SAR.")
+
+                            # Asignar rfc_id al recibo
+                            dict_recibo["rfc_id"] = rfc_id_final
+
+                            if error_rfc_detectado:
+                                # Guardar con error de RFC no catalogado
+                                f_repo.update_status(folio_id, "ERROR_RFC_NO_CATALOGADO", error_msg=f"El RFC {rfc_pdf} del PDF no existe en el catálogo maestro.")
+                                session.commit()
+                                procesados_err += 1
+                                self.metric_updated.emit("errores", procesados_err)
+                            else:
+                                # Guardar Recibo y actualizar Folio a RECIBO_OK
+                                rec = r_repo.save_extracted_receipt(folio_id, dict_recibo)
+                                
+                                # Alimentar de vuelta los folios extraídos al registro original de Folio (FolioCancun)
+                                db_folio = session.get(FolioCancun, folio_id)
+                                if db_folio:
+                                    if dict_recibo["folio_electronico"]:
+                                        db_folio.folio_electronico = dict_recibo["folio_electronico"]
+                                    if dict_recibo["folio_pase_caja"]:
+                                        db_folio.folio_pase_caja = dict_recibo["folio_pase_caja"]
+                                    db_folio.rfc_id = rfc_id_final
+
+                                # Pasar el recibo a PENDIENTE_FACTURAR automáticamente para el siguiente bot
+                                r_repo.update_status(rec.recibo_id, "PENDIENTE_FACTURAR")
+                                f_repo.update_status(folio_id, "RECIBO_OK")
+                                session.commit()
+                                
+                                procesados_ok += 1
+                                self.metric_updated.emit("exitosos", procesados_ok)
+                                self.status_changed.emit("   ✅ Recibo capturado y guardado correctamente.")
 
                         except Exception as parse_error:
                             logger.error(f"Error procesando PDF del folio {folio_texto}: {parse_error}")

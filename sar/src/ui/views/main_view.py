@@ -165,6 +165,24 @@ class MainView(QWidget):
             if not self.dashboard_view:
                 from sar.src.ui.views.dashboard_view import DashboardView
                 self.dashboard_view = DashboardView(self.db_connector, self)
+                
+                # Handler to load and switch to metrics view inside QStackedWidget
+                def load_metrics_view(orden_ids):
+                    if not hasattr(self, "metrics_view") or not self.metrics_view:
+                        from sar.src.ui.views.metrics_dashboard_dialog import MetricsDashboardDialog
+                        self.metrics_view = MetricsDashboardDialog(self.db_connector, initial_orden_ids=orden_ids, parent=self)
+                        
+                        # Return to dashboard when back button is pressed
+                        self.metrics_view.back_requested.connect(lambda: self.stacked_widget.setCurrentWidget(self.dashboard_view))
+                        self.stacked_widget.addWidget(self.metrics_view)
+                    else:
+                        self.metrics_view.selected_orden_ids = list(orden_ids)
+                        self.metrics_view._update_orden_filter_label()
+                        self.metrics_view.refresh_metrics()
+                    
+                    self.stacked_widget.setCurrentWidget(self.metrics_view)
+
+                self.dashboard_view.show_metrics_requested.connect(load_metrics_view)
                 self.stacked_widget.addWidget(self.dashboard_view)
             self.stacked_widget.setCurrentWidget(self.dashboard_view)
             self.dashboard_view.refresh_data()
