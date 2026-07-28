@@ -894,3 +894,17 @@ SELECT setval(COALESCE(pg_get_serial_sequence('sar_auditoria.auditoria_error', '
 
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_configuracion.parametro_sistema', 'parametro_id'), 'sar_configuracion.parametro_sistema_parametro_id_seq'), COALESCE((SELECT MAX(parametro_id) FROM sar_configuracion.parametro_sistema), 0) + 1, false);
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_configuracion.localizador_portal', 'localizador_id'), 'sar_configuracion.localizador_portal_localizador_id_seq'), COALESCE((SELECT MAX(localizador_id) FROM sar_configuracion.localizador_portal), 0) + 1, false);
+
+-- ===========================================================================
+-- AJUSTE DE SECUENCIAS: CANCUNBOT
+-- ===========================================================================
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_configuracion.parametro_sistema', 'parametro_id'), 'cancunbot_configuracion.parametro_sistema_parametro_id_seq'), COALESCE((SELECT MAX(parametro_id) FROM cancunbot_configuracion.parametro_sistema), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_configuracion.localizador_portal', 'localizador_id'), 'cancunbot_configuracion.localizador_portal_localizador_id_seq'), COALESCE((SELECT MAX(localizador_id) FROM cancunbot_configuracion.localizador_portal), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_catalogo.estado_sistema', 'estado_id'), 'cancunbot_catalogo.estado_sistema_estado_id_seq'), COALESCE((SELECT MAX(estado_id) FROM cancunbot_catalogo.estado_sistema), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_catalogo.contribuyente', 'contribuyente_id'), 'cancunbot_catalogo.contribuyente_contribuyente_id_seq'), COALESCE((SELECT MAX(contribuyente_id) FROM cancunbot_catalogo.contribuyente), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_produccion.solicitud', 'solicitud_id'), 'cancunbot_produccion.solicitud_solicitud_id_seq'), COALESCE((SELECT MAX(solicitud_id) FROM cancunbot_produccion.solicitud), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_produccion.folio', 'folio_id'), 'cancunbot_produccion.folio_folio_id_seq'), COALESCE((SELECT MAX(folio_id) FROM cancunbot_produccion.folio), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_produccion.recibo', 'recibo_id'), 'cancunbot_produccion.recibo_recibo_id_seq'), COALESCE((SELECT MAX(recibo_id) FROM cancunbot_produccion.recibo), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_archivo.factura', 'factura_id'), 'cancunbot_archivo.factura_factura_id_seq'), COALESCE((SELECT MAX(factura_id) FROM cancunbot_archivo.factura), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_auditoria.auditoria_evento', 'evento_id'), 'cancunbot_auditoria.auditoria_evento_evento_id_seq'), COALESCE((SELECT MAX(evento_id) FROM cancunbot_auditoria.auditoria_evento), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_auditoria.auditoria_error', 'error_id'), 'cancunbot_auditoria.auditoria_error_error_id_seq'), COALESCE((SELECT MAX(error_id) FROM cancunbot_auditoria.auditoria_error), 0) + 1, false);

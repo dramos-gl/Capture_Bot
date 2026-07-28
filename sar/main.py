@@ -158,6 +158,13 @@ class MainWindow(QMainWindow):
                 
                 # Hook up logout for BillingBotWindow
                 self.active_module.logout_requested.connect(self._handle_logout)
+            elif selected_mod_code == "R2F_CANCUN":
+                from cancunbot.src.ui.views.r2f_cancun_view import R2FCancunWindow
+                self.active_module = R2FCancunWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
+                self.active_module.current_sesion_id = self.current_sesion_id
+                
+                # Hook up logout for R2FCancunWindow
+                self.active_module.logout_requested.connect(self._handle_logout)
 
             else:
                 # Placeholder for other modules
@@ -169,7 +176,7 @@ class MainWindow(QMainWindow):
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.active_module.setCentralWidget(lbl)
                 
-            if selected_mod_code in ("BOT_FACE_A", "BOT_C"):
+            if selected_mod_code in ("BOT_FACE_A", "BOT_C", "R2F_CANCUN"):
                 self.active_module.show()
                 # Center window on primary screen
                 screen_geometry = QApplication.primaryScreen().geometry()

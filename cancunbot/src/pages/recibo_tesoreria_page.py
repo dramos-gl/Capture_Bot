@@ -8,7 +8,7 @@ Se resuelven desde cancunbot_configuracion.localizador_portal (portal='RECIBO').
 import logging
 from playwright.sync_api import Page
 
-from src.pages.base_page import BasePage
+from cancunbot.src.pages.base_page import BasePage
 
 
 class ReciboTesoreriaPage(BasePage):
@@ -31,28 +31,52 @@ class ReciboTesoreriaPage(BasePage):
         self.page.goto(url)
         self.esperar_carga()
 
-    def consultar_folio(self, folio: str) -> bool:
+    def consultar_folio(self, folio: str, tipo_folio: str) -> bool:
         """
-        Ingresa el folio en el campo de búsqueda y ejecuta la consulta.
+        Ingresa el folio en el campo de búsqueda correspondiente, omitiendo el prefijo 'F-' si aplica,
+        y limpia el otro campo para no confundir al portal.
         
         Args:
             folio: Folio electrónico o pase de caja a consultar
+            tipo_folio: 'ELECTRONICO' o 'PASE_CAJA'
         
         Returns:
             True si el folio fue encontrado, False si no existe
         """
-        self.logger.info(f"Consultando folio: {folio}")
+        self.logger.info(f"Consultando folio tipo {tipo_folio}: {folio}")
 
-        inp = self._resolver("RECIBO_INPUT_FOLIO")
-        inp.wait_for(state="visible")
-        inp.clear()
-        inp.fill(folio)
+        # Resolver campos de entrada
+        inp_elec = self._resolver("CANCUN_RECIBO_INPUT_FOLIO")              # #ayo
+        inp_pase = self._resolver("CANCUN_RECIBO_INPUT_PASE_CAJA")          # #pase
 
-        self._resolver("RECIBO_BTN_CONSULTAR").click()
+        # Limpieza segura tolerante a visibilidad
+        try:
+            inp_elec.wait_for(state="visible", timeout=3000)
+            inp_elec.clear()
+        except Exception:
+            self.logger.warning("Campo folio electrónico (#ayo) no está visible.")
+            
+        try:
+            inp_pase.clear()
+        except Exception:
+            pass
+
+        if tipo_folio == "ELECTRONICO":
+            # Si el folio inicia con "F-", se remueve ya que el portal lo incluye por defecto.
+            folio_limpio = folio
+            if folio.upper().startswith("F-"):
+                folio_limpio = folio[2:]
+            self.logger.info(f"Folio electrónico formateado para búsqueda: {folio_limpio}")
+            inp_elec.fill(folio_limpio)
+        else:
+            self.logger.info(f"Folio Pase de Caja para búsqueda: {folio}")
+            inp_pase.fill(folio)
+
+        self._resolver("CANCUN_RECIBO_BTN_CONSULTAR").click()
         self.esperar_carga()
 
         # Verificar si el folio no fue encontrado
-        if self.esta_visible("RECIBO_MSG_NO_ENCONTRADO"):
+        if self.esta_visible("CANCUN_RECIBO_MSG_NO_ENCONTRADO"):
             self.logger.warning(f"Folio '{folio}' no encontrado en el portal.")
             return False
 

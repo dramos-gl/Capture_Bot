@@ -31,6 +31,8 @@ class DatosRecibo:
     concepto: Optional[str] = None
     total: Optional[float] = None
     forma_pago: Optional[str] = None
+    padron: Optional[str] = None
+    clave_catastral: Optional[str] = None
     datos_adicionales: dict = field(default_factory=dict)
 
 
@@ -61,6 +63,8 @@ class PdfExtractor:
         "concepto":             r"CONCEPTO[:\s]+(.+?)(?:\n|TOTAL|FORMA)",
         "total":                r"TOTAL[:\s]+\$?\s*([\d,]+\.?\d*)",
         "forma_pago":           r"FORMA\s+DE\s+PAGO[:\s]+(.+?)(?:\n|$)",
+        "padron":               r"PADR[OÓ]N[:\s]+([A-Z0-9\-]+)",
+        "clave_catastral":      r"CLAVE\s+CATASTRAL[:\s]+([A-Z0-9\-]+)",
     }
 
     def extraer(self, ruta_pdf: str) -> DatosRecibo:

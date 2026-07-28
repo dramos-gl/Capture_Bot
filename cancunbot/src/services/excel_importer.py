@@ -8,7 +8,8 @@ from typing import Optional
 
 import openpyxl
 
-from src.storage.repositories import ParametroRepository
+from sar.src.storage.repositories import ConfigRepository
+from sar.src.storage.db_connector import DatabaseConnector
 
 logger = logging.getLogger(__name__)
 
@@ -18,22 +19,21 @@ class ExcelImporter:
     Importa folios desde un archivo Excel.
     
     Estructura esperada del Excel:
-        - Columna 'FOLIO' (o el nombre configurado en BD): Folio electrónico
+        - Columna 'FOLIO_ELECTRONICO' (o el nombre configurado en BD): Folio electrónico
         - Columna 'FOLIO_PASE_CAJA' (opcional): Folio de pase de caja
     
     Los nombres de columna son configurables via parámetros de sistema:
-        - EXCEL_COLUMNA_FOLIO_ELECTRONICO
-        - EXCEL_COLUMNA_FOLIO_PASE_CAJA
+        - CANCUN_EXCEL_COL_FOLIO_ELECTRONICO
+        - CANCUN_EXCEL_COL_FOLIO_PASE_CAJA
     """
 
     def __init__(self):
-        params = ParametroRepository()
-        self._col_electronico = params.obtener(
-            "EXCEL_COLUMNA_FOLIO_ELECTRONICO", "FOLIO"
-        )
-        self._col_pase_caja = params.obtener(
-            "EXCEL_COLUMNA_FOLIO_PASE_CAJA", "FOLIO_PASE_CAJA"
-        )
+        # Conectar dinámicamente a la BD del SAR para obtener las configuraciones reales
+        db = DatabaseConnector()
+        with db.get_session() as session:
+            repo = ConfigRepository(session)
+            self._col_electronico = repo.get_parametro("CANCUN_EXCEL_COL_FOLIO_ELECTRONICO") or "FOLIO_ELECTRONICO"
+            self._col_pase_caja = repo.get_parametro("CANCUN_EXCEL_COL_FOLIO_PASE_CAJA") or "FOLIO_PASE_CAJA"
 
     def importar(self, ruta_excel: str) -> list[dict]:
         """
@@ -58,22 +58,41 @@ class ExcelImporter:
         wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
         ws = wb.active
 
-        # Leer encabezados de la primera fila
-        headers = [str(cell.value).strip().upper() if cell.value else "" 
-                   for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+        # Leer encabezados de la primera fila y limpiarlos (removiendo espacios, guiones y guiones bajos para máxima compatibilidad)
+        def _clean_header(name: str) -> str:
+            return name.strip().upper().replace(" ", "").replace("_", "").replace("-", "")
 
-        col_elec = self._col_electronico.upper()
-        col_pase = self._col_pase_caja.upper()
+        headers_original = [str(cell.value).strip() if cell.value else "" for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+        headers_cleaned = [_clean_header(h) for h in headers_original]
 
-        if col_elec not in headers and col_pase not in headers:
+        target_elec = _clean_header(self._col_electronico)
+        target_pase = _clean_header(self._col_pase_caja)
+
+        # Fallbacks amigables
+        fallbacks_elec = [target_elec, "FOLIO", "FOLIOELECTRONICO", "FOLIOELEC", "ELECTRONICO"]
+        fallbacks_pase = [target_pase, "PASECAJA", "FOLIOPASECAJA", "PASE", "FOLIO_PASE_CAJA"]
+
+        idx_elec: Optional[int] = None
+        idx_pase: Optional[int] = None
+
+        # Buscar coincidencia para FOLIO_ELECTRONICO
+        for fallback in fallbacks_elec:
+            if fallback in headers_cleaned:
+                idx_elec = headers_cleaned.index(fallback)
+                break
+
+        # Buscar coincidencia para FOLIO_PASE_CAJA
+        for fallback in fallbacks_pase:
+            if fallback in headers_cleaned:
+                idx_pase = headers_cleaned.index(fallback)
+                break
+
+        if idx_elec is None and idx_pase is None:
             raise ValueError(
-                f"El Excel no tiene las columnas esperadas. "
-                f"Se requiere al menos '{col_elec}' o '{col_pase}'. "
-                f"Columnas encontradas: {headers}"
+                f"El Excel no tiene las columnas esperadas.\n"
+                f"Se requiere una columna como '{self._col_electronico}' o '{self._col_pase_caja}'.\n"
+                f"Columnas detectadas en el archivo: {headers_original}"
             )
-
-        idx_elec: Optional[int] = headers.index(col_elec) if col_elec in headers else None
-        idx_pase: Optional[int] = headers.index(col_pase) if col_pase in headers else None
 
         folios: list[dict] = []
         for row in ws.iter_rows(min_row=2, values_only=True):

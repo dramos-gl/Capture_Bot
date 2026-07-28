@@ -549,4 +549,6 @@ class LocalizadorPortal(Base):
     valor_selector: Mapped[str] = mapped_column(String(500), nullable=False)
     descripcion: Mapped[Optional[str]] = mapped_column(String(500))
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    portal: Mapped[Optional[str]] = mapped_column(String(50), default="SAR")
+
 

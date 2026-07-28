@@ -712,17 +712,17 @@ class ThemeManager:
         }}
 
         /* Bot Face A and Face C Specific Styles (Forced Light Look) */
-        BotView, BillingBotView {{
+        BotView, BillingBotView, R2FCancunView {{
             background-color: #f3f4f6;
             color: #1f2937;
             font-family: 'Segoe UI', sans-serif;
         }}
-        BotView QFrame#card, BillingBotView QFrame#card {{
+        BotView QFrame#card, BillingBotView QFrame#card, R2FCancunView QFrame#card {{
             background-color: #ffffff;
             border-radius: 8px;
             border: 1px solid #e5e7eb;
         }}
-        BotView QLabel, BillingBotView QLabel {{
+        BotView QLabel, BillingBotView QLabel, R2FCancunView QLabel {{
             background: transparent;
         }}
         BotView QPushButton#primaryBtn {{
@@ -735,24 +735,24 @@ class ThemeManager:
         BotView QPushButton#primaryBtn:hover {{
             background-color: #334155;
         }}
-        BillingBotView QPushButton#primaryBtn {{
+        BillingBotView QPushButton#primaryBtn, R2FCancunView QPushButton#primaryBtn {{
             background-color: #1e293b;
             color: white;
             border-radius: 4px;
             padding: 8px 16px;
             font-weight: bold;
         }}
-        BillingBotView QPushButton#primaryBtn:hover {{
+        BillingBotView QPushButton#primaryBtn:hover, R2FCancunView QPushButton#primaryBtn:hover {{
             background-color: #334155;
         }}
-        BotView QPushButton#secondaryBtn, BillingBotView QPushButton#secondaryBtn {{
+        BotView QPushButton#secondaryBtn, BillingBotView QPushButton#secondaryBtn, R2FCancunView QPushButton#secondaryBtn {{
             background-color: #ffffff;
             color: #4b5563;
             border: 1px solid #d1d5db;
             border-radius: 4px;
             padding: 8px 16px;
         }}
-        BotView QPushButton#secondaryBtn:hover, BillingBotView QPushButton#secondaryBtn:hover {{
+        BotView QPushButton#secondaryBtn:hover, BillingBotView QPushButton#secondaryBtn:hover, R2FCancunView QPushButton#secondaryBtn:hover {{
             background-color: #f9fafb;
         }}
         BotView QPushButton#iconHeaderBtn {{
@@ -766,14 +766,14 @@ class ThemeManager:
             background-color: #334155;
             border-radius: 4px;
         }}
-        BillingBotView QPushButton#iconHeaderBtn {{
+        BillingBotView QPushButton#iconHeaderBtn, R2FCancunView QPushButton#iconHeaderBtn {{
             background-color: transparent;
             border: none;
             color: white;
             font-size: 16px;
             padding: 4px;
         }}
-        BillingBotView QPushButton#iconHeaderBtn:hover {{
+        BillingBotView QPushButton#iconHeaderBtn:hover, R2FCancunView QPushButton#iconHeaderBtn:hover {{
             background-color: #334155;
             border-radius: 4px;
         }}
@@ -784,14 +784,14 @@ class ThemeManager:
             border-radius: 4px;
             padding: 8px;
         }}
-        BillingBotView QTextEdit#console {{
+        BillingBotView QTextEdit#console, R2FCancunView QTextEdit#console {{
             background-color: #111827;
             color: #10b981;
             font-family: 'Consolas', monospace;
             border-radius: 4px;
             padding: 8px;
         }}
-        BotView QProgressBar, BillingBotView QProgressBar {{
+        BotView QProgressBar, BillingBotView QProgressBar, R2FCancunView QProgressBar {{
             border: 1px solid #e5e7eb;
             border-radius: 4px;
             text-align: center;
@@ -800,7 +800,7 @@ class ThemeManager:
         BotView QProgressBar::chunk {{
             background-color: #1e293b;
         }}
-        BillingBotView QProgressBar::chunk {{
+        BillingBotView QProgressBar::chunk, R2FCancunView QProgressBar::chunk {{
             background-color: #1e293b;
         }}
         QFrame#botHeaderFaceA {{
@@ -825,13 +825,13 @@ class ThemeManager:
         }}
         
         /* Table Styles inside Bots */
-        BotView QTableWidget#botTable, BillingBotView QTableWidget#botTable {{
+        BotView QTableWidget#botTable, BillingBotView QTableWidget#botTable, R2FCancunView QTableWidget#botTable {{
             background-color: white;
             color: #374151;
             gridline-color: #e5e7eb;
             border: 1px solid #e5e7eb;
         }}
-        BotView QTableWidget#botTable QHeaderView::section, BillingBotView QTableWidget#botTable QHeaderView::section {{
+        BotView QTableWidget#botTable QHeaderView::section, BillingBotView QTableWidget#botTable QHeaderView::section, R2FCancunView QTableWidget#botTable QHeaderView::section {{
             background-color: #f9fafb;
             color: #374151;
             font-weight: bold;

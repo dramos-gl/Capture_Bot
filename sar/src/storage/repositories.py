@@ -270,6 +270,14 @@ class ConfigRepository(BaseRepository):
         results = self.session.execute(stmt).scalars().all()
         return {loc.nombre_clave: loc for loc in results}
 
+    def get_localizadores_portal(self, portal: str) -> dict[str, LocalizadorPortal]:
+        """Gets all active locators for a specific portal, mapped by their nombre_clave."""
+        stmt = select(LocalizadorPortal).where(
+            and_(LocalizadorPortal.activo == True, LocalizadorPortal.portal == portal)
+        )
+        results = self.session.execute(stmt).scalars().all()
+        return {loc.nombre_clave: loc for loc in results}
+
     def get_lote_size(self, default_size: int = 299) -> int:
         """Helper to get TAMANO_LOTE parameter or return default."""
         val = self.get_parametro("TAMANO_LOTE")
