@@ -147,13 +147,19 @@ class R2FCancunView(QWidget):
         self.chk_autonomo.setEnabled(False) # Estático, no editable por el usuario
         c_layout.addWidget(self.chk_autonomo)
 
-        self.btn_importar_excel = CustomButton("📁 Importar Excel de Folios", is_secondary=True)
-        self.btn_importar_excel.clicked.connect(self._on_importar_excel)
-        c_layout.addWidget(self.btn_importar_excel)
+        # Botones en la misma fila (2 columnas) para optimizar el espacio vertical
+        buttons_row_layout = QHBoxLayout()
+        buttons_row_layout.setSpacing(6)
 
-        self.btn_descargar_plantilla = CustomButton("⬇ Descargar Plantilla Excel", is_secondary=True)
+        self.btn_importar_excel = CustomButton("📁 Importar Excel", is_secondary=True)
+        self.btn_importar_excel.clicked.connect(self._on_importar_excel)
+        buttons_row_layout.addWidget(self.btn_importar_excel)
+
+        self.btn_descargar_plantilla = CustomButton("⬇ Plantilla", is_secondary=True)
         self.btn_descargar_plantilla.clicked.connect(self._on_descargar_plantilla)
-        c_layout.addWidget(self.btn_descargar_plantilla)
+        buttons_row_layout.addWidget(self.btn_descargar_plantilla)
+
+        c_layout.addLayout(buttons_row_layout)
 
         # Replicando selector de ruta de descarga de Bot Face A
         lbl_path_title = CustomLabel("📁 Ruta de Descarga / Almacenamiento:", variant="body")
@@ -182,21 +188,15 @@ class R2FCancunView(QWidget):
         self.btn_iniciar.clicked.connect(self._on_iniciar_bot)
         c_layout.addWidget(self.btn_iniciar)
 
-        self.btn_detener = CustomButton("🛑 Detener Bot", is_secondary=True)
-        self.btn_detener.setObjectName("dangerBtn")
-        self.btn_detener.setEnabled(False)
-        self.btn_detener.clicked.connect(self._on_detener_bot)
-        c_layout.addWidget(self.btn_detener)
-
         top_layout.addWidget(controles_frame, stretch=1)
 
-        # Panel de Métricas
+        # Panel de Métricas (Replicado de Bot Face A)
         metricas_frame = QFrame()
         metricas_frame.setObjectName("card")
         m_layout = QVBoxLayout(metricas_frame)
         m_layout.setContentsMargins(8, 8, 8, 8)
 
-        lbl_m = CustomLabel("📊 ESTADO DEL PROCESO", variant="subheader")
+        lbl_m = CustomLabel("📊 MÉTRICAS DEL LOTE", variant="subheader")
         m_layout.addWidget(lbl_m)
 
         grid_m = QGridLayout()
@@ -208,13 +208,48 @@ class R2FCancunView(QWidget):
         grid_m.addWidget(self.box_exitosos, 0, 1)
         grid_m.addWidget(self.box_errores, 0, 2)
 
-        self.lbl_lote_actual_info = CustomLabel("Lote seleccionado: Ninguno", variant="muted")
+        self.lbl_lote_actual_info = CustomLabel("RFC: -- | Razón Social: --\nCP: --", variant="muted")
+        self.lbl_lote_actual_info.setStyleSheet("color: #6b7280; font-size: 11px; background: #f9fafb; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px;")
         grid_m.addWidget(self.lbl_lote_actual_info, 1, 0, 1, 3)
 
         m_layout.addLayout(grid_m)
-        top_layout.addWidget(metricas_frame, stretch=2)
+        top_layout.addWidget(metricas_frame, stretch=1)
 
-        self.main_layout.addLayout(top_layout)
+        # Panel de Monitoreo en Tiempo Real (Replicado de Bot Face A)
+        monitoreo_frame = QFrame()
+        monitoreo_frame.setObjectName("card")
+        mon_layout = QVBoxLayout(monitoreo_frame)
+        mon_layout.setContentsMargins(8, 8, 8, 8)
+
+        lbl_mon = CustomLabel("📡 MONITOREO EN TIEMPO REAL", variant="subheader")
+        mon_layout.addWidget(lbl_mon)
+
+        grid_data = QGridLayout()
+        grid_data.addWidget(CustomLabel("Folio:", variant="body"), 0, 0)
+        self.lbl_m_ref = CustomLabel("--", variant="body")
+        grid_data.addWidget(self.lbl_m_ref, 0, 1)
+
+        grid_data.addWidget(CustomLabel("RFC:", variant="body"), 1, 0)
+        self.lbl_m_rfc = CustomLabel("--", variant="body")
+        grid_data.addWidget(self.lbl_m_rfc, 1, 1)
+
+        grid_data.addWidget(CustomLabel("Estado:", variant="body"), 2, 0)
+        self.lbl_m_est = CustomLabel("--", variant="body")
+        grid_data.addWidget(self.lbl_m_est, 2, 1)
+        mon_layout.addLayout(grid_data)
+
+        mon_layout.addWidget(CustomLabel("Progreso", variant="body"))
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        mon_layout.addWidget(self.progress_bar)
+
+        self.lbl_mon_status = CustomLabel("ESPERANDO INICIO DE PROCESAMIENTO...", variant="muted")
+        self.lbl_mon_status.setStyleSheet("color: #6b7280; font-size: 11px;")
+        mon_layout.addWidget(self.lbl_mon_status)
+
+        top_layout.addWidget(monitoreo_frame, stretch=1)
+
+        self.main_layout.addLayout(top_layout, stretch=1)
 
     def _build_tables_panel(self):
         self.tables_card = CustomCard("📑 BANDEJA DE TRABAJO")
@@ -268,16 +303,80 @@ class R2FCancunView(QWidget):
             self._write_log("Modo cambiado a RECIBOS.")
 
     def _on_iniciar_bot(self):
-        """Lanza el worker de Playwright para descargas de recibos."""
+        """Lanza o detiene el worker de Playwright para descargas de recibos."""
+        # Si el hilo ya se encuentra en ejecución, se solicita detención segura
         if self.active_worker and self.active_worker.isRunning():
+            self.btn_iniciar.setEnabled(False)
+            self.btn_iniciar.setText("⏹ Deteniendo...")
+            self.active_worker.stop()
             return
 
         if not self.selected_lote_id:
             QMessageBox.warning(self, "Lote no seleccionado", "Selecciona un lote haciendo doble clic en la tabla de lotes.")
             return
 
-        self.btn_iniciar.setEnabled(False)
-        self.btn_detener.setEnabled(True)
+        # Validar el estado del lote en la base de datos antes de iniciar
+        try:
+            with self.db_connector.get_session() as session:
+                from sqlalchemy import text
+                lote_row = session.execute(
+                    text("""
+                        SELECT e.codigo 
+                        FROM cancunbot_produccion.lote_folio l
+                        JOIN sar_catalogo.estado_sistema e ON l.estado_id = e.estado_id
+                        WHERE l.lote_id = :lid
+                    """),
+                    {"lid": self.selected_lote_id}
+                ).fetchone()
+                
+                estado_lote = lote_row[0] if lote_row else "NUEVO"
+
+                if estado_lote == "COMPLETADO":
+                    QMessageBox.information(
+                        self, 
+                        "Lote Completado", 
+                        "Este lote ya ha sido procesado de forma exitosa en su totalidad.\nNo hay folios pendientes de descargar."
+                    )
+                    return
+
+                # Si es un lote con errores (COMPLETADO_PARCIAL), reactivar los folios fallidos
+                if estado_lote in ("COMPLETADO_PARCIAL", "EN_PROCESO"):
+                    # Preguntar al usuario si desea reintentar los folios fallidos
+                    reply = QMessageBox.question(
+                        self,
+                        "Reintentar Errores",
+                        "El lote seleccionado ya fue procesado pero contiene errores o descargas pendientes.\n"
+                        "¿Deseas reactivar los folios con error y volver a procesarlos?",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes
+                    )
+                    if reply == QMessageBox.Yes:
+                        # Resetear los folios que tengan estado 'ERROR_DESCARGA' de vuelta a 'PENDIENTE'
+                        st_pendiente = session.execute(
+                            text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'folio_cancun' AND codigo = 'PENDIENTE'")
+                        ).scalar()
+                        st_error = session.execute(
+                            text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'folio_cancun' AND codigo = 'ERROR_DESCARGA'")
+                        ).scalar()
+                        
+                        session.execute(
+                            text("""
+                                UPDATE cancunbot_produccion.folio_cancun 
+                                SET estado_id = :st_p, ultimo_error = NULL
+                                WHERE lote_id = :lid AND estado_id = :st_e
+                            """),
+                            {"st_p": st_pendiente, "lid": self.selected_lote_id, "st_e": st_error}
+                        )
+                        session.commit()
+                        self._write_log(f"Reactivando folios con error del lote {self.selected_lote_id} para reintento.")
+                    elif estado_lote == "COMPLETADO_PARCIAL":
+                        # Si decide no reactivar, no hay nada que procesar
+                        return
+        except Exception as e:
+            logger.error(f"Error validando estado del lote antes de iniciar: {e}")
+
+        self.btn_iniciar.setText("⏹ Detener Bot")
+        self.btn_iniciar.setStyleSheet(f"background-color: {Colors.ERROR}; color: white;")
         self.switch_modo.setEnabled(False)
         self.btn_browse.setEnabled(False)
 
@@ -295,22 +394,23 @@ class R2FCancunView(QWidget):
 
         self.active_worker.status_changed.connect(self._write_log)
         self.active_worker.metric_updated.connect(self._on_metric_updated)
+        self.active_worker.progress_changed.connect(self._on_progress_changed)
+        self.active_worker.folio_status_changed.connect(self._on_folio_status_changed)
         self.active_worker.finished_processing.connect(self._on_worker_finished)
         self.active_worker.start()
 
         self.lbl_portal_status.setText("Portal: ACTIVO")
-
-    def _on_detener_bot(self):
-        if self.active_worker:
-            self.active_worker.stop()
-            self.btn_detener.setEnabled(False)
+        self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.ACCENT_EMERALD}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
 
     def _on_worker_finished(self, success: bool, message: str):
         self.btn_iniciar.setEnabled(True)
-        self.btn_detener.setEnabled(False)
+        self.btn_iniciar.setText("▶ Iniciar Bot")
+        self.btn_iniciar.setStyleSheet(f"background-color: {Colors.SURFACE_DARK}; color: white;")
         self.switch_modo.setEnabled(True)
         self.btn_browse.setEnabled(True)
+        
         self.lbl_portal_status.setText("Portal: INACTIVO")
+        self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.BORDER_DARK}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")
 
         if success:
             QMessageBox.information(self, "Proceso Finalizado", message)
@@ -326,6 +426,17 @@ class R2FCancunView(QWidget):
             self.box_exitosos.set_value(str(value))
         elif metric == "errores":
             self.box_errores.set_value(str(value))
+
+    def _on_progress_changed(self, current: int, total: int):
+        if total > 0:
+            percentage = int((current / total) * 100)
+            self.progress_bar.setValue(percentage)
+            self.lbl_mon_status.setText(f"PROCESANDO FOLIO {current} DE {total} ({percentage}%)")
+
+    def _on_folio_status_changed(self, data: dict):
+        self.lbl_m_ref.setText(data.get("referencia", "--"))
+        self.lbl_m_rfc.setText(data.get("rfc", "--"))
+        self.lbl_m_est.setText(data.get("estado", "--"))
 
     def _refresh_lotes_table(self):
         """Carga la lista de lotes desde la base de datos usando el estándar populate_rows de StyledDataTable."""

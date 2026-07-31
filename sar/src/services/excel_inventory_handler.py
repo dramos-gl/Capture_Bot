@@ -45,15 +45,18 @@ class ExcelInventoryHandler:
         idx_viv = get_idx("VIV", "VIVIENDA")
         idx_folio = get_idx("FOLIO")
         idx_estatus_aviso = get_idx("ESTATUS_PRIMER_AVISO", "ESTATUS RPP")
+        idx_credito_titular = get_idx("CREDITO_TITULAR", "CREDITO TITULAR", "CREDITO", "TITULAR", "CREDITO_O_TITULAR")
+        idx_pa = get_idx("PA", "PADRON", "PADRÓN")
+        idx_delegacion = get_idx("DELEGACION", "DELEGACIÓN")
         
-        # Concept reference columns
+        # Concept reference columns (resilient to accents, spaces, and abbreviations)
         concept_cols = {
-            "ANALISIS": get_idx("ANALISIS"),
-            "AVISO": get_idx("AVISO"),
-            "CLG": get_idx("CLG"),
-            "CANC_1ER _AVISO": get_idx("CANC_1ER _AVISO"),
-            "CANC_2DO_AVISO": get_idx("CANC_2DO_AVISO"),
-            "NUEVO_DERECHO_AVISO": get_idx("NUEVO_DERECHO_AVISO"),
+            "ANALISIS": get_idx("ANALISIS", "ANÁLISIS", "ANALIS"),
+            "AVISO": get_idx("AVISO", "1ER_AVISO", "1ER _AVISO", "AVISO_RPP", "PRIMER AVISO", "AVISO PREVENTIVO"),
+            "CLG": get_idx("CLG", "CERTIFICADO", "CLG_RPP"),
+            "CANC_1ER _AVISO": get_idx("CANC_1ER _AVISO", "CANC_1ER_AVISO", "CANCELACION_1ER_AVISO", "CANCELACIÓN 1ER AVISO", "CANCELACION 1ER AVISO"),
+            "CANC_2DO_AVISO": get_idx("CANC_2DO_AVISO", "CANCELACION_2DO_AVISO", "CANCELACIÓN 2DO AVISO", "CANCELACION 2DO AVISO"),
+            "NUEVO_DERECHO_AVISO": get_idx("NUEVO_DERECHO_AVISO", "NUEVO_AVISO", "NUEVO DERECHO AVISO"),
         }
 
         parsed_records = []
@@ -89,11 +92,13 @@ class ExcelInventoryHandler:
             edif = str(row[idx_edif]).strip() if idx_edif != -1 and row[idx_edif] is not None else ""
             viv = str(row[idx_viv]).strip() if idx_viv != -1 and row[idx_viv] is not None else ""
             
+            raw_ubicacion = str(row[idx_ubicacion]).strip() if idx_ubicacion != -1 and row[idx_ubicacion] is not None else ""
+
             # Parse fallback from UBICACION text column if mz/lote are empty
             if (not mz and not lote) and idx_ubicacion != -1 and row[idx_ubicacion] is not None:
                 # Try parsing e.g. "MZ 38 LT 2 VIV 35"
                 import re
-                txt = str(row[idx_ubicacion]).upper()
+                txt = raw_ubicacion.upper()
                 m_mz = re.search(r"MZ\s*(\d+)", txt)
                 m_lt = re.search(r"L?T\s*(\d+)", txt)
                 m_ed = re.search(r"EDIF\s*([A-Z0-9\-]+)", txt)
@@ -105,6 +110,9 @@ class ExcelInventoryHandler:
 
             folio = str(row[idx_folio]).strip() if idx_folio != -1 and row[idx_folio] is not None else ""
             estatus_aviso = str(row[idx_estatus_aviso]).strip() if idx_estatus_aviso != -1 and row[idx_estatus_aviso] is not None else ""
+            credito_titular = str(row[idx_credito_titular]).strip() if idx_credito_titular != -1 and row[idx_credito_titular] is not None else ""
+            pa = str(row[idx_pa]).strip() if idx_pa != -1 and row[idx_pa] is not None else ""
+            delegacion = str(row[idx_delegacion]).strip() if idx_delegacion != -1 and row[idx_delegacion] is not None else ""
 
             # Check each concept reference column
             for concept_name, col_idx in concept_cols.items():
@@ -125,12 +133,16 @@ class ExcelInventoryHandler:
                         "desarrollo": desarrollo,
                         "empresa": empresa,
                         "fecha_solicitud": fecha_sol,
+                        "ubicacion": raw_ubicacion,
                         "mz": mz,
                         "lote": lote,
                         "edif": edif,
                         "viv": viv,
                         "folio_electronico": folio,
                         "estatus_primer_aviso": estatus_aviso,
+                        "credito_titular": credito_titular,
+                        "pa": pa,
+                        "delegacion": delegacion,
                         "concepto_solicitado": concept_name,
                         "referencia_asignada": "" if is_indicator else ref_val,
                         "requiere_autovincular": is_indicator
@@ -147,7 +159,7 @@ class ExcelInventoryHandler:
         4. Geolocation match (desarrollo delegation == reference delegation).
         5. Company (RFC) matching for autolink and validation.
         """
-        from sar.src.storage.models import Referencia, EstadoSistema, Desarrollo, Delegacion, GrupoReferencia, Concepto, Solicitud, Rfc
+        from sar.src.storage.models import Referencia, EstadoSistema, Desarrollo, Delegacion, GrupoReferencia, Concepto, Solicitud, Rfc, LoteDetalle
         from sqlalchemy import select
         
         # Cache concepts mapping
@@ -213,6 +225,20 @@ class ExcelInventoryHandler:
             deleg_name = session.execute(deleg_stmt).scalar()
             row_result["delegacion_nombre"] = deleg_name
 
+            # Check if this client already has an assignment for the same concept at this exact location
+            dup_stmt = select(LoteDetalle).where(
+                LoteDetalle.cliente == cliente,
+                LoteDetalle.desarrollo_id == desarrollo.desarrollo_id,
+                LoteDetalle.mz == mz,
+                LoteDetalle.lote == lote,
+                LoteDetalle.edif == edif,
+                LoteDetalle.viv == viv,
+                LoteDetalle.concepto_solicitado == concept_req
+            )
+            dup_check = session.execute(dup_stmt).scalars().first()
+            has_dup = dup_check is not None
+            dup_ref = dup_check.referencia_asignada if dup_check else None
+
             # Handle automatic reference assignment
             if req_autolink or not ref_str:
                 if not resolved_rfc_id:
@@ -255,7 +281,11 @@ class ExcelInventoryHandler:
                 row_result["referencia_id"] = ref_obj.referencia_id
                 row_result["referencia_asignada"] = ref_obj.referencia_portal
                 allocated_ref_ids.add(ref_obj.referencia_id)
-                row_result["status"] = "CORRECTO"
+                if has_dup:
+                    row_result["status"] = "WARNING"
+                    row_result["error_message"] = f"El cliente ya tiene una asignación de {concept_req} para esta ubicación en un lote anterior (Ref: {dup_ref})."
+                else:
+                    row_result["status"] = "CORRECTO"
                 validated_rows.append(row_result)
                 continue
 
@@ -315,7 +345,11 @@ class ExcelInventoryHandler:
                 continue
 
             # Valid reference!
-            row_result["status"] = "CORRECTO"
+            if has_dup:
+                row_result["status"] = "WARNING"
+                row_result["error_message"] = f"El cliente ya tiene una asignación de {concept_req} para esta ubicación en un lote anterior (Ref: {dup_ref})."
+            else:
+                row_result["status"] = "CORRECTO"
             validated_rows.append(row_result)
 
         return validated_rows
@@ -456,7 +490,7 @@ class ExcelInventoryHandler:
 
         headers = [
             "CLIENTE", "DESARROLLO", "EMPRESA", "FECHA_SOLICITUD", "UBICACION", "MZ", "LOTE", "EDIF", "VIV", 
-            "FOLIO", "ESTATUS_PRIMER_AVISO", "ANALISIS", "AVISO", "CLG", "CANC_1ER _AVISO", "CANC_2DO_AVISO", "NUEVO_DERECHO_AVISO"
+            "FOLIO", "ESTATUS_PRIMER_AVISO", "CREDITO_TITULAR", "PA", "DELEGACION", "ANALISIS", "AVISO", "CLG", "CANC_1ER _AVISO", "CANC_2DO_AVISO", "NUEVO_DERECHO_AVISO"
         ]
         
         ws.row_dimensions[1].height = 25
@@ -471,7 +505,7 @@ class ExcelInventoryHandler:
         ws.row_dimensions[2].height = 18
         mock_data = [
             "JUAN PEREZ", "ALDEA TULUM", "PROMOTORA RESIDENCIAL", "2026-07-21", "MZ 10 LT 5 VIV 3", "10", "5", "", "3",
-            "123456", "NUEVO INGRESO", "", "70028350819888101", "", "", "", ""
+            "123456", "NUEVO INGRESO", "123456789", "PA-ALDEA", "TULUM", "", "70028350819888101", "", "", "", ""
         ]
         for col_idx, val in enumerate(mock_data, start=1):
             cell = ws.cell(row=2, column=col_idx, value=val)

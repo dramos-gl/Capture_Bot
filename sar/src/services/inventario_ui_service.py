@@ -113,6 +113,27 @@ class InventarioUIService:
                     "rfcs": [{"rfc_id": r.rfc_id, "razon_social": r.razon_social} for r in rfcs]
                 }
 
+    def get_filtros_data(self) -> Dict[str, Any]:
+        """Fetches only the lightweight catalogs needed for visor filters (conceptos and rfcs)."""
+        if self.api_client.connect_via_api:
+            cats = self.api_client.request("GET", "/api/ops/catalogos")
+            return {
+                "conceptos": cats["conceptos"],
+                "rfcs": cats.get("rfcs", [])
+            }
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                from sar.src.storage.models import Concepto, Rfc
+                from sqlalchemy import select
+                concepts = session.execute(select(Concepto).where(Concepto.activo == True)).scalars().all()
+                rfcs = session.execute(select(Rfc).where(Rfc.activo == True)).scalars().all()
+                return {
+                    "conceptos": [{"concepto_id": c.concepto_id, "nombre": c.nombre} for c in concepts],
+                    "rfcs": [{"rfc_id": r.rfc_id, "razon_social": r.razon_social} for r in rfcs]
+                }
+
     def save_notaria(self, name: str) -> None:
         """Saves a new notaria entry."""
         if self.api_client.connect_via_api:

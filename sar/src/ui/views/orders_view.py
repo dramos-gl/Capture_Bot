@@ -41,6 +41,8 @@ class OrdersView(QWidget):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         self.ordenes_ui_service = OrdenesUIService(self.db_connector)
         self.active_worker = None
         

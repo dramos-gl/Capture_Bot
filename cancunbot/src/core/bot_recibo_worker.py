@@ -37,6 +37,7 @@ class BotReciboCunWorker(QThread):
     progress_changed = Signal(int, int)     # prog_actual, prog_total
     metric_updated = Signal(str, int)       # metric_name, value ('pendientes', 'exitosos', 'errores')
     finished_processing = Signal(bool, str) # success, message
+    folio_status_changed = Signal(dict)     # metadata dict: {"referencia": str, "rfc": str, "estado": str}
 
     def __init__(self, db_connector: DatabaseConnector, lote_id: int, headless: bool = True, custom_output_dir: Optional[str] = None, parent=None):
         super().__init__(parent)
@@ -163,6 +164,11 @@ class BotReciboCunWorker(QThread):
             procesados_ok = 0
             procesados_err = 0
             extractor = PdfExtractor()
+            
+            # Instanciar la página persistente fuera del bucle de folios
+            page = browser_context.new_page()
+            page.set_default_timeout(timeout_ms)
+            page_needs_init = True
 
             for idx, folio_dict in enumerate(folios_pendientes):
                 if self._stop_requested:
@@ -176,6 +182,13 @@ class BotReciboCunWorker(QThread):
                 folio_texto = folio_dict["folio_electronico"] if tipo_folio == "ELECTRONICO" else folio_dict["folio_pase_caja"]
                 folio_id = folio_dict["folio_id"]
                 self.status_changed.emit(f"[{idx+1}/{total_items}] Procesando folio {tipo_folio}: {folio_texto}...")
+
+                # Emitir señal de cambio de estado en el monitor
+                self.folio_status_changed.emit({
+                    "referencia": folio_texto,
+                    "rfc": "Consultando...",
+                    "estado": "Conectando al portal..."
+                })
 
                 # Actualiza estado del folio a descarga en proceso
                 with self.db_connector.get_session() as session:
@@ -193,13 +206,26 @@ class BotReciboCunWorker(QThread):
                     if self._stop_requested:
                         break
                     
-                    page = browser_context.new_page()
-                    page.set_default_timeout(timeout_ms)
-
+                    if page_needs_init:
+                        self.status_changed.emit(f"   -> Inicializando ventana del portal (intento {retry_attempt + 1})...")
+                        try:
+                            # Si la página vieja seguía abierta pero en estado inválido, la cerramos de forma segura
+                            try:
+                                page.close()
+                            except Exception:
+                                pass
+                            page = browser_context.new_page()
+                            page.set_default_timeout(timeout_ms)
+                            page.goto(portal_url)
+                            page_needs_init = False
+                        except Exception as init_err:
+                            retry_attempt += 1
+                            error_msg = f"Error conectando al sitio: {init_err}"
+                            self.status_changed.emit(f"   ⚠️ Fallo de conexión: {error_msg}")
+                            page_needs_init = True
+                            continue
+                    
                     try:
-                        self.status_changed.emit(f"   -> Conectando al portal (intento {retry_attempt + 1})...")
-                        page.goto(portal_url)
-
                         pom = ReciboTesoreriaPage(page, locators)
                         
                         # Captura e ingresa el folio e inicia consulta
@@ -235,7 +261,10 @@ class BotReciboCunWorker(QThread):
                             try:
                                 pom._resolver("CANCUN_RECIBO_BTN_VOLVER").click()
                             except Exception:
-                                page.reload()
+                                try:
+                                    page.reload()
+                                except Exception:
+                                    page_needs_init = True
                         else:
                             error_msg = "No se generó el archivo temporal PDF."
 
@@ -243,8 +272,8 @@ class BotReciboCunWorker(QThread):
                         retry_attempt += 1
                         error_msg = str(e)
                         self.status_changed.emit(f"   ⚠️ Error en intento {retry_attempt}: {error_msg}")
-                    finally:
-                        page.close()
+                        # Forzar el cierre y reapertura de la ventana en el siguiente reintento
+                        page_needs_init = True
 
                 # Guardar el resultado en la base de datos
                 with self.db_connector.get_session() as session:
@@ -255,7 +284,7 @@ class BotReciboCunWorker(QThread):
                         try:
                             # Parsear el PDF para extraer los campos clave
                             self.status_changed.emit("   -> Analizando PDF y extrayendo campos...")
-                            datos_pdf = extractor.extraer(temp_pdf_path)
+                            datos_pdf = extractor.extraer(temp_pdf_path, db_session=session)
                             hash_file = extractor.calcular_hash(temp_pdf_path)
 
                             # Definir subcarpeta de Desarrollo dinámicamente forzando subdirectorio \Recibos\
@@ -288,18 +317,22 @@ class BotReciboCunWorker(QThread):
                                 "fecha_expedicion": datos_pdf.fecha_expedicion,
                                 "hora_expedicion": datos_pdf.hora_expedicion,
                                 "lugar_expedicion": datos_pdf.lugar_expedicion,
-                                "rfc": datos_pdf.rfc,
+                                "rfc": datos_pdf.rfc or None,
                                 "contribucion": datos_pdf.contribucion,
-                                "nombre_contribuyente": datos_pdf.nombre_contribuyente,
+                                "nombre_contribuyente": datos_pdf.nombre_contribuyente or "CONTRIBUYENTE GENERAL",
                                 "concepto": datos_pdf.concepto,
                                 "total": datos_pdf.total,
                                 "forma_pago": datos_pdf.forma_pago,
                                 "pdf_nombre": pdf_name,
                                 "pdf_ruta": str(final_pdf_path),
                                 "hash_sha256": hash_file,
-                                "padron": datos_pdf.padron,
-                                "clave_catastral": datos_pdf.clave_catastral,
-                                "correo_factura": datos_pdf.datos_adicionales.get("correo")
+                                "padron": datos_pdf.padron or None,
+                                "clave_catastral": datos_pdf.clave_catastral or None,
+                                "sm": datos_pdf.sm or None,
+                                "mz": datos_pdf.mz or None,
+                                "l": datos_pdf.l or None,
+                                "correo_factura": datos_pdf.datos_adicionales.get("correo"),
+                                "datos_adicionales": datos_pdf.datos_adicionales
                             }
 
                             # Lógica de Validación de RFC
@@ -307,7 +340,11 @@ class BotReciboCunWorker(QThread):
                             rfc_id_final = folio_dict.get("rfc_id")
                             error_rfc_detectado = False
 
-                            if rfc_pdf:
+                            # Tratamos el RFC genérico XAXX010101000 igual que si estuviera vacío
+                            # para forzar la resolución por el nombre limpio del contribuyente
+                            es_generico = rfc_pdf in ("XAXX010101000", "XEXX010101000")
+
+                            if rfc_pdf and not es_generico:
                                 # 1. Resolver el rfc_id real del PDF desde el catálogo maestro
                                 db_rfc_row = session.execute(
                                     text("SELECT rfc_id FROM sar_catalogo.rfc WHERE rfc = :r AND activo = true"),
@@ -326,6 +363,38 @@ class BotReciboCunWorker(QThread):
                                     # El RFC real no existe en el catálogo maestro
                                     error_rfc_detectado = True
                                     self.status_changed.emit(f"   ❌ ERROR: El RFC '{rfc_pdf}' extraído del PDF no está catalogado en SAR.")
+                            else:
+                                # Si el RFC no viene en el PDF o es el genérico, resolverlo dinámicamente mediante el nombre de contribuyente limpio
+                                nombre_limpio = dict_recibo["nombre_contribuyente"]
+                                rfc_id_resuelto = None
+                                rfc_texto_resuelto = None
+                                
+                                if nombre_limpio and nombre_limpio != "CONTRIBUYENTE GENERAL":
+                                    # Buscar coincidencia aproximada (ILIKE) en el catálogo de RFCs usando la razón social limpia
+                                    # Compara tanto con el inicio de la razón social como buscando palabras clave
+                                    db_match = session.execute(
+                                        text("""
+                                            SELECT rfc_id, rfc, razon_social 
+                                            FROM sar_catalogo.rfc 
+                                            WHERE (razon_social ILIKE :n OR :n_clean ILIKE '%' || razon_social || '%')
+                                              AND activo = true
+                                            LIMIT 1
+                                        """),
+                                        {"n": f"%{nombre_limpio}%", "n_clean": nombre_limpio}
+                                    ).fetchone()
+                                    
+                                    if db_match:
+                                        rfc_id_resuelto = db_match[0]
+                                        rfc_texto_resuelto = db_match[1]
+                                        self.status_changed.emit(f"   ℹ️ RFC resuelto por Nombre: '{nombre_limpio}' -> {rfc_texto_resuelto} ({db_match[2]})")
+                                
+                                if rfc_id_resuelto:
+                                    rfc_id_final = rfc_id_resuelto
+                                    # Inyectar el RFC resuelto al diccionario de recibo para que no se guarde vacío en la columna RFC
+                                    dict_recibo["rfc"] = rfc_texto_resuelto
+                                else:
+                                    self.status_changed.emit(f"   ℹ️ RFC no especificado en el recibo y no pudo ser resuelto por el nombre '{nombre_limpio}'.")
+                                    rfc_id_final = None
 
                             # Asignar rfc_id al recibo
                             dict_recibo["rfc_id"] = rfc_id_final
@@ -336,6 +405,11 @@ class BotReciboCunWorker(QThread):
                                 session.commit()
                                 procesados_err += 1
                                 self.metric_updated.emit("errores", procesados_err)
+                                self.folio_status_changed.emit({
+                                    "referencia": folio_texto,
+                                    "rfc": rfc_pdf,
+                                    "estado": "ERROR_RFC_NO_CATALOGADO"
+                                })
                             else:
                                 # Guardar Recibo y actualizar Folio a RECIBO_OK
                                 rec = r_repo.save_extracted_receipt(folio_id, dict_recibo)
@@ -357,17 +431,32 @@ class BotReciboCunWorker(QThread):
                                 procesados_ok += 1
                                 self.metric_updated.emit("exitosos", procesados_ok)
                                 self.status_changed.emit("   ✅ Recibo capturado y guardado correctamente.")
+                                self.folio_status_changed.emit({
+                                    "referencia": folio_texto,
+                                    "rfc": rfc_pdf or "No detectado",
+                                    "estado": "RECIBO_OK"
+                                })
 
                         except Exception as parse_error:
                             logger.error(f"Error procesando PDF del folio {folio_texto}: {parse_error}")
                             f_repo.update_status(folio_id, "ERROR_DESCARGA", error_msg=f"Error parseando PDF: {parse_error}")
                             procesados_err += 1
                             self.metric_updated.emit("errores", procesados_err)
+                            self.folio_status_changed.emit({
+                                "referencia": folio_texto,
+                                "rfc": "Error PDF",
+                                "estado": "ERROR_DESCARGA"
+                            })
                     else:
                         f_repo.update_status(folio_id, "ERROR_DESCARGA", error_msg=error_msg)
                         procesados_err += 1
                         self.metric_updated.emit("errores", procesados_err)
                         self.status_changed.emit(f"   ❌ Error en folio: {error_msg}")
+                        self.folio_status_changed.emit({
+                            "referencia": folio_texto,
+                            "rfc": "Fallo",
+                            "estado": "ERROR_DESCARGA"
+                        })
 
                     session.commit()
 

@@ -112,8 +112,8 @@ class InventoryView(QWidget):
 
         self.main_layout.addWidget(self.tabs)
         
-        # Initial data loading
-        self.refresh_all()
+        # Initial data loading (load only filters at start to make tab switching instant)
+        self.refresh_all(load_catalogs=False)
 
     def set_active_tab(self, tab_key: str):
         """Switches active widget based on sidebar submenu navigation key."""
@@ -127,6 +127,8 @@ class InventoryView(QWidget):
     def refresh_all(self, load_catalogs=True):
         if load_catalogs:
             self._load_catalogs_data()
+        else:
+            self._load_filters_data()
         self.refresh_visor_data()
 
     # =========================================================================
@@ -401,29 +403,29 @@ class InventoryView(QWidget):
         layout.setSpacing(16)
 
         card_form = CustomCard(title="Configuración de la Asignación", parent=self)
-        form_layout = QFormLayout()
+        self.form_layout_masivo = QFormLayout()
         
         self.cb_destino_masivo = CustomComboBox(self)
         self.cb_destino_masivo.addItems(["NOTARIA", "COLABORADOR"])
         self.cb_destino_masivo.currentTextChanged.connect(self._on_destino_masivo_changed)
-        form_layout.addRow("Tipo Destino:", self.cb_destino_masivo)
+        self.form_layout_masivo.addRow("Tipo Destino:", self.cb_destino_masivo)
 
         self.cb_notarias_masivo = CustomComboBox(self)
-        form_layout.addRow("Notaría:", self.cb_notarias_masivo)
+        self.form_layout_masivo.addRow("Notaría:", self.cb_notarias_masivo)
 
         self.cb_colaboradores_masivo = CustomComboBox(self)
-        form_layout.addRow("Colaborador:", self.cb_colaboradores_masivo)
+        self.form_layout_masivo.addRow("Colaborador:", self.cb_colaboradores_masivo)
 
         self.cb_empresa_masivo = CustomComboBox(self)
-        form_layout.addRow("Empresa por Defecto:", self.cb_empresa_masivo)
+        self.form_layout_masivo.addRow("Empresa por Defecto:", self.cb_empresa_masivo)
 
         self.txt_solicitante_masivo = QLineEdit(self)
         self.txt_solicitante_masivo.setPlaceholderText("Ej. Pedro Gómez")
-        form_layout.addRow("Solicitante Externo (Persona):", self.txt_solicitante_masivo)
+        self.form_layout_masivo.addRow("Solicitante Externo (Persona):", self.txt_solicitante_masivo)
 
         self.txt_obs_masivo = QTextEdit(self)
         self.txt_obs_masivo.setMaximumHeight(80)
-        form_layout.addRow("Observaciones:", self.txt_obs_masivo)
+        self.form_layout_masivo.addRow("Observaciones:", self.txt_obs_masivo)
 
         # File picker row
         file_layout = QHBoxLayout()
@@ -440,9 +442,9 @@ class InventoryView(QWidget):
         file_layout.addWidget(btn_download_template)
         file_layout.addWidget(self.lbl_excel_path)
         file_layout.addStretch()
-        form_layout.addRow("Archivo Excel:", file_layout)
+        self.form_layout_masivo.addRow("Archivo Excel:", file_layout)
 
-        card_form.layout.addLayout(form_layout)
+        card_form.layout.addLayout(self.form_layout_masivo)
         layout.addWidget(card_form)
 
         # Preview list card
@@ -470,27 +472,27 @@ class InventoryView(QWidget):
         
         # Hide internal widgets initially
         self.cb_colaboradores_masivo.hide()
-        self.lbl_colab_row = form_layout.labelForField(self.cb_colaboradores_masivo)
+        self.lbl_colab_row = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
         if self.lbl_colab_row: self.lbl_colab_row.hide()
 
     def _on_destino_masivo_changed(self, text):
         if text == "NOTARIA":
             self.cb_notarias_masivo.show()
-            lbl = self.cb_notarias_masivo.parentWidget().layout().labelForField(self.cb_notarias_masivo)
+            lbl = self.form_layout_masivo.labelForField(self.cb_notarias_masivo)
             if lbl: lbl.show()
             
             self.cb_colaboradores_masivo.hide()
-            lbl_c = self.cb_colaboradores_masivo.parentWidget().layout().labelForField(self.cb_colaboradores_masivo)
+            lbl_c = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
             if lbl_c: lbl_c.hide()
             
             self.txt_solicitante_masivo.setEnabled(True)
         else:
             self.cb_notarias_masivo.hide()
-            lbl = self.cb_notarias_masivo.parentWidget().layout().labelForField(self.cb_notarias_masivo)
+            lbl = self.form_layout_masivo.labelForField(self.cb_notarias_masivo)
             if lbl: lbl.hide()
             
             self.cb_colaboradores_masivo.show()
-            lbl_c = self.cb_colaboradores_masivo.parentWidget().layout().labelForField(self.cb_colaboradores_masivo)
+            lbl_c = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
             if lbl_c: lbl_c.show()
             
             self.txt_solicitante_masivo.setEnabled(False)
@@ -655,6 +657,10 @@ class InventoryView(QWidget):
                         "viv": det.get("viv"),
                         "folio_electronico": det.get("folio_electronico"),
                         "estatus_primer_aviso": det.get("estatus_primer_aviso"),
+                        "ubicacion": det.get("ubicacion"),
+                        "credito_titular": det.get("credito_titular"),
+                        "pa": det.get("pa"),
+                        "delegacion": det.get("delegacion"),
                         "fecha_solicitud": det["fecha_solicitud"].strftime("%Y-%m-%d") if det.get("fecha_solicitud") else None
                     }
                     detalles_payload.append(det_dict)
@@ -826,6 +832,33 @@ class InventoryView(QWidget):
 
         except Exception as e:
             print("Error loading catalog data for inventory view:", e)
+
+    def _load_filters_data(self):
+        try:
+            data = self.inventario_ui_service.get_filtros_data()
+            concepts_list = data["conceptos"]
+            rfcs_list = data["rfcs"]
+            
+            self._concepts_map = {cp["nombre"] if isinstance(cp, dict) else cp.nombre: cp["concepto_id"] if isinstance(cp, dict) else cp.concepto_id for cp in concepts_list}
+            self._rfcs_map = {r["razon_social"] if isinstance(r, dict) else r.razon_social: r["rfc_id"] if isinstance(r, dict) else r.rfc_id for r in rfcs_list}
+
+            # Populate filter combos in visor
+            current_concept_txt = self.cb_concept_filter.currentText()
+            self.cb_concept_filter.clear()
+            self.cb_concept_filter.addItem("Todos los conceptos")
+            self.cb_concept_filter.addItems(list(self._concepts_map.keys()))
+            if current_concept_txt in self._concepts_map:
+                self.cb_concept_filter.setCurrentText(current_concept_txt)
+
+            current_empresa_txt = self.cb_empresa_filter.currentText()
+            self.cb_empresa_filter.clear()
+            self.cb_empresa_filter.addItem("Todas las empresas")
+            self.cb_empresa_filter.addItems(list(self._rfcs_map.keys()))
+            if current_empresa_txt in self._rfcs_map:
+                self.cb_empresa_filter.setCurrentText(current_empresa_txt)
+
+        except Exception as e:
+            print("Error loading filter data for inventory view:", e)
 
     def _on_add_notaria(self):
         name = self.txt_add_notaria.text().strip()

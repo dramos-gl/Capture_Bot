@@ -760,12 +760,16 @@ class LoteDetalleItem(BaseModel):
     cliente: str
     desarrollo_id: int
     fecha_solicitud: Optional[str] = None
+    ubicacion: Optional[str] = None
     mz: Optional[str] = None
     lote: Optional[str] = None
     edif: Optional[str] = None
     viv: Optional[str] = None
     folio_electronico: Optional[str] = None
     estatus_primer_aviso: Optional[str] = None
+    credito_titular: Optional[str] = None
+    pa: Optional[str] = None
+    delegacion: Optional[str] = None
     concepto_solicitado: str
     referencia_id: Optional[int] = None
     referencia_asignada: str

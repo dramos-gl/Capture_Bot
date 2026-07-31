@@ -233,6 +233,10 @@ class ReciboCancunRepository(BaseCancunRepository):
         recibo.padron = data.get("padron")
         recibo.clave_catastral = data.get("clave_catastral")
         recibo.rfc_id = data.get("rfc_id")
+        recibo.sm = data.get("sm")
+        recibo.mz = data.get("mz")
+        recibo.l = data.get("l")
+        recibo.detalle_concepto = data.get("datos_adicionales")
         recibo.estado_id = estado_id
         recibo.updated_at = datetime.utcnow()
         
