@@ -532,6 +532,8 @@ INSERT INTO sar_configuracion.localizador_portal (nombre_clave, label_visible, e
 ('txtNumeroInterior', 'No. Interior', 'CSS', 'input#Numero_Interior', 'Campo para número interior en el formulario RPP'),
 ('txtCodigoPostal', 'Código Postal', 'CSS', 'input#Codigo_Postal', 'Campo para el código postal del RFC en el formulario RPP'),
 ('txtLocalidad', 'Localidad', 'CSS', 'input#Localidad', 'Campo para la localidad en el formulario RPP'),
+('txtMunicipioRfc', 'Municipio del RFC', 'CSS', 'input#mun', 'Campo para el municipio del RFC en el formulario principal RPP'),
+('txtEstadoRfc', 'Estado del RFC', 'CSS', 'input#Estado', 'Campo para la entidad federativa / estado del RFC en el formulario principal RPP'),
 ('ddlDelegacion', 'Delegación', 'CSS', 'select[name="Delegacion"]', 'Selector de delegación física para el trámite RPP'),
 ('ddlConcepto', 'Concepto', 'CSS', 'select#conceptos', 'Selector de conceptos de cobro RPP'),
 ('btnAgregarConcepto', 'Agregar', 'CSS', 'input#agregar', 'Botón para agregar el concepto seleccionado a la grilla RPP'),

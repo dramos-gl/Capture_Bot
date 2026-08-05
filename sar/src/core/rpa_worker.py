@@ -166,6 +166,8 @@ class RpaWorker(QThread):
                         self._fill_locator(page, locators.get("txtNumeroInterior"), self.ctx["no_interior"])# 5
                         self._fill_locator(page, locators.get("txtCodigoPostal"), self.ctx["codigo_postal"])# 6
                         self._fill_locator(page, locators.get("txtLocalidad"), self.ctx["localidad"])      # 7
+                        self._fill_locator(page, locators.get("txtMunicipioRfc"), self.ctx.get("rfc_municipio", "")) # 8
+                        self._fill_locator(page, locators.get("txtEstadoRfc"), self.ctx.get("rfc_estado", ""))       # 9
                         
                         # Select Delegacion (10)
                         self._select_option_fuzzy(page, locators.get("ddlDelegacion"), self.ctx["delegacion_nombre"])
