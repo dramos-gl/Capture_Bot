@@ -182,6 +182,11 @@ class ExcelInventoryHandler:
             desarrollo_name = row["desarrollo"]
             row_empresa = row.get("empresa", "").strip().upper()
             req_autolink = row.get("requiere_autovincular", False)
+            cliente = row.get("cliente", "")
+            mz = row.get("mz", "")
+            lote = row.get("lote", "")
+            edif = row.get("edif", "")
+            viv = row.get("viv", "")
             
             row_result = dict(row)
             row_result["status"] = "PENDIENTE" # default

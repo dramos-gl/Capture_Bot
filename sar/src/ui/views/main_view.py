@@ -100,6 +100,7 @@ class MainView(QWidget):
                 self.sidebar.show_item("inventario_facturas")
                 self.sidebar.show_item("inventario_masivo")
                 self.sidebar.show_item("inventario_catalogos")
+                self.sidebar.show_item("r2f_control")
                 if not default_item: default_item = "referencias"
             if has_seguridad:
                 self.sidebar.show_item("configuracion")
@@ -139,6 +140,7 @@ class MainView(QWidget):
                 "inventario_facturas": "REFERENCIAS",
                 "inventario_masivo": "REFERENCIAS",
                 "inventario_catalogos": "REFERENCIAS",
+                "r2f_control": "REFERENCIAS",
                 "configuracion": "SEGURIDAD"
             }
             
@@ -211,6 +213,13 @@ class MainView(QWidget):
                 self.stacked_widget.addWidget(self.refs_view)
             self.stacked_widget.setCurrentWidget(self.refs_view)
             self.refs_view.refresh_data()
+        elif view_key == "r2f_control":
+            if not hasattr(self, "r2f_control_view") or not self.r2f_control_view:
+                from sar.src.ui.views.r2f_control_view import R2FControlView
+                self.r2f_control_view = R2FControlView(self.db_connector, self)
+                self.stacked_widget.addWidget(self.r2f_control_view)
+            self.stacked_widget.setCurrentWidget(self.r2f_control_view)
+            self.r2f_control_view.refresh_data()
         elif view_key in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
             if not self.inventory_view:
                 from sar.src.ui.views.inventory_view import InventoryView

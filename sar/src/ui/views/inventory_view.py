@@ -59,6 +59,8 @@ class InventoryView(QWidget):
         super().__init__(parent)
         self.db_connector = db_connector
         self.inventario_ui_service = InventarioUIService(self.db_connector)
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         self.active_worker = None
         
         self.main_layout = QVBoxLayout(self)
@@ -678,6 +680,7 @@ class InventoryView(QWidget):
                 lote_id = res["lote_id"]
             else:
                 with self.db_connector.get_session() as session:
+                    from sar.src.storage.repositories import InventarioRepository
                     repo = InventarioRepository(session)
                     lote_id = repo.crear_lote_asignacion(
                         tipo_destino=tipo_destino,

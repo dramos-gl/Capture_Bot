@@ -1646,15 +1646,18 @@ class InventarioRepository(BaseRepository):
         
         # Modify conditions to use table aliases
         conditions_sql = []
-        conditions_sql.append("es.codigo = 'FACTURADA'")
+        if filter_assigned == "Disponible":
+            conditions_sql.append("es.codigo = 'FACTURADA'")
+            conditions_sql.append("ld.lote_detalle_id IS NULL")
+        elif filter_assigned == "Asignada":
+            conditions_sql.append("es.codigo = 'ASIGNADA'")
+        else: # Todos
+            conditions_sql.append("es.codigo IN ('FACTURADA', 'ASIGNADA')")
+            
         if concepto_id:
             conditions_sql.append("gr.concepto_id = :concepto_id")
         if rfc_id:
             conditions_sql.append("gr.rfc_id = :rfc_id")
-        if filter_assigned == "Disponible":
-            conditions_sql.append("ld.lote_detalle_id IS NULL")
-        elif filter_assigned == "Asignada":
-            conditions_sql.append("ld.lote_detalle_id IS NOT NULL")
             
         if search_text:
             search_conds = [

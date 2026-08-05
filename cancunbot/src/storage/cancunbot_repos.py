@@ -251,6 +251,38 @@ class ReciboCancunRepository(BaseCancunRepository):
         ).order_by(ReciboCancun.recibo_id)
         return list(self.session.execute(stmt).scalars().all())
 
+    def get_recibos_paginated(self, limit: int, offset: int, search_text: str = "", estado_filter: str = "Todos") -> Tuple[List[ReciboCancun], int]:
+        """Fetches paginated receipts matching search criteria and optional status filters."""
+        stmt = select(ReciboCancun)
+        
+        # Apply filters
+        filters = []
+        if search_text:
+            s_like = f"%{search_text.strip()}%"
+            filters.append(
+                (ReciboCancun.folio_electronico.like(s_like)) |
+                (ReciboCancun.folio_pase_caja.like(s_like)) |
+                (ReciboCancun.nombre_contribuyente.like(s_like)) |
+                (ReciboCancun.rfc.like(s_like))
+            )
+            
+        if estado_filter and estado_filter != "Todos":
+            status_id = self._get_estado_id("recibo_cancun", estado_filter)
+            filters.append(ReciboCancun.estado_id == status_id)
+            
+        if filters:
+            stmt = stmt.where(and_(*filters))
+            
+        # Count total
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total_count = self.session.execute(count_stmt).scalar() or 0
+        
+        # Pagination & Ordering
+        stmt = stmt.order_by(ReciboCancun.recibo_id.desc()).limit(limit).offset(offset)
+        results = list(self.session.execute(stmt).scalars().all())
+        
+        return results, total_count
+
     def update_status(self, recibo_id: int, status_code: str) -> None:
         recibo = self.session.get(ReciboCancun, recibo_id)
         if recibo:

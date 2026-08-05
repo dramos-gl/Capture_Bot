@@ -212,6 +212,11 @@ class R2FCancunView(QWidget):
         self.lbl_lote_actual_info.setStyleSheet("color: #6b7280; font-size: 11px; background: #f9fafb; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px;")
         grid_m.addWidget(self.lbl_lote_actual_info, 1, 0, 1, 3)
 
+        # Integrar botón Control R2F en la última fila disponible del panel de Métricas
+        self.btn_control_r2f = CustomButton("📊 Control de Recibos & Facturas (R2F)", is_secondary=True)
+        self.btn_control_r2f.clicked.connect(self._on_administrar_recibos_clicked)
+        grid_m.addWidget(self.btn_control_r2f, 2, 0, 1, 3)
+
         m_layout.addLayout(grid_m)
         top_layout.addWidget(metricas_frame, stretch=1)
 
@@ -458,6 +463,33 @@ class R2FCancunView(QWidget):
                 self.table_lotes.populate_rows(data)
         except Exception as e:
             logger.error(f"Error cargando tabla de lotes: {e}")
+
+    def _on_administrar_recibos_clicked(self):
+        """Abre el panel de control administrativo de R2F en un diálogo modal independiente maximizado."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Control de Recibos & Facturas (R2F)")
+        
+        # Habilitar botones de maximizar/minimizar de la ventana
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        from sar.src.ui.views.r2f_control_view import R2FControlView
+        control_view = R2FControlView(self.db_connector, dialog)
+        layout.addWidget(control_view)
+
+        # Guardar el diálogo activo en la lista de diálogos del objeto para poder cerrarlo en caso de logout
+        if not hasattr(self, '_open_dialogs'):
+            self._open_dialogs = []
+        self._open_dialogs.append(dialog)
+        
+        # Remover el diálogo de la lista cuando se cierre
+        dialog.finished.connect(lambda: self._open_dialogs.remove(dialog) if dialog in self._open_dialogs else None)
+        
+        # Mostrar el diálogo maximizado por defecto
+        dialog.showMaximized()
+        dialog.exec()
 
     def _on_lote_double_clicked(self, index):
         row = index.row()
@@ -709,15 +741,51 @@ class R2FCancunView(QWidget):
         menu.addSeparator()
         
         logout_action = menu.addAction("🚪 Cerrar Sesión")
-        logout_action.triggered.connect(self.logout_requested.emit)
+        logout_action.triggered.connect(self._handle_logout_intent)
         
         menu.exec_(QCursor.pos())
+
+    def _handle_logout_intent(self):
+        """Valida que no haya diálogos o procesos activos antes de notificar la señal de logout."""
+        open_dialogs = getattr(self, '_open_dialogs', [])
+        if open_dialogs:
+            reply = QMessageBox.question(
+                self, "Confirmar Cierre de Sesión",
+                f"Tiene una o más ventanas de Control R2F abiertas ({len(open_dialogs)}).\n"
+                "¿Está seguro de que desea cerrar la sesión de todos modos? Se cerrarán las ventanas activas.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+            
+            # Cerrar todas las ventanas abiertas en el pool
+            for diag in list(open_dialogs):
+                try:
+                    diag.reject()
+                except Exception:
+                    pass
+            self._open_dialogs = []
+
+        self.logout_requested.emit()
 
     def _write_log(self, text: str):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.txt_console.append(f"[{timestamp}] {text}")
 
     def closeEvent(self, event):
+        # Primero validar diálogos activos
+        open_dialogs = getattr(self, '_open_dialogs', [])
+        if open_dialogs:
+            reply = QMessageBox.question(
+                self, "Cerrar Ventana",
+                "Tiene ventanas secundarias de Control R2F abiertas.\n"
+                "¿Desea cerrar el bot y todas sus ventanas vinculadas?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+
         if self.active_worker and self.active_worker.isRunning():
             reply = QMessageBox.question(
                 self, "Bot en ejecución",
@@ -727,10 +795,23 @@ class R2FCancunView(QWidget):
             if reply == QMessageBox.Yes:
                 self.active_worker.stop()
                 self.active_worker.wait()
+                
+                # Cerrar secundarias
+                for diag in list(open_dialogs):
+                    try:
+                        diag.reject()
+                    except Exception:
+                        pass
                 event.accept()
             else:
                 event.ignore()
         else:
+            # Cerrar secundarias
+            for diag in list(open_dialogs):
+                try:
+                    diag.reject()
+                except Exception:
+                    pass
             event.accept()
 
     def _verify_paths(self):
