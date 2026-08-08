@@ -831,14 +831,35 @@ def save_desarrollo(request: DesarrolloCreateRequest, db: Session = Depends(get_
 @router.get("/inventario/referencias-facturadas")
 def get_referencias_facturadas(
     limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None, filter_assigned: str = "Todos",
+    start_date: Optional[str] = None, end_date: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     from sar.src.storage.repositories import InventarioRepository
     repo = InventarioRepository(db)
     records, total = repo.get_referencias_facturadas_paginated(
-        limit=limit, offset=offset, search_text=search_text, concepto_id=concepto_id, rfc_id=rfc_id, filter_assigned=filter_assigned
+        limit=limit, offset=offset, search_text=search_text, concepto_id=concepto_id, rfc_id=rfc_id, filter_assigned=filter_assigned,
+        start_date=start_date, end_date=end_date
     )
     return {"records": records, "total_count": total}
+
+@router.get("/inventario/referencias-facturadas-summary")
+def get_referencias_facturadas_summary(
+    search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None,
+    start_date: Optional[str] = None, end_date: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    from sar.src.storage.repositories import InventarioRepository
+    repo = InventarioRepository(db)
+    return repo.get_inventario_summary(
+        search_text=search_text, concepto_id=concepto_id, rfc_id=rfc_id,
+        start_date=start_date, end_date=end_date
+    )
+
+@router.get("/inventario/referencias/{referencia_id}/facturas")
+def get_referencias_facturas(referencia_id: int, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    repo = InventarioRepository(db)
+    return repo.get_facturas_by_referencia_id(referencia_id)
 
 @router.post("/inventario/lotes")
 def create_lote_asignacion(request: LoteAsignacionCreateRequest, db: Session = Depends(get_db)):

@@ -2,22 +2,25 @@ import os
 from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QPushButton, QTabWidget,
-    QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox
+    QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
+    QDateEdit
 )
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QDate
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
     LabeledComboBox, CustomLabel, CustomInput, CustomCheckBox
 )
+from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
+from sar.src.ui.design_system.theme_manager import Colors
 from sar.src.services.inventario_ui_service import InventarioUIService
 from sar.src.services.excel_inventory_handler import ExcelInventoryHandler
 
 class InventoryLoadWorker(QThread):
     """Background worker thread to load references from the DB dynamically with pagination."""
-    result_ready = Signal(list, int) # data, total_count
+    result_ready = Signal(list, int, dict) # data, total_count, summary
     error_occurred = Signal(str)
     
-    def __init__(self, inventario_ui_service, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str):
+    def __init__(self, inventario_ui_service, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str, start_date: str = None, end_date: str = None):
         super().__init__()
         self.inventario_ui_service = inventario_ui_service
         self.limit = limit
@@ -26,6 +29,8 @@ class InventoryLoadWorker(QThread):
         self.concepto_id = concepto_id
         self.rfc_id = rfc_id
         self.filter_assigned = filter_assigned
+        self.start_date = start_date
+        self.end_date = end_date
         self._is_cancelled = False
         
     def cancel(self):
@@ -41,10 +46,21 @@ class InventoryLoadWorker(QThread):
                 search_text=self.search_text,
                 concepto_id=self.concepto_id,
                 rfc_id=self.rfc_id,
-                filter_assigned=self.filter_assigned
+                filter_assigned=self.filter_assigned,
+                start_date=self.start_date,
+                end_date=self.end_date
+            )
+            if self._is_cancelled:
+                return
+            summary = self.inventario_ui_service.get_inventario_summary(
+                search_text=self.search_text,
+                concepto_id=self.concepto_id,
+                rfc_id=self.rfc_id,
+                start_date=self.start_date,
+                end_date=self.end_date
             )
             if not self._is_cancelled:
-                self.result_ready.emit(res["records"], res["total_count"])
+                self.result_ready.emit(res["records"], res["total_count"], summary)
         except Exception as e:
             if not self._is_cancelled:
                 import traceback
@@ -165,7 +181,64 @@ class InventoryView(QWidget):
         self.cb_empresa_filter.currentTextChanged.connect(self._on_empresa_filter_visor)
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.labeled_empresa)
         
+        # Checkbox to enable date filters
+        self.chk_fecha_filter = CustomCheckBox("Filtrar por Fecha Asignación", parent=self)
+        self.chk_fecha_filter.setChecked(False)
+        self.chk_fecha_filter.stateChanged.connect(self._on_fecha_filter_toggled)
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.chk_fecha_filter)
+
+        # Date Desde
+        self.lbl_desde = CustomLabel("Desde:", variant="body")
+        self.de_desde = QDateEdit(QDate.currentDate().addMonths(-1))
+        self.de_desde.setCalendarPopup(True)
+        self.de_desde.setEnabled(False)
+        self.de_desde.dateChanged.connect(self._on_date_changed)
+        
+        # Date Hasta
+        self.lbl_hasta = CustomLabel("Hasta:", variant="body")
+        self.de_hasta = QDateEdit(QDate.currentDate())
+        self.de_hasta.setCalendarPopup(True)
+        self.de_hasta.setEnabled(False)
+        self.de_hasta.dateChanged.connect(self._on_date_changed)
+
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.lbl_desde)
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.de_desde)
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.lbl_hasta)
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.de_hasta)
+        
         layout.addWidget(self.filter_bar)
+
+        # KPI summary cards
+        kpi_widget = QWidget(self)
+        kpi_widget.setStyleSheet("background: transparent;")
+        self.kpi_layout = QHBoxLayout(kpi_widget)
+        self.kpi_layout.setContentsMargins(0, 0, 0, 0)
+        self.kpi_layout.setSpacing(12)
+        
+        self.card_disponibles = StatCard(
+            "Referencias Disponibles",
+            "0",
+            icon_name="clock",
+            color_hex=Colors.PRIMARY,
+            show_sparkline=False,
+            parent=kpi_widget
+        )
+        self.card_disponibles.lbl_sub.setText("Total sin asignar")
+        self.kpi_layout.addWidget(self.card_disponibles, stretch=1)
+        
+        self.card_asignadas = StatCard(
+            "Referencias Asignadas",
+            "0",
+            icon_name="shield_check",
+            color_hex=Colors.SUCCESS,
+            show_sparkline=False,
+            parent=kpi_widget
+        )
+        self.card_asignadas.lbl_sub.setText("Total asignadas")
+        self.kpi_layout.addWidget(self.card_asignadas, stretch=1)
+        self.kpi_layout.addStretch()
+        
+        layout.addWidget(kpi_widget)
 
         # Main Card & Table
         self.card = CustomCard(title="Referencias en Estado FACTURADA", parent=self)
@@ -227,6 +300,7 @@ class InventoryView(QWidget):
         self._current_rfc_id = None
         
         self.table.itemChanged.connect(self._on_table_item_changed)
+        self.table.cellDoubleClicked.connect(self._on_table_cell_double_clicked)
 
     def refresh_visor_data(self):
         if self.active_worker and self.active_worker.isRunning():
@@ -246,6 +320,12 @@ class InventoryView(QWidget):
 
         offset = (self.current_page - 1) * self.page_size
         
+        start_date = None
+        end_date = None
+        if hasattr(self, 'chk_fecha_filter') and self.chk_fecha_filter.isChecked():
+            start_date = self.de_desde.date().toString("yyyy-MM-dd")
+            end_date = self.de_hasta.date().toString("yyyy-MM-dd")
+
         self.active_worker = InventoryLoadWorker(
             inventario_ui_service=self.inventario_ui_service,
             limit=self.page_size,
@@ -253,22 +333,43 @@ class InventoryView(QWidget):
             search_text=self._current_search_text,
             concepto_id=self._current_concepto_id,
             rfc_id=self._current_rfc_id,
-            filter_assigned=self._current_estado_filter
+            filter_assigned=self._current_estado_filter,
+            start_date=start_date,
+            end_date=end_date
         )
         self.active_worker.result_ready.connect(self._on_visor_data_loaded)
         self.active_worker.error_occurred.connect(self._on_visor_load_error)
         self.active_worker.start()
 
-    def _on_visor_data_loaded(self, data, total_count):
+    def _on_visor_data_loaded(self, data, total_count, summary):
         self.all_data = data
         self.total_items = total_count
         self.pagination_widget.setEnabled(True)
+        
+        # Update cards
+        disponibles = summary.get("disponibles", 0)
+        asignadas = summary.get("asignadas", 0)
+        self.card_disponibles.set_value(f"{disponibles:,}")
+        self.card_asignadas.set_value(f"{asignadas:,}")
+        
         self._populate_visor_table()
 
     def _on_visor_load_error(self, err):
         self.pagination_widget.setEnabled(True)
         self.lbl_pagination_info.setText("Error al cargar inventario.")
         QMessageBox.critical(self, "Error de Datos", f"Fallo al conectar con el servidor:\n{err}")
+
+    def _on_fecha_filter_toggled(self, state):
+        enabled = (state == Qt.CheckState.Checked or state == 2 or state == True)
+        self.de_desde.setEnabled(enabled)
+        self.de_hasta.setEnabled(enabled)
+        self.current_page = 1
+        self.refresh_visor_data()
+
+    def _on_date_changed(self, date):
+        if self.chk_fecha_filter.isChecked():
+            self.current_page = 1
+            self.refresh_visor_data()
 
     def _populate_visor_table(self):
         rows_data = []
@@ -365,6 +466,26 @@ class InventoryView(QWidget):
         if item.column() == 0:
             checked = any(self.table.item(r, 0).checkState() == Qt.CheckState.Checked for r in range(self.table.rowCount()))
             self.btn_marcar_visibles.setText("Desmarcar Visibles" if checked else "Marcar Visibles")
+
+    def _on_table_cell_double_clicked(self, row, column):
+        state_item = self.table.item(row, 6)
+        if not state_item or state_item.text() != "Asignada":
+            return
+            
+        ref_id_str = self.table.item(row, 1).text()
+        if not ref_id_str:
+            return
+            
+        ref_id = int(ref_id_str)
+        lote_id = None
+        for r in self.all_data:
+            if r.get("referencia_id") == ref_id:
+                lote_id = r.get("lote_asignacion_id")
+                break
+                
+        if lote_id:
+            dialog = LoteProcessingDialog(self.db_connector, lote_id, self)
+            dialog.exec()
 
     def _on_marcar_visibles(self):
         any_checked = any(self.table.item(r, 0).checkState() == Qt.CheckState.Checked for r in range(self.table.rowCount()))
@@ -1199,3 +1320,143 @@ class ExportLotesDialog(QDialog):
 
         except Exception as e:
             QMessageBox.critical(self, "Error de Exportación", f"No se pudo generar el archivo Excel:\n{str(e)}")
+
+
+class LoteProcessingDialog(QDialog):
+    """Dialog to show details of a lote_asignacion and export renamed PDF invoices."""
+    
+    def __init__(self, db_connector, lote_id: int, parent=None):
+        super().__init__(parent)
+        self.db_connector = db_connector
+        self.lote_id = lote_id
+        self.inventario_ui_service = InventarioUIService(self.db_connector)
+        
+        self.setWindowTitle(f"Procesar Lote de Asignación #{lote_id}")
+        self.setMinimumSize(900, 500)
+        self.layout = QVBoxLayout(self)
+        
+        self.layout.addWidget(CustomLabel(f"Detalle de Asignación - Lote #{lote_id}", variant="subheader"))
+        
+        headers = ["✔", "ID Detalle", "Referencia ID", "Cliente", "Referencia", "Desarrollo", "Ubicación", "Mz", "Lt", "Edif", "Viv", "Folio Electrónico"]
+        self.table_detalles = StyledDataTable(headers, parent=self)
+        self.table_detalles.setColumnHidden(1, True) # Hide ID Detalle
+        self.table_detalles.setColumnHidden(2, True) # Hide Referencia ID
+        self.layout.addWidget(self.table_detalles)
+        
+        # Action Buttons
+        btns = QHBoxLayout()
+        btn_close = CustomButton("Cerrar", is_secondary=True)
+        btn_close.clicked.connect(self.reject)
+        
+        btn_export = CustomButton("Exportar Facturas Renombradas")
+        btn_export.clicked.connect(self._on_export_facturas)
+        
+        btns.addStretch()
+        btns.addWidget(btn_close)
+        btns.addWidget(btn_export)
+        self.layout.addLayout(btns)
+        
+        self._load_detalles()
+        
+    def _load_detalles(self):
+        try:
+            self.detalles = self.inventario_ui_service.get_lote_detalles(self.lote_id)
+            rows = []
+            for d in self.detalles:
+                rows.append([
+                    "",
+                    str(d.get("lote_detalle_id", "")),
+                    str(d.get("referencia_id", "") or ""),
+                    d.get("cliente", ""),
+                    d.get("referencia", ""),
+                    d.get("desarrollo", ""),
+                    d.get("ubicacion", ""),
+                    d.get("mz", ""),
+                    d.get("lote", ""),
+                    d.get("edif", ""),
+                    d.get("viv", ""),
+                    d.get("folio_electronico", "")
+                ])
+            self.table_detalles.populate_rows(rows, checkable_first_col=True)
+            
+            # Select all by default
+            for r in range(self.table_detalles.rowCount()):
+                chk_item = self.table_detalles.item(r, 0)
+                if chk_item:
+                    chk_item.setCheckState(Qt.CheckState.Checked)
+        except Exception as e:
+            QMessageBox.critical(self, "Error al Cargar", f"No se pudieron cargar los detalles del lote:\n{str(e)}")
+            
+    def _on_export_facturas(self):
+        # Find which rows are checked
+        selected_rows = []
+        for r in range(self.table_detalles.rowCount()):
+            if self.table_detalles.item(r, 0).checkState() == Qt.CheckState.Checked:
+                selected_rows.append(r)
+                
+        if not selected_rows:
+            QMessageBox.warning(self, "Selección Vacía", "Por favor selecciona al menos una referencia para exportar.")
+            return
+            
+        dest_dir = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Destino")
+        if not dest_dir:
+            return
+            
+        import shutil
+        import re
+        
+        def sanitize_filename(name: str) -> str:
+            return re.sub(r'[^\w\s\.-]', '', name).strip()
+            
+        success_count = 0
+        error_count = 0
+        missing_count = 0
+        
+        for r in selected_rows:
+            ref_id_str = self.table_detalles.item(r, 2).text()
+            cliente_raw = self.table_detalles.item(r, 3).text()
+            ref_portal = self.table_detalles.item(r, 4).text()
+            
+            if not ref_id_str:
+                continue
+                
+            ref_id = int(ref_id_str)
+            cliente = sanitize_filename(cliente_raw) or f"Referencia_{ref_portal}"
+            
+            try:
+                facturas = self.inventario_ui_service.get_facturas_by_referencia_id(ref_id)
+                if not facturas:
+                    missing_count += 1
+                    continue
+                    
+                # A reference can have multiple invoice records or two files (pdf_path and xml_path) per invoice record
+                idx = 1
+                for f in facturas:
+                    paths_to_copy = []
+                    if f.get("pdf_path"):
+                        paths_to_copy.append(f["pdf_path"])
+                    if f.get("xml_path"):
+                        paths_to_copy.append(f["xml_path"])
+                        
+                    for src_path in paths_to_copy:
+                        if src_path and os.path.exists(src_path):
+                            ext = os.path.splitext(src_path)[1]
+                            dest_filename = f"{cliente}_{idx}{ext}"
+                            dest_path = os.path.join(dest_dir, dest_filename)
+                            shutil.copy2(src_path, dest_path)
+                            idx += 1
+                            success_count += 1
+                        else:
+                            error_count += 1
+            except Exception as e:
+                print(f"Error copying files for ref {ref_id}:", e)
+                error_count += 1
+                
+        # Report results
+        msg = f"Exportación finalizada:\n\n- Facturas exportadas con éxito: {success_count}\n"
+        if missing_count > 0:
+            msg += f"- Referencias sin facturas registradas: {missing_count}\n"
+        if error_count > 0:
+            msg += f"- Archivos no encontrados o con error: {error_count}\n"
+            
+        QMessageBox.information(self, "Resultado de Exportación", msg)

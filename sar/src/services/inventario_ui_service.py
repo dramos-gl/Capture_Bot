@@ -11,7 +11,7 @@ class InventarioUIService:
         self.db_connector = db_connector
         self.api_client = APIClient()
 
-    def get_referencias_facturadas_paginated(self, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str) -> Dict[str, Any]:
+    def get_referencias_facturadas_paginated(self, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """Fetches paginated facturadas references."""
         if self.api_client.connect_via_api:
             payload = {
@@ -24,6 +24,10 @@ class InventarioUIService:
                 payload["concepto_id"] = concepto_id
             if rfc_id:
                 payload["rfc_id"] = rfc_id
+            if start_date:
+                payload["start_date"] = start_date
+            if end_date:
+                payload["end_date"] = end_date
             res = self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas", data=payload)
             return {"records": res["records"], "total_count": res["total_count"]}
         else:
@@ -37,9 +41,39 @@ class InventarioUIService:
                     search_text=search_text,
                     concepto_id=concepto_id,
                     rfc_id=rfc_id,
-                    filter_assigned=filter_assigned
+                    filter_assigned=filter_assigned,
+                    start_date=start_date,
+                    end_date=end_date
                 )
                 return {"records": res, "total_count": total_count}
+
+    def get_inventario_summary(self, search_text: str = "", concepto_id: int = None, rfc_id: int = None, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """Fetches inventory counts (disponibles, asignadas) under active filters."""
+        if self.api_client.connect_via_api:
+            payload = {}
+            if search_text:
+                payload["search_text"] = search_text
+            if concepto_id:
+                payload["concepto_id"] = concepto_id
+            if rfc_id:
+                payload["rfc_id"] = rfc_id
+            if start_date:
+                payload["start_date"] = start_date
+            if end_date:
+                payload["end_date"] = end_date
+            return self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas-summary", data=payload)
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                return repo.get_inventario_summary(
+                    search_text=search_text,
+                    concepto_id=concepto_id,
+                    rfc_id=rfc_id,
+                    start_date=start_date,
+                    end_date=end_date
+                )
 
     def get_notarias(self) -> List[Dict[str, Any]]:
         """Fetches notarias."""
@@ -227,3 +261,14 @@ class InventarioUIService:
             with self.db_connector.get_session() as session:
                 repo = InventarioRepository(session)
                 return repo.get_lote_detalles(lote_id)
+
+    def get_facturas_by_referencia_id(self, referencia_id: int) -> List[Dict[str, Any]]:
+        """Fetches invoices (facturas) associated with a reference ID."""
+        if self.api_client.connect_via_api:
+            return self.api_client.request("GET", f"/api/docs/inventario/referencias/{referencia_id}/facturas")
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                return repo.get_facturas_by_referencia_id(referencia_id)

@@ -1585,7 +1585,7 @@ class InventarioRepository(BaseRepository):
         return {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "delegacion_id": d.delegacion_id}
 
     def get_referencias_facturadas_paginated(
-        self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, rfc_id: int = None, filter_assigned: str = "Todos"
+        self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, rfc_id: int = None, filter_assigned: str = "Todos", start_date: str = None, end_date: str = None
     ) -> tuple[List[dict], int]:
         from sqlalchemy import text
         
@@ -1617,6 +1617,11 @@ class InventarioRepository(BaseRepository):
             ]
             conditions.append(f"({' OR '.join(search_conds)})")
             params["search"] = f"%{search_text}%"
+            
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
             
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         
@@ -1660,6 +1665,11 @@ class InventarioRepository(BaseRepository):
         if rfc_id:
             conditions_sql.append("gr.rfc_id = :rfc_id")
             
+        if start_date:
+            conditions_sql.append("la.fecha::date >= :start_date")
+        if end_date:
+            conditions_sql.append("la.fecha::date <= :end_date")
+            
         if search_text:
             search_conds = [
                 "r.referencia_portal ILIKE :search",
@@ -1696,7 +1706,8 @@ class InventarioRepository(BaseRepository):
                 la.fecha AS fecha_asignacion,
                 des.nombre AS desarrollo_nombre,
                 ld.cliente AS cliente_nombre,
-                ld.mz, ld.lote, ld.edif, ld.viv, ld.folio_electronico
+                ld.mz, ld.lote, ld.edif, ld.viv, ld.folio_electronico,
+                la.lote_asignacion_id AS lote_asignacion_id
             {sql_base}
             {where_clause}
             ORDER BY r.fecha_generacion DESC, r.referencia_id DESC
@@ -1729,10 +1740,81 @@ class InventarioRepository(BaseRepository):
                 "lote": row.lote or "",
                 "edif": row.edif or "",
                 "viv": row.viv or "",
-                "folio_electronico": row.folio_electronico or ""
+                "folio_electronico": row.folio_electronico or "",
+                "lote_asignacion_id": row.lote_asignacion_id
             })
             
         return res, total_count
+
+    def get_inventario_summary(
+        self, search_text: str = "", concepto_id: int = None, rfc_id: int = None, start_date: str = None, end_date: str = None
+    ) -> dict:
+        from sqlalchemy import text
+        
+        params = {}
+        if search_text:
+            params["search"] = f"%{search_text}%"
+        if concepto_id:
+            params["concepto_id"] = concepto_id
+        if rfc_id:
+            params["rfc_id"] = rfc_id
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+            
+        sql_base = """
+            FROM sar_produccion.referencia r
+            JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+            JOIN sar_produccion.orden_generacion og ON gr.orden_id = og.orden_id
+            JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
+            JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+            JOIN sar_produccion.solicitud s ON r.solicitud_id = s.solicitud_id
+            LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            LEFT JOIN sar_seguridad.usuario u ON r.usuario_asignado = u.usuario_id
+            LEFT JOIN sar_archivo.lote_detalle ld ON r.referencia_id = ld.referencia_id
+            LEFT JOIN sar_archivo.lote_asignacion la ON ld.lote_asignacion_id = la.lote_asignacion_id
+        """
+        
+        base_conditions = []
+        if concepto_id:
+            base_conditions.append("gr.concepto_id = :concepto_id")
+        if rfc_id:
+            base_conditions.append("gr.rfc_id = :rfc_id")
+        if start_date:
+            base_conditions.append("la.fecha::date >= :start_date")
+        if end_date:
+            base_conditions.append("la.fecha::date <= :end_date")
+        if search_text:
+            search_conds = [
+                "r.referencia_portal ILIKE :search",
+                "rfc.razon_social ILIKE :search",
+                "c.nombre ILIKE :search",
+                "d.nombre ILIKE :search",
+                "u.nombre ILIKE :search",
+                "ld.cliente ILIKE :search"
+            ]
+            base_conditions.append(f"({' OR '.join(search_conds)})")
+            
+        # Available condition
+        conds_disp = list(base_conditions)
+        conds_disp.append("es.codigo = 'FACTURADA'")
+        conds_disp.append("ld.lote_detalle_id IS NULL")
+        where_disp = f"WHERE {' AND '.join(conds_disp)}"
+        
+        # Assigned condition
+        conds_asig = list(base_conditions)
+        conds_asig.append("es.codigo = 'ASIGNADA'")
+        where_asig = f"WHERE {' AND '.join(conds_asig)}"
+        
+        query_disp = text(f"SELECT COUNT(DISTINCT r.referencia_id) {sql_base} {where_disp}")
+        query_asig = text(f"SELECT COUNT(DISTINCT r.referencia_id) {sql_base} {where_asig}")
+        
+        disponibles = self.session.execute(query_disp, params).scalar() or 0
+        asignadas = self.session.execute(query_asig, params).scalar() or 0
+        
+        return {"disponibles": disponibles, "asignadas": asignadas}
 
     def crear_lote_asignacion(
         self, tipo_destino: str, notaria_id: Optional[int], colaborador_id: Optional[int],
@@ -1823,6 +1905,7 @@ class InventarioRepository(BaseRepository):
         stmt = text("""
             SELECT 
                 ld.lote_detalle_id,
+                ld.referencia_id,
                 ld.cliente,
                 des.nombre AS desarrollo_nombre,
                 ld.fecha_solicitud,
@@ -1849,6 +1932,7 @@ class InventarioRepository(BaseRepository):
         return [
             {
                 "lote_detalle_id": row.lote_detalle_id,
+                "referencia_id": row.referencia_id,
                 "cliente": row.cliente,
                 "desarrollo": row.desarrollo_nombre,
                 "delegacion": row.delegacion_nombre,
@@ -1865,6 +1949,26 @@ class InventarioRepository(BaseRepository):
                 "delegacion_original": row.delegacion or "",
                 "concepto": row.concepto_solicitado,
                 "referencia": row.referencia_asignada
+            }
+            for row in results
+        ]
+
+    def get_facturas_by_referencia_id(self, referencia_id: int) -> List[dict]:
+        from sqlalchemy import text
+        stmt = text("""
+            SELECT factura_id, pdf_path, xml_path, uuid, folio, estado
+            FROM sar_archivo.factura
+            WHERE referencia_id = :referencia_id
+        """)
+        results = self.session.execute(stmt, {"referencia_id": referencia_id}).all()
+        return [
+            {
+                "factura_id": row.factura_id,
+                "pdf_path": row.pdf_path,
+                "xml_path": row.xml_path,
+                "uuid": row.uuid,
+                "folio": row.folio,
+                "estado": row.estado
             }
             for row in results
         ]
