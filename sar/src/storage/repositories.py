@@ -1,6 +1,6 @@
 """Repository classes for encapsulated database CRUD and queries."""
 
-from typing import List, Optional
+from typing import List, Optional, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_
 from sar.src.storage.models import (
@@ -375,6 +375,38 @@ class CatalogoRepository(BaseRepository):
         self.session.flush()
         return est
 
+    def get_all_notarias(self) -> List[Any]:
+        from sar.src.storage.models import Notaria
+        stmt = select(Notaria).order_by(Notaria.nombre)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def save_notaria(self, n: Any) -> Any:
+        self.session.add(n)
+        self.session.flush()
+        return n
+
+    def get_all_colaboradores(self) -> List[Any]:
+        from sar.src.storage.models import Colaborador
+        stmt = select(Colaborador).order_by(Colaborador.nombre)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def save_colaborador(self, c: Any) -> Any:
+        self.session.add(c)
+        self.session.flush()
+        return c
+
+    def get_all_desarrollos(self) -> List[Any]:
+        from sar.src.storage.models import Desarrollo
+        from sqlalchemy.orm import selectinload
+        stmt = select(Desarrollo).options(selectinload(Desarrollo.delegacion)).order_by(Desarrollo.nombre)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def save_desarrollo(self, d: Any) -> Any:
+        self.session.add(d)
+        self.session.flush()
+        return d
+
+
 
 class OperacionRepository(BaseRepository):
     def _get_estado_id(self, codigo: str) -> int:
@@ -605,9 +637,9 @@ class OperacionRepository(BaseRepository):
             WHERE s.usuario_asignado = :usuario_id
         """
         if ver_facturadas:
-            query_str += " AND es.codigo IN ('AUTORIZADA', 'AUTORIZACION_PARCIAL', 'FACTURADA', 'FACTURADA_PARCIAL', 'ERROR_VALIDACION')"
+            query_str += " AND es.codigo IN ('AUTORIZADA', 'AUTORIZACION_PARCIAL', 'FACTURADA', 'FACTURADA_PARCIAL', 'ERROR_VALIDACION', 'ERROR', 'PROCESANDO')"
         else:
-            query_str += " AND es.codigo IN ('AUTORIZADA', 'AUTORIZACION_PARCIAL')"
+            query_str += " AND es.codigo IN ('AUTORIZADA', 'AUTORIZACION_PARCIAL', 'FACTURADA_PARCIAL', 'ERROR_VALIDACION', 'ERROR', 'PROCESANDO')"
             
         query_str += " ORDER BY s.solicitud_id ASC"
         

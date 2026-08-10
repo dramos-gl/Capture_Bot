@@ -35,10 +35,15 @@ class CrudTablePanel(QWidget):
         self.btn_add = CustomButton("+ Nuevo")
         self.btn_add.clicked.connect(self.add_requested.emit)
         
+        self.btn_edit = CustomButton("Editar")
+        self.btn_edit.setEnabled(False)
+        self.btn_edit.clicked.connect(self._on_edit_button_clicked)
+        
         self.header_layout.addWidget(self.lbl_title)
         self.header_layout.addStretch()
         self.header_layout.addWidget(self.search_input)
         self.header_layout.addWidget(self.btn_add)
+        self.header_layout.addWidget(self.btn_edit)
         
         self.layout.addLayout(self.header_layout)
         
@@ -93,14 +98,26 @@ class CrudTablePanel(QWidget):
     def _on_selection_changed(self):
         selected_items = self.table.selectedItems()
         if not selected_items:
+            self.btn_edit.setEnabled(False)
             return
             
+        self.btn_edit.setEnabled(True)
         # The data is stored in the first column of the selected row
         row = selected_items[0].row()
         item = self.table.item(row, 0)
         if item:
             data = item.data(Qt.UserRole)
             self.item_selected.emit(data)
+
+    def _on_edit_button_clicked(self):
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            return
+        row = selected_items[0].row()
+        item = self.table.item(row, 0)
+        if item:
+            data = item.data(Qt.UserRole)
+            self.edit_requested.emit(data)
 
     def _on_double_clicked(self, item):
         row = item.row()

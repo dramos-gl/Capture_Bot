@@ -13,7 +13,7 @@ from sar.src.storage.repositories import (
 from sar.src.storage.models import (
     Usuario, Rfc, Concepto, ParametroSistema, EventoSistema,
     Rol, LocalizadorPortal, Municipio, Delegacion,
-    AppModulo, Modulo, EstadoSistema, Accion
+    AppModulo, Modulo, EstadoSistema, Accion, Notaria, Colaborador, Desarrollo
 )
 
 def require_active_session(func):
@@ -201,6 +201,81 @@ class AdminService:
         new_val = {"concepto_id": concepto.concepto_id, "nombre": concepto.nombre, "alias": concepto.alias, "activo": concepto.activo}
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": concepto.nombre})
         return concepto
+
+    @require_active_session
+    def save_notaria(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Notaria:
+        modulo = "ADMIN_CATALOGOS"
+        action = "CREAR_REGISTRO"
+        old_val = None
+
+        if data.get("notaria_id"):
+            notaria = self.session.get(Notaria, data["notaria_id"])
+            action = "ACTUALIZAR_REGISTRO"
+            old_val = {"nombre": notaria.nombre, "activo": notaria.activo}
+            notaria.nombre = data.get("nombre", notaria.nombre).strip().upper()
+            if "activo" in data:
+                notaria.activo = data["activo"]
+        else:
+            notaria = Notaria(
+                nombre=data["nombre"].strip().upper(),
+                activo=data.get("activo", True)
+            )
+
+        self.cat_repo.save_notaria(notaria)
+        new_val = {"notaria_id": notaria.notaria_id, "nombre": notaria.nombre, "activo": notaria.activo}
+        self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": notaria.nombre})
+        return notaria
+
+    @require_active_session
+    def save_colaborador(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Colaborador:
+        modulo = "ADMIN_CATALOGOS"
+        action = "CREAR_REGISTRO"
+        old_val = None
+
+        if data.get("colaborador_id"):
+            colaborador = self.session.get(Colaborador, data["colaborador_id"])
+            action = "ACTUALIZAR_REGISTRO"
+            old_val = {"nombre": colaborador.nombre, "activo": colaborador.activo}
+            colaborador.nombre = data.get("nombre", colaborador.nombre).strip().upper()
+            if "activo" in data:
+                colaborador.activo = data["activo"]
+        else:
+            colaborador = Colaborador(
+                nombre=data["nombre"].strip().upper(),
+                activo=data.get("activo", True)
+            )
+
+        self.cat_repo.save_colaborador(colaborador)
+        new_val = {"colaborador_id": colaborador.colaborador_id, "nombre": colaborador.nombre, "activo": colaborador.activo}
+        self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": colaborador.nombre})
+        return colaborador
+
+    @require_active_session
+    def save_desarrollo(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> Desarrollo:
+        modulo = "ADMIN_CATALOGOS"
+        action = "CREAR_REGISTRO"
+        old_val = None
+
+        if data.get("desarrollo_id"):
+            desarrollo = self.session.get(Desarrollo, data["desarrollo_id"])
+            action = "ACTUALIZAR_REGISTRO"
+            old_val = {"nombre": desarrollo.nombre, "delegacion_id": desarrollo.delegacion_id, "activo": desarrollo.activo}
+            desarrollo.nombre = data.get("nombre", desarrollo.nombre).strip().upper()
+            desarrollo.delegacion_id = data.get("delegacion_id", desarrollo.delegacion_id)
+            if "activo" in data:
+                desarrollo.activo = data["activo"]
+        else:
+            desarrollo = Desarrollo(
+                nombre=data["nombre"].strip().upper(),
+                delegacion_id=data["delegacion_id"],
+                activo=data.get("activo", True)
+            )
+
+        self.cat_repo.save_desarrollo(desarrollo)
+        new_val = {"desarrollo_id": desarrollo.desarrollo_id, "nombre": desarrollo.nombre, "delegacion_id": desarrollo.delegacion_id, "activo": desarrollo.activo}
+        self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": desarrollo.nombre})
+        return desarrollo
+
 
     @require_active_session
     def save_estado_sistema(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> EstadoSistema:

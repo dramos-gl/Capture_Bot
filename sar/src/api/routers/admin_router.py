@@ -65,6 +65,24 @@ def get_admin_entity_data(entity: str, db: Session = Depends(get_db)):
                 {"concepto_id": c.concepto_id, "codigo_portal": c.codigo_portal, "nombre": c.nombre, "alias": c.alias, "activo": c.activo}
                 for c in items
             ]
+        elif entity == "notarias":
+            items = cat_repo.get_all_notarias()
+            return [
+                {"notaria_id": n.notaria_id, "nombre": n.nombre, "activo": n.activo}
+                for n in items
+            ]
+        elif entity == "colaboradores":
+            items = cat_repo.get_all_colaboradores()
+            return [
+                {"colaborador_id": c.colaborador_id, "nombre": c.nombre, "activo": c.activo}
+                for c in items
+            ]
+        elif entity == "desarrollos":
+            items = cat_repo.get_all_desarrollos()
+            return [
+                {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "delegacion_id": d.delegacion_id, "delegacion_nombre": d.delegacion.nombre if d.delegacion else "", "activo": d.activo}
+                for d in items
+            ]
         elif entity == "municipios":
             items = cat_repo.get_all_municipios()
             return [
@@ -159,6 +177,18 @@ def save_admin_entity(entity: str, request: AdminSaveRequest, db: Session = Depe
             res = service.save_concepto(request.usuario_id, request.sesion_id, request.data)
             db.commit()
             return {"detail": "Concepto guardado con éxito", "id": res.concepto_id}
+        elif entity == "notarias":
+            res = service.save_notaria(request.usuario_id, request.sesion_id, request.data)
+            db.commit()
+            return {"detail": "Notaría guardada con éxito", "id": res.notaria_id}
+        elif entity == "colaboradores":
+            res = service.save_colaborador(request.usuario_id, request.sesion_id, request.data)
+            db.commit()
+            return {"detail": "Colaborador guardado con éxito", "id": res.colaborador_id}
+        elif entity == "desarrollos":
+            res = service.save_desarrollo(request.usuario_id, request.sesion_id, request.data)
+            db.commit()
+            return {"detail": "Desarrollo guardado con éxito", "id": res.desarrollo_id}
         elif entity == "municipios":
             res = service.save_municipio(request.usuario_id, request.sesion_id, request.data)
             db.commit()

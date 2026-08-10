@@ -387,7 +387,7 @@ class BillingBotView(QWidget):
             
         row = selected[0].row()
         estado = self.table.item(row, 8).text().upper()
-        valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "ERROR_VALIDACION", "FACTURADA_PARCIAL")
+        valid_states = ("AUTORIZADA", "AUTORIZACION_PARCIAL", "ERROR_VALIDACION", "FACTURADA_PARCIAL", "ERROR", "PROCESANDO")
         if estado not in valid_states:
             QMessageBox.warning(
                 self, 

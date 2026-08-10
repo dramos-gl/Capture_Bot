@@ -34,20 +34,20 @@ class ExcelInventoryHandler:
                     return headers.index(name_upper)
             return -1
 
-        idx_cliente = get_idx("CLIENTE", "NOMBRE CLIENTE", "NOMBRE")
+        idx_empresa = get_idx("RAZON SOCIAL", "RAZÓN SOCIAL", "EMPRESA", "RFC", "EMPRESA FACTURADORA")
         idx_desarrollo = get_idx("DESARROLLO")
-        idx_empresa = get_idx("EMPRESA", "RFC", "EMPRESA FACTURADORA")
+        idx_delegacion = get_idx("DELEGACION", "DELEGACIÓN")
+        idx_mz = get_idx("MZA", "MZ", "MANZANA")
+        idx_lote = get_idx("LOTE", "LT")
+        idx_edif = get_idx("EXT", "EDIF", "EDIFICIO", "EXTERIOR")
+        idx_viv = get_idx("INT", "VIV", "VIVIENDA", "INTERIOR")
+        idx_folio = get_idx("No.OFICIAL", "No. OFICIAL", "NO.OFICIAL", "NO. OFICIAL", "FOLIO")
+        idx_cliente = get_idx("CLIENTE", "NOMBRE CLIENTE", "NOMBRE")
+        idx_estatus_aviso = get_idx("FECHA INGRESO A RPP", "FECHA_INGRESO_A_RPP", "ESTATUS_PRIMER_AVISO", "ESTATUS RPP")
+        idx_credito_titular = get_idx("CREDITO_TITULAR", "CREDITO TITULAR", "CREDITO", "TITULAR", "CREDITO_O_TITULAR")
+        idx_pa = get_idx("COMENTARIOS", "PA", "PADRON", "PADRÓN")
         idx_fecha_sol = get_idx("FECHA_SOLICITUD", "FECHA SOLICITUD", "FECHA")
         idx_ubicacion = get_idx("UBICACION", "UBICACIÓN")
-        idx_mz = get_idx("MZ", "MANZANA")
-        idx_lote = get_idx("LOTE", "LT")
-        idx_edif = get_idx("EDIF", "EDIFICIO")
-        idx_viv = get_idx("VIV", "VIVIENDA")
-        idx_folio = get_idx("FOLIO")
-        idx_estatus_aviso = get_idx("ESTATUS_PRIMER_AVISO", "ESTATUS RPP")
-        idx_credito_titular = get_idx("CREDITO_TITULAR", "CREDITO TITULAR", "CREDITO", "TITULAR", "CREDITO_O_TITULAR")
-        idx_pa = get_idx("PA", "PADRON", "PADRÓN")
-        idx_delegacion = get_idx("DELEGACION", "DELEGACIÓN")
         
         # Concept reference columns (resilient to accents, spaces, and abbreviations)
         concept_cols = {
@@ -494,8 +494,9 @@ class ExcelInventoryHandler:
         border_thin = Side(border_style="thin", color="D3D3D3")
 
         headers = [
-            "CLIENTE", "DESARROLLO", "EMPRESA", "FECHA_SOLICITUD", "UBICACION", "MZ", "LOTE", "EDIF", "VIV", 
-            "FOLIO", "ESTATUS_PRIMER_AVISO", "CREDITO_TITULAR", "PA", "DELEGACION", "ANALISIS", "AVISO", "CLG", "CANC_1ER _AVISO", "CANC_2DO_AVISO", "NUEVO_DERECHO_AVISO"
+            "RAZON SOCIAL", "DESARROLLO", "DELEGACION", "MZA", "LOTE", "EXT", "INT", "No.OFICIAL",
+            "CLIENTE", "FECHA INGRESO A RPP", "ANALISIS", "AVISO", "CLG", "CANC_1ER _AVISO",
+            "CANC_2DO_AVISO", "COMENTARIOS", "FECHA_SOLICITUD"
         ]
         
         ws.row_dimensions[1].height = 25
@@ -509,8 +510,8 @@ class ExcelInventoryHandler:
         # Add a mock row as a reference example for users
         ws.row_dimensions[2].height = 18
         mock_data = [
-            "JUAN PEREZ", "ALDEA TULUM", "PROMOTORA RESIDENCIAL", "2026-07-21", "MZ 10 LT 5 VIV 3", "10", "5", "", "3",
-            "123456", "NUEVO INGRESO", "123456789", "PA-ALDEA", "TULUM", "", "70028350819888101", "", "", "", ""
+            "PROMOTORA RESIDENCIAL", "ALDEA TULUM", "TULUM", "10", "5", "", "3", "123456",
+            "JUAN PEREZ", "2026-07-21", "", "70028350819888101", "", "", "", "Sin observaciones", "2026-07-20"
         ]
         for col_idx, val in enumerate(mock_data, start=1):
             cell = ws.cell(row=2, column=col_idx, value=val)

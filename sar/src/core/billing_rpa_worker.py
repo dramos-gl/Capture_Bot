@@ -237,8 +237,8 @@ class BillingRpaWorker(QThread):
                         page.keyboard.press("Backspace")
                         for char in referencia_portal:
                             page.keyboard.type(char)
-                            time.sleep(random.uniform(0.04, 0.12))
-                        time.sleep(random.uniform(0.5, 1.0))
+                            time.sleep(random.uniform(0.01, 0.03))
+                        time.sleep(random.uniform(0.2, 0.4))
                         
                         # ── LLENADO ROBUSTO DE RFC (P1-Fix1) ─────────────────────────────────
                         sel_rfc = locators.get("input_rfc") or "input#RFC"
@@ -248,8 +248,8 @@ class BillingRpaWorker(QThread):
                         page.keyboard.press("Backspace")
                         for char in self.ctx["rfc"]:
                             page.keyboard.type(char)
-                            time.sleep(random.uniform(0.04, 0.12))
-                        time.sleep(random.uniform(0.8, 1.5))
+                            time.sleep(random.uniform(0.01, 0.03))
+                        time.sleep(random.uniform(0.3, 0.6))
                         
                         # Click Buscar
                         sel_buscar = locators.get("btn_buscar") or "button[type='submit']"
@@ -438,12 +438,27 @@ class BillingRpaWorker(QThread):
                         # Descargar cada botón PDF encontrado (máximo 2)
                         num_pdfs = min(len(botones), 2)
                         for idx_pdf in range(num_pdfs):
+                            # Re-consultar botones en el DOM para evitar que queden obsoletos (stale elements)
+                            botones_actuales = main_frame.query_selector_all(sel_pdf)
+                            if len(botones_actuales) <= idx_pdf:
+                                raise Exception(f"No se encontró el botón PDF con índice {idx_pdf} en la re-consulta.")
+                            
+                            btn = botones_actuales[idx_pdf]
+                            
+                            # Remover target="_new" o target="_blank" para forzar la descarga en la misma pestaña
+                            try:
+                                main_frame.evaluate("(el) => el.removeAttribute('target')", btn)
+                            except Exception as eval_err:
+                                self.status_changed.emit(f"Advertencia al remover target: {str(eval_err)}")
+                            
                             temp_path = os.path.join(
                                 os.environ.get("TEMP", "C:\\Temp"),
                                 f"temp_factura_{referencia_portal}_{idx_pdf + 1}.pdf"
                             )
-                            with page.expect_download(timeout=30000) as download_info:
-                                botones[idx_pdf].click()
+                            
+                            self.status_changed.emit(f"Descargando PDF {idx_pdf + 1} de 2 (latencia del portal)...")
+                            with page.expect_download(timeout=45000) as download_info:  # Aumentado a 45s por latencia
+                                btn.click()
                             dl = download_info.value
                             dl.save_as(temp_path)
                             

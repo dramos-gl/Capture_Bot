@@ -180,32 +180,6 @@ class InventoryView(QWidget):
         self.cb_empresa_filter = self.labeled_empresa.combo
         self.cb_empresa_filter.currentTextChanged.connect(self._on_empresa_filter_visor)
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.labeled_empresa)
-        
-        # Checkbox to enable date filters
-        self.chk_fecha_filter = CustomCheckBox("Filtrar por Fecha Asignación", parent=self)
-        self.chk_fecha_filter.setChecked(False)
-        self.chk_fecha_filter.stateChanged.connect(self._on_fecha_filter_toggled)
-        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.chk_fecha_filter)
-
-        # Date Desde
-        self.lbl_desde = CustomLabel("Desde:", variant="body")
-        self.de_desde = QDateEdit(QDate.currentDate().addMonths(-1))
-        self.de_desde.setCalendarPopup(True)
-        self.de_desde.setEnabled(False)
-        self.de_desde.dateChanged.connect(self._on_date_changed)
-        
-        # Date Hasta
-        self.lbl_hasta = CustomLabel("Hasta:", variant="body")
-        self.de_hasta = QDateEdit(QDate.currentDate())
-        self.de_hasta.setCalendarPopup(True)
-        self.de_hasta.setEnabled(False)
-        self.de_hasta.dateChanged.connect(self._on_date_changed)
-
-        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.lbl_desde)
-        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.de_desde)
-        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.lbl_hasta)
-        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.de_hasta)
-        
         layout.addWidget(self.filter_bar)
 
         # KPI summary cards
@@ -214,6 +188,17 @@ class InventoryView(QWidget):
         self.kpi_layout = QHBoxLayout(kpi_widget)
         self.kpi_layout.setContentsMargins(0, 0, 0, 0)
         self.kpi_layout.setSpacing(12)
+        
+        self.card_total = StatCard(
+            "Total Referencias",
+            "0",
+            icon_name="file_text",
+            color_hex=Colors.ACCENT,
+            show_sparkline=False,
+            parent=kpi_widget
+        )
+        self.card_total.lbl_sub.setText("Disponibles + Asignadas")
+        self.kpi_layout.addWidget(self.card_total, stretch=1)
         
         self.card_disponibles = StatCard(
             "Referencias Disponibles",
@@ -320,12 +305,6 @@ class InventoryView(QWidget):
 
         offset = (self.current_page - 1) * self.page_size
         
-        start_date = None
-        end_date = None
-        if hasattr(self, 'chk_fecha_filter') and self.chk_fecha_filter.isChecked():
-            start_date = self.de_desde.date().toString("yyyy-MM-dd")
-            end_date = self.de_hasta.date().toString("yyyy-MM-dd")
-
         self.active_worker = InventoryLoadWorker(
             inventario_ui_service=self.inventario_ui_service,
             limit=self.page_size,
@@ -334,8 +313,8 @@ class InventoryView(QWidget):
             concepto_id=self._current_concepto_id,
             rfc_id=self._current_rfc_id,
             filter_assigned=self._current_estado_filter,
-            start_date=start_date,
-            end_date=end_date
+            start_date=None,
+            end_date=None
         )
         self.active_worker.result_ready.connect(self._on_visor_data_loaded)
         self.active_worker.error_occurred.connect(self._on_visor_load_error)
@@ -349,6 +328,9 @@ class InventoryView(QWidget):
         # Update cards
         disponibles = summary.get("disponibles", 0)
         asignadas = summary.get("asignadas", 0)
+        total = disponibles + asignadas
+        
+        self.card_total.set_value(f"{total:,}")
         self.card_disponibles.set_value(f"{disponibles:,}")
         self.card_asignadas.set_value(f"{asignadas:,}")
         
@@ -358,18 +340,6 @@ class InventoryView(QWidget):
         self.pagination_widget.setEnabled(True)
         self.lbl_pagination_info.setText("Error al cargar inventario.")
         QMessageBox.critical(self, "Error de Datos", f"Fallo al conectar con el servidor:\n{err}")
-
-    def _on_fecha_filter_toggled(self, state):
-        enabled = (state == Qt.CheckState.Checked or state == 2 or state == True)
-        self.de_desde.setEnabled(enabled)
-        self.de_hasta.setEnabled(enabled)
-        self.current_page = 1
-        self.refresh_visor_data()
-
-    def _on_date_changed(self, date):
-        if self.chk_fecha_filter.isChecked():
-            self.current_page = 1
-            self.refresh_visor_data()
 
     def _populate_visor_table(self):
         rows_data = []
