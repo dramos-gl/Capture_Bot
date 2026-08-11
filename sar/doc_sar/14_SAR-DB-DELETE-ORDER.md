@@ -6,7 +6,7 @@ Este documento detalla el procedimiento técnico y el script SQL necesario para 
 
 ## 1. Análisis de Dependencias y Cascada
 
-Debido al diseño físico del esquema de base de datos del **Sistema de Administración de Referencias (SAR)**, los registros correspondientes a una orden se encuentran altamente relacionados:
+Dueño al diseño físico del esquema de base de datos del **Sistema de Administración de Referencias (SAR)**, los registros correspondientes a una orden se encuentran altamente relacionados:
 
 ```mermaid
 graph TD
@@ -16,13 +16,12 @@ graph TD
     S -->|ON DELETE CASCADE| R
     R -->|ON DELETE CASCADE| AP[archivo_pdf]
     R -->|ON DELETE RESTRICT| F[factura]
-    R -->|ON DELETE SET NULL| LD[lote_detalle]
+    R -->|ON DELETE RESTRICT| AR[asignacion_referencia]
 ```
 
 ### Comportamiento ante la eliminación:
 * **En cascada (`ON DELETE CASCADE`):** Al borrar un registro en `orden_generacion`, PostgreSQL eliminará automáticamente sus grupos, solicitudes, referencias y archivos PDF vinculados.
-* **Restringido (`ON DELETE RESTRICT`):** La tabla `factura` bloquea la eliminación de cualquier referencia que ya cuente con una factura emitida. Por ende, **es obligatorio eliminar primero las facturas relacionadas**.
-* **Puesta a nulo (`ON DELETE SET NULL`):** La tabla `lote_detalle` (asignaciones) desvincula la referencia colocando su `referencia_id` en `NULL`. Para limpiar por completo la asignación, se puede optar por borrar los registros del detalle explícitamente.
+* **Restringido (`ON DELETE RESTRICT`):** La tabla `factura` bloquea la eliminación de cualquier referencia que ya cuente con una factura emitida. La tabla `asignacion_referencia` restringe de igual modo la eliminación de referencias asignadas a un lote. Por ende, **es obligatorio eliminar primero las facturas y las asignaciones relacionadas**.
 
 ---
 
@@ -53,9 +52,9 @@ BEGIN
     );
 
     -- =========================================================================
-    -- PASO 2: Eliminar detalles de lote (asignaciones) de la orden
+    -- PASO 2: Eliminar asignaciones de la orden
     -- =========================================================================
-    DELETE FROM sar_archivo.lote_detalle
+    DELETE FROM sar_archivo.asignacion_referencia
     WHERE referencia_id IN (
         SELECT r.referencia_id
         FROM sar_produccion.referencia r
@@ -106,6 +105,18 @@ BEGIN
     PERFORM setval(
         COALESCE(pg_get_serial_sequence('sar_archivo.archivo_pdf', 'archivo_id'), 'sar_archivo.archivo_pdf_archivo_id_seq'), 
         COALESCE((SELECT MAX(archivo_id) FROM sar_archivo.archivo_pdf), 0) + 1, 
+        false
+    );
+
+    PERFORM setval(
+        COALESCE(pg_get_serial_sequence('sar_archivo.asignacion_referencia', 'asignacion_referencia_id'), 'sar_archivo.asignacion_referencia_asignacion_referencia_id_seq'), 
+        COALESCE((SELECT MAX(asignacion_referencia_id) FROM sar_archivo.asignacion_referencia), 0) + 1, 
+        false
+    );
+
+    PERFORM setval(
+        COALESCE(pg_get_serial_sequence('sar_archivo.ubicacion', 'ubicacion_id'), 'sar_archivo.ubicacion_ubicacion_id_seq'), 
+        COALESCE((SELECT MAX(ubicacion_id) FROM sar_archivo.ubicacion), 0) + 1, 
         false
     );
 

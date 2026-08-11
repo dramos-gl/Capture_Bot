@@ -788,6 +788,24 @@ class LoteApartarRequest(BaseModel):
     desarrollo_id: int
     cantidad: int
     usuario_creacion: int
+    observaciones: Optional[str] = None
+
+@router.get("/inventario/disponibles")
+def get_disponibles_count(
+    rfc_id: int,
+    concepto_id: int,
+    desarrollo_id: int,
+    db: Session = Depends(get_db)
+):
+    """Returns the count of FACTURADA references available for a given (rfc, concepto, desarrollo) combination.
+    Used for real-time UI feedback in the Apartar Referencias grid.
+    """
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        count = InventarioRepository(db).count_referencias_disponibles(rfc_id, concepto_id, desarrollo_id)
+        return {"count": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/inventario/notarias")
 def get_notarias(db: Session = Depends(get_db)):
@@ -919,7 +937,8 @@ def api_apartar_referencias(request: LoteApartarRequest, db: Session = Depends(g
             concepto_id=request.concepto_id,
             desarrollo_id=request.desarrollo_id,
             cantidad=request.cantidad,
-            usuario_id=request.usuario_creacion
+            usuario_id=request.usuario_creacion,
+            observaciones=request.observaciones
         )
         db.commit()
         return {"lote_id": lote_id, "detail": "Referencias apartadas con éxito"}

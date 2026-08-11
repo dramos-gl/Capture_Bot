@@ -1664,7 +1664,6 @@ class InventarioRepository(BaseRepository):
         # og.folio AS folio_orden, r.grupo_id, rfc.razon_social AS rfc_razon_social,
         # c.nombre AS concepto_nombre, d.nombre AS delegacion_nombre, ...
         # c.nombre is the concept name. It doesn't have concepto_id, but we can join with grupo_referencia to get it.
-        # Let's write the query selecting directly from tables or join with grupo_referencia:
         sql_base = """
             FROM sar_produccion.referencia r
             JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
@@ -1675,18 +1674,20 @@ class InventarioRepository(BaseRepository):
             LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
             JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
             LEFT JOIN sar_seguridad.usuario u ON r.usuario_asignado = u.usuario_id
-            LEFT JOIN sar_archivo.lote_detalle ld ON r.referencia_id = ld.referencia_id
+            LEFT JOIN sar_archivo.asignacion_referencia ar ON r.referencia_id = ar.referencia_id
+            LEFT JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
             LEFT JOIN sar_archivo.lote_asignacion la ON ld.lote_asignacion_id = la.lote_asignacion_id
             LEFT JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
             LEFT JOIN sar_catalogo.colaborador col ON la.colaborador_id = col.colaborador_id
             LEFT JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
+            LEFT JOIN sar_archivo.ubicacion ubi ON ar.ubicacion_id = ubi.ubicacion_id
         """
         
         # Modify conditions to use table aliases
         conditions_sql = []
         if filter_assigned == "Disponible":
             conditions_sql.append("es.codigo = 'FACTURADA'")
-            conditions_sql.append("ld.lote_detalle_id IS NULL")
+            conditions_sql.append("ar.referencia_id IS NULL")
         elif filter_assigned == "Asignada":
             conditions_sql.append("es.codigo = 'ASIGNADA'")
         else: # Todos
@@ -1709,7 +1710,7 @@ class InventarioRepository(BaseRepository):
                 "c.nombre ILIKE :search",
                 "d.nombre ILIKE :search",
                 "u.nombre ILIKE :search",
-                "ld.cliente ILIKE :search"
+                "ubi.cliente ILIKE :search"
             ]
             conditions_sql.append(f"({' OR '.join(search_conds)})")
             
@@ -1731,14 +1732,14 @@ class InventarioRepository(BaseRepository):
                 d.nombre AS delegacion_nombre,
                 d.delegacion_id AS delegacion_id,
                 u.nombre AS procesado_por,
-                ld.lote_detalle_id IS NOT NULL AS asignada,
+                ar.referencia_id IS NOT NULL AS asignada,
                 COALESCE(n.nombre, col.nombre, '') AS asignado_a,
                 la.tipo_destino AS tipo_asignacion,
                 la.solicitante_externo AS solicitante_externo,
                 la.fecha AS fecha_asignacion,
                 des.nombre AS desarrollo_nombre,
-                ld.cliente AS cliente_nombre,
-                ld.mz, ld.lote, ld.edif, ld.viv, ld.folio_electronico,
+                ubi.cliente AS cliente_nombre,
+                ubi.mz, ubi.lote, ubi.edif, ubi.viv, ubi.lote_id_erp AS folio_electronico,
                 la.lote_asignacion_id AS lote_asignacion_id
             {sql_base}
             {where_clause}
@@ -1805,8 +1806,10 @@ class InventarioRepository(BaseRepository):
             LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
             JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
             LEFT JOIN sar_seguridad.usuario u ON r.usuario_asignado = u.usuario_id
-            LEFT JOIN sar_archivo.lote_detalle ld ON r.referencia_id = ld.referencia_id
+            LEFT JOIN sar_archivo.asignacion_referencia ar ON r.referencia_id = ar.referencia_id
+            LEFT JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
             LEFT JOIN sar_archivo.lote_asignacion la ON ld.lote_asignacion_id = la.lote_asignacion_id
+            LEFT JOIN sar_archivo.ubicacion ubi ON ar.ubicacion_id = ubi.ubicacion_id
         """
         
         base_conditions = []
@@ -1825,14 +1828,14 @@ class InventarioRepository(BaseRepository):
                 "c.nombre ILIKE :search",
                 "d.nombre ILIKE :search",
                 "u.nombre ILIKE :search",
-                "ld.cliente ILIKE :search"
+                "ubi.cliente ILIKE :search"
             ]
             base_conditions.append(f"({' OR '.join(search_conds)})")
             
         # Available condition
         conds_disp = list(base_conditions)
         conds_disp.append("es.codigo = 'FACTURADA'")
-        conds_disp.append("ld.lote_detalle_id IS NULL")
+        conds_disp.append("ar.referencia_id IS NULL")
         where_disp = f"WHERE {' AND '.join(conds_disp)}"
         
         # Assigned condition
@@ -1853,7 +1856,8 @@ class InventarioRepository(BaseRepository):
         solicitante_externo: Optional[str], observaciones: Optional[str], usuario_creacion: int,
         detalles_list: List[dict]
     ) -> int:
-        from sar.src.storage.models import LoteAsignacion, LoteDetalle, Referencia
+        from sar.src.storage.models import LoteAsignacion, LoteDetalle, Ubicacion, AsignacionReferencia, Referencia, Concepto
+        from sqlalchemy import select
         
         lote = LoteAsignacion(
             tipo_destino=tipo_destino,
@@ -1864,37 +1868,78 @@ class InventarioRepository(BaseRepository):
             usuario_creacion=usuario_creacion
         )
         self.session.add(lote)
-        self.session.flush() # Generate lote_asignacion_id
+        self.session.flush()
 
         estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
 
+        # Load concepts map
+        concepto_stmt = select(Concepto)
+        concepts = self.session.execute(concepto_stmt).scalars().all()
+        concepts_map = {c.alias: c.concepto_id for c in concepts if c.alias}
+
+        # We will group references by (rfc_id, concepto_id, desarrollo_id) to create the LoteDetalle entries
+        grouped_details = {}
+
         for d in detalles_list:
-            det = LoteDetalle(
-                lote_asignacion_id=lote.lote_asignacion_id,
+            ref = None
+            if d.get("referencia_id"):
+                ref = self.session.get(Referencia, d["referencia_id"])
+            
+            # Resolve keys
+            rfc_id = ref.grupo.rfc_id if (ref and ref.grupo) else 1
+            concepto_id = ref.grupo.concepto_id if (ref and ref.grupo) else concepts_map.get(d["concepto_solicitado"], 3)
+            desarrollo_id = d["desarrollo_id"]
+
+            key = (rfc_id, concepto_id, desarrollo_id)
+            if key not in grouped_details:
+                ld = LoteDetalle(
+                    lote_asignacion_id=lote.lote_asignacion_id,
+                    rfc_id=rfc_id,
+                    concepto_id=concepto_id,
+                    desarrollo_id=desarrollo_id,
+                    cantidad_solicitada=0,
+                    cantidad_confirmada=0
+                )
+                self.session.add(ld)
+                self.session.flush()
+                grouped_details[key] = ld
+
+            # Increment count
+            ld_parent = grouped_details[key]
+            ld_parent.cantidad_solicitada += 1
+            ld_parent.cantidad_confirmada += 1
+
+            # Create Ubicacion record
+            ubi = Ubicacion(
                 cliente=d["cliente"].strip().upper(),
-                desarrollo_id=d["desarrollo_id"],
+                desarrollo_id=desarrollo_id,
                 fecha_solicitud=d.get("fecha_solicitud"),
-                ubicacion=d.get("ubicacion"),
                 mz=d.get("mz"),
                 lote=d.get("lote"),
                 edif=d.get("edif"),
                 viv=d.get("viv"),
-                folio_electronico=d.get("folio_electronico"),
-                estatus_primer_aviso=d.get("estatus_primer_aviso"),
                 credito_titular=d.get("credito_titular"),
-                pa=d.get("pa"),
                 delegacion=d.get("delegacion"),
-                concepto_solicitado=d["concepto_solicitado"],
-                referencia_id=d.get("referencia_id"),
-                referencia_asignada=d["referencia_asignada"]
+                comentarios=d.get("pa"),
+                lote_id_erp=d.get("folio_electronico")
             )
-            self.session.add(det)
+            self.session.add(ubi)
+            self.session.flush()
+
+            # Create AsignacionReferencia record
+            asig = AsignacionReferencia(
+                lote_detalle_id=ld_parent.lote_detalle_id,
+                referencia_id=d["referencia_id"],
+                ubicacion_id=ubi.ubicacion_id,
+                intento=1,
+                estado_id=estado_asignada_id,
+                usuario_asignacion=usuario_creacion,
+                observaciones=d.get("pa")
+            )
+            self.session.add(asig)
             
-            # If reference exists in DB, update status to ASIGNADA
-            if d.get("referencia_id"):
-                ref = self.session.get(Referencia, d["referencia_id"])
-                if ref:
-                    ref.estado_id = estado_asignada_id
+            if ref:
+                ref.estado_id = estado_asignada_id
 
         self.session.flush()
         return lote.lote_asignacion_id
@@ -1910,7 +1955,12 @@ class InventarioRepository(BaseRepository):
                 la.fecha,
                 la.observaciones,
                 u.nombre AS creador,
-                (SELECT COUNT(*) FROM sar_archivo.lote_detalle ld WHERE ld.lote_asignacion_id = la.lote_asignacion_id) AS total_referencias
+                (
+                    SELECT COUNT(*) 
+                    FROM sar_archivo.asignacion_referencia ar 
+                    JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
+                    WHERE ld.lote_asignacion_id = la.lote_asignacion_id
+                ) AS total_referencias
             FROM sar_archivo.lote_asignacion la
             LEFT JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
             LEFT JOIN sar_catalogo.colaborador col ON la.colaborador_id = col.colaborador_id
@@ -1936,29 +1986,33 @@ class InventarioRepository(BaseRepository):
         from sqlalchemy import text
         stmt = text("""
             SELECT 
-                ld.lote_detalle_id,
-                ld.referencia_id,
-                ld.cliente,
+                ar.asignacion_referencia_id AS lote_detalle_id,
+                ar.referencia_id,
+                COALESCE(ubi.cliente, 'RESERVA PENDIENTE DE COMPLETAR') AS cliente,
                 des.nombre AS desarrollo_nombre,
-                ld.fecha_solicitud,
-                ld.ubicacion,
-                ld.mz,
-                ld.lote,
-                ld.edif,
-                ld.viv,
-                ld.folio_electronico,
-                ld.estatus_primer_aviso,
-                ld.credito_titular,
-                ld.pa,
-                ld.delegacion,
-                ld.concepto_solicitado,
-                ld.referencia_asignada,
+                ubi.fecha_solicitud,
+                COALESCE(ubi.mz, '') || ' ' || COALESCE(ubi.lote, '') AS ubicacion,
+                ubi.mz,
+                ubi.lote,
+                ubi.edif,
+                ubi.viv,
+                ubi.lote_id_erp AS folio_electronico,
+                '' AS estatus_primer_aviso,
+                ubi.credito_titular,
+                ubi.comentarios AS pa,
+                ubi.delegacion,
+                c.alias AS concepto_solicitado,
+                ref.referencia_portal AS referencia_asignada,
                 d.nombre AS delegacion_nombre
-            FROM sar_archivo.lote_detalle ld
+            FROM sar_archivo.asignacion_referencia ar
+            JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
+            JOIN sar_produccion.referencia ref ON ar.referencia_id = ref.referencia_id
+            JOIN sar_catalogo.concepto c ON ld.concepto_id = c.concepto_id
             JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
             JOIN sar_catalogo.delegacion d ON des.delegacion_id = d.delegacion_id
+            LEFT JOIN sar_archivo.ubicacion ubi ON ar.ubicacion_id = ubi.ubicacion_id
             WHERE ld.lote_asignacion_id = :lote_id
-            ORDER BY ld.lote_detalle_id ASC
+            ORDER BY ar.asignacion_referencia_id ASC
         """)
         results = self.session.execute(stmt, {"lote_id": lote_asignacion_id}).all()
         return [
@@ -2005,23 +2059,66 @@ class InventarioRepository(BaseRepository):
             for row in results
         ]
 
+    def count_referencias_disponibles(self, rfc_id: int, concepto_id: int, desarrollo_id: int) -> int:
+        """Returns the count of FACTURADA references available for the given combination.
+        Used for real-time UI feedback without side effects.
+        """
+        from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto, Desarrollo
+        from sqlalchemy import select, func
+
+        des = self.session.get(Desarrollo, desarrollo_id)
+        if not des:
+            return 0
+        delegacion_id = des.delegacion_id
+
+        conc = self.session.get(Concepto, concepto_id)
+        if not conc:
+            return 0
+
+        expected_aliases = []
+        if conc.alias == "CLG":
+            expected_aliases = ["CLG"]
+        elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO", "AVISO PREVENTIVO"):
+            expected_aliases = ["AVISO PREVENTIVO"]
+        elif conc.alias == "ANALISIS":
+            expected_aliases = ["ANALISIS"]
+        else:
+            expected_aliases = [conc.alias]
+
+        count_stmt = (
+            select(func.count(Referencia.referencia_id))
+            .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+            .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
+            .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
+            .join(Solicitud, Referencia.solicitud_id == Solicitud.solicitud_id)
+            .where(
+                EstadoSistema.entidad == 'referencia',
+                EstadoSistema.codigo == 'FACTURADA',
+                GrupoReferencia.rfc_id == rfc_id,
+                Concepto.alias.in_(expected_aliases),
+                Solicitud.delegacion_id == delegacion_id,
+                ~Referencia.referencia_id.in_(
+                    select(AsignacionReferencia.referencia_id)
+                )
+            )
+        )
+        result = self.session.execute(count_stmt).scalar()
+        return result if result is not None else 0
+
     def apartar_referencias(
-        self, notaria_id: int, rfc_id: int, concepto_id: int, desarrollo_id: int, cantidad: int, usuario_id: int
+        self, notaria_id: int, rfc_id: int, concepto_id: int, desarrollo_id: int, cantidad: int, usuario_id: int, observaciones: Optional[str] = None
     ) -> int:
-        from sar.src.storage.models import LoteAsignacion, LoteDetalle, Referencia, EstadoSistema, Desarrollo, GrupoReferencia, Solicitud, Concepto
+        from sar.src.storage.models import LoteAsignacion, LoteDetalle, AsignacionReferencia, Referencia, EstadoSistema, Desarrollo, GrupoReferencia, Solicitud, Concepto
         from sqlalchemy import select
 
-        # 1. Fetch the delegation of the development
         des = self.session.get(Desarrollo, desarrollo_id)
         if not des:
             raise ValueError("El desarrollo seleccionado no existe.")
         delegacion_id = des.delegacion_id
 
-        # 2. Get the states IDs
         estado_facturada_id = self._get_estado_id("referencia", "FACTURADA")
         estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
 
-        # 3. Find available references
         conc = self.session.get(Concepto, concepto_id)
         if not conc:
             raise ValueError("El concepto seleccionado no existe.")
@@ -2032,8 +2129,6 @@ class InventarioRepository(BaseRepository):
         elif conc.alias == "ANALISIS": expected_aliases = ["ANALISIS"]
         else: expected_aliases = [conc.alias]
 
-        # Find references in FACTURADA state, matching company and delegation, and not already linked in lote_detalle
-        # We can construct a subquery or join to ensure they are not assigned.
         available_stmt = (
             select(Referencia)
             .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
@@ -2047,7 +2142,7 @@ class InventarioRepository(BaseRepository):
                 Concepto.alias.in_(expected_aliases),
                 Solicitud.delegacion_id == delegacion_id,
                 ~Referencia.referencia_id.in_(
-                    select(LoteDetalle.referencia_id).where(LoteDetalle.referencia_id.is_not(None))
+                    select(AsignacionReferencia.referencia_id)
                 )
             )
             .limit(cantidad)
@@ -2057,29 +2152,40 @@ class InventarioRepository(BaseRepository):
         if len(available_refs) < cantidad:
             raise ValueError(f"No hay suficientes facturas disponibles en estado FACTURADA. Solicitadas: {cantidad}, Disponibles: {len(available_refs)}")
 
-        # 4. Create lote_asignacion
         lote = LoteAsignacion(
             tipo_destino="NOTARIA",
             notaria_id=notaria_id,
             colaborador_id=None,
             solicitante_externo=None,
-            observaciones=f"Apartado/Reserva de referencias (Cant: {cantidad})",
+            observaciones=observaciones if observaciones else f"Apartado/Reserva de referencias (Cant: {cantidad})",
             usuario_creacion=usuario_id
         )
         self.session.add(lote)
         self.session.flush()
 
-        # 5. Insert lote_detalle placeholders and update references status to RESERVADA
+        # Create LoteDetalle representing the Captured Row
+        ld = LoteDetalle(
+            lote_asignacion_id=lote.lote_asignacion_id,
+            rfc_id=rfc_id,
+            concepto_id=concepto_id,
+            desarrollo_id=desarrollo_id,
+            cantidad_solicitada=cantidad,
+            cantidad_confirmada=0
+        )
+        self.session.add(ld)
+        self.session.flush()
+
         for ref in available_refs:
-            det = LoteDetalle(
-                lote_asignacion_id=lote.lote_asignacion_id,
-                cliente="RESERVA PENDIENTE DE COMPLETAR",
-                desarrollo_id=desarrollo_id,
-                concepto_solicitado=conc.alias or "CLG",
+            asig = AsignacionReferencia(
+                lote_detalle_id=ld.lote_detalle_id,
                 referencia_id=ref.referencia_id,
-                referencia_asignada=ref.referencia_portal
+                ubicacion_id=None,
+                intento=1,
+                estado_id=estado_reservada_id,
+                usuario_asignacion=usuario_id,
+                observaciones="Reservada"
             )
-            self.session.add(det)
+            self.session.add(asig)
             ref.estado_id = estado_reservada_id
 
         self.session.flush()
@@ -2091,13 +2197,21 @@ class InventarioRepository(BaseRepository):
             SELECT 
                 la.lote_asignacion_id,
                 la.fecha,
-                (SELECT COUNT(*) FROM sar_archivo.lote_detalle ld WHERE ld.lote_asignacion_id = la.lote_asignacion_id AND ld.cliente = 'RESERVA PENDIENTE DE COMPLETAR') AS total_pendientes
+                (
+                    SELECT COUNT(*) 
+                    FROM sar_archivo.asignacion_referencia ar 
+                    JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
+                    WHERE ld.lote_asignacion_id = la.lote_asignacion_id 
+                      AND ar.ubicacion_id IS NULL
+                ) AS total_pendientes
             FROM sar_archivo.lote_asignacion la
             WHERE la.notaria_id = :notaria_id
               AND EXISTS (
-                  SELECT 1 FROM sar_archivo.lote_detalle ld 
+                  SELECT 1 
+                  FROM sar_archivo.asignacion_referencia ar 
+                  JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
                   WHERE ld.lote_asignacion_id = la.lote_asignacion_id 
-                    AND ld.cliente = 'RESERVA PENDIENTE DE COMPLETAR'
+                    AND ar.ubicacion_id IS NULL
               )
             ORDER BY la.fecha ASC
         """)
@@ -2112,47 +2226,56 @@ class InventarioRepository(BaseRepository):
         ]
 
     def completar_reservaciones(self, detalles_completados: List[dict]) -> None:
-        from sar.src.storage.models import LoteDetalle, Referencia
+        from sar.src.storage.models import AsignacionReferencia, Referencia, Ubicacion
         import datetime
         estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
         
         for d in detalles_completados:
-            ld_id = d.get("lote_detalle_id")
-            if not ld_id:
+            ar_id = d.get("lote_detalle_id") # Note: mapped in get_lote_detalles as lote_detalle_id
+            if not ar_id:
                 continue
             
-            ld = self.session.get(LoteDetalle, ld_id)
-            if ld:
-                ld.cliente = d["cliente"].strip().upper()
-                ld.desarrollo_id = d["desarrollo_id"]
-                
+            ar = self.session.get(AsignacionReferencia, ar_id)
+            if ar:
                 # Convert string date to datetime.date object
                 f_sol = d.get("fecha_solicitud")
+                fecha_sol = None
                 if f_sol:
                     if isinstance(f_sol, str):
                         try:
-                            ld.fecha_solicitud = datetime.datetime.strptime(f_sol.split()[0], "%Y-%m-%d").date()
+                            fecha_sol = datetime.datetime.strptime(f_sol.split()[0], "%Y-%m-%d").date()
                         except:
-                            ld.fecha_solicitud = None
+                            fecha_sol = None
                     else:
-                        ld.fecha_solicitud = f_sol
-                else:
-                    ld.fecha_solicitud = None
+                        fecha_sol = f_sol
 
-                ld.ubicacion = d.get("ubicacion")
-                ld.mz = d.get("mz")
-                ld.lote = d.get("lote")
-                ld.edif = d.get("edif")
-                ld.viv = d.get("viv")
-                ld.folio_electronico = d.get("folio_electronico")
-                ld.estatus_primer_aviso = d.get("estatus_primer_aviso")
-                ld.credito_titular = d.get("credito_titular")
-                ld.pa = d.get("pa")
-                ld.delegacion = d.get("delegacion")
+                # Create new Ubicacion
+                ubi = Ubicacion(
+                    cliente=d["cliente"].strip().upper(),
+                    desarrollo_id=ar.lote_detalle.desarrollo_id, # Inherit from lote_detalle row!
+                    fecha_solicitud=fecha_sol,
+                    mz=d.get("mz"),
+                    lote=d.get("lote"),
+                    edif=d.get("edif"),
+                    viv=d.get("viv"),
+                    credito_titular=d.get("credito_titular"),
+                    delegacion=d.get("delegacion"),
+                    comentarios=d.get("pa"),
+                    lote_id_erp=d.get("folio_electronico")
+                )
+                self.session.add(ubi)
+                self.session.flush()
+
+                # Link to AsignacionReferencia
+                ar.ubicacion_id = ubi.ubicacion_id
+                ar.estado_id = estado_asignada_id
+                
+                # Increment confirmed count in lote_detalle
+                ar.lote_detalle.cantidad_confirmada += 1
                 
                 # Update reference status to ASIGNADA
-                if ld.referencia_id:
-                    ref = self.session.get(Referencia, ld.referencia_id)
+                if ar.referencia_id:
+                    ref = self.session.get(Referencia, ar.referencia_id)
                     if ref:
                         ref.estado_id = estado_asignada_id
         self.session.flush()

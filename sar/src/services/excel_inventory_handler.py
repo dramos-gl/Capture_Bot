@@ -162,7 +162,7 @@ class ExcelInventoryHandler:
         5. Company (RFC) matching for autolink and validation.
         6. If completing a reservation (completar_notaria_id), matches against RESERVADA placeholders using FIFO.
         """
-        from sar.src.storage.models import Referencia, EstadoSistema, Desarrollo, Delegacion, GrupoReferencia, Concepto, Solicitud, Rfc, LoteDetalle, LoteAsignacion
+        from sar.src.storage.models import Referencia, EstadoSistema, Desarrollo, Delegacion, GrupoReferencia, Concepto, Solicitud, Rfc, Ubicacion, AsignacionReferencia, LoteAsignacion, LoteDetalle
         from sqlalchemy import select
         
         # Cache concepts mapping
@@ -180,17 +180,18 @@ class ExcelInventoryHandler:
         reserved_placeholders = []
         if completar_notaria_id:
             placeholder_stmt = (
-                select(LoteDetalle, Referencia)
+                select(AsignacionReferencia, Referencia)
+                .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
                 .join(LoteAsignacion, LoteDetalle.lote_asignacion_id == LoteAsignacion.lote_asignacion_id)
-                .join(Referencia, LoteDetalle.referencia_id == Referencia.referencia_id)
+                .join(Referencia, AsignacionReferencia.referencia_id == Referencia.referencia_id)
                 .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
                 .where(
                     LoteAsignacion.notaria_id == completar_notaria_id,
                     EstadoSistema.entidad == 'referencia',
                     EstadoSistema.codigo == 'RESERVADA',
-                    LoteDetalle.cliente == 'RESERVA PENDIENTE DE COMPLETAR'
+                    AsignacionReferencia.ubicacion_id.is_(None)
                 )
-                .order_by(LoteAsignacion.fecha.asc(), LoteDetalle.lote_detalle_id.asc())
+                .order_by(LoteAsignacion.fecha.asc(), AsignacionReferencia.asignacion_referencia_id.asc())
             )
             reserved_placeholders = session.execute(placeholder_stmt).all()
             # Convert to a mutable list of dicts/tuples to pop sequentially
@@ -255,36 +256,44 @@ class ExcelInventoryHandler:
             row_result["delegacion_nombre"] = deleg_name
 
             # Check if this client already has an assignment for the same concept at this exact location
-            dup_stmt = select(LoteDetalle).where(
-                LoteDetalle.cliente == cliente,
-                LoteDetalle.desarrollo_id == desarrollo.desarrollo_id,
-                LoteDetalle.mz == mz,
-                LoteDetalle.lote == lote,
-                LoteDetalle.edif == edif,
-                LoteDetalle.viv == viv,
-                LoteDetalle.concepto_solicitado == concept_req
+            dup_stmt = (
+                select(AsignacionReferencia)
+                .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
+                .join(Ubicacion, AsignacionReferencia.ubicacion_id == Ubicacion.ubicacion_id)
+                .join(Concepto, LoteDetalle.concepto_id == Concepto.concepto_id)
+                .where(
+                    Ubicacion.cliente == cliente,
+                    Ubicacion.desarrollo_id == desarrollo.desarrollo_id,
+                    Ubicacion.mz == mz,
+                    Ubicacion.lote == lote,
+                    Ubicacion.edif == edif,
+                    Ubicacion.viv == viv,
+                    Concepto.alias == concept_req
+                )
             )
             dup_check = session.execute(dup_stmt).scalars().first()
             has_dup = dup_check is not None
-            dup_ref = dup_check.referencia_asignada if dup_check else None
+            dup_ref = dup_check.referencia.referencia_portal if dup_check else None
 
             # Scenario A: We are completing a Notary Reservation
             if completar_notaria_id:
                 # Find matching placeholder by concept
                 placeholder_match = None
                 placeholder_idx = -1
+                concept_obj = concept_alias_map.get(concept_req)
+                concept_id_req = concept_obj.concepto_id if concept_obj else None
                 
                 if req_autolink or not ref_str:
                     # Find first placeholder matching concept
                     for idx, (ld_p, ref_p) in enumerate(reserved_placeholders):
-                        if ld_p.concepto_solicitado == concept_req:
+                        if ld_p.lote_detalle.concepto_id == concept_id_req:
                             placeholder_match = (ld_p, ref_p)
                             placeholder_idx = idx
                             break
                 else:
                     # Find specific placeholder matching reference string
                     for idx, (ld_p, ref_p) in enumerate(reserved_placeholders):
-                        if ref_p.referencia_portal == ref_str and ld_p.concepto_solicitado == concept_req:
+                        if ref_p.referencia_portal == ref_str and ld_p.lote_detalle.concepto_id == concept_id_req:
                             placeholder_match = (ld_p, ref_p)
                             placeholder_idx = idx
                             break
@@ -301,12 +310,12 @@ class ExcelInventoryHandler:
 
                 row_result["referencia_id"] = ref_p.referencia_id
                 row_result["referencia_asignada"] = ref_p.referencia_portal
-                row_result["lote_detalle_id"] = ld_p.lote_detalle_id
+                row_result["lote_detalle_id"] = ld_p.asignacion_referencia_id
 
                 # Warning if development doesn't match the reserved one
-                if ld_p.desarrollo_id != desarrollo.desarrollo_id:
+                if ld_p.lote_detalle.desarrollo_id != desarrollo.desarrollo_id:
                     row_result["status"] = "WARNING"
-                    row_result["error_message"] = f"El desarrollo no coincide con el desarrollo reservado en el lote original ({ld_p.lote_asignacion_id})."
+                    row_result["error_message"] = f"El desarrollo no coincide con el desarrollo reservado en el lote original ({ld_p.lote_detalle.lote_asignacion_id})."
                 elif has_dup:
                     row_result["status"] = "WARNING"
                     row_result["error_message"] = f"El cliente ya tiene una asignación de {concept_req} en esta ubicación (Ref: {dup_ref})."

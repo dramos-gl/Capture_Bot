@@ -13,8 +13,9 @@ from sar.src.ui.design_system.utils.icons import Icons
 class InteractiveGridRow(QFrame):
     """A single row in the interactive grid."""
     
-    deleted = Signal(object) # emits self
+    deleted = Signal(object)         # emits self
     changed = Signal()
+    availability_requested = Signal(object)  # emits self when all 3 combos have valid selection
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -42,6 +43,16 @@ class InteractiveGridRow(QFrame):
         self.spin_cantidad.setMaximum(100000)
         self.spin_cantidad.setValue(1)
         self.spin_cantidad.setMinimumWidth(100)
+
+        # Read-only availability label
+        self.lbl_disponibles = QLabel("—")
+        self.lbl_disponibles.setAlignment(Qt.AlignCenter)
+        self.lbl_disponibles.setMinimumWidth(80)
+        self.lbl_disponibles.setMaximumWidth(100)
+        self.lbl_disponibles.setStyleSheet(
+            "background: #F1F5F9; color: #94A3B8; border: 1px solid #E2E8F0; "
+            "border-radius: 4px; padding: 4px 6px; font-size: 11px; font-weight: 600;"
+        )
         
         self.btn_delete = CustomButton("", is_secondary=True)
         self.btn_delete.setIcon(Icons.trash())
@@ -49,16 +60,52 @@ class InteractiveGridRow(QFrame):
         self.btn_delete.setStyleSheet("border: none;")
         self.btn_delete.clicked.connect(lambda: self.deleted.emit(self))
         
-        self.layout.addWidget(self.combo_rfc)
-        self.layout.addWidget(self.combo_concepto)
-        self.layout.addWidget(self.combo_delegacion)
+        self.layout.addWidget(self.combo_rfc, stretch=1)
+        self.layout.addWidget(self.combo_concepto, stretch=1)
+        self.layout.addWidget(self.combo_delegacion, stretch=1)
         self.layout.addWidget(self.spin_cantidad)
+        self.layout.addWidget(self.lbl_disponibles)
         self.layout.addWidget(self.btn_delete)
         
-        self.combo_rfc.currentIndexChanged.connect(lambda _: self.changed.emit())
-        self.combo_concepto.currentIndexChanged.connect(lambda _: self.changed.emit())
-        self.combo_delegacion.currentIndexChanged.connect(lambda _: self.changed.emit())
+        self.combo_rfc.currentIndexChanged.connect(self._on_combo_changed)
+        self.combo_concepto.currentIndexChanged.connect(self._on_combo_changed)
+        self.combo_delegacion.currentIndexChanged.connect(self._on_combo_changed)
         self.spin_cantidad.valueChanged.connect(lambda _: self.changed.emit())
+
+    def _on_combo_changed(self):
+        self.changed.emit()
+        # Request availability refresh only when all 3 combos have a valid selection
+        if self.combo_rfc.currentData() and self.combo_concepto.currentData() and self.combo_delegacion.currentData():
+            self.lbl_disponibles.setText("...")
+            self.lbl_disponibles.setStyleSheet(
+                "background: #F1F5F9; color: #94A3B8; border: 1px solid #E2E8F0; "
+                "border-radius: 4px; padding: 4px 6px; font-size: 11px; font-weight: 600;"
+            )
+            self.availability_requested.emit(self)
+        else:
+            self.set_disponibles(None)
+
+    def set_disponibles(self, count):
+        """Update the read-only availability label with semaphoric color."""
+        if count is None:
+            self.lbl_disponibles.setText("—")
+            self.lbl_disponibles.setStyleSheet(
+                "background: #F1F5F9; color: #94A3B8; border: 1px solid #E2E8F0; "
+                "border-radius: 4px; padding: 4px 6px; font-size: 11px; font-weight: 600;"
+            )
+            return
+        requested = self.spin_cantidad.value()
+        if count == 0:
+            icon, bg, fg, border = "✗", "#FEF2F2", "#DC2626", "#FECACA"
+        elif count < requested:
+            icon, bg, fg, border = "⚠", "#FFFBEB", "#D97706", "#FDE68A"
+        else:
+            icon, bg, fg, border = "✓", "#F0FDF4", "#16A34A", "#BBF7D0"
+        self.lbl_disponibles.setText(f"{icon} {count}")
+        self.lbl_disponibles.setStyleSheet(
+            f"background: {bg}; color: {fg}; border: 1px solid {border}; "
+            f"border-radius: 4px; padding: 4px 6px; font-size: 11px; font-weight: 600;"
+        )
         
     def populate(self, rfcs, conceptos, delegaciones):
         """Populates combo boxes with provided data. Lists of tuples (id, display_text)"""
@@ -120,6 +167,7 @@ class InteractiveGrid(QWidget):
     data_changed = Signal()
     save_triggered = Signal()
     cancel_triggered = Signal()
+    availability_requested = Signal(object)  # re-emits row's availability_requested
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -178,26 +226,40 @@ class InteractiveGrid(QWidget):
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         self.rows_layout.setSpacing(8)
         
-        # Table Headers
+        # Table Headers — use same spacing/margins as rows (8px margin, 12px spacing)
         table_header_layout = QHBoxLayout()
-        table_header_layout.setContentsMargins(8, 0, 8, 0)
+        table_header_layout.setContentsMargins(8, 4, 8, 4)
         table_header_layout.setSpacing(12)
-        
+
         lbl_h_rfc = CustomLabel("Empresa (RFC)", variant="body")
-        lbl_h_rfc.setMinimumWidth(150)
+        lbl_h_rfc.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
+
         lbl_h_concepto = CustomLabel("Concepto", variant="body")
-        lbl_h_concepto.setMinimumWidth(150)
-        lbl_h_del = CustomLabel("Delegación", variant="body")
-        lbl_h_del.setMinimumWidth(120)
+        lbl_h_concepto.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
+
+        self.lbl_h_del = CustomLabel("Delegación", variant="body")
+        self.lbl_h_del.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
+
         lbl_h_cant = CustomLabel("Cantidad", variant="body")
+        lbl_h_cant.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
         lbl_h_cant.setMinimumWidth(100)
+        lbl_h_cant.setMaximumWidth(120)
+
+        lbl_h_disp = CustomLabel("Disponibles", variant="body")
+        lbl_h_disp.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
+        lbl_h_disp.setMinimumWidth(80)
+        lbl_h_disp.setMaximumWidth(100)
+        lbl_h_disp.setAlignment(Qt.AlignCenter)
+
         lbl_h_empty = CustomLabel("", variant="body")
         lbl_h_empty.setFixedSize(30, 20)
-        
-        table_header_layout.addWidget(lbl_h_rfc)
-        table_header_layout.addWidget(lbl_h_concepto)
-        table_header_layout.addWidget(lbl_h_del)
+
+        # Stretch factor 1 for the three combos, fixed for cantidad, disponibles and delete
+        table_header_layout.addWidget(lbl_h_rfc, stretch=1)
+        table_header_layout.addWidget(lbl_h_concepto, stretch=1)
+        table_header_layout.addWidget(self.lbl_h_del, stretch=1)
         table_header_layout.addWidget(lbl_h_cant)
+        table_header_layout.addWidget(lbl_h_disp)
         table_header_layout.addWidget(lbl_h_empty)
         
         self.rows_layout.addLayout(table_header_layout)
@@ -217,11 +279,17 @@ class InteractiveGrid(QWidget):
         self._conceptos = conceptos
         self._delegaciones = delegaciones
         
+    def set_third_column_label(self, label: str):
+        self.lbl_h_del.setText(label)
+
     def add_row(self):
         row_widget = InteractiveGridRow(self.rows_container)
         row_widget.populate(self._rfcs, self._conceptos, self._delegaciones)
+        if self.lbl_h_del.text() != "Delegación":
+            row_widget.combo_delegacion.setPlaceholderText(self.lbl_h_del.text())
         row_widget.deleted.connect(self._remove_row)
         row_widget.changed.connect(self.data_changed.emit)
+        row_widget.availability_requested.connect(self.availability_requested.emit)
         
         self.rows_layout.addWidget(row_widget)
         self.rows.append(row_widget)
@@ -230,13 +298,21 @@ class InteractiveGrid(QWidget):
     def add_row_with_data(self, rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada=0):
         row_widget = InteractiveGridRow(self.rows_container)
         row_widget.populate(self._rfcs, self._conceptos, self._delegaciones)
+        if self.lbl_h_del.text() != "Delegación":
+            row_widget.combo_delegacion.setPlaceholderText(self.lbl_h_del.text())
         row_widget.set_values(rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada)
         row_widget.deleted.connect(self._remove_row)
         row_widget.changed.connect(self.data_changed.emit)
+        row_widget.availability_requested.connect(self.availability_requested.emit)
         
         self.rows_layout.addWidget(row_widget)
         self.rows.append(row_widget)
         self.data_changed.emit()
+
+    def update_row_availability(self, row: InteractiveGridRow, count: int):
+        """Update the availability label for a specific row. Safe to call from any thread."""
+        if row in self.rows:
+            row.set_disponibles(count)
         
     def _remove_row(self, row_widget: InteractiveGridRow):
         self.rows_layout.removeWidget(row_widget)

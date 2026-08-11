@@ -108,6 +108,29 @@ class InventarioUIService:
                 repo = InventarioRepository(session)
                 return repo.get_desarrollos()
 
+    def get_disponibles_count(self, rfc_id: int, concepto_id: int, desarrollo_id: int) -> int:
+        """Returns the count of FACTURADA references available for the given (rfc, concepto, desarrollo).
+        Used by the real-time availability column in the InteractiveGrid.
+        """
+        if self.api_client.connect_via_api:
+            try:
+                result = self.api_client.request(
+                    "GET", "/api/docs/inventario/disponibles",
+                    params={"rfc_id": rfc_id, "concepto_id": concepto_id, "desarrollo_id": desarrollo_id}
+                )
+                return result.get("count", 0) if isinstance(result, dict) else 0
+            except Exception:
+                return 0
+        else:
+            if not self.db_connector:
+                return 0
+            try:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.count_referencias_disponibles(rfc_id, concepto_id, desarrollo_id)
+            except Exception:
+                return 0
+
     def get_catalogos_data(self) -> Dict[str, Any]:
         """Fetches all catalogs required for the inventory view."""
         if self.api_client.connect_via_api:

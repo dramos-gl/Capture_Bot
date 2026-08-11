@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QDate
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
-    LabeledComboBox, CustomLabel, CustomInput, CustomCheckBox
+    LabeledComboBox, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.theme_manager import Colors
@@ -66,6 +66,26 @@ class InventoryLoadWorker(QThread):
                 import traceback
                 traceback.print_exc()
                 self.error_occurred.emit(str(e))
+
+
+class AvailabilityWorker(QThread):
+    """Lightweight worker to fetch disponibles count for a single grid row without blocking UI."""
+    result_ready = Signal(object, int)  # row_widget, count
+
+    def __init__(self, service, row_widget, rfc_id: int, concepto_id: int, desarrollo_id: int):
+        super().__init__()
+        self.service = service
+        self.row_widget = row_widget
+        self.rfc_id = rfc_id
+        self.concepto_id = concepto_id
+        self.desarrollo_id = desarrollo_id
+
+    def run(self):
+        try:
+            count = self.service.get_disponibles_count(self.rfc_id, self.concepto_id, self.desarrollo_id)
+            self.result_ready.emit(self.row_widget, count)
+        except Exception:
+            self.result_ready.emit(self.row_widget, 0)
 
 
 class InventoryView(QWidget):
@@ -997,12 +1017,22 @@ class InventoryView(QWidget):
                 ])
             self.table_desarrollos.populate_rows(des_rows)
 
-            # Make sure apartar tab has at least one row populated
-            if not self.apartar_rows:
-                self._add_new_row_apartar()
-            else:
-                for row in self.apartar_rows:
-                    row.populate(self._rfcs_map, self._concepts_map, self._desarrollos_map)
+            # Populate grid_apartar catalogs — only AVISO (2) and CLG (3) allowed, sorted by ID
+            CONCEPTOS_APARTADO = {2, 3}
+            rfcs_list_tuples = [(r_id, r_name) for r_name, r_id in self._rfcs_map.items()]
+            concepts_list_tuples = sorted(
+                [
+                    (c_id, c_name)
+                    for c_name, c_id in self._concepts_map.items()
+                    if c_id in CONCEPTOS_APARTADO
+                ],
+                key=lambda x: x[0]  # 2 (AVISO) first, then 3 (CLG)
+            )
+            desarrollos_list_tuples = [(d_id, d_name) for d_name, d_id in self._desarrollos_map.items()]
+            self.grid_apartar.set_catalogs(rfcs_list_tuples, concepts_list_tuples, desarrollos_list_tuples)
+
+            if not self.grid_apartar.rows:
+                self.grid_apartar.add_row()
 
         except Exception as e:
             print("Error loading catalog data for inventory view:", e)
@@ -1075,46 +1105,65 @@ class InventoryView(QWidget):
         layout = QVBoxLayout(self.tab_apartar)
         layout.setSpacing(16)
 
-        card_apartar = CustomCard(title="Apartar Referencias (Reserva)", parent=self)
+        card_apartar = CustomCard(parent=self)
         form_layout = QVBoxLayout()
-        form_layout.setSpacing(12)
+        form_layout.setSpacing(16)
 
-        # Notaria Selector
-        top_layout = QHBoxLayout()
-        lbl_notaria = QLabel("Notaría de Destino:", self)
-        lbl_notaria.setStyleSheet("font-weight: bold;")
+        # Build custom header for the card
+        card_header_layout = QHBoxLayout()
+        card_title_vbox = QVBoxLayout()
+        lbl_card_title = CustomLabel("Apartar Referencias (Reserva)", variant="subheader")
+        lbl_card_subtitle = CustomLabel("Completa los datos para reservar referencias para una notaría", variant="muted")
+        card_title_vbox.addWidget(lbl_card_title)
+        card_title_vbox.addWidget(lbl_card_subtitle)
+        card_header_layout.addLayout(card_title_vbox)
+        card_header_layout.addStretch()
+        form_layout.addLayout(card_header_layout)
+
+        # Two-column input layout: Notaria on the left, Observaciones on the right
+        inputs_layout = QHBoxLayout()
+        inputs_layout.setSpacing(16)
+
+        # Left side: Notaria
+        not_layout = QVBoxLayout()
+        lbl_notaria = CustomLabel("Notaría de Destino", variant="body")
+        lbl_notaria.setStyleSheet("font-weight: bold; background: transparent; border: none;")
         self.cb_notarias_apartar = CustomComboBox(self)
-        self.cb_notarias_apartar.setMinimumWidth(250)
-        top_layout.addWidget(lbl_notaria)
-        top_layout.addWidget(self.cb_notarias_apartar)
-        top_layout.addStretch()
-        form_layout.addLayout(top_layout)
+        self.cb_notarias_apartar.setMinimumHeight(35)
+        not_layout.addWidget(lbl_notaria)
+        not_layout.addWidget(self.cb_notarias_apartar)
 
-        # Scroll Area for dynamic rows
-        from PySide6.QtWidgets import QScrollArea, QFrame
-        self.scroll_apartar = QScrollArea(self)
-        self.scroll_apartar.setWidgetResizable(True)
-        self.scroll_apartar.setFrameShape(QFrame.NoFrame)
-        self.scroll_apartar.setMinimumHeight(250)
+        # Right side: Observaciones
+        obs_layout = QVBoxLayout()
+        lbl_obs = CustomLabel("Observaciones del Lote", variant="body")
+        lbl_obs.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.txt_obs_apartar = CustomInput("Ingresa observaciones o descripción para el apartado...")
+        self.txt_obs_apartar.setMinimumHeight(35)
+        obs_layout.addWidget(lbl_obs)
+        obs_layout.addWidget(self.txt_obs_apartar)
 
-        self.scroll_content_apartar = QWidget()
-        self.scroll_layout_apartar = QVBoxLayout(self.scroll_content_apartar)
-        self.scroll_layout_apartar.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout_apartar.setSpacing(8)
-        self.scroll_layout_apartar.addStretch()
+        inputs_layout.addLayout(not_layout, stretch=1)
+        inputs_layout.addLayout(obs_layout, stretch=1)
+        form_layout.addLayout(inputs_layout)
 
-        self.scroll_apartar.setWidget(self.scroll_content_apartar)
-        form_layout.addWidget(self.scroll_apartar)
+        # Interactive Grid
+        self.grid_apartar = InteractiveGrid(self)
+        self.grid_apartar.set_third_column_label("Desarrollo")
+        self.grid_apartar.btn_save.setVisible(False)
+        self.grid_apartar.btn_cancel.setVisible(False)
+        self.grid_apartar.availability_requested.connect(self._on_availability_requested)
+        form_layout.addWidget(self.grid_apartar)
 
-        # Bottom controls for adding row
-        ctrl_layout = QHBoxLayout()
-        self.btn_add_row_apartar = CustomButton("+ Agregar Renglón", is_secondary=True)
-        self.btn_add_row_apartar.clicked.connect(self._add_new_row_apartar)
-        ctrl_layout.addWidget(self.btn_add_row_apartar)
-        ctrl_layout.addStretch()
-        form_layout.addLayout(ctrl_layout)
+        # Debounce timer and pending availability worker tracking
+        from PySide6.QtCore import QTimer
+        self._avail_timer = QTimer(self)
+        self._avail_timer.setSingleShot(True)
+        self._avail_timer.setInterval(220)  # 220ms debounce
+        self._avail_pending_row = None
+        self._avail_timer.timeout.connect(self._launch_availability_worker)
+        self._active_avail_workers = []  # track to avoid premature GC
 
-        # Confirm Button
+        # Confirm Button at the bottom
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         self.btn_save_apartar = CustomButton("Confirmar Apartados")
@@ -1124,32 +1173,38 @@ class InventoryView(QWidget):
 
         card_apartar.layout.addLayout(form_layout)
         layout.addWidget(card_apartar)
-
-        self.apartar_rows = []
         
-        # Add first row by default after catalog loading has occurred
         # Wait, since _setup_tab_apartar is called during __init__, self._rfcs_map might not exist yet.
         # So we trigger it dynamically when the catalogs are loaded.
 
-    def _add_new_row_apartar(self):
-        row = ReservaGridRow(self)
-        row.deleted.connect(self._on_delete_row_apartar)
-        
-        # Populate combinations
-        if hasattr(self, "_rfcs_map") and hasattr(self, "_concepts_map") and hasattr(self, "_desarrollos_map"):
-            row.populate(self._rfcs_map, self._concepts_map, self._desarrollos_map)
-            
-        self.scroll_layout_apartar.insertWidget(self.scroll_layout_apartar.count() - 1, row)
-        self.apartar_rows.append(row)
+    def _on_availability_requested(self, row_widget):
+        """Debounce handler: stores the pending row and restarts the 220ms timer."""
+        self._avail_pending_row = row_widget
+        self._avail_timer.start()  # resets if already running
 
-    def _on_delete_row_apartar(self, row):
-        if len(self.apartar_rows) <= 1:
-            QMessageBox.warning(self, "Acción Inválida", "Debes tener al menos un renglón para realizar un apartado.")
+    def _launch_availability_worker(self):
+        """Fires the background worker after the debounce window closes."""
+        row = self._avail_pending_row
+        if row is None:
             return
-        row.hide()
-        self.scroll_layout_apartar.removeWidget(row)
-        self.apartar_rows.remove(row)
-        row.deleteLater()
+        data = row.get_data()
+        rfc_id = data.get("rfc_id")
+        concepto_id = data.get("concepto_id")
+        desarrollo_id = data.get("delegacion_id")
+        if not rfc_id or not concepto_id or not desarrollo_id:
+            return
+
+        worker = AvailabilityWorker(
+            self.inventario_ui_service, row, rfc_id, concepto_id, desarrollo_id
+        )
+        worker.result_ready.connect(self._on_availability_result)
+        worker.finished.connect(lambda: self._active_avail_workers.remove(worker) if worker in self._active_avail_workers else None)
+        self._active_avail_workers.append(worker)
+        worker.start()
+
+    def _on_availability_result(self, row_widget, count: int):
+        """Called on the main thread when the worker returns a count."""
+        self.grid_apartar.update_row_availability(row_widget, count)
 
     def _on_save_apartar(self):
         not_name = self.cb_notarias_apartar.currentText()
@@ -1158,17 +1213,78 @@ class InventoryView(QWidget):
             QMessageBox.warning(self, "Notaría Faltante", "Por favor, seleccione una Notaría de destino.")
             return
             
+        data = self.grid_apartar.get_all_data()
+        if not data:
+            QMessageBox.warning(self, "Validación", "Debes agregar al menos un renglón para realizar un apartado.")
+            return
+
+        # Validate that all rows have selected elements and no duplicates
+        CONCEPTO_AVISO_ID = 2
+        CONCEPTO_CLG_ID = 3
+        seen_combinations = set()
         rows_data = []
-        for r in self.apartar_rows:
-            d = r.get_data()
-            if not all([d["rfc_id"], d["concepto_id"], d["desarrollo_id"]]):
-                QMessageBox.warning(self, "Campos Incompletos", "Por favor, complete todos los campos de selección en cada renglón.")
+        for i, row in enumerate(data):
+            if not row["rfc_id"] or not row["concepto_id"] or not row["delegacion_id"]:
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener todos los campos seleccionados (Empresa, Concepto y Desarrollo).")
                 return
-            rows_data.append(d)
+            if row["concepto_id"] not in (CONCEPTO_AVISO_ID, CONCEPTO_CLG_ID):
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} tiene un concepto no permitido. Solo se permiten: Aviso Preventivo (2) y CLG (3).")
+                return
+
+            key = (row["rfc_id"], row["concepto_id"], row["delegacion_id"])
+            if key in seen_combinations:
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} tiene una combinación duplicada de Empresa, Concepto y Desarrollo.")
+                return
+            seen_combinations.add(key)
             
+            rows_data.append({
+                "rfc_id": row["rfc_id"],
+                "concepto_id": row["concepto_id"],
+                "desarrollo_id": row["delegacion_id"],
+                "cantidad": row["cantidad"]
+            })
+
+        # Business rule: each (empresa, desarrollo) pair must include both AVISO and CLG
+        pair_concepts: dict = {}  # (rfc_id, desarrollo_id) -> set of concepto_ids
+        for r in rows_data:
+            pair_key = (r["rfc_id"], r["desarrollo_id"])
+            pair_concepts.setdefault(pair_key, set()).add(r["concepto_id"])
+
+        missing_pairs = []
+        for (rfc_id, des_id), concepts_set in pair_concepts.items():
+            missing = []
+            if CONCEPTO_AVISO_ID not in concepts_set:
+                missing.append("Aviso Preventivo")
+            if CONCEPTO_CLG_ID not in concepts_set:
+                missing.append("CLG")
+            if missing:
+                rfc_name = self.grid_apartar.get_rfc_text(rfc_id) or f"RFC {rfc_id}"
+                des_name = self.grid_apartar.get_delegacion_text(des_id) or f"Desarrollo {des_id}"
+                missing_pairs.append(f"• {rfc_name} / {des_name}: falta(n) {', '.join(missing)}")
+
+        if missing_pairs:
+            detail = "\n".join(missing_pairs)
+            QMessageBox.warning(
+                self, "Regla de Negocio",
+                f"Cada combinación de Empresa + Desarrollo debe tener un renglón de "
+                f"Aviso Preventivo y uno de CLG.\n\nFaltan:\n{detail}"
+            )
+            return
+
+        # Confirmation Dialog
+        reply = QMessageBox.question(
+            self, "Confirmar Apartado",
+            f"¿Estás seguro de que deseas apartar las referencias para esta notaría?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
         try:
             parent_window = self.window()
             usuario_id = getattr(parent_window, "current_usuario_id", 1)
+            obs_text = self.txt_obs_apartar.text().strip()
+            obs_val = obs_text if obs_text else None
             
             if self.api_client.connect_via_api:
                 # API sequentially
@@ -1179,7 +1295,8 @@ class InventoryView(QWidget):
                         "concepto_id": row_d["concepto_id"],
                         "desarrollo_id": row_d["desarrollo_id"],
                         "cantidad": row_d["cantidad"],
-                        "usuario_creacion": usuario_id
+                        "usuario_creacion": usuario_id,
+                        "observaciones": obs_val
                     }
                     self.api_client.request("POST", "/api/docs/inventario/lotes/apartar", data=payload)
             else:
@@ -1194,25 +1311,24 @@ class InventoryView(QWidget):
                             concepto_id=row_d["concepto_id"],
                             desarrollo_id=row_d["desarrollo_id"],
                             cantidad=row_d["cantidad"],
-                            usuario_id=usuario_id
+                            usuario_id=usuario_id,
+                            observaciones=obs_val
                         )
                     session.commit()
                     
             total_refs = sum(row_d["cantidad"] for row_d in rows_data)
             QMessageBox.information(self, "Apartado Exitoso", f"Se han reservado exitosamente {total_refs} referencias en total en estado RESERVADA.")
             
-            # Reset table and reload visor
-            for r in list(self.apartar_rows):
-                r.hide()
-                self.scroll_layout_apartar.removeWidget(r)
-                r.deleteLater()
-            self.apartar_rows.clear()
-            self._add_new_row_apartar()
+            # Reset table, observations and reload visor
+            self.txt_obs_apartar.clear()
+            self.grid_apartar.clear()
+            self.grid_apartar.add_row()
             self.refresh_visor_data()
         except Exception as e:
             QMessageBox.critical(self, "Error al Reservar", f"No se pudo completar el apartado de referencias:\n{str(e)}")
 
     def _on_apartar_referencias(self):
+        # We also want to adapt ApartarReferenciasDialog to use InteractiveGrid
         dialog = ApartarReferenciasDialog(self.db_connector, self)
         if dialog.exec() == QDialog.Accepted:
             self.refresh_visor_data()
@@ -1744,8 +1860,8 @@ class ApartarReferenciasDialog(QDialog):
         self.api_client = APIClient()
         
         self.setWindowTitle("Apartar Referencias (Reserva)")
-        self.setMinimumWidth(650)
-        self.setMinimumHeight(400)
+        self.setMinimumWidth(750)
+        self.setMinimumHeight(450)
         self.layout = QVBoxLayout(self)
         self.layout.setSpacing(12)
         
@@ -1758,28 +1874,12 @@ class ApartarReferenciasDialog(QDialog):
         top_layout.addStretch()
         self.layout.addLayout(top_layout)
         
-        # Scroll Area for dynamic rows
-        from PySide6.QtWidgets import QScrollArea, QFrame
-        self.scroll = QScrollArea(self)
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QFrame.NoFrame)
-        
-        self.scroll_content = QWidget()
-        self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout.setSpacing(8)
-        self.scroll_layout.addStretch() # keep rows at the top
-        
-        self.scroll.setWidget(self.scroll_content)
-        self.layout.addWidget(self.scroll)
-        
-        # Bottom controls for adding row
-        ctrl_layout = QHBoxLayout()
-        self.btn_add_row = CustomButton("+ Agregar Renglón", is_secondary=True)
-        self.btn_add_row.clicked.connect(self._add_new_row)
-        ctrl_layout.addWidget(self.btn_add_row)
-        ctrl_layout.addStretch()
-        self.layout.addLayout(ctrl_layout)
+        # Interactive Grid
+        self.grid = InteractiveGrid(self)
+        self.grid.set_third_column_label("Desarrollo")
+        self.grid.btn_save.setVisible(False)
+        self.grid.btn_cancel.setVisible(False)
+        self.layout.addWidget(self.grid)
         
         # Dialog Action Buttons
         btn_layout = QHBoxLayout()
@@ -1794,11 +1894,7 @@ class ApartarReferenciasDialog(QDialog):
         btn_layout.addWidget(self.btn_save)
         self.layout.addLayout(btn_layout)
         
-        self.rows = []
         self._load_catalogs()
-        
-        # Add first row by default
-        self._add_new_row()
         
     def _load_catalogs(self):
         try:
@@ -1809,29 +1905,15 @@ class ApartarReferenciasDialog(QDialog):
             self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in self._catalogs_data["desarrollos"]}
             
             self.cb_notarias.addItems(list(self._notarias_map.keys()))
+            
+            rfcs_list_tuples = [(r_id, r_name) for r_name, r_id in self._rfcs_map.items()]
+            concepts_list_tuples = [(c_id, c_name) for c_name, c_id in self._concepts_map.items()]
+            desarrollos_list_tuples = [(d_id, d_name) for d_name, d_id in self._desarrollos_map.items()]
+            self.grid.set_catalogs(rfcs_list_tuples, concepts_list_tuples, desarrollos_list_tuples)
+            self.grid.add_row()
         except Exception as e:
             print("Error loading dialog catalog data:", e)
             
-    def _add_new_row(self):
-        row = ReservaGridRow(self)
-        row.deleted.connect(self._on_delete_row)
-        
-        # Populate combinations
-        row.populate(self._rfcs_map, self._concepts_map, self._desarrollos_map)
-        
-        # Insert row before the stretch item
-        self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, row)
-        self.rows.append(row)
-        
-    def _on_delete_row(self, row):
-        if len(self.rows) <= 1:
-            QMessageBox.warning(self, "Acción Inválida", "Debes tener al menos un renglón para realizar un apartado.")
-            return
-        row.hide()
-        self.scroll_layout.removeWidget(row)
-        self.rows.remove(row)
-        row.deleteLater()
-        
     def _on_save(self):
         not_name = self.cb_notarias.currentText()
         notaria_id = self._notarias_map.get(not_name)
@@ -1839,13 +1921,30 @@ class ApartarReferenciasDialog(QDialog):
             QMessageBox.warning(self, "Notaría Faltante", "Por favor, seleccione una Notaría de destino.")
             return
             
+        data = self.grid.get_all_data()
+        if not data:
+            QMessageBox.warning(self, "Validación", "Debes agregar al menos un renglón para realizar un apartado.")
+            return
+
+        seen_combinations = set()
         rows_data = []
-        for r in self.rows:
-            d = r.get_data()
-            if not all([d["rfc_id"], d["concepto_id"], d["desarrollo_id"]]):
-                QMessageBox.warning(self, "Campos Incompletos", "Por favor, complete todos los campos de selección en cada renglón.")
+        for i, row in enumerate(data):
+            if not row["rfc_id"] or not row["concepto_id"] or not row["delegacion_id"]:
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener todos los campos seleccionados (Empresa, Concepto y Desarrollo).")
                 return
-            rows_data.append(d)
+                
+            key = (row["rfc_id"], row["concepto_id"], row["delegacion_id"])
+            if key in seen_combinations:
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} tiene una combinación duplicada de Empresa, Concepto y Desarrollo.")
+                return
+            seen_combinations.add(key)
+            
+            rows_data.append({
+                "rfc_id": row["rfc_id"],
+                "concepto_id": row["concepto_id"],
+                "desarrollo_id": row["delegacion_id"],
+                "cantidad": row["cantidad"]
+            })
             
         try:
             parent_window = self.window()
