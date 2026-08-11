@@ -3,7 +3,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QPushButton, QTabWidget,
     QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
-    QDateEdit
+    QDateEdit, QFrame
 )
 from PySide6.QtCore import Qt, QThread, Signal, QDate
 from sar.src.ui.design_system.components import (
@@ -120,7 +120,12 @@ class InventoryView(QWidget):
         self._setup_tab_masivo()
         self.tabs.addTab(self.tab_masivo, "⚡ Asignación Masiva (Excel)")
 
-        # 3. Tab: Catálogos
+        # 3. Tab: Apartar Referencia
+        self.tab_apartar = QWidget()
+        self._setup_tab_apartar()
+        self.tabs.addTab(self.tab_apartar, "🔑 Apartar Referencia")
+
+        # 4. Tab: Catálogos
         self.tab_catalogos = QWidget()
         self._setup_tab_catalogos()
         self.tabs.addTab(self.tab_catalogos, "⚙ Gestión de Catálogos")
@@ -139,6 +144,8 @@ class InventoryView(QWidget):
             self.tabs.setCurrentWidget(self.tab_visor)
         elif tab_key == "inventario_masivo":
             self.tabs.setCurrentWidget(self.tab_masivo)
+        elif tab_key == "inventario_apartar":
+            self.tabs.setCurrentWidget(self.tab_apartar)
         elif tab_key == "inventario_catalogos":
             self.tabs.setCurrentWidget(self.tab_catalogos)
 
@@ -265,8 +272,12 @@ class InventoryView(QWidget):
         self.btn_exportar_lotes = CustomButton("Exportar Control Inventario", is_secondary=True)
         self.btn_exportar_lotes.clicked.connect(self._on_exportar_reporte)
 
+        self.btn_apartar_referencias = CustomButton("Apartar Referencias", is_secondary=True)
+        self.btn_apartar_referencias.clicked.connect(self._on_apartar_referencias)
+
         actions_layout.addWidget(self.btn_marcar_visibles)
         actions_layout.addStretch()
+        actions_layout.addWidget(self.btn_apartar_referencias)
         actions_layout.addWidget(self.btn_exportar_lotes)
         actions_layout.addWidget(self.btn_asignar_manual)
         
@@ -498,6 +509,10 @@ class InventoryView(QWidget):
         card_form = CustomCard(title="Configuración de la Asignación", parent=self)
         self.form_layout_masivo = QFormLayout()
         
+        self.chk_completar_reserva = CustomCheckBox("Completar Lote Apartado (Reserva)", self)
+        self.chk_completar_reserva.stateChanged.connect(self._on_completar_reserva_changed)
+        self.form_layout_masivo.addRow("", self.chk_completar_reserva)
+
         self.cb_destino_masivo = CustomComboBox(self)
         self.cb_destino_masivo.addItems(["NOTARIA", "COLABORADOR"])
         self.cb_destino_masivo.currentTextChanged.connect(self._on_destino_masivo_changed)
@@ -568,6 +583,21 @@ class InventoryView(QWidget):
         self.lbl_colab_row = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
         if self.lbl_colab_row: self.lbl_colab_row.hide()
 
+    def _on_completar_reserva_changed(self, state):
+        is_checked = (state == 2 or state == Qt.CheckState.Checked)
+        if is_checked:
+            self.cb_destino_masivo.setCurrentText("NOTARIA")
+            self.cb_destino_masivo.setEnabled(False)
+            self._on_destino_masivo_changed("NOTARIA")
+            self.cb_empresa_masivo.setEnabled(False)
+            self.txt_solicitante_masivo.setEnabled(False)
+            self.txt_obs_masivo.setEnabled(False)
+        else:
+            self.cb_destino_masivo.setEnabled(True)
+            self.cb_empresa_masivo.setEnabled(True)
+            self.txt_solicitante_masivo.setEnabled(True)
+            self.txt_obs_masivo.setEnabled(True)
+
     def _on_destino_masivo_changed(self, text):
         if text == "NOTARIA":
             self.cb_notarias_masivo.show()
@@ -636,10 +666,18 @@ class InventoryView(QWidget):
             if default_empresa_txt != "Seleccione empresa..." and hasattr(self, "_rfcs_map"):
                 default_rfc_id = self._rfcs_map.get(default_empresa_txt)
 
+            completar_notaria_id = None
+            if self.chk_completar_reserva.isChecked():
+                not_name = self.cb_notarias_masivo.currentText()
+                completar_notaria_id = self._notarias_map.get(not_name)
+                if not completar_notaria_id:
+                    QMessageBox.warning(self, "Seleccionar Notaría", "Por favor, selecciona una Notaría válida para completar su apartado.")
+                    return
+
             # Validate rows against database
             with self.db_connector.get_session() as session:
                 self.validated_records = ExcelInventoryHandler.validate_parsed_rows(
-                    session, self.parsed_records, default_rfc_id=default_rfc_id
+                    session, self.parsed_records, default_rfc_id=default_rfc_id, completar_notaria_id=completar_notaria_id
                 )
 
             # Populate preview table
@@ -734,57 +772,89 @@ class InventoryView(QWidget):
             parent_window = self.window()
             usuario_id = getattr(parent_window, "current_usuario_id", 1) # Default admin
 
-            if self.api_client.connect_via_api:
-                # Prepare payload
-                detalles_payload = []
-                for det in valid_details:
-                    det_dict = {
-                        "cliente": det["cliente"],
-                        "desarrollo_id": det["desarrollo_id"],
-                        "concepto_solicitado": det["concepto_solicitado"],
-                        "referencia_asignada": det["referencia_asignada"],
-                        "referencia_id": det.get("referencia_id"),
-                        "mz": det.get("mz"),
-                        "lote": det.get("lote"),
-                        "edif": det.get("edif"),
-                        "viv": det.get("viv"),
-                        "folio_electronico": det.get("folio_electronico"),
-                        "estatus_primer_aviso": det.get("estatus_primer_aviso"),
-                        "ubicacion": det.get("ubicacion"),
-                        "credito_titular": det.get("credito_titular"),
-                        "pa": det.get("pa"),
-                        "delegacion": det.get("delegacion"),
-                        "fecha_solicitud": det["fecha_solicitud"].strftime("%Y-%m-%d") if det.get("fecha_solicitud") else None
-                    }
-                    detalles_payload.append(det_dict)
-
-                payload = {
-                    "tipo_destino": tipo_destino,
-                    "notaria_id": notaria_id,
-                    "colaborador_id": colaborador_id,
-                    "solicitante_externo": solicitante_externo,
-                    "observaciones": observaciones,
-                    "usuario_creacion": usuario_id,
-                    "detalles": detalles_payload
-                }
-                res = self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
-                lote_id = res["lote_id"]
+            if self.chk_completar_reserva.isChecked():
+                if self.api_client.connect_via_api:
+                    detalles_payload = []
+                    for det in valid_details:
+                        det_dict = {
+                            "lote_detalle_id": det["lote_detalle_id"],
+                            "cliente": det["cliente"],
+                            "desarrollo_id": det["desarrollo_id"],
+                            "concepto_solicitado": det["concepto_solicitado"],
+                            "referencia_asignada": det["referencia_asignada"],
+                            "referencia_id": det.get("referencia_id"),
+                            "mz": det.get("mz"),
+                            "lote": det.get("lote"),
+                            "edif": det.get("edif"),
+                            "viv": det.get("viv"),
+                            "folio_electronico": det.get("folio_electronico"),
+                            "estatus_primer_aviso": det.get("estatus_primer_aviso"),
+                            "ubicacion": det.get("ubicacion"),
+                            "credito_titular": det.get("credito_titular"),
+                            "pa": det.get("pa"),
+                            "delegacion": det.get("delegacion"),
+                            "fecha_solicitud": det["fecha_solicitud"].strftime("%Y-%m-%d") if det.get("fecha_solicitud") and not isinstance(det.get("fecha_solicitud"), str) else det.get("fecha_solicitud")
+                        }
+                        detalles_payload.append(det_dict)
+                    payload = {"detalles": detalles_payload}
+                    self.api_client.request("POST", "/api/docs/inventario/lotes/completar", data=payload)
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.repositories import InventarioRepository
+                        repo = InventarioRepository(session)
+                        repo.completar_reservaciones(valid_details)
+                        session.commit()
+                QMessageBox.information(self, "Lote Completado", f"Se han completado exitosamente {len(valid_details)} asignaciones reservadas.")
             else:
-                with self.db_connector.get_session() as session:
-                    from sar.src.storage.repositories import InventarioRepository
-                    repo = InventarioRepository(session)
-                    lote_id = repo.crear_lote_asignacion(
-                        tipo_destino=tipo_destino,
-                        notaria_id=notaria_id,
-                        colaborador_id=colaborador_id,
-                        solicitante_externo=solicitante_externo,
-                        observaciones=observaciones,
-                        usuario_creacion=usuario_id,
-                        detalles_list=valid_details
-                    )
-                    session.commit()
+                if self.api_client.connect_via_api:
+                    detalles_payload = []
+                    for det in valid_details:
+                        det_dict = {
+                            "cliente": det["cliente"],
+                            "desarrollo_id": det["desarrollo_id"],
+                            "concepto_solicitado": det["concepto_solicitado"],
+                            "referencia_asignada": det["referencia_asignada"],
+                            "referencia_id": det.get("referencia_id"),
+                            "mz": det.get("mz"),
+                            "lote": det.get("lote"),
+                            "edif": det.get("edif"),
+                            "viv": det.get("viv"),
+                            "folio_electronico": det.get("folio_electronico"),
+                            "estatus_primer_aviso": det.get("estatus_primer_aviso"),
+                            "ubicacion": det.get("ubicacion"),
+                            "credito_titular": det.get("credito_titular"),
+                            "pa": det.get("pa"),
+                            "delegacion": det.get("delegacion"),
+                            "fecha_solicitud": det["fecha_solicitud"].strftime("%Y-%m-%d") if det.get("fecha_solicitud") and not isinstance(det.get("fecha_solicitud"), str) else det.get("fecha_solicitud")
+                        }
+                        detalles_payload.append(det_dict)
 
-            QMessageBox.information(self, "Lote Guardado", f"Se ha registrado exitosamente el lote ID {lote_id} con {len(valid_details)} asignaciones.")
+                    payload = {
+                        "tipo_destino": tipo_destino,
+                        "notaria_id": notaria_id,
+                        "colaborador_id": colaborador_id,
+                        "solicitante_externo": solicitante_externo,
+                        "observaciones": observaciones,
+                        "usuario_creacion": usuario_id,
+                        "detalles": detalles_payload
+                    }
+                    res = self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
+                    lote_id = res["lote_id"]
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.repositories import InventarioRepository
+                        repo = InventarioRepository(session)
+                        lote_id = repo.crear_lote_asignacion(
+                            tipo_destino=tipo_destino,
+                            notaria_id=notaria_id,
+                            colaborador_id=colaborador_id,
+                            solicitante_externo=solicitante_externo,
+                            observaciones=observaciones,
+                            usuario_creacion=usuario_id,
+                            detalles_list=valid_details
+                        )
+                        session.commit()
+                QMessageBox.information(self, "Lote Guardado", f"Se ha registrado exitosamente el lote ID {lote_id} con {len(valid_details)} asignaciones.")
             
             # Reset values
             self.lbl_excel_path.setText("Ningún archivo seleccionado")
@@ -887,6 +957,9 @@ class InventoryView(QWidget):
             self.cb_notarias_masivo.clear()
             self.cb_notarias_masivo.addItems(list(self._notarias_map.keys()))
 
+            self.cb_notarias_apartar.clear()
+            self.cb_notarias_apartar.addItems(list(self._notarias_map.keys()))
+
             self.cb_colaboradores_masivo.clear()
             self.cb_colaboradores_masivo.addItems(list(self._colaboradores_map.keys()))
 
@@ -923,6 +996,13 @@ class InventoryView(QWidget):
                     d.get("delegacion_nombre") or d.get("delegacion", "")
                 ])
             self.table_desarrollos.populate_rows(des_rows)
+
+            # Make sure apartar tab has at least one row populated
+            if not self.apartar_rows:
+                self._add_new_row_apartar()
+            else:
+                for row in self.apartar_rows:
+                    row.populate(self._rfcs_map, self._concepts_map, self._desarrollos_map)
 
         except Exception as e:
             print("Error loading catalog data for inventory view:", e)
@@ -989,6 +1069,153 @@ class InventoryView(QWidget):
             self._load_catalogs_data()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo guardar el desarrollo:\n{str(e)}")
+
+
+    def _setup_tab_apartar(self):
+        layout = QVBoxLayout(self.tab_apartar)
+        layout.setSpacing(16)
+
+        card_apartar = CustomCard(title="Apartar Referencias (Reserva)", parent=self)
+        form_layout = QVBoxLayout()
+        form_layout.setSpacing(12)
+
+        # Notaria Selector
+        top_layout = QHBoxLayout()
+        lbl_notaria = QLabel("Notaría de Destino:", self)
+        lbl_notaria.setStyleSheet("font-weight: bold;")
+        self.cb_notarias_apartar = CustomComboBox(self)
+        self.cb_notarias_apartar.setMinimumWidth(250)
+        top_layout.addWidget(lbl_notaria)
+        top_layout.addWidget(self.cb_notarias_apartar)
+        top_layout.addStretch()
+        form_layout.addLayout(top_layout)
+
+        # Scroll Area for dynamic rows
+        from PySide6.QtWidgets import QScrollArea, QFrame
+        self.scroll_apartar = QScrollArea(self)
+        self.scroll_apartar.setWidgetResizable(True)
+        self.scroll_apartar.setFrameShape(QFrame.NoFrame)
+        self.scroll_apartar.setMinimumHeight(250)
+
+        self.scroll_content_apartar = QWidget()
+        self.scroll_layout_apartar = QVBoxLayout(self.scroll_content_apartar)
+        self.scroll_layout_apartar.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout_apartar.setSpacing(8)
+        self.scroll_layout_apartar.addStretch()
+
+        self.scroll_apartar.setWidget(self.scroll_content_apartar)
+        form_layout.addWidget(self.scroll_apartar)
+
+        # Bottom controls for adding row
+        ctrl_layout = QHBoxLayout()
+        self.btn_add_row_apartar = CustomButton("+ Agregar Renglón", is_secondary=True)
+        self.btn_add_row_apartar.clicked.connect(self._add_new_row_apartar)
+        ctrl_layout.addWidget(self.btn_add_row_apartar)
+        ctrl_layout.addStretch()
+        form_layout.addLayout(ctrl_layout)
+
+        # Confirm Button
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_save_apartar = CustomButton("Confirmar Apartados")
+        self.btn_save_apartar.clicked.connect(self._on_save_apartar)
+        btn_layout.addWidget(self.btn_save_apartar)
+        form_layout.addLayout(btn_layout)
+
+        card_apartar.layout.addLayout(form_layout)
+        layout.addWidget(card_apartar)
+
+        self.apartar_rows = []
+        
+        # Add first row by default after catalog loading has occurred
+        # Wait, since _setup_tab_apartar is called during __init__, self._rfcs_map might not exist yet.
+        # So we trigger it dynamically when the catalogs are loaded.
+
+    def _add_new_row_apartar(self):
+        row = ReservaGridRow(self)
+        row.deleted.connect(self._on_delete_row_apartar)
+        
+        # Populate combinations
+        if hasattr(self, "_rfcs_map") and hasattr(self, "_concepts_map") and hasattr(self, "_desarrollos_map"):
+            row.populate(self._rfcs_map, self._concepts_map, self._desarrollos_map)
+            
+        self.scroll_layout_apartar.insertWidget(self.scroll_layout_apartar.count() - 1, row)
+        self.apartar_rows.append(row)
+
+    def _on_delete_row_apartar(self, row):
+        if len(self.apartar_rows) <= 1:
+            QMessageBox.warning(self, "Acción Inválida", "Debes tener al menos un renglón para realizar un apartado.")
+            return
+        row.hide()
+        self.scroll_layout_apartar.removeWidget(row)
+        self.apartar_rows.remove(row)
+        row.deleteLater()
+
+    def _on_save_apartar(self):
+        not_name = self.cb_notarias_apartar.currentText()
+        notaria_id = self._notarias_map.get(not_name)
+        if not notaria_id:
+            QMessageBox.warning(self, "Notaría Faltante", "Por favor, seleccione una Notaría de destino.")
+            return
+            
+        rows_data = []
+        for r in self.apartar_rows:
+            d = r.get_data()
+            if not all([d["rfc_id"], d["concepto_id"], d["desarrollo_id"]]):
+                QMessageBox.warning(self, "Campos Incompletos", "Por favor, complete todos los campos de selección en cada renglón.")
+                return
+            rows_data.append(d)
+            
+        try:
+            parent_window = self.window()
+            usuario_id = getattr(parent_window, "current_usuario_id", 1)
+            
+            if self.api_client.connect_via_api:
+                # API sequentially
+                for row_d in rows_data:
+                    payload = {
+                        "notaria_id": notaria_id,
+                        "rfc_id": row_d["rfc_id"],
+                        "concepto_id": row_d["concepto_id"],
+                        "desarrollo_id": row_d["desarrollo_id"],
+                        "cantidad": row_d["cantidad"],
+                        "usuario_creacion": usuario_id
+                    }
+                    self.api_client.request("POST", "/api/docs/inventario/lotes/apartar", data=payload)
+            else:
+                # Single session transaction
+                with self.db_connector.get_session() as session:
+                    from sar.src.storage.repositories import InventarioRepository
+                    repo = InventarioRepository(session)
+                    for row_d in rows_data:
+                        repo.apartar_referencias(
+                            notaria_id=notaria_id,
+                            rfc_id=row_d["rfc_id"],
+                            concepto_id=row_d["concepto_id"],
+                            desarrollo_id=row_d["desarrollo_id"],
+                            cantidad=row_d["cantidad"],
+                            usuario_id=usuario_id
+                        )
+                    session.commit()
+                    
+            total_refs = sum(row_d["cantidad"] for row_d in rows_data)
+            QMessageBox.information(self, "Apartado Exitoso", f"Se han reservado exitosamente {total_refs} referencias en total en estado RESERVADA.")
+            
+            # Reset table and reload visor
+            for r in list(self.apartar_rows):
+                r.hide()
+                self.scroll_layout_apartar.removeWidget(r)
+                r.deleteLater()
+            self.apartar_rows.clear()
+            self._add_new_row_apartar()
+            self.refresh_visor_data()
+        except Exception as e:
+            QMessageBox.critical(self, "Error al Reservar", f"No se pudo completar el apartado de referencias:\n{str(e)}")
+
+    def _on_apartar_referencias(self):
+        dialog = ApartarReferenciasDialog(self.db_connector, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.refresh_visor_data()
 
 
 # =============================================================================
@@ -1430,3 +1657,230 @@ class LoteProcessingDialog(QDialog):
             msg += f"- Archivos no encontrados o con error: {error_count}\n"
             
         QMessageBox.information(self, "Resultado de Exportación", msg)
+
+
+class ReservaGridRow(QFrame):
+    """Dynamic row item inside ApartarReferenciasDialog."""
+    deleted = Signal(object)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("reservaGridRow")
+        self.setStyleSheet("QFrame#reservaGridRow { background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; }")
+        
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setSpacing(8)
+        
+        self.cb_empresa = CustomComboBox(self)
+        self.cb_empresa.setMinimumWidth(120)
+        self.cb_empresa.setPlaceholderText("Empresa...")
+        
+        self.cb_concepto = CustomComboBox(self)
+        self.cb_concepto.setMinimumWidth(120)
+        self.cb_concepto.setPlaceholderText("Concepto...")
+        
+        self.cb_desarrollo = CustomComboBox(self)
+        self.cb_desarrollo.setMinimumWidth(140)
+        self.cb_desarrollo.setPlaceholderText("Desarrollo...")
+        
+        from PySide6.QtWidgets import QSpinBox
+        self.sb_cantidad = QSpinBox(self)
+        self.sb_cantidad.setRange(1, 1000)
+        self.sb_cantidad.setValue(10)
+        self.sb_cantidad.setStyleSheet("""
+            QSpinBox {
+                padding: 6px;
+                border: 1px solid #CBD5E1;
+                border-radius: 4px;
+                min-width: 80px;
+                background-color: white;
+            }
+        """)
+        
+        from sar.src.ui.design_system.utils.icons import Icons
+        self.btn_delete = CustomButton("", is_secondary=True)
+        self.btn_delete.setIcon(Icons.trash())
+        self.btn_delete.setFixedSize(30, 30)
+        self.btn_delete.setStyleSheet("border: none;")
+        self.btn_delete.clicked.connect(lambda: self.deleted.emit(self))
+        
+        self.layout.addWidget(self.cb_empresa)
+        self.layout.addWidget(self.cb_concepto)
+        self.layout.addWidget(self.cb_desarrollo)
+        self.layout.addWidget(self.sb_cantidad)
+        self.layout.addWidget(self.btn_delete)
+
+    def populate(self, rfcs, conceptos, desarrollos):
+        self.cb_empresa.clear()
+        for name, r_id in rfcs.items():
+            self.cb_empresa.addItem(name, r_id)
+            
+        self.cb_concepto.clear()
+        for name, c_id in conceptos.items():
+            self.cb_concepto.addItem(name, c_id)
+            
+        self.cb_desarrollo.clear()
+        for name, d_id in desarrollos.items():
+            self.cb_desarrollo.addItem(name, d_id)
+            
+    def get_data(self) -> dict:
+        return {
+            "rfc_id": self.cb_empresa.currentData(),
+            "concepto_id": self.cb_concepto.currentData(),
+            "desarrollo_id": self.cb_desarrollo.currentData(),
+            "cantidad": self.sb_cantidad.value()
+        }
+
+
+class ApartarReferenciasDialog(QDialog):
+    """Dialog to pre-reserve (apartar) references for a Notary in RESERVADA state with multi-row options."""
+    
+    def __init__(self, db_connector, parent=None):
+        super().__init__(parent)
+        self.db_connector = db_connector
+        self.inventario_ui_service = InventarioUIService(self.db_connector)
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
+        self.setWindowTitle("Apartar Referencias (Reserva)")
+        self.setMinimumWidth(650)
+        self.setMinimumHeight(400)
+        self.layout = QVBoxLayout(self)
+        self.layout.setSpacing(12)
+        
+        # Notaria Selector at the top
+        top_layout = QHBoxLayout()
+        top_layout.addWidget(QLabel("Notaría de Destino:", self))
+        self.cb_notarias = CustomComboBox(self)
+        self.cb_notarias.setMinimumWidth(250)
+        top_layout.addWidget(self.cb_notarias)
+        top_layout.addStretch()
+        self.layout.addLayout(top_layout)
+        
+        # Scroll Area for dynamic rows
+        from PySide6.QtWidgets import QScrollArea, QFrame
+        self.scroll = QScrollArea(self)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout.setSpacing(8)
+        self.scroll_layout.addStretch() # keep rows at the top
+        
+        self.scroll.setWidget(self.scroll_content)
+        self.layout.addWidget(self.scroll)
+        
+        # Bottom controls for adding row
+        ctrl_layout = QHBoxLayout()
+        self.btn_add_row = CustomButton("+ Agregar Renglón", is_secondary=True)
+        self.btn_add_row.clicked.connect(self._add_new_row)
+        ctrl_layout.addWidget(self.btn_add_row)
+        ctrl_layout.addStretch()
+        self.layout.addLayout(ctrl_layout)
+        
+        # Dialog Action Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_cancel = CustomButton("Cancelar", is_secondary=True)
+        self.btn_cancel.clicked.connect(self.reject)
+        
+        self.btn_save = CustomButton("Confirmar Apartados")
+        self.btn_save.clicked.connect(self._on_save)
+        
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_save)
+        self.layout.addLayout(btn_layout)
+        
+        self.rows = []
+        self._load_catalogs()
+        
+        # Add first row by default
+        self._add_new_row()
+        
+    def _load_catalogs(self):
+        try:
+            self._catalogs_data = self.inventario_ui_service.get_catalogos_data()
+            self._notarias_map = {n["nombre"]: n["notaria_id"] for n in self._catalogs_data["notarias"]}
+            self._rfcs_map = {r["razon_social"] if isinstance(r, dict) else r.razon_social: r["rfc_id"] if isinstance(r, dict) else r.rfc_id for r in self._catalogs_data["rfcs"]}
+            self._concepts_map = {c["nombre"] if isinstance(c, dict) else c.nombre: c["concepto_id"] if isinstance(c, dict) else c.concepto_id for c in self._catalogs_data["conceptos"]}
+            self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in self._catalogs_data["desarrollos"]}
+            
+            self.cb_notarias.addItems(list(self._notarias_map.keys()))
+        except Exception as e:
+            print("Error loading dialog catalog data:", e)
+            
+    def _add_new_row(self):
+        row = ReservaGridRow(self)
+        row.deleted.connect(self._on_delete_row)
+        
+        # Populate combinations
+        row.populate(self._rfcs_map, self._concepts_map, self._desarrollos_map)
+        
+        # Insert row before the stretch item
+        self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, row)
+        self.rows.append(row)
+        
+    def _on_delete_row(self, row):
+        if len(self.rows) <= 1:
+            QMessageBox.warning(self, "Acción Inválida", "Debes tener al menos un renglón para realizar un apartado.")
+            return
+        row.hide()
+        self.scroll_layout.removeWidget(row)
+        self.rows.remove(row)
+        row.deleteLater()
+        
+    def _on_save(self):
+        not_name = self.cb_notarias.currentText()
+        notaria_id = self._notarias_map.get(not_name)
+        if not notaria_id:
+            QMessageBox.warning(self, "Notaría Faltante", "Por favor, seleccione una Notaría de destino.")
+            return
+            
+        rows_data = []
+        for r in self.rows:
+            d = r.get_data()
+            if not all([d["rfc_id"], d["concepto_id"], d["desarrollo_id"]]):
+                QMessageBox.warning(self, "Campos Incompletos", "Por favor, complete todos los campos de selección en cada renglón.")
+                return
+            rows_data.append(d)
+            
+        try:
+            parent_window = self.window()
+            usuario_id = getattr(parent_window, "current_usuario_id", 1)
+            
+            if self.api_client.connect_via_api:
+                # API sequentially
+                for row_d in rows_data:
+                    payload = {
+                        "notaria_id": notaria_id,
+                        "rfc_id": row_d["rfc_id"],
+                        "concepto_id": row_d["concepto_id"],
+                        "desarrollo_id": row_d["desarrollo_id"],
+                        "cantidad": row_d["cantidad"],
+                        "usuario_creacion": usuario_id
+                    }
+                    self.api_client.request("POST", "/api/docs/inventario/lotes/apartar", data=payload)
+            else:
+                # Single session transaction
+                with self.db_connector.get_session() as session:
+                    from sar.src.storage.repositories import InventarioRepository
+                    repo = InventarioRepository(session)
+                    for row_d in rows_data:
+                        repo.apartar_referencias(
+                            notaria_id=notaria_id,
+                            rfc_id=row_d["rfc_id"],
+                            concepto_id=row_d["concepto_id"],
+                            desarrollo_id=row_d["desarrollo_id"],
+                            cantidad=row_d["cantidad"],
+                            usuario_id=usuario_id
+                        )
+                    session.commit()
+                    
+            total_refs = sum(row_d["cantidad"] for row_d in rows_data)
+            QMessageBox.information(self, "Apartado Exitoso", f"Se han reservado exitosamente {total_refs} referencias en total en estado RESERVADA.")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Error al Reservar", f"No se pudo completar el apartado de referencias:\n{str(e)}")

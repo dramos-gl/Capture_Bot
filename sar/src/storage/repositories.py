@@ -2005,3 +2005,155 @@ class InventarioRepository(BaseRepository):
             for row in results
         ]
 
+    def apartar_referencias(
+        self, notaria_id: int, rfc_id: int, concepto_id: int, desarrollo_id: int, cantidad: int, usuario_id: int
+    ) -> int:
+        from sar.src.storage.models import LoteAsignacion, LoteDetalle, Referencia, EstadoSistema, Desarrollo, GrupoReferencia, Solicitud, Concepto
+        from sqlalchemy import select
+
+        # 1. Fetch the delegation of the development
+        des = self.session.get(Desarrollo, desarrollo_id)
+        if not des:
+            raise ValueError("El desarrollo seleccionado no existe.")
+        delegacion_id = des.delegacion_id
+
+        # 2. Get the states IDs
+        estado_facturada_id = self._get_estado_id("referencia", "FACTURADA")
+        estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
+
+        # 3. Find available references
+        conc = self.session.get(Concepto, concepto_id)
+        if not conc:
+            raise ValueError("El concepto seleccionado no existe.")
+        
+        expected_aliases = []
+        if conc.alias == "CLG": expected_aliases = ["CLG"]
+        elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO"): expected_aliases = ["AVISO PREVENTIVO"]
+        elif conc.alias == "ANALISIS": expected_aliases = ["ANALISIS"]
+        else: expected_aliases = [conc.alias]
+
+        # Find references in FACTURADA state, matching company and delegation, and not already linked in lote_detalle
+        # We can construct a subquery or join to ensure they are not assigned.
+        available_stmt = (
+            select(Referencia)
+            .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+            .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
+            .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
+            .join(Solicitud, Referencia.solicitud_id == Solicitud.solicitud_id)
+            .where(
+                EstadoSistema.entidad == 'referencia',
+                EstadoSistema.codigo == 'FACTURADA',
+                GrupoReferencia.rfc_id == rfc_id,
+                Concepto.alias.in_(expected_aliases),
+                Solicitud.delegacion_id == delegacion_id,
+                ~Referencia.referencia_id.in_(
+                    select(LoteDetalle.referencia_id).where(LoteDetalle.referencia_id.is_not(None))
+                )
+            )
+            .limit(cantidad)
+        )
+        available_refs = self.session.execute(available_stmt).scalars().all()
+        
+        if len(available_refs) < cantidad:
+            raise ValueError(f"No hay suficientes facturas disponibles en estado FACTURADA. Solicitadas: {cantidad}, Disponibles: {len(available_refs)}")
+
+        # 4. Create lote_asignacion
+        lote = LoteAsignacion(
+            tipo_destino="NOTARIA",
+            notaria_id=notaria_id,
+            colaborador_id=None,
+            solicitante_externo=None,
+            observaciones=f"Apartado/Reserva de referencias (Cant: {cantidad})",
+            usuario_creacion=usuario_id
+        )
+        self.session.add(lote)
+        self.session.flush()
+
+        # 5. Insert lote_detalle placeholders and update references status to RESERVADA
+        for ref in available_refs:
+            det = LoteDetalle(
+                lote_asignacion_id=lote.lote_asignacion_id,
+                cliente="RESERVA PENDIENTE DE COMPLETAR",
+                desarrollo_id=desarrollo_id,
+                concepto_solicitado=conc.alias or "CLG",
+                referencia_id=ref.referencia_id,
+                referencia_asignada=ref.referencia_portal
+            )
+            self.session.add(det)
+            ref.estado_id = estado_reservada_id
+
+        self.session.flush()
+        return lote.lote_asignacion_id
+
+    def get_lotes_reservados_by_notaria(self, notaria_id: int) -> List[dict]:
+        from sqlalchemy import text
+        stmt = text("""
+            SELECT 
+                la.lote_asignacion_id,
+                la.fecha,
+                (SELECT COUNT(*) FROM sar_archivo.lote_detalle ld WHERE ld.lote_asignacion_id = la.lote_asignacion_id AND ld.cliente = 'RESERVA PENDIENTE DE COMPLETAR') AS total_pendientes
+            FROM sar_archivo.lote_asignacion la
+            WHERE la.notaria_id = :notaria_id
+              AND EXISTS (
+                  SELECT 1 FROM sar_archivo.lote_detalle ld 
+                  WHERE ld.lote_asignacion_id = la.lote_asignacion_id 
+                    AND ld.cliente = 'RESERVA PENDIENTE DE COMPLETAR'
+              )
+            ORDER BY la.fecha ASC
+        """)
+        results = self.session.execute(stmt, {"notaria_id": notaria_id}).all()
+        return [
+            {
+                "lote_asignacion_id": row.lote_asignacion_id,
+                "fecha": row.fecha.strftime("%Y-%m-%d %H:%M"),
+                "total_pendientes": row.total_pendientes
+            }
+            for row in results
+        ]
+
+    def completar_reservaciones(self, detalles_completados: List[dict]) -> None:
+        from sar.src.storage.models import LoteDetalle, Referencia
+        import datetime
+        estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
+        
+        for d in detalles_completados:
+            ld_id = d.get("lote_detalle_id")
+            if not ld_id:
+                continue
+            
+            ld = self.session.get(LoteDetalle, ld_id)
+            if ld:
+                ld.cliente = d["cliente"].strip().upper()
+                ld.desarrollo_id = d["desarrollo_id"]
+                
+                # Convert string date to datetime.date object
+                f_sol = d.get("fecha_solicitud")
+                if f_sol:
+                    if isinstance(f_sol, str):
+                        try:
+                            ld.fecha_solicitud = datetime.datetime.strptime(f_sol.split()[0], "%Y-%m-%d").date()
+                        except:
+                            ld.fecha_solicitud = None
+                    else:
+                        ld.fecha_solicitud = f_sol
+                else:
+                    ld.fecha_solicitud = None
+
+                ld.ubicacion = d.get("ubicacion")
+                ld.mz = d.get("mz")
+                ld.lote = d.get("lote")
+                ld.edif = d.get("edif")
+                ld.viv = d.get("viv")
+                ld.folio_electronico = d.get("folio_electronico")
+                ld.estatus_primer_aviso = d.get("estatus_primer_aviso")
+                ld.credito_titular = d.get("credito_titular")
+                ld.pa = d.get("pa")
+                ld.delegacion = d.get("delegacion")
+                
+                # Update reference status to ASIGNADA
+                if ld.referencia_id:
+                    ref = self.session.get(Referencia, ld.referencia_id)
+                    if ref:
+                        ref.estado_id = estado_asignada_id
+        self.session.flush()
+

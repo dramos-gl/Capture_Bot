@@ -781,7 +781,13 @@ class LoteAsignacionCreateRequest(BaseModel):
     solicitante_externo: Optional[str] = None
     observaciones: Optional[str] = None
     usuario_creacion: int
-    detalles: List[LoteDetalleItem]
+class LoteApartarRequest(BaseModel):
+    notaria_id: int
+    rfc_id: int
+    concepto_id: int
+    desarrollo_id: int
+    cantidad: int
+    usuario_creacion: int
 
 @router.get("/inventario/notarias")
 def get_notarias(db: Session = Depends(get_db)):
@@ -901,4 +907,41 @@ def get_lotes_asignacion(db: Session = Depends(get_db)):
 def get_lote_detalles(lote_id: int, db: Session = Depends(get_db)):
     from sar.src.storage.repositories import InventarioRepository
     return InventarioRepository(db).get_lote_detalles(lote_id)
+
+@router.post("/inventario/lotes/apartar")
+def api_apartar_referencias(request: LoteApartarRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        lote_id = repo.apartar_referencias(
+            notaria_id=request.notaria_id,
+            rfc_id=request.rfc_id,
+            concepto_id=request.concepto_id,
+            desarrollo_id=request.desarrollo_id,
+            cantidad=request.cantidad,
+            usuario_id=request.usuario_creacion
+        )
+        db.commit()
+        return {"lote_id": lote_id, "detail": "Referencias apartadas con éxito"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/notarias/{notaria_id}/reservas")
+def api_get_lotes_reservados_by_notaria(notaria_id: int, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    return InventarioRepository(db).get_lotes_reservados_by_notaria(notaria_id)
+
+class LoteCompletarRequest(BaseModel):
+    detalles: List[dict]
+
+@router.post("/inventario/lotes/completar")
+def api_completar_reservaciones(request: LoteCompletarRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        repo.completar_reservaciones(request.detalles)
+        db.commit()
+        return {"detail": "Reservaciones completadas con éxito"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 

@@ -151,15 +151,18 @@ class ExcelInventoryHandler:
         return parsed_records
 
     @staticmethod
-    def validate_parsed_rows(session, parsed_rows: List[Dict[str, Any]], default_rfc_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    def validate_parsed_rows(
+        session, parsed_rows: List[Dict[str, Any]], default_rfc_id: Optional[int] = None, completar_notaria_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """Validates parsed rows against the database, enforcing:
         1. Reference exists and is FACTURADA (or auto-assigns an available one if empty).
         2. Reference is not already assigned.
         3. Concept matching (CLG, AVISO, etc.).
         4. Geolocation match (desarrollo delegation == reference delegation).
         5. Company (RFC) matching for autolink and validation.
+        6. If completing a reservation (completar_notaria_id), matches against RESERVADA placeholders using FIFO.
         """
-        from sar.src.storage.models import Referencia, EstadoSistema, Desarrollo, Delegacion, GrupoReferencia, Concepto, Solicitud, Rfc, LoteDetalle
+        from sar.src.storage.models import Referencia, EstadoSistema, Desarrollo, Delegacion, GrupoReferencia, Concepto, Solicitud, Rfc, LoteDetalle, LoteAsignacion
         from sqlalchemy import select
         
         # Cache concepts mapping
@@ -173,6 +176,26 @@ class ExcelInventoryHandler:
         rfcs_map = {r.razon_social.strip().upper(): r.rfc_id for r in rfcs}
         rfcs_map.update({r.rfc.strip().upper(): r.rfc_id for r in rfcs})
         
+        # Load active RESERVADA placeholders if completing a notary reservation
+        reserved_placeholders = []
+        if completar_notaria_id:
+            placeholder_stmt = (
+                select(LoteDetalle, Referencia)
+                .join(LoteAsignacion, LoteDetalle.lote_asignacion_id == LoteAsignacion.lote_asignacion_id)
+                .join(Referencia, LoteDetalle.referencia_id == Referencia.referencia_id)
+                .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+                .where(
+                    LoteAsignacion.notaria_id == completar_notaria_id,
+                    EstadoSistema.entidad == 'referencia',
+                    EstadoSistema.codigo == 'RESERVADA',
+                    LoteDetalle.cliente == 'RESERVA PENDIENTE DE COMPLETAR'
+                )
+                .order_by(LoteAsignacion.fecha.asc(), LoteDetalle.lote_detalle_id.asc())
+            )
+            reserved_placeholders = session.execute(placeholder_stmt).all()
+            # Convert to a mutable list of dicts/tuples to pop sequentially
+            reserved_placeholders = list(reserved_placeholders)
+
         validated_rows = []
         allocated_ref_ids = set()
 
@@ -195,6 +218,7 @@ class ExcelInventoryHandler:
             row_result["desarrollo_id"] = None
             row_result["delegacion_nombre"] = ""
             row_result["rfc_id"] = None
+            row_result["lote_detalle_id"] = None  # To track which reservation to update
             
             # Resolve Company (RFC)
             resolved_rfc_id = None
@@ -244,7 +268,55 @@ class ExcelInventoryHandler:
             has_dup = dup_check is not None
             dup_ref = dup_check.referencia_asignada if dup_check else None
 
-            # Handle automatic reference assignment
+            # Scenario A: We are completing a Notary Reservation
+            if completar_notaria_id:
+                # Find matching placeholder by concept
+                placeholder_match = None
+                placeholder_idx = -1
+                
+                if req_autolink or not ref_str:
+                    # Find first placeholder matching concept
+                    for idx, (ld_p, ref_p) in enumerate(reserved_placeholders):
+                        if ld_p.concepto_solicitado == concept_req:
+                            placeholder_match = (ld_p, ref_p)
+                            placeholder_idx = idx
+                            break
+                else:
+                    # Find specific placeholder matching reference string
+                    for idx, (ld_p, ref_p) in enumerate(reserved_placeholders):
+                        if ref_p.referencia_portal == ref_str and ld_p.concepto_solicitado == concept_req:
+                            placeholder_match = (ld_p, ref_p)
+                            placeholder_idx = idx
+                            break
+
+                if not placeholder_match:
+                    row_result["status"] = "ERROR"
+                    row_result["error_message"] = f"No hay facturas RESERVADAS disponibles para el concepto '{concept_req}' de esta Notaría."
+                    validated_rows.append(row_result)
+                    continue
+
+                ld_p, ref_p = placeholder_match
+                # Pop from cached list so it is not double-allocated
+                reserved_placeholders.pop(placeholder_idx)
+
+                row_result["referencia_id"] = ref_p.referencia_id
+                row_result["referencia_asignada"] = ref_p.referencia_portal
+                row_result["lote_detalle_id"] = ld_p.lote_detalle_id
+
+                # Warning if development doesn't match the reserved one
+                if ld_p.desarrollo_id != desarrollo.desarrollo_id:
+                    row_result["status"] = "WARNING"
+                    row_result["error_message"] = f"El desarrollo no coincide con el desarrollo reservado en el lote original ({ld_p.lote_asignacion_id})."
+                elif has_dup:
+                    row_result["status"] = "WARNING"
+                    row_result["error_message"] = f"El cliente ya tiene una asignación de {concept_req} en esta ubicación (Ref: {dup_ref})."
+                else:
+                    row_result["status"] = "CORRECTO"
+
+                validated_rows.append(row_result)
+                continue
+
+            # Scenario B: General bulk assignment (Reactivo)
             if req_autolink or not ref_str:
                 if not resolved_rfc_id:
                     row_result["status"] = "ERROR"

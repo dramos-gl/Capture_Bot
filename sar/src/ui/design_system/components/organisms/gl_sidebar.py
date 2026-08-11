@@ -191,6 +191,12 @@ class NavigationSidebar(QFrame):
         self.btn_inv_masivo.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_masivo.setVisible(False)
 
+        self.btn_inv_apartar = QPushButton("Apartar Referencia")
+        self.btn_inv_apartar.setObjectName("subNavBtn")
+        self.btn_inv_apartar.setCheckable(True)
+        self.btn_inv_apartar.setIcon(Icons.hollow_dot("#94A3B8"))
+        self.btn_inv_apartar.setVisible(False)
+
         self.btn_inv_catalogos = QPushButton("Gestión de Catálogos")
         self.btn_inv_catalogos.setObjectName("subNavBtn")
         self.btn_inv_catalogos.setCheckable(True)
@@ -199,10 +205,12 @@ class NavigationSidebar(QFrame):
 
         self.inv_submenu_layout.addWidget(self.btn_inv_facturas)
         self.inv_submenu_layout.addWidget(self.btn_inv_masivo)
+        self.inv_submenu_layout.addWidget(self.btn_inv_apartar)
         self.inv_submenu_layout.addWidget(self.btn_inv_catalogos)
 
         self.buttons["inventario_facturas"] = self.btn_inv_facturas
         self.buttons["inventario_masivo"] = self.btn_inv_masivo
+        self.buttons["inventario_apartar"] = self.btn_inv_apartar
         self.buttons["inventario_catalogos"] = self.btn_inv_catalogos
         
         def _update_btn_icon(btn, icon_name, checked):
@@ -265,6 +273,7 @@ class NavigationSidebar(QFrame):
 
         self.btn_inv_facturas.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_facturas"))
         self.btn_inv_masivo.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_masivo"))
+        self.btn_inv_apartar.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_apartar"))
         self.btn_inv_catalogos.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_catalogos"))
 
     def _setup_footer(self):

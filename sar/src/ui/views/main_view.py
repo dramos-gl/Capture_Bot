@@ -99,6 +99,7 @@ class MainView(QWidget):
                 self.sidebar.show_item("inventario")
                 self.sidebar.show_item("inventario_facturas")
                 self.sidebar.show_item("inventario_masivo")
+                self.sidebar.show_item("inventario_apartar")
                 self.sidebar.show_item("inventario_catalogos")
                 self.sidebar.show_item("r2f_control")
                 if not default_item: default_item = "referencias"
@@ -139,6 +140,7 @@ class MainView(QWidget):
                 "inventario": "REFERENCIAS",
                 "inventario_facturas": "REFERENCIAS",
                 "inventario_masivo": "REFERENCIAS",
+                "inventario_apartar": "REFERENCIAS",
                 "inventario_catalogos": "REFERENCIAS",
                 "r2f_control": "REFERENCIAS",
                 "configuracion": "SEGURIDAD"
@@ -220,15 +222,15 @@ class MainView(QWidget):
                 self.stacked_widget.addWidget(self.r2f_control_view)
             self.stacked_widget.setCurrentWidget(self.r2f_control_view)
             self.r2f_control_view.refresh_data()
-        elif view_key in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
+        elif view_key in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos"]:
             if not self.inventory_view:
                 from sar.src.ui.views.inventory_view import InventoryView
                 self.inventory_view = InventoryView(self.db_connector, self)
                 self.stacked_widget.addWidget(self.inventory_view)
             self.stacked_widget.setCurrentWidget(self.inventory_view)
             
-            # Load catalogs only if entering mass assignment or catalog tabs
-            load_cats = view_key in ["inventario_masivo", "inventario_catalogos"]
+            # Load catalogs only if entering mass assignment, reservation or catalog tabs
+            load_cats = view_key in ["inventario_masivo", "inventario_apartar", "inventario_catalogos"]
             self.inventory_view.refresh_all(load_catalogs=load_cats)
             
             if view_key == "inventario":
