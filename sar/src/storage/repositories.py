@@ -397,14 +397,26 @@ class CatalogoRepository(BaseRepository):
 
     def get_all_desarrollos(self) -> List[Any]:
         from sar.src.storage.models import Desarrollo
-        from sqlalchemy.orm import selectinload
-        stmt = select(Desarrollo).options(selectinload(Desarrollo.delegacion)).order_by(Desarrollo.nombre)
+        stmt = select(Desarrollo).order_by(Desarrollo.nombre)
         return list(self.session.execute(stmt).scalars().all())
 
     def save_desarrollo(self, d: Any) -> Any:
         self.session.add(d)
         self.session.flush()
         return d
+
+    def get_desarrollo_empresas(self, desarrollo_id: int) -> List[Any]:
+        from sar.src.storage.models import DesarrolloEmpresa
+        from sqlalchemy.orm import selectinload
+        stmt = select(DesarrolloEmpresa).where(DesarrolloEmpresa.desarrollo_id == desarrollo_id)\
+            .options(selectinload(DesarrolloEmpresa.rfc), selectinload(DesarrolloEmpresa.delegacion))\
+            .order_by(DesarrolloEmpresa.desarrollo_empresa_id)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def save_desarrollo_empresa(self, de: Any) -> Any:
+        self.session.add(de)
+        self.session.flush()
+        return de
 
 
 
@@ -1596,25 +1608,38 @@ class InventarioRepository(BaseRepository):
 
     def get_desarrollos(self) -> List[dict]:
         from sqlalchemy import select
-        from sar.src.storage.models import Desarrollo, Delegacion
-        stmt = select(Desarrollo, Delegacion.nombre).join(Delegacion).where(Desarrollo.activo == True).order_by(Desarrollo.nombre)
+        from sar.src.storage.models import Desarrollo, DesarrolloEmpresa, Delegacion
+        stmt = (
+            select(Desarrollo, DesarrolloEmpresa, Delegacion)
+            .join(DesarrolloEmpresa, Desarrollo.desarrollo_id == DesarrolloEmpresa.desarrollo_id)
+            .join(Delegacion, DesarrolloEmpresa.delegacion_id == Delegacion.delegacion_id)
+            .where(Desarrollo.activo == True, DesarrolloEmpresa.activo == True)
+            .order_by(DesarrolloEmpresa.es_default.desc(), Desarrollo.nombre)  # defaults first
+        )
         results = self.session.execute(stmt).all()
-        return [
-            {
-                "desarrollo_id": d[0].desarrollo_id,
-                "nombre": d[0].nombre,
-                "delegacion_id": d[0].delegacion_id,
-                "delegacion_nombre": d[1]
-            }
-            for d in results
-        ]
+        # Evitar duplicados: si un desarrollo tiene varias empresas/delegaciones,
+        # conservamos el registro marcado como es_default (que viene primero por el ORDER BY).
+        seen_ids = set()
+        desarrollos_list = []
+        for row in results:
+            d_obj, de_obj, del_obj = row[0], row[1], row[2]
+            if d_obj.desarrollo_id not in seen_ids:
+                seen_ids.add(d_obj.desarrollo_id)
+                desarrollos_list.append({
+                    "desarrollo_id": d_obj.desarrollo_id,
+                    "nombre": d_obj.nombre,
+                    "delegacion_id": del_obj.delegacion_id,
+                    "delegacion_nombre": del_obj.nombre,
+                    "es_default": de_obj.es_default,
+                })
+        return desarrollos_list
 
     def save_desarrollo(self, nombre: str, delegacion_id: int) -> dict:
         from sar.src.storage.models import Desarrollo
-        d = Desarrollo(nombre=nombre.strip().upper(), delegacion_id=delegacion_id, activo=True)
+        d = Desarrollo(nombre=nombre.strip().upper(), activo=True)
         self.session.add(d)
         self.session.flush()
-        return {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "delegacion_id": d.delegacion_id}
+        return {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "delegacion_id": delegacion_id}
 
     def get_referencias_facturadas_paginated(
         self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, rfc_id: int = None, filter_assigned: str = "Todos", start_date: str = None, end_date: str = None
@@ -1690,8 +1715,10 @@ class InventarioRepository(BaseRepository):
             conditions_sql.append("ar.referencia_id IS NULL")
         elif filter_assigned == "Asignada":
             conditions_sql.append("es.codigo = 'ASIGNADA'")
+        elif filter_assigned == "Reservada":
+            conditions_sql.append("es.codigo = 'RESERVADA'")
         else: # Todos
-            conditions_sql.append("es.codigo IN ('FACTURADA', 'ASIGNADA')")
+            conditions_sql.append("es.codigo IN ('FACTURADA', 'ASIGNADA', 'RESERVADA')")
             
         if concepto_id:
             conditions_sql.append("gr.concepto_id = :concepto_id")
@@ -1740,7 +1767,8 @@ class InventarioRepository(BaseRepository):
                 des.nombre AS desarrollo_nombre,
                 ubi.cliente AS cliente_nombre,
                 ubi.mz, ubi.lote, ubi.edif, ubi.viv, ubi.lote_id_erp AS folio_electronico,
-                la.lote_asignacion_id AS lote_asignacion_id
+                la.lote_asignacion_id AS lote_asignacion_id,
+                es.codigo AS estado_codigo
             {sql_base}
             {where_clause}
             ORDER BY r.fecha_generacion DESC, r.referencia_id DESC
@@ -1774,7 +1802,8 @@ class InventarioRepository(BaseRepository):
                 "edif": row.edif or "",
                 "viv": row.viv or "",
                 "folio_electronico": row.folio_electronico or "",
-                "lote_asignacion_id": row.lote_asignacion_id
+                "lote_asignacion_id": row.lote_asignacion_id,
+                "estado_codigo": row.estado_codigo
             })
             
         return res, total_count
@@ -1843,13 +1872,20 @@ class InventarioRepository(BaseRepository):
         conds_asig.append("es.codigo = 'ASIGNADA'")
         where_asig = f"WHERE {' AND '.join(conds_asig)}"
         
+        # Reservada condition
+        conds_res = list(base_conditions)
+        conds_res.append("es.codigo = 'RESERVADA'")
+        where_res = f"WHERE {' AND '.join(conds_res)}"
+        
         query_disp = text(f"SELECT COUNT(DISTINCT r.referencia_id) {sql_base} {where_disp}")
         query_asig = text(f"SELECT COUNT(DISTINCT r.referencia_id) {sql_base} {where_asig}")
+        query_res = text(f"SELECT COUNT(DISTINCT r.referencia_id) {sql_base} {where_res}")
         
         disponibles = self.session.execute(query_disp, params).scalar() or 0
         asignadas = self.session.execute(query_asig, params).scalar() or 0
+        reservadas = self.session.execute(query_res, params).scalar() or 0
         
-        return {"disponibles": disponibles, "asignadas": asignadas}
+        return {"disponibles": disponibles, "asignadas": asignadas, "reservadas": reservadas}
 
     def crear_lote_asignacion(
         self, tipo_destino: str, notaria_id: Optional[int], colaborador_id: Optional[int],
@@ -2059,17 +2095,12 @@ class InventarioRepository(BaseRepository):
             for row in results
         ]
 
-    def count_referencias_disponibles(self, rfc_id: int, concepto_id: int, desarrollo_id: int) -> int:
+    def count_referencias_disponibles(self, rfc_id: int, concepto_id: int, delegacion_id: int) -> int:
         """Returns the count of FACTURADA references available for the given combination.
         Used for real-time UI feedback without side effects.
         """
-        from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto, Desarrollo
+        from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto
         from sqlalchemy import select, func
-
-        des = self.session.get(Desarrollo, desarrollo_id)
-        if not des:
-            return 0
-        delegacion_id = des.delegacion_id
 
         conc = self.session.get(Concepto, concepto_id)
         if not conc:
@@ -2106,15 +2137,37 @@ class InventarioRepository(BaseRepository):
         return result if result is not None else 0
 
     def apartar_referencias(
-        self, notaria_id: int, rfc_id: int, concepto_id: int, desarrollo_id: int, cantidad: int, usuario_id: int, observaciones: Optional[str] = None
+        self, notaria_id: int, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int, usuario_id: int, desarrollo_id: Optional[int] = None, observaciones: Optional[str] = None
     ) -> int:
         from sar.src.storage.models import LoteAsignacion, LoteDetalle, AsignacionReferencia, Referencia, EstadoSistema, Desarrollo, GrupoReferencia, Solicitud, Concepto
         from sqlalchemy import select
 
-        des = self.session.get(Desarrollo, desarrollo_id)
-        if not des:
-            raise ValueError("El desarrollo seleccionado no existe.")
-        delegacion_id = des.delegacion_id
+        # If desarrollo_id is not specified (e.g. "Cualquier Desarrollo"), we find fallback development
+        from sar.src.storage.models import DesarrolloEmpresa
+        if not desarrollo_id:
+            des_emp = (
+                self.session.query(DesarrolloEmpresa)
+                .filter(
+                    DesarrolloEmpresa.rfc_id == rfc_id,
+                    DesarrolloEmpresa.delegacion_id == delegacion_id,
+                    DesarrolloEmpresa.activo == True
+                )
+                .order_by(DesarrolloEmpresa.es_default.desc())
+                .first()
+            )
+            if not des_emp:
+                # Fallback to any active development for this delegation
+                des_emp = (
+                    self.session.query(DesarrolloEmpresa)
+                    .filter(
+                        DesarrolloEmpresa.delegacion_id == delegacion_id,
+                        DesarrolloEmpresa.activo == True
+                    )
+                    .first()
+                )
+            if not des_emp:
+                raise ValueError("No se encontró ningún desarrollo activo asociado a la delegación seleccionada.")
+            desarrollo_id = des_emp.desarrollo_id
 
         estado_facturada_id = self._get_estado_id("referencia", "FACTURADA")
         estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
@@ -2187,6 +2240,127 @@ class InventarioRepository(BaseRepository):
             )
             self.session.add(asig)
             ref.estado_id = estado_reservada_id
+
+        self.session.flush()
+        return lote.lote_asignacion_id
+
+    def apartar_referencias_lote(
+        self, notaria_id: int, usuario_id: int, partidas: List[dict], observaciones: Optional[str] = None
+    ) -> int:
+        """
+        Reserva referencias para múltiples partidas bajo un único lote_asignacion.
+        Cada partida en 'partidas' debe ser un diccionario con:
+        - rfc_id, concepto_id, delegacion_id, cantidad, desarrollo_id (opcional)
+        """
+        from sar.src.storage.models import LoteAsignacion, LoteDetalle, AsignacionReferencia, Referencia, EstadoSistema, Desarrollo, GrupoReferencia, Solicitud, Concepto, DesarrolloEmpresa
+        from sqlalchemy import select
+
+        estado_facturada_id = self._get_estado_id("referencia", "FACTURADA")
+        estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
+
+        # 1. Crear el lote global de asignación (cabecera única)
+        lote = LoteAsignacion(
+            tipo_destino="NOTARIA",
+            notaria_id=notaria_id,
+            colaborador_id=None,
+            solicitante_externo=None,
+            observaciones=observaciones if observaciones else "Apartado/Reserva de referencias múltiple",
+            usuario_creacion=usuario_id
+        )
+        self.session.add(lote)
+        self.session.flush()
+
+        # 2. Iterar y procesar cada renglón/partida
+        for partida in partidas:
+            rfc_id = partida["rfc_id"]
+            concepto_id = partida["concepto_id"]
+            delegacion_id = partida["delegacion_id"]
+            cantidad = partida["cantidad"]
+            desarrollo_id = partida.get("desarrollo_id")
+
+            # Buscar desarrollo default si no se especifica
+            if not desarrollo_id:
+                des_emp = (
+                    self.session.query(DesarrolloEmpresa)
+                    .filter(
+                        DesarrolloEmpresa.rfc_id == rfc_id,
+                        DesarrolloEmpresa.delegacion_id == delegacion_id,
+                        DesarrolloEmpresa.activo == True
+                    )
+                    .order_by(DesarrolloEmpresa.es_default.desc())
+                    .first()
+                )
+                if not des_emp:
+                    des_emp = (
+                        self.session.query(DesarrolloEmpresa)
+                        .filter(
+                            DesarrolloEmpresa.delegacion_id == delegacion_id,
+                            DesarrolloEmpresa.activo == True
+                        )
+                        .first()
+                    )
+                if not des_emp:
+                    raise ValueError("No se encontró ningún desarrollo activo asociado a la delegación seleccionada.")
+                desarrollo_id = des_emp.desarrollo_id
+
+            conc = self.session.get(Concepto, concepto_id)
+            if not conc:
+                raise ValueError("El concepto seleccionado no existe.")
+            
+            expected_aliases = []
+            if conc.alias == "CLG": expected_aliases = ["CLG"]
+            elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO"): expected_aliases = ["AVISO PREVENTIVO"]
+            elif conc.alias == "ANALISIS": expected_aliases = ["ANALISIS"]
+            else: expected_aliases = [conc.alias]
+
+            available_stmt = (
+                select(Referencia)
+                .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+                .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
+                .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
+                .join(Solicitud, Referencia.solicitud_id == Solicitud.solicitud_id)
+                .where(
+                    EstadoSistema.entidad == 'referencia',
+                    EstadoSistema.codigo == 'FACTURADA',
+                    GrupoReferencia.rfc_id == rfc_id,
+                    Concepto.alias.in_(expected_aliases),
+                    Solicitud.delegacion_id == delegacion_id,
+                    ~Referencia.referencia_id.in_(
+                        select(AsignacionReferencia.referencia_id)
+                    )
+                )
+                .limit(cantidad)
+            )
+            available_refs = self.session.execute(available_stmt).scalars().all()
+            
+            if len(available_refs) < cantidad:
+                raise ValueError(f"No hay suficientes facturas disponibles en estado FACTURADA. Solicitadas: {cantidad}, Disponibles: {len(available_refs)}")
+
+            # Crear el LoteDetalle correspondiente a este renglón
+            ld = LoteDetalle(
+                lote_asignacion_id=lote.lote_asignacion_id,
+                rfc_id=rfc_id,
+                concepto_id=concepto_id,
+                desarrollo_id=desarrollo_id,
+                cantidad_solicitada=cantidad,
+                cantidad_confirmada=0
+            )
+            self.session.add(ld)
+            self.session.flush()
+
+            # Vincular referencias
+            for ref in available_refs:
+                asig = AsignacionReferencia(
+                    lote_detalle_id=ld.lote_detalle_id,
+                    referencia_id=ref.referencia_id,
+                    ubicacion_id=None,
+                    intento=1,
+                    estado_id=estado_reservada_id,
+                    usuario_asignacion=usuario_id,
+                    observaciones="Reservada"
+                )
+                self.session.add(asig)
+                ref.estado_id = estado_reservada_id
 
         self.session.flush()
         return lote.lote_asignacion_id
@@ -2274,9 +2448,142 @@ class InventarioRepository(BaseRepository):
                 ar.lote_detalle.cantidad_confirmada += 1
                 
                 # Update reference status to ASIGNADA
+                # Update reference status to ASIGNADA
                 if ar.referencia_id:
                     ref = self.session.get(Referencia, ar.referencia_id)
                     if ref:
                         ref.estado_id = estado_asignada_id
         self.session.flush()
+
+    def get_referencias_disponibles_filtro(
+        self, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int
+    ) -> List[dict]:
+        """Fetches available references matching criteria using FIFO order, returning lightweight dicts."""
+        from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto
+        from sqlalchemy import select
+
+        conc = self.session.get(Concepto, concepto_id)
+        if not conc:
+            return []
+
+        expected_aliases = []
+        if conc.alias == "CLG": expected_aliases = ["CLG"]
+        elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO", "AVISO PREVENTIVO"): expected_aliases = ["AVISO PREVENTIVO"]
+        elif conc.alias == "ANALISIS": expected_aliases = ["ANALISIS"]
+        else: expected_aliases = [conc.alias]
+
+        from sar.src.storage.models import Rfc
+        stmt = (
+            select(
+                Referencia.referencia_id,
+                Referencia.referencia_portal,
+                Referencia.importe,
+                Concepto.nombre,
+                Rfc.razon_social
+            )
+            .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+            .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
+            .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
+            .join(Rfc, GrupoReferencia.rfc_id == Rfc.rfc_id)
+            .join(Solicitud, Referencia.solicitud_id == Solicitud.solicitud_id)
+            .where(
+                EstadoSistema.entidad == 'referencia',
+                EstadoSistema.codigo == 'FACTURADA',
+                GrupoReferencia.rfc_id == rfc_id,
+                Concepto.alias.in_(expected_aliases),
+                Solicitud.delegacion_id == delegacion_id,
+                ~Referencia.referencia_id.in_(
+                    select(AsignacionReferencia.referencia_id)
+                )
+            )
+            .order_by(Referencia.fecha_generacion.asc(), Referencia.referencia_id.asc())
+            .limit(cantidad)
+        )
+        rows = self.session.execute(stmt).all()
+        return [
+            {
+                "referencia_id": r[0],
+                "referencia_portal": r[1],
+                "importe": str(r[2]) if r[2] else "0.00",
+                "concepto_nombre": r[3] or "",
+                "empresa_nombre": r[4] or ""
+            }
+            for r in rows
+        ]
+
+    def asignar_referencias_directo(
+        self, tipo_destino: str, destino_id: int, usuario_id: int, referencias_data: List[dict],
+        solicitante_externo: Optional[str] = None, observaciones: Optional[str] = None
+    ) -> int:
+        """Assigns references directly (individual selection style) to Notaria/Colaborador."""
+        from sar.src.storage.models import LoteAsignacion, LoteDetalle, AsignacionReferencia, Referencia, Concepto, Desarrollo
+        from sqlalchemy import select
+        import datetime
+
+        notaria_id = destino_id if tipo_destino == "NOTARIA" else None
+        colaborador_id = destino_id if tipo_destino == "COLABORADOR" else None
+
+        lote = LoteAsignacion(
+            tipo_destino=tipo_destino,
+            notaria_id=notaria_id,
+            colaborador_id=colaborador_id,
+            solicitante_externo=solicitante_externo.strip() if solicitante_externo else None,
+            observaciones=observaciones.strip() if observaciones else "Asignación Individual Directa",
+            usuario_creacion=usuario_id
+        )
+        self.session.add(lote)
+        self.session.flush()
+
+        estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
+
+        # Agrupar referencias por (rfc_id, concepto_id, desarrollo_id)
+        for item in referencias_data:
+            ref_id = item["referencia_id"]
+            delegacion_id = item["delegacion_id"]
+
+            ref = self.session.get(Referencia, ref_id)
+            if not ref:
+                continue
+
+            # Obtener el desarrollo_id correspondiente a esa delegación y al RFC del grupo de la referencia
+            from sar.src.storage.models import DesarrolloEmpresa
+            de_stmt = select(DesarrolloEmpresa.desarrollo_id).where(
+                DesarrolloEmpresa.delegacion_id == delegacion_id,
+                DesarrolloEmpresa.rfc_id == ref.grupo.rfc_id,
+                DesarrolloEmpresa.activo == True
+            )
+            desarrollo_id = self.session.execute(de_stmt).scalar()
+            if not desarrollo_id:
+                # Fallback to any development matching this delegation
+                from sar.src.storage.models import Desarrollo
+                des_stmt = select(Desarrollo.desarrollo_id).where(Desarrollo.nombre == "GENERAL")
+                desarrollo_id = self.session.execute(des_stmt).scalar() or 1
+
+            ld = LoteDetalle(
+                lote_asignacion_id=lote.lote_asignacion_id,
+                rfc_id=ref.grupo.rfc_id,
+                concepto_id=ref.grupo.concepto_id,
+                desarrollo_id=desarrollo_id,
+                cantidad_solicitada=1,
+                cantidad_confirmada=1
+            )
+            self.session.add(ld)
+            self.session.flush()
+
+            # Registrar asignación
+            asig = AsignacionReferencia(
+                lote_detalle_id=ld.lote_detalle_id,
+                referencia_id=ref.referencia_id,
+                ubicacion_id=None,
+                intento=1,
+                estado_id=estado_asignada_id,
+                usuario_asignacion=usuario_id,
+                observaciones="Asignado Individualmente"
+            )
+            self.session.add(asig)
+            ref.estado_id = estado_asignada_id
+
+        self.session.flush()
+        return lote.lote_asignacion_id
+
 

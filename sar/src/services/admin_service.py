@@ -13,7 +13,7 @@ from sar.src.storage.repositories import (
 from sar.src.storage.models import (
     Usuario, Rfc, Concepto, ParametroSistema, EventoSistema,
     Rol, LocalizadorPortal, Municipio, Delegacion,
-    AppModulo, Modulo, EstadoSistema, Accion, Notaria, Colaborador, Desarrollo
+    AppModulo, Modulo, EstadoSistema, Accion, Notaria, Colaborador, Desarrollo, DesarrolloEmpresa
 )
 
 def require_active_session(func):
@@ -259,22 +259,75 @@ class AdminService:
         if data.get("desarrollo_id"):
             desarrollo = self.session.get(Desarrollo, data["desarrollo_id"])
             action = "ACTUALIZAR_REGISTRO"
-            old_val = {"nombre": desarrollo.nombre, "delegacion_id": desarrollo.delegacion_id, "activo": desarrollo.activo}
+            old_val = {"nombre": desarrollo.nombre, "activo": desarrollo.activo}
             desarrollo.nombre = data.get("nombre", desarrollo.nombre).strip().upper()
-            desarrollo.delegacion_id = data.get("delegacion_id", desarrollo.delegacion_id)
             if "activo" in data:
                 desarrollo.activo = data["activo"]
         else:
             desarrollo = Desarrollo(
                 nombre=data["nombre"].strip().upper(),
-                delegacion_id=data["delegacion_id"],
                 activo=data.get("activo", True)
             )
 
         self.cat_repo.save_desarrollo(desarrollo)
-        new_val = {"desarrollo_id": desarrollo.desarrollo_id, "nombre": desarrollo.nombre, "delegacion_id": desarrollo.delegacion_id, "activo": desarrollo.activo}
+        new_val = {"desarrollo_id": desarrollo.desarrollo_id, "nombre": desarrollo.nombre, "activo": desarrollo.activo}
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": desarrollo.nombre})
         return desarrollo
+
+    @require_active_session
+    def save_desarrollo_empresa(self, usuario_id: Optional[int], sesion_id: Optional[int], data: Dict[str, Any]) -> DesarrolloEmpresa:
+        modulo = "ADMIN_CATALOGOS"
+        action = "CREAR_REGISTRO"
+        old_val = None
+
+        if data.get("desarrollo_empresa_id"):
+            de = self.session.get(DesarrolloEmpresa, data["desarrollo_empresa_id"])
+            action = "ACTUALIZAR_REGISTRO"
+            old_val = {
+                "desarrollo_id": de.desarrollo_id,
+                "rfc_id": de.rfc_id,
+                "delegacion_id": de.delegacion_id,
+                "es_default": de.es_default,
+                "activo": de.activo
+            }
+            de.desarrollo_id = data.get("desarrollo_id", de.desarrollo_id)
+            de.rfc_id = data.get("rfc_id", de.rfc_id)
+            de.delegacion_id = data.get("delegacion_id", de.delegacion_id)
+            if "es_default" in data:
+                de.es_default = data["es_default"]
+            if "activo" in data:
+                de.activo = data["activo"]
+        else:
+            de = DesarrolloEmpresa(
+                desarrollo_id=data["desarrollo_id"],
+                rfc_id=data["rfc_id"],
+                delegacion_id=data["delegacion_id"],
+                es_default=data.get("es_default", False),
+                activo=data.get("activo", True)
+            )
+
+        # Business rule: if es_default is True, make sure other records for the same desarrollo_id are NOT default
+        if de.es_default:
+            from sqlalchemy import update
+            self.session.execute(
+                update(DesarrolloEmpresa)
+                .where(DesarrolloEmpresa.desarrollo_id == de.desarrollo_id)
+                .where(DesarrolloEmpresa.desarrollo_empresa_id != (de.desarrollo_empresa_id or 0))
+                .values(es_default=False)
+            )
+
+        self.cat_repo.save_desarrollo_empresa(de)
+        new_val = {
+            "desarrollo_empresa_id": de.desarrollo_empresa_id,
+            "desarrollo_id": de.desarrollo_id,
+            "rfc_id": de.rfc_id,
+            "delegacion_id": de.delegacion_id,
+            "es_default": de.es_default,
+            "activo": de.activo
+        }
+        self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"desarrollo_id": de.desarrollo_id, "rfc_id": de.rfc_id})
+        return de
+
 
 
     @require_active_session

@@ -25,6 +25,10 @@ class CatalogsView(QWidget):
         
         self.delegaciones_list = []
         self.delegaciones_map = {}
+        self.rfcs_list = []
+        
+        self.current_desarrollo_id = None
+        self.current_desarrollo_empresa_id = None
         
         self._build_ui()
         self.refresh_data()
@@ -72,17 +76,32 @@ class CatalogsView(QWidget):
         lay_colaboradores.addWidget(self.tbl_colaboradores)
         self.tabs.addTab(self.tab_colaboradores, "Colaboradores")
         
-        # 4. Desarrollos Tab
+        # 4. Desarrollos Tab (horizontal split layout)
         self.tab_desarrollos = QWidget()
         lay_desarrollos = QHBoxLayout(self.tab_desarrollos)
         lay_desarrollos.setContentsMargins(0, 0, 0, 0)
+        lay_desarrollos.setSpacing(16)
+        
+        # Left Table: Developments
         self.tbl_desarrollos = CrudTablePanel("Catálogo de Desarrollos")
-        self.tbl_desarrollos.setup_table(["ID", "Nombre", "Delegación", "Estado"], ["desarrollo_id", "nombre", "delegacion_nombre", "activo"])
+        self.tbl_desarrollos.setup_table(["ID", "Nombre", "Estado"], ["desarrollo_id", "nombre", "activo"])
         self.tbl_desarrollos.add_requested.connect(self._on_new_desarrollo)
         self.tbl_desarrollos.edit_requested.connect(self._on_edit_desarrollo)
+        self.tbl_desarrollos.item_selected.connect(self._on_desarrollo_selected)
         self.tbl_desarrollos.btn_add.setVisible(self.can_edit)
         self.tbl_desarrollos.btn_edit.setVisible(self.can_edit)
-        lay_desarrollos.addWidget(self.tbl_desarrollos)
+        lay_desarrollos.addWidget(self.tbl_desarrollos, stretch=6)
+        
+        # Right Table: Development-Companies Mapping
+        self.tbl_desarrollo_empresas = CrudTablePanel("Empresas Asociadas")
+        self.tbl_desarrollo_empresas.setup_table(["ID", "Empresa (RFC)", "Delegación", "Default", "Estado"], ["desarrollo_empresa_id", "rfc_nombre", "delegacion_nombre", "es_default", "activo"])
+        self.tbl_desarrollo_empresas.add_requested.connect(self._on_new_desarrollo_empresa)
+        self.tbl_desarrollo_empresas.edit_requested.connect(self._on_edit_desarrollo_empresa)
+        self.tbl_desarrollo_empresas.btn_add.setVisible(self.can_edit)
+        self.tbl_desarrollo_empresas.btn_edit.setVisible(self.can_edit)
+        self.tbl_desarrollo_empresas.setEnabled(False)
+        lay_desarrollos.addWidget(self.tbl_desarrollo_empresas, stretch=4)
+        
         self.tabs.addTab(self.tab_desarrollos, "Desarrollos")
 
     # --- CONCEPTOS ---
@@ -217,7 +236,7 @@ class CatalogsView(QWidget):
         dialog = CustomDialog(title, self)
         
         self.inp_col_nombre = LabeledInput("Nombre del Colaborador")
-        self.chk_col_activo = QCheckBox("Colaborador Activo")
+        self.chk_col_activo = QCheckBox("Colaborador Activa")
         self.chk_col_activo.setChecked(True)
         
         dialog.add_widget(self.inp_col_nombre)
@@ -276,20 +295,15 @@ class CatalogsView(QWidget):
         
         self.inp_d_nombre = LabeledInput("Nombre del Desarrollo")
         
-        delegacion_names = [d["nombre"] for d in self.delegaciones_list]
-        self.cmb_d_delegacion = LabeledComboBox("Delegación", delegacion_names)
-        
         self.chk_d_activo = QCheckBox("Desarrollo Activo")
         self.chk_d_activo.setChecked(True)
         
         dialog.add_widget(self.inp_d_nombre)
-        dialog.add_widget(self.cmb_d_delegacion)
         dialog.add_widget(self.chk_d_activo)
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
             self.inp_d_nombre.input.setReadOnly(True)
-            self.cmb_d_delegacion.combo.setEnabled(False)
             self.chk_d_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
@@ -307,37 +321,17 @@ class CatalogsView(QWidget):
         dialog = self._create_desarrollo_dialog(f"Editar Desarrollo: {data.get('nombre')}")
         self.inp_d_nombre.set_text(data.get("nombre", ""))
         self.chk_d_activo.setChecked(bool(data.get("activo", False)))
-        
-        # Set selected delegacion
-        del_id = data.get("delegacion_id")
-        del_name = self.delegaciones_map.get(del_id, "")
-        idx = self.cmb_d_delegacion.combo.findText(del_name)
-        if idx >= 0:
-            self.cmb_d_delegacion.combo.setCurrentIndex(idx)
-            
         self.inp_d_nombre.set_focus()
         dialog.exec()
 
     def _save_desarrollo(self, dialog: CustomDialog):
-        del_name = self.cmb_d_delegacion.combo.currentText()
-        # Find delegacion_id from name
-        del_id = None
-        for d in self.delegaciones_list:
-            if d["nombre"] == del_name:
-                del_id = d["delegacion_id"]
-                break
-                
         data = {
             "desarrollo_id": self.current_desarrollo_id,
             "nombre": self.inp_d_nombre.text().strip().upper(),
-            "delegacion_id": del_id,
             "activo": self.chk_d_activo.isChecked()
         }
         if not data["nombre"]:
             QMessageBox.warning(self, "Validación", "El Nombre del Desarrollo es obligatorio.")
-            return
-        if not data["delegacion_id"]:
-            QMessageBox.warning(self, "Validación", "La Delegación es obligatoria.")
             return
         try:
             if self.api_client.connect_via_api:
@@ -354,12 +348,151 @@ class CatalogsView(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
+    def _on_desarrollo_selected(self, data: dict):
+        self.current_desarrollo_id = data.get("desarrollo_id")
+        self.tbl_desarrollo_empresas.setEnabled(True)
+        self.tbl_desarrollo_empresas.lbl_title.setText(f"Empresas: {data.get('nombre')}")
+        self.refresh_desarrollo_empresas()
+
+    # --- DESARROLLO EMPRESAS ---
+    def _create_desarrollo_empresa_dialog(self, title: str) -> CustomDialog:
+        dialog = CustomDialog(title, self)
+        
+        rfc_names = [f"{r['rfc']} - {r['razon_social']}" for r in self.rfcs_list]
+        self.cmb_de_rfc = LabeledComboBox("Empresa", rfc_names)
+        
+        del_names = [d["nombre"] for d in self.delegaciones_activas_list]
+        self.cmb_de_delegacion = LabeledComboBox("Delegación", del_names)
+        
+        self.chk_de_default = QCheckBox("Empresa Predeterminada (es_default)")
+        self.chk_de_activo = QCheckBox("Asociación Activa")
+        self.chk_de_activo.setChecked(True)
+        
+        dialog.add_widget(self.cmb_de_rfc)
+        dialog.add_widget(self.cmb_de_delegacion)
+        dialog.add_widget(self.chk_de_default)
+        dialog.add_widget(self.chk_de_activo)
+        
+        if not self.can_edit:
+            dialog.btn_save.setVisible(False)
+            self.cmb_de_rfc.combo.setEnabled(False)
+            self.cmb_de_delegacion.combo.setEnabled(False)
+            self.chk_de_default.setEnabled(False)
+            self.chk_de_activo.setEnabled(False)
+            
+        dialog.btn_save.clicked.disconnect()
+        dialog.btn_save.clicked.connect(lambda: self._save_desarrollo_empresa(dialog))
+        return dialog
+
+    def _on_new_desarrollo_empresa(self):
+        self.current_desarrollo_empresa_id = None
+        dialog = self._create_desarrollo_empresa_dialog("Asociar Nueva Empresa")
+        dialog.exec()
+
+    def _on_edit_desarrollo_empresa(self, data: dict):
+        self.current_desarrollo_empresa_id = data.get("desarrollo_empresa_id")
+        dialog = self._create_desarrollo_empresa_dialog("Editar Asociación")
+        
+        # Set current RFC
+        rfc_display = f"{data.get('rfc_nombre', '')} - {data.get('rfc_razon_social', '')}"
+        idx = self.cmb_de_rfc.combo.findText(rfc_display)
+        if idx >= 0:
+            self.cmb_de_rfc.combo.setCurrentIndex(idx)
+            
+        # Set current Delegación
+        del_name = data.get("delegacion_nombre")
+        idx2 = self.cmb_de_delegacion.combo.findText(del_name)
+        if idx2 < 0 and del_name:
+            self.cmb_de_delegacion.combo.addItem(del_name)
+            idx2 = self.cmb_de_delegacion.combo.findText(del_name)
+        if idx2 >= 0:
+            self.cmb_de_delegacion.combo.setCurrentIndex(idx2)
+            
+        self.chk_de_default.setChecked(bool(data.get("es_default", False)))
+        self.chk_de_activo.setChecked(bool(data.get("activo", False)))
+        dialog.exec()
+
+    def _save_desarrollo_empresa(self, dialog: CustomDialog):
+        rfc_text = self.cmb_de_rfc.combo.currentText()
+        rfc_id = None
+        for r in self.rfcs_list:
+            display = f"{r['rfc']} - {r['razon_social']}"
+            if display == rfc_text:
+                rfc_id = r["rfc_id"]
+                break
+                
+        del_name = self.cmb_de_delegacion.combo.currentText()
+        del_id = None
+        for d in self.delegaciones_list:
+            if d["nombre"] == del_name:
+                del_id = d["delegacion_id"]
+                break
+                
+        data = {
+            "desarrollo_empresa_id": self.current_desarrollo_empresa_id,
+            "desarrollo_id": self.current_desarrollo_id,
+            "rfc_id": rfc_id,
+            "delegacion_id": del_id,
+            "es_default": self.chk_de_default.isChecked(),
+            "activo": self.chk_de_activo.isChecked()
+        }
+        if not data["rfc_id"]:
+            QMessageBox.warning(self, "Validación", "La Empresa es obligatoria.")
+            return
+        if not data["delegacion_id"]:
+            QMessageBox.warning(self, "Validación", "La Delegación es obligatoria.")
+            return
+        try:
+            if self.api_client.connect_via_api:
+                payload = {"usuario_id": self.current_user_id, "sesion_id": self.current_sesion_id, "data": data}
+                self.api_client.request("POST", "/api/admin/save/desarrollo_empresas", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    service = AdminService(session)
+                    service.save_desarrollo_empresa(self.current_user_id, self.current_sesion_id, data)
+                    session.commit()
+            QMessageBox.information(self, "Éxito", "Asociación de empresa guardada correctamente.")
+            dialog.accept()
+            self.refresh_desarrollo_empresas()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+    def refresh_desarrollo_empresas(self):
+        if not self.current_desarrollo_id:
+            self.tbl_desarrollo_empresas.populate([])
+            return
+        try:
+            if self.api_client.connect_via_api:
+                data = self.api_client.request("GET", "/api/admin/data/desarrollo_empresas", data={"desarrollo_id": self.current_desarrollo_id})
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = CatalogoRepository(session)
+                    items = repo.get_desarrollo_empresas(self.current_desarrollo_id)
+                    data = [
+                        {
+                            "desarrollo_empresa_id": de.desarrollo_empresa_id,
+                            "desarrollo_id": de.desarrollo_id,
+                            "rfc_id": de.rfc_id,
+                            "rfc_nombre": de.rfc.rfc if de.rfc else "",
+                            "rfc_razon_social": de.rfc.razon_social if de.rfc else "",
+                            "delegacion_id": de.delegacion_id,
+                            "delegacion_nombre": de.delegacion.nombre if de.delegacion else "",
+                            "es_default": de.es_default,
+                            "activo": de.activo
+                        }
+                        for de in items
+                    ]
+            self.tbl_desarrollo_empresas.populate(data)
+        except Exception as e:
+            print("Error refreshing desarrollo empresas:", e)
+
     # --- GENERAL ---
     def refresh_data(self):
         try:
-            # First, fetch delegaciones
             if self.api_client.connect_via_api:
                 self.delegaciones_list = self.api_client.request("GET", "/api/admin/data/delegaciones")
+                self.delegaciones_activas_list = [d for d in self.delegaciones_list if d.get("activo", True)]
+                self.rfcs_list = self.api_client.request("GET", "/api/admin/data/rfcs")
                 concepts_data = self.api_client.request("GET", "/api/admin/data/conceptos")
                 notarias_data = self.api_client.request("GET", "/api/admin/data/notarias")
                 colaboradores_data = self.api_client.request("GET", "/api/admin/data/colaboradores")
@@ -369,7 +502,11 @@ class CatalogsView(QWidget):
                     repo = CatalogoRepository(session)
                     
                     dels = repo.get_all_delegaciones_list()
-                    self.delegaciones_list = [{"delegacion_id": d.delegacion_id, "nombre": d.nombre} for d in dels]
+                    self.delegaciones_list = [{"delegacion_id": d.delegacion_id, "nombre": d.nombre, "activo": d.activo} for d in dels]
+                    self.delegaciones_activas_list = [d for d in self.delegaciones_list if d.get("activo", True)]
+                    
+                    rfcs = repo.get_all_rfcs()
+                    self.rfcs_list = [{"rfc_id": r.rfc_id, "rfc": r.rfc, "razon_social": r.razon_social} for r in rfcs]
                     
                     concepts = repo.get_all_conceptos()
                     concepts_data = [{"concepto_id": c.concepto_id, "codigo_portal": c.codigo_portal, "nombre": c.nombre, "alias": c.alias, "activo": c.activo} for c in concepts]
@@ -382,7 +519,7 @@ class CatalogsView(QWidget):
                     
                     desas = repo.get_all_desarrollos()
                     desarrollos_data = [
-                        {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "delegacion_id": d.delegacion_id, "delegacion_nombre": d.delegacion.nombre if d.delegacion else "", "activo": d.activo}
+                        {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "activo": d.activo}
                         for d in desas
                     ]
             
@@ -393,6 +530,9 @@ class CatalogsView(QWidget):
             self.tbl_notarias.populate(notarias_data)
             self.tbl_colaboradores.populate(colaboradores_data)
             self.tbl_desarrollos.populate(desarrollos_data)
+            
+            # Refresh details table if there's any active development selected
+            self.refresh_desarrollo_empresas()
             
         except Exception as e:
             print("Error refreshing catalogos:", e)

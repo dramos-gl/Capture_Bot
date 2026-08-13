@@ -9,7 +9,8 @@ from sar.src.storage.repositories import UsuarioRepository, CatalogoRepository, 
 from sar.src.services.admin_service import AdminService
 from sar.src.storage.models import (
     Usuario, Rol, Permiso, AppModulo, Modulo, Accion,
-    Concepto, Municipio, Delegacion, Rfc, EstadoSistema, ParametroSistema, LocalizadorPortal
+    Concepto, Municipio, Delegacion, Rfc, EstadoSistema, ParametroSistema, LocalizadorPortal,
+    DesarrolloEmpresa
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -25,7 +26,7 @@ class AdminSaveRequest(BaseModel):
     data: Dict[str, Any]
 
 @router.get("/data/{entity}")
-def get_admin_entity_data(entity: str, db: Session = Depends(get_db)):
+def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: Session = Depends(get_db)):
     try:
         user_repo = UsuarioRepository(db)
         cat_repo = CatalogoRepository(db)
@@ -80,8 +81,27 @@ def get_admin_entity_data(entity: str, db: Session = Depends(get_db)):
         elif entity == "desarrollos":
             items = cat_repo.get_all_desarrollos()
             return [
-                {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "delegacion_id": d.delegacion_id, "delegacion_nombre": d.delegacion.nombre if d.delegacion else "", "activo": d.activo}
+                {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "activo": d.activo}
                 for d in items
+            ]
+        elif entity == "desarrollo_empresas":
+            if desarrollo_id:
+                items = cat_repo.get_desarrollo_empresas(desarrollo_id)
+            else:
+                items = []
+            return [
+                {
+                    "desarrollo_empresa_id": de.desarrollo_empresa_id,
+                    "desarrollo_id": de.desarrollo_id,
+                    "rfc_id": de.rfc_id,
+                    "rfc_nombre": de.rfc.rfc if de.rfc else "",
+                    "rfc_razon_social": de.rfc.razon_social if de.rfc else "",
+                    "delegacion_id": de.delegacion_id,
+                    "delegacion_nombre": de.delegacion.nombre if de.delegacion else "",
+                    "es_default": de.es_default,
+                    "activo": de.activo
+                }
+                for de in items
             ]
         elif entity == "municipios":
             items = cat_repo.get_all_municipios()
@@ -189,6 +209,10 @@ def save_admin_entity(entity: str, request: AdminSaveRequest, db: Session = Depe
             res = service.save_desarrollo(request.usuario_id, request.sesion_id, request.data)
             db.commit()
             return {"detail": "Desarrollo guardado con éxito", "id": res.desarrollo_id}
+        elif entity == "desarrollo_empresas":
+            res = service.save_desarrollo_empresa(request.usuario_id, request.sesion_id, request.data)
+            db.commit()
+            return {"detail": "Empresa asociada guardada con éxito", "id": res.desarrollo_empresa_id}
         elif entity == "municipios":
             res = service.save_municipio(request.usuario_id, request.sesion_id, request.data)
             db.commit()

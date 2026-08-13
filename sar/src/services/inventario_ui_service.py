@@ -108,15 +108,15 @@ class InventarioUIService:
                 repo = InventarioRepository(session)
                 return repo.get_desarrollos()
 
-    def get_disponibles_count(self, rfc_id: int, concepto_id: int, desarrollo_id: int) -> int:
-        """Returns the count of FACTURADA references available for the given (rfc, concepto, desarrollo).
+    def get_disponibles_count(self, rfc_id: int, concepto_id: int, delegacion_id: int) -> int:
+        """Returns the count of FACTURADA references available for the given (rfc, concepto, delegacion).
         Used by the real-time availability column in the InteractiveGrid.
         """
         if self.api_client.connect_via_api:
             try:
                 result = self.api_client.request(
                     "GET", "/api/docs/inventario/disponibles",
-                    params={"rfc_id": rfc_id, "concepto_id": concepto_id, "desarrollo_id": desarrollo_id}
+                    params={"rfc_id": rfc_id, "concepto_id": concepto_id, "delegacion_id": delegacion_id}
                 )
                 return result.get("count", 0) if isinstance(result, dict) else 0
             except Exception:
@@ -127,7 +127,7 @@ class InventarioUIService:
             try:
                 with self.db_connector.get_session() as session:
                     repo = InventarioRepository(session)
-                    return repo.count_referencias_disponibles(rfc_id, concepto_id, desarrollo_id)
+                    return repo.count_referencias_disponibles(rfc_id, concepto_id, delegacion_id)
             except Exception:
                 return 0
 
@@ -158,7 +158,7 @@ class InventarioUIService:
                 from sar.src.storage.models import Concepto, Delegacion, Rfc
                 from sqlalchemy import select
                 concepts = session.execute(select(Concepto).where(Concepto.activo == True)).scalars().all()
-                delegations = session.execute(select(Delegacion)).scalars().all()
+                delegations = session.execute(select(Delegacion).where(Delegacion.activo == True)).scalars().all()
                 rfcs = session.execute(select(Rfc).where(Rfc.activo == True)).scalars().all()
                 
                 return {
@@ -295,3 +295,49 @@ class InventarioUIService:
             with self.db_connector.get_session() as session:
                 repo = InventarioRepository(session)
                 return repo.get_facturas_by_referencia_id(referencia_id)
+
+    def get_referencias_disponibles_filtro(
+        self, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int
+    ) -> List[Dict[str, Any]]:
+        """Fetches available references under given criteria using FIFO."""
+        if self.api_client.connect_via_api:
+            payload = {
+                "rfc_id": rfc_id,
+                "concepto_id": concepto_id,
+                "delegacion_id": delegacion_id,
+                "cantidad": cantidad
+            }
+            return self.api_client.request("GET", "/api/docs/inventario/disponibles/filtro", data=payload)
+        else:
+            if not self.db_connector:
+                return []
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                return repo.get_referencias_disponibles_filtro(rfc_id, concepto_id, delegacion_id, cantidad)
+
+    def asignar_referencias_directo(
+        self, tipo_destino: str, destino_id: int, usuario_id: int, referencias_data: List[dict],
+        solicitante_externo: Optional[str] = None, observaciones: Optional[str] = None
+    ) -> int:
+        """Assigns selected references directly to Notaria or Colaborador."""
+        if self.api_client.connect_via_api:
+            payload = {
+                "tipo_destino": tipo_destino,
+                "destino_id": destino_id,
+                "usuario_id": usuario_id,
+                "referencias": referencias_data,
+                "solicitante_externo": solicitante_externo,
+                "observaciones": observaciones
+            }
+            res = self.api_client.request("POST", "/api/docs/inventario/lotes/asignar-directo", data=payload)
+            return res.get("lote_id", 0)
+        else:
+            if not self.db_connector:
+                return 0
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                lote_id = repo.asignar_referencias_directo(
+                    tipo_destino, destino_id, usuario_id, referencias_data, solicitante_externo, observaciones
+                )
+                session.commit()
+                return lote_id

@@ -785,7 +785,8 @@ class LoteApartarRequest(BaseModel):
     notaria_id: int
     rfc_id: int
     concepto_id: int
-    desarrollo_id: int
+    delegacion_id: int
+    desarrollo_id: Optional[int] = None
     cantidad: int
     usuario_creacion: int
     observaciones: Optional[str] = None
@@ -794,15 +795,15 @@ class LoteApartarRequest(BaseModel):
 def get_disponibles_count(
     rfc_id: int,
     concepto_id: int,
-    desarrollo_id: int,
+    delegacion_id: int,
     db: Session = Depends(get_db)
 ):
-    """Returns the count of FACTURADA references available for a given (rfc, concepto, desarrollo) combination.
+    """Returns the count of FACTURADA references available for a given (rfc, concepto, delegacion) combination.
     Used for real-time UI feedback in the Apartar Referencias grid.
     """
     from sar.src.storage.repositories import InventarioRepository
     try:
-        count = InventarioRepository(db).count_referencias_disponibles(rfc_id, concepto_id, desarrollo_id)
+        count = InventarioRepository(db).count_referencias_disponibles(rfc_id, concepto_id, delegacion_id)
         return {"count": count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -935,9 +936,10 @@ def api_apartar_referencias(request: LoteApartarRequest, db: Session = Depends(g
             notaria_id=request.notaria_id,
             rfc_id=request.rfc_id,
             concepto_id=request.concepto_id,
-            desarrollo_id=request.desarrollo_id,
+            delegacion_id=request.delegacion_id,
             cantidad=request.cantidad,
             usuario_id=request.usuario_creacion,
+            desarrollo_id=request.desarrollo_id,
             observaciones=request.observaciones
         )
         db.commit()
@@ -964,3 +966,36 @@ def api_completar_reservaciones(request: LoteCompletarRequest, db: Session = Dep
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class AsignarDirectoRequest(BaseModel):
+    tipo_destino: str
+    destino_id: int
+    usuario_id: int
+    referencias: List[dict]
+    solicitante_externo: Optional[str] = None
+    observaciones: Optional[str] = None
+
+@router.get("/inventario/disponibles/filtro")
+def get_referencias_disponibles_filtro(
+    rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int,
+    db: Session = Depends(get_db)
+):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        return repo.get_referencias_disponibles_filtro(rfc_id, concepto_id, delegacion_id, cantidad)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/inventario/lotes/asignar-directo")
+def api_asignar_referencias_directo(request: AsignarDirectoRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        lote_id = repo.asignar_referencias_directo(
+            request.tipo_destino, request.destino_id, request.usuario_id, request.referencias,
+            request.solicitante_externo, request.observaciones
+        )
+        db.commit()
+        return {"lote_id": lote_id, "detail": "Asignaciones realizadas con éxito"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

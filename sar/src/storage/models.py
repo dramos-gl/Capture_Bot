@@ -194,7 +194,6 @@ class Delegacion(Base):
     # Relaciones
     municipio: Mapped["Municipio"] = relationship(back_populates="delegaciones")
     solicitudes: Mapped[List["Solicitud"]] = relationship(back_populates="delegacion")
-    desarrollos: Mapped[List["Desarrollo"]] = relationship(back_populates="delegacion")
 
 
 class Concepto(Base):
@@ -265,13 +264,30 @@ class Desarrollo(Base):
     __table_args__ = {"schema": "sar_catalogo"}
 
     desarrollo_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    delegacion_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.delegacion.delegacion_id", ondelete="RESTRICT"), nullable=False)
-    nombre: Mapped[str] = mapped_column(String(200), nullable=False)
+    nombre: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     # Relaciones
-    delegacion: Mapped["Delegacion"] = relationship(back_populates="desarrollos")
+    empresas_asociadas: Mapped[List["DesarrolloEmpresa"]] = relationship(back_populates="desarrollo", cascade="all, delete-orphan")
+
+
+class DesarrolloEmpresa(Base):
+    __tablename__ = "desarrollo_empresa"
+    __table_args__ = {"schema": "sar_catalogo"}
+
+    desarrollo_empresa_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    desarrollo_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id", ondelete="RESTRICT"), nullable=False)
+    rfc_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.rfc.rfc_id", ondelete="RESTRICT"), nullable=False)
+    delegacion_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.delegacion.delegacion_id", ondelete="RESTRICT"), nullable=False)
+    es_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    desarrollo: Mapped["Desarrollo"] = relationship(back_populates="empresas_asociadas")
+    rfc: Mapped["Rfc"] = relationship()
+    delegacion: Mapped["Delegacion"] = relationship()
 
 
 class EstadoSistema(Base):

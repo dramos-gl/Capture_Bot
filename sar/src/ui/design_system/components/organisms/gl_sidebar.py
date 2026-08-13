@@ -191,22 +191,22 @@ class NavigationSidebar(QFrame):
         self.btn_inv_masivo.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_masivo.setVisible(False)
 
-        self.btn_inv_apartar = QPushButton("Apartar Referencia")
+        self.btn_inv_apartar = QPushButton("Apartar Referencias")
         self.btn_inv_apartar.setObjectName("subNavBtn")
         self.btn_inv_apartar.setCheckable(True)
         self.btn_inv_apartar.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_apartar.setVisible(False)
 
-        self.btn_inv_catalogos = QPushButton("Gestión de Catálogos")
+        self.btn_inv_catalogos = QPushButton("Asignación Individual")
         self.btn_inv_catalogos.setObjectName("subNavBtn")
         self.btn_inv_catalogos.setCheckable(True)
         self.btn_inv_catalogos.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_catalogos.setVisible(False)
 
         self.inv_submenu_layout.addWidget(self.btn_inv_facturas)
+        self.inv_submenu_layout.addWidget(self.btn_inv_catalogos)
         self.inv_submenu_layout.addWidget(self.btn_inv_masivo)
         self.inv_submenu_layout.addWidget(self.btn_inv_apartar)
-        self.inv_submenu_layout.addWidget(self.btn_inv_catalogos)
 
         self.buttons["inventario_facturas"] = self.btn_inv_facturas
         self.buttons["inventario_masivo"] = self.btn_inv_masivo
@@ -390,7 +390,7 @@ class NavigationSidebar(QFrame):
                     btn.setIcon(Icons.hollow_dot("#94A3B8"))
 
         # 2. Handle Inventario Submenu
-        elif clicked_key in ["inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
+        elif clicked_key in ["inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos"]:
             self.buttons["inventario"].setChecked(True)
             self.chevron_label2.setPixmap(Icons.chevron_up("#2563EB").pixmap(12, 12))
             self.inv_submenu_visible = True
@@ -398,13 +398,13 @@ class NavigationSidebar(QFrame):
             
             # Uncheck all other parent items except inventario
             for key, btn in self.buttons.items():
-                if key not in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
+                if key not in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos"]:
                     btn.setChecked(False)
                     if key in ["ordenes_capturadas", "capturar_orden"]:
                         btn.setIcon(Icons.hollow_dot("#94A3B8"))
             
             # Handle Inventario submenus check states
-            for key in ["inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
+            for key in ["inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos"]:
                 btn = self.buttons[key]
                 if key == clicked_key:
                     btn.setChecked(True)
@@ -417,7 +417,7 @@ class NavigationSidebar(QFrame):
 
     def select_item(self, key: str):
         """Allows programmatically checking a navigation item button."""
-        if key in ["ordenes_capturadas", "capturar_orden", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
+        if key in ["ordenes_capturadas", "capturar_orden", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos"]:
             self._on_sub_nav_clicked(key)
         elif key in self.buttons:
             self._on_main_nav_clicked(key)

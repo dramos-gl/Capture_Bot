@@ -72,17 +72,17 @@ class AvailabilityWorker(QThread):
     """Lightweight worker to fetch disponibles count for a single grid row without blocking UI."""
     result_ready = Signal(object, int)  # row_widget, count
 
-    def __init__(self, service, row_widget, rfc_id: int, concepto_id: int, desarrollo_id: int):
+    def __init__(self, service, row_widget, rfc_id: int, concepto_id: int, delegacion_id: int):
         super().__init__()
         self.service = service
         self.row_widget = row_widget
         self.rfc_id = rfc_id
         self.concepto_id = concepto_id
-        self.desarrollo_id = desarrollo_id
+        self.delegacion_id = delegacion_id
 
     def run(self):
         try:
-            count = self.service.get_disponibles_count(self.rfc_id, self.concepto_id, self.desarrollo_id)
+            count = self.service.get_disponibles_count(self.rfc_id, self.concepto_id, self.delegacion_id)
             self.result_ready.emit(self.row_widget, count)
         except Exception:
             self.result_ready.emit(self.row_widget, 0)
@@ -145,10 +145,10 @@ class InventoryView(QWidget):
         self._setup_tab_apartar()
         self.tabs.addTab(self.tab_apartar, "🔑 Apartar Referencia")
 
-        # 4. Tab: Catálogos
-        self.tab_catalogos = QWidget()
-        self._setup_tab_catalogos()
-        self.tabs.addTab(self.tab_catalogos, "⚙ Gestión de Catálogos")
+        # 4. Tab: Asignación Individual
+        self.tab_individual = QWidget()
+        self._setup_tab_individual()
+        self.tabs.addTab(self.tab_individual, "👤 Asignación Individual")
 
         # Hide tab bar headers to act as a QStackedWidget
         self.tabs.tabBar().hide()
@@ -166,8 +166,8 @@ class InventoryView(QWidget):
             self.tabs.setCurrentWidget(self.tab_masivo)
         elif tab_key == "inventario_apartar":
             self.tabs.setCurrentWidget(self.tab_apartar)
-        elif tab_key == "inventario_catalogos":
-            self.tabs.setCurrentWidget(self.tab_catalogos)
+        elif tab_key in ("inventario_catalogos", "inventario_individual"):
+            self.tabs.setCurrentWidget(self.tab_individual)
 
     def refresh_all(self, load_catalogs=True):
         if load_catalogs:
@@ -186,7 +186,7 @@ class InventoryView(QWidget):
         # Filter bar
         self.filter_bar = FilterBar(
             search_placeholder="Buscar por referencia, cliente, folio...",
-            state_options=["Todos", "Disponible", "Asignada"],
+            state_options=["Todos", "Disponible", "Asignada", "Reservadas"],
             on_search=self._on_search_visor,
             on_state_change=self._on_state_filter_visor,
             on_action=self.refresh_visor_data,
@@ -224,7 +224,7 @@ class InventoryView(QWidget):
             show_sparkline=False,
             parent=kpi_widget
         )
-        self.card_total.lbl_sub.setText("Disponibles + Asignadas")
+        self.card_total.lbl_sub.setText("Disponibles + Asignadas + Reservadas")
         self.kpi_layout.addWidget(self.card_total, stretch=1)
         
         self.card_disponibles = StatCard(
@@ -248,6 +248,17 @@ class InventoryView(QWidget):
         )
         self.card_asignadas.lbl_sub.setText("Total asignadas")
         self.kpi_layout.addWidget(self.card_asignadas, stretch=1)
+
+        self.card_reservadas = StatCard(
+            "Referencias Reservadas",
+            "0",
+            icon_name="archive",
+            color_hex="#F59E0B",
+            show_sparkline=False,
+            parent=kpi_widget
+        )
+        self.card_reservadas.lbl_sub.setText("Total reservadas")
+        self.kpi_layout.addWidget(self.card_reservadas, stretch=1)
         self.kpi_layout.addStretch()
         
         layout.addWidget(kpi_widget)
@@ -292,12 +303,8 @@ class InventoryView(QWidget):
         self.btn_exportar_lotes = CustomButton("Exportar Control Inventario", is_secondary=True)
         self.btn_exportar_lotes.clicked.connect(self._on_exportar_reporte)
 
-        self.btn_apartar_referencias = CustomButton("Apartar Referencias", is_secondary=True)
-        self.btn_apartar_referencias.clicked.connect(self._on_apartar_referencias)
-
         actions_layout.addWidget(self.btn_marcar_visibles)
         actions_layout.addStretch()
-        actions_layout.addWidget(self.btn_apartar_referencias)
         actions_layout.addWidget(self.btn_exportar_lotes)
         actions_layout.addWidget(self.btn_asignar_manual)
         
@@ -359,11 +366,13 @@ class InventoryView(QWidget):
         # Update cards
         disponibles = summary.get("disponibles", 0)
         asignadas = summary.get("asignadas", 0)
-        total = disponibles + asignadas
+        reservadas = summary.get("reservadas", 0)
+        total = disponibles + asignadas + reservadas
         
         self.card_total.set_value(f"{total:,}")
         self.card_disponibles.set_value(f"{disponibles:,}")
         self.card_asignadas.set_value(f"{asignadas:,}")
+        self.card_reservadas.set_value(f"{reservadas:,}")
         
         self._populate_visor_table()
 
@@ -375,7 +384,10 @@ class InventoryView(QWidget):
     def _populate_visor_table(self):
         rows_data = []
         for r in self.all_data:
-            state_desc = "Asignada" if r["asignada"] else "Disponible"
+            if r.get("estado_codigo") == "RESERVADA":
+                state_desc = "Reservada"
+            else:
+                state_desc = "Asignada" if r["asignada"] else "Disponible"
             rows_data.append([
                 "",
                 str(r["referencia_id"]),
@@ -436,7 +448,10 @@ class InventoryView(QWidget):
         self.refresh_visor_data()
 
     def _on_state_filter_visor(self, text):
-        self._current_estado_filter = text
+        if text == "Reservadas":
+            self._current_estado_filter = "Reservada"
+        else:
+            self._current_estado_filter = text
         self.current_page = 1
         self.refresh_visor_data()
 
@@ -470,7 +485,7 @@ class InventoryView(QWidget):
 
     def _on_table_cell_double_clicked(self, row, column):
         state_item = self.table.item(row, 6)
-        if not state_item or state_item.text() != "Asignada":
+        if not state_item or state_item.text() not in ("Asignada", "Reservada"):
             return
             
         ref_id_str = self.table.item(row, 1).text()
@@ -892,69 +907,224 @@ class InventoryView(QWidget):
     # =========================================================================
     # TAB 3: GESTIÓN DE CATALOGOS
     # =========================================================================
-    def _setup_tab_catalogos(self):
-        from PySide6.QtWidgets import QGridLayout
-        layout = QGridLayout(self.tab_catalogos)
-        layout.setSpacing(24)
+    def _setup_tab_individual(self):
+        layout = QVBoxLayout(self.tab_individual)
+        layout.setSpacing(16)
 
-        # Left Column: Notarias Catalog
-        card_notarias = CustomCard(title="Catálogo de Notarías", parent=self)
-        col_not_layout = QVBoxLayout()
-        self.table_notarias = StyledDataTable(["ID", "Nombre Notaría"], parent=self)
-        self.table_notarias.setMinimumWidth(100)
-        col_not_layout.addWidget(self.table_notarias)
-        
-        add_not_layout = QHBoxLayout()
-        self.txt_add_notaria = QLineEdit(self)
-        self.txt_add_notaria.setPlaceholderText("Nombre de la Notaría...")
-        btn_add_notaria = CustomButton("Agregar")
-        btn_add_notaria.clicked.connect(self._on_add_notaria)
-        add_not_layout.addWidget(self.txt_add_notaria)
-        add_not_layout.addWidget(btn_add_notaria)
-        col_not_layout.addLayout(add_not_layout)
-        card_notarias.layout.addLayout(col_not_layout)
-        layout.addWidget(card_notarias, 0, 0)
+        card_ind = CustomCard(parent=self)
+        form_layout = QVBoxLayout()
+        form_layout.setSpacing(16)
 
-        # Middle Column: Colaboradores Catalog
-        card_colabs = CustomCard(title="Catálogo de Colaboradores", parent=self)
-        col_col_layout = QVBoxLayout()
-        self.table_colaboradores = StyledDataTable(["ID", "Nombre Colaborador"], parent=self)
-        self.table_colaboradores.setMinimumWidth(100)
-        col_col_layout.addWidget(self.table_colaboradores)
-        
-        add_col_layout = QHBoxLayout()
-        self.txt_add_colaborador = QLineEdit(self)
-        self.txt_add_colaborador.setPlaceholderText("Nombre del Colaborador...")
-        btn_add_colaborador = CustomButton("Agregar")
-        btn_add_colaborador.clicked.connect(self._on_add_colaborador)
-        add_col_layout.addWidget(self.txt_add_colaborador)
-        add_col_layout.addWidget(btn_add_colaborador)
-        col_col_layout.addLayout(add_col_layout)
-        card_colabs.layout.addLayout(col_col_layout)
-        layout.addWidget(card_colabs, 0, 1)
+        # Header
+        card_header_layout = QHBoxLayout()
+        card_title_vbox = QVBoxLayout()
+        lbl_card_title = CustomLabel("Asignación Individual Directa", variant="subheader")
+        lbl_card_subtitle = CustomLabel("Filtra referencias disponibles FIFO y asígnalas a un destino final", variant="muted")
+        card_title_vbox.addWidget(lbl_card_title)
+        card_title_vbox.addWidget(lbl_card_subtitle)
+        card_header_layout.addLayout(card_title_vbox)
+        card_header_layout.addStretch()
+        form_layout.addLayout(card_header_layout)
 
-        # Right Column: Desarrollos Catalog
-        card_des = CustomCard(title="Catálogo de Desarrollos", parent=self)
-        col_des_layout = QVBoxLayout()
-        self.table_desarrollos = StyledDataTable(["ID", "Desarrollo", "Delegación"], parent=self)
-        self.table_desarrollos.setMinimumWidth(100)
-        col_des_layout.addWidget(self.table_desarrollos)
+        # Destino Selectors
+        dest_layout = QHBoxLayout()
+        dest_layout.setSpacing(16)
+
+        vbox_tipo = QVBoxLayout()
+        lbl_tipo = CustomLabel("Tipo de Destino", variant="body")
+        lbl_tipo.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.cb_tipo_destino_ind = CustomComboBox(self)
+        self.cb_tipo_destino_ind.addItems(["NOTARIA", "COLABORADOR"])
+        self.cb_tipo_destino_ind.currentTextChanged.connect(self._on_tipo_destino_ind_changed)
+        vbox_tipo.addWidget(lbl_tipo)
+        vbox_tipo.addWidget(self.cb_tipo_destino_ind)
+
+        vbox_dest = QVBoxLayout()
+        lbl_dest = CustomLabel("Destinatario", variant="body")
+        lbl_dest.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.cb_destinatario_ind = CustomComboBox(self)
+        vbox_dest.addWidget(lbl_dest)
+        vbox_dest.addWidget(self.cb_destinatario_ind)
+
+        dest_layout.addLayout(vbox_tipo, stretch=1)
+        dest_layout.addLayout(vbox_dest, stretch=2)
+        form_layout.addLayout(dest_layout)
+
+        # Fields for Solicitante Externo & Observaciones
+        fields_layout = QHBoxLayout()
+        fields_layout.setSpacing(16)
+
+        vbox_sol = QVBoxLayout()
+        lbl_sol = CustomLabel("Solicitante Externo", variant="body")
+        lbl_sol.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.txt_solicitante_ind = CustomInput("Nombre del solicitante...")
+        self.txt_solicitante_ind.setMinimumHeight(35)
+        vbox_sol.addWidget(lbl_sol)
+        vbox_sol.addWidget(self.txt_solicitante_ind)
+
+        vbox_obs = QVBoxLayout()
+        lbl_obs = CustomLabel("Observaciones", variant="body")
+        lbl_obs.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.txt_observaciones_ind = CustomInput("Observaciones de la asignación...")
+        self.txt_observaciones_ind.setMinimumHeight(35)
+        vbox_obs.addWidget(lbl_obs)
+        vbox_obs.addWidget(self.txt_observaciones_ind)
+
+        fields_layout.addLayout(vbox_sol, stretch=1)
+        fields_layout.addLayout(vbox_obs, stretch=1)
+        form_layout.addLayout(fields_layout)
+
+        # Interactive Grid for filters and counts
+        self.grid_individual = InteractiveGrid(self)
+        self.grid_individual.set_third_column_label("Delegación")
+        self.grid_individual.btn_save.setVisible(False)
+        self.grid_individual.btn_cancel.setVisible(False)
         
-        add_des_form = QFormLayout()
-        self.txt_add_desarrollo = QLineEdit(self)
-        self.txt_add_desarrollo.setPlaceholderText("Nombre del Desarrollo...")
-        add_des_form.addRow("Desarrollo:", self.txt_add_desarrollo)
+        # We reuse the same availability worker & signals logic
+        self.grid_individual.availability_requested.connect(self._on_availability_requested_ind)
+        form_layout.addWidget(self.grid_individual)
+
+        # Buttons to query & assign
+        buttons_layout = QHBoxLayout()
+        self.btn_buscar_ind = CustomButton("Buscar y Cargar Referencias (FIFO)")
+        self.btn_buscar_ind.clicked.connect(self._on_buscar_referencias_ind)
         
-        self.cb_deleg_desarrollo = CustomComboBox(self)
-        add_des_form.addRow("Delegación:", self.cb_deleg_desarrollo)
-        
-        btn_add_desarrollo = CustomButton("Agregar Desarrollo")
-        btn_add_desarrollo.clicked.connect(self._on_add_desarrollo)
-        
-        col_des_layout.addLayout(add_des_form)
-        col_des_layout.addWidget(btn_add_desarrollo)
-        card_des.layout.addLayout(col_des_layout)
-        layout.addWidget(card_des, 1, 0, 1, 2)
+        self.btn_confirmar_ind = CustomButton("Confirmar Asignación Directa")
+        self.btn_confirmar_ind.clicked.connect(self._on_confirmar_asignacion_ind)
+        self.btn_confirmar_ind.setEnabled(False)
+
+        buttons_layout.addWidget(self.btn_buscar_ind)
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.btn_confirmar_ind)
+        form_layout.addLayout(buttons_layout)
+
+        card_ind.layout.addLayout(form_layout)
+        layout.addWidget(card_ind)
+
+        # Preview list table
+        self.card_preview_ind = CustomCard(title="Referencias Disponibles a Asignar", parent=self)
+        self.table_preview_ind = StyledDataTable(["✔", "ID", "Referencia (Portal)", "Concepto", "Empresa", "Importe", "Delegación"], parent=self)
+        self.table_preview_ind.setColumnHidden(1, True) # Hide internal ID
+        self.card_preview_ind.add_widget(self.table_preview_ind)
+        layout.addWidget(self.card_preview_ind)
+
+        self._pending_ind_refs = []
+
+    def _on_tipo_destino_ind_changed(self, text):
+        self.cb_destinatario_ind.clear()
+        if text == "NOTARIA" and hasattr(self, "_notarias_map"):
+            self.cb_destinatario_ind.addItems(list(self._notarias_map.keys()))
+        elif text == "COLABORADOR" and hasattr(self, "_colaboradores_map"):
+            self.cb_destinatario_ind.addItems(list(self._colaboradores_map.keys()))
+
+    def _on_availability_requested_ind(self, row_widget):
+        self._avail_pending_row = row_widget
+        self._avail_timer.start()
+
+    def _on_buscar_referencias_ind(self):
+        grid_data = self.grid_individual.get_all_data()
+        if not grid_data:
+            QMessageBox.warning(self, "Grilla Vacía", "Por favor, agregue al menos una partida para buscar.")
+            return
+
+        for i, row in enumerate(grid_data):
+            if not row["rfc_id"] or not row["concepto_id"] or not row["delegacion_id"]:
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener Empresa, Concepto y Desarrollo seleccionados.")
+                return
+
+        self._pending_ind_refs = []
+        try:
+            for row in grid_data:
+                refs = self.inventario_ui_service.get_referencias_disponibles_filtro(
+                    row["rfc_id"], row["concepto_id"], row["delegacion_id"], row["cantidad"]
+                )
+                for r in refs:
+                    r["desarrollo_id"] = None
+                    r["delegacion_id"] = row["delegacion_id"]
+                    r["delegacion_nombre"] = self.grid_individual.get_delegacion_text(row["delegacion_id"]) or "Delegación"
+                    self._pending_ind_refs.append(r)
+            
+            table_rows = []
+            for item in self._pending_ind_refs:
+                table_rows.append([
+                    "",  # checked column
+                    str(item["referencia_id"]),
+                    item["referencia_portal"],
+                    item.get("concepto_nombre", ""),
+                    item.get("empresa_nombre", ""),
+                    f"${float(item['importe']):,.2f}" if item.get("importe") else "$0.00",
+                    item["delegacion_nombre"]
+                ])
+            
+            self.table_preview_ind.blockSignals(True)
+            self.table_preview_ind.populate_rows(table_rows, checkable_first_col=True)
+            for r in range(self.table_preview_ind.rowCount()):
+                self.table_preview_ind.item(r, 0).setCheckState(Qt.CheckState.Checked)
+            self.table_preview_ind.blockSignals(False)
+
+            self.btn_confirmar_ind.setEnabled(len(self._pending_ind_refs) > 0)
+            if not self._pending_ind_refs:
+                QMessageBox.information(self, "Sin Coincidencias", "No se encontraron referencias físicas FACTURADAS disponibles con los filtros especificados.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error al Consultar", f"Ocurrió un error al buscar referencias en la BD:\n{str(e)}")
+
+    def _on_confirmar_asignacion_ind(self):
+        selected_refs = []
+        for r in range(self.table_preview_ind.rowCount()):
+            if self.table_preview_ind.item(r, 0).checkState() == Qt.CheckState.Checked:
+                ref_id = int(self.table_preview_ind.item(r, 1).text())
+                for item in self._pending_ind_refs:
+                    if item["referencia_id"] == ref_id:
+                        selected_refs.append(item)
+                        break
+
+        if not selected_refs:
+            QMessageBox.warning(self, "Selección Vacía", "Por favor, seleccione al menos una referencia de la lista para asignar.")
+            return
+
+        tipo_destino = self.cb_tipo_destino_ind.currentText()
+        dest_name = self.cb_destinatario_ind.currentText()
+        if tipo_destino == "NOTARIA":
+            destino_id = self._notarias_map.get(dest_name)
+        else:
+            destino_id = self._colaboradores_map.get(dest_name)
+
+        if not destino_id:
+            QMessageBox.warning(self, "Destino Inválido", "Por favor, seleccione un destinatario válido.")
+            return
+
+        reply = QMessageBox.question(
+            self, "Confirmar Asignación",
+            f"¿Desea asignar directamente las {len(selected_refs)} referencias seleccionadas a {dest_name}?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            parent_window = self.window()
+            usuario_id = getattr(parent_window, "current_usuario_id", 1)
+            sol_ext = self.txt_solicitante_ind.text().strip()
+            obs = self.txt_observaciones_ind.text().strip()
+
+            lote_id = self.inventario_ui_service.asignar_referencias_directo(
+                tipo_destino, destino_id, usuario_id, selected_refs,
+                solicitante_externo=sol_ext if sol_ext else None,
+                observaciones=obs if obs else None
+            )
+
+            QMessageBox.information(self, "Asignación Completa", f"Asignaciones procesadas y registradas con éxito en el lote ID {lote_id}.")
+            
+            self.txt_solicitante_ind.clear()
+            self.txt_observaciones_ind.clear()
+            self.table_preview_ind.clearContents()
+            self.table_preview_ind.setRowCount(0)
+            self.grid_individual.clear()
+            self.grid_individual.add_row()
+            self.btn_confirmar_ind.setEnabled(False)
+            self.refresh_all()
+        except Exception as e:
+            QMessageBox.critical(self, "Error al Asignar", f"No se pudo completar el proceso de asignación individual:\n{str(e)}")
 
     def _load_catalogs_data(self):
         try:
@@ -973,12 +1143,15 @@ class InventoryView(QWidget):
             self._concepts_map = {cp["nombre"] if isinstance(cp, dict) else cp.nombre: cp["concepto_id"] if isinstance(cp, dict) else cp.concepto_id for cp in concepts_list}
             self._rfcs_map = {r["razon_social"] if isinstance(r, dict) else r.razon_social: r["rfc_id"] if isinstance(r, dict) else r.rfc_id for r in rfcs_list}
 
-            # Populate combo boxes
+            # Populate Notaría combos — insert explicit placeholder so no record is auto-selected
             self.cb_notarias_masivo.clear()
             self.cb_notarias_masivo.addItems(list(self._notarias_map.keys()))
 
             self.cb_notarias_apartar.clear()
-            self.cb_notarias_apartar.addItems(list(self._notarias_map.keys()))
+            self.cb_notarias_apartar.addItem("-- Seleccione una notaría --")
+            for nombre in self._notarias_map:
+                self.cb_notarias_apartar.addItem(nombre)
+            self.cb_notarias_apartar.setCurrentIndex(0)  # keep placeholder selected
 
             self.cb_colaboradores_masivo.clear()
             self.cb_colaboradores_masivo.addItems(list(self._colaboradores_map.keys()))
@@ -986,9 +1159,6 @@ class InventoryView(QWidget):
             self.cb_empresa_masivo.clear()
             self.cb_empresa_masivo.addItem("Seleccione empresa...")
             self.cb_empresa_masivo.addItems(list(self._rfcs_map.keys()))
-
-            self.cb_deleg_desarrollo.clear()
-            self.cb_deleg_desarrollo.addItems(list(self._delegations_map.keys()))
 
             current_concept_txt = self.cb_concept_filter.currentText()
             self.cb_concept_filter.clear()
@@ -1004,18 +1174,15 @@ class InventoryView(QWidget):
             if current_empresa_txt in self._rfcs_map:
                 self.cb_empresa_filter.setCurrentText(current_empresa_txt)
 
-            # Populate tables in Tab 3
-            self.table_notarias.populate_rows([[str(n["notaria_id"]), n["nombre"]] for n in notarias])
-            self.table_colaboradores.populate_rows([[str(c["colaborador_id"]), c["nombre"]] for c in colaboradores])
-            
-            des_rows = []
-            for d in desarrollos:
-                des_rows.append([
-                    str(d["desarrollo_id"]),
-                    d["nombre"],
-                    d.get("delegacion_nombre") or d.get("delegacion", "")
-                ])
-            self.table_desarrollos.populate_rows(des_rows)
+            # Populate tables in Tab 3 — only ACTIVE delegations
+            delegations_list_tuples = [
+                (
+                    d["delegacion_id"] if isinstance(d, dict) else d.delegacion_id,
+                    d["nombre"] if isinstance(d, dict) else d.nombre
+                )
+                for d in delegations_list
+                if (d.get("activo", True) if isinstance(d, dict) else getattr(d, "activo", True))
+            ]
 
             # Populate grid_apartar catalogs — only AVISO (2) and CLG (3) allowed, sorted by ID
             CONCEPTOS_APARTADO = {2, 3}
@@ -1028,11 +1195,35 @@ class InventoryView(QWidget):
                 ],
                 key=lambda x: x[0]  # 2 (AVISO) first, then 3 (CLG)
             )
-            desarrollos_list_tuples = [(d_id, d_name) for d_name, d_id in self._desarrollos_map.items()]
-            self.grid_apartar.set_catalogs(rfcs_list_tuples, concepts_list_tuples, desarrollos_list_tuples)
-
+            
+            # Map desarrollos as tuples: (desarrollo_id, nombre, delegacion_id, es_default)
+            # Los que son default se colocan al inicio de la lista.
+            desarrollos_tuples = sorted(
+                [
+                    (
+                        d["desarrollo_id"],
+                        d["nombre"],
+                        d.get("delegacion_id"),
+                        d.get("es_default", False),
+                    )
+                    for d in desarrollos
+                ],
+                key=lambda x: (not x[3], x[1])  # default primero, luego alfabetico
+            )
+                
+            self.grid_apartar.set_has_desarrollo(True)
+            self.grid_apartar.set_catalogs(rfcs_list_tuples, concepts_list_tuples, delegations_list_tuples, desarrollos_tuples)
             if not self.grid_apartar.rows:
                 self.grid_apartar.add_row()
+
+            # Populate grid_individual catalogs with ALL active concepts and DELEGATIONS
+            concepts_all_tuples = sorted(
+                [(c_id, c_name) for c_name, c_id in self._concepts_map.items()],
+                key=lambda x: x[0]
+            )
+            self.grid_individual.set_catalogs(rfcs_list_tuples, concepts_all_tuples, delegations_list_tuples)
+            if not self.grid_individual.rows:
+                self.grid_individual.add_row()
 
         except Exception as e:
             print("Error loading catalog data for inventory view:", e)
@@ -1124,20 +1315,21 @@ class InventoryView(QWidget):
         inputs_layout = QHBoxLayout()
         inputs_layout.setSpacing(16)
 
-        # Left side: Notaria
+        # Left side: Notaria — with explicit placeholder so no item is pre-selected
         not_layout = QVBoxLayout()
-        lbl_notaria = CustomLabel("Notaría de Destino", variant="body")
+        lbl_notaria = CustomLabel("Notaría de Destino *", variant="body")
         lbl_notaria.setStyleSheet("font-weight: bold; background: transparent; border: none;")
         self.cb_notarias_apartar = CustomComboBox(self)
         self.cb_notarias_apartar.setMinimumHeight(35)
+        self.cb_notarias_apartar.setPlaceholderText("-- Seleccione una notaría --")
         not_layout.addWidget(lbl_notaria)
         not_layout.addWidget(self.cb_notarias_apartar)
 
-        # Right side: Observaciones
+        # Right side: Observaciones (obligatorio)
         obs_layout = QVBoxLayout()
-        lbl_obs = CustomLabel("Observaciones del Lote", variant="body")
+        lbl_obs = CustomLabel("Observaciones del Lote *", variant="body")
         lbl_obs.setStyleSheet("font-weight: bold; background: transparent; border: none;")
-        self.txt_obs_apartar = CustomInput("Ingresa observaciones o descripción para el apartado...")
+        self.txt_obs_apartar = CustomInput("Observaciones obligatorias para el apartado...")
         self.txt_obs_apartar.setMinimumHeight(35)
         obs_layout.addWidget(lbl_obs)
         obs_layout.addWidget(self.txt_obs_apartar)
@@ -1146,9 +1338,9 @@ class InventoryView(QWidget):
         inputs_layout.addLayout(obs_layout, stretch=1)
         form_layout.addLayout(inputs_layout)
 
-        # Interactive Grid
+        # Interactive Grid (Delegación and optional Desarrollo)
         self.grid_apartar = InteractiveGrid(self)
-        self.grid_apartar.set_third_column_label("Desarrollo")
+        self.grid_apartar.set_has_desarrollo(True)
         self.grid_apartar.btn_save.setVisible(False)
         self.grid_apartar.btn_cancel.setVisible(False)
         self.grid_apartar.availability_requested.connect(self._on_availability_requested)
@@ -1190,12 +1382,12 @@ class InventoryView(QWidget):
         data = row.get_data()
         rfc_id = data.get("rfc_id")
         concepto_id = data.get("concepto_id")
-        desarrollo_id = data.get("delegacion_id")
-        if not rfc_id or not concepto_id or not desarrollo_id:
+        delegacion_id = data.get("delegacion_id")
+        if not rfc_id or not concepto_id or not delegacion_id:
             return
 
         worker = AvailabilityWorker(
-            self.inventario_ui_service, row, rfc_id, concepto_id, desarrollo_id
+            self.inventario_ui_service, row, rfc_id, concepto_id, delegacion_id
         )
         worker.result_ready.connect(self._on_availability_result)
         worker.finished.connect(lambda: self._active_avail_workers.remove(worker) if worker in self._active_avail_workers else None)
@@ -1207,10 +1399,20 @@ class InventoryView(QWidget):
         self.grid_apartar.update_row_availability(row_widget, count)
 
     def _on_save_apartar(self):
+        # --- Validación 1: Notaría seleccionada ---
         not_name = self.cb_notarias_apartar.currentText()
         notaria_id = self._notarias_map.get(not_name)
         if not notaria_id:
-            QMessageBox.warning(self, "Notaría Faltante", "Por favor, seleccione una Notaría de destino.")
+            QMessageBox.warning(self, "Notaría Faltante", "Por favor, seleccione una Notaría de destino válida.")
+            return
+
+        # --- Validación 2: Observaciones obligatorias ---
+        obs_text = self.txt_obs_apartar.text().strip()
+        if not obs_text:
+            QMessageBox.warning(self, "Observaciones Requeridas",
+                                "Las observaciones del lote son obligatorias.\n"
+                                "Por favor describe el motivo o referencia del apartado.")
+            self.txt_obs_apartar.setFocus()
             return
             
         data = self.grid_apartar.get_all_data()
@@ -1218,40 +1420,74 @@ class InventoryView(QWidget):
             QMessageBox.warning(self, "Validación", "Debes agregar al menos un renglón para realizar un apartado.")
             return
 
-        # Validate that all rows have selected elements and no duplicates
+        # --- Validaciones por renglón ---
         CONCEPTO_AVISO_ID = 2
         CONCEPTO_CLG_ID = 3
         seen_combinations = set()
         rows_data = []
         for i, row in enumerate(data):
+            n = i + 1
             if not row["rfc_id"] or not row["concepto_id"] or not row["delegacion_id"]:
-                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener todos los campos seleccionados (Empresa, Concepto y Desarrollo).")
+                QMessageBox.warning(self, "Validación", f"El renglón {n} debe tener Empresa, Concepto y Delegación seleccionados.")
                 return
             if row["concepto_id"] not in (CONCEPTO_AVISO_ID, CONCEPTO_CLG_ID):
-                QMessageBox.warning(self, "Validación", f"El renglón {i+1} tiene un concepto no permitido. Solo se permiten: Aviso Preventivo (2) y CLG (3).")
+                QMessageBox.warning(self, "Validación",
+                                    f"El renglón {n} tiene un concepto no permitido.\n"
+                                    f"Solo se permiten: Aviso Preventivo (2) y CLG (3).")
                 return
 
-            key = (row["rfc_id"], row["concepto_id"], row["delegacion_id"])
+            # --- Validación 3: No duplicados ---
+            key = (row["rfc_id"], row["concepto_id"], row["delegacion_id"], row.get("desarrollo_id"))
             if key in seen_combinations:
-                QMessageBox.warning(self, "Validación", f"El renglón {i+1} tiene una combinación duplicada de Empresa, Concepto y Desarrollo.")
+                QMessageBox.warning(self, "Renglón Duplicado",
+                                    f"El renglón {n} es duplicado.\n"
+                                    f"Ya existe un renglón con la misma Empresa, Concepto, Delegación y Desarrollo.")
                 return
             seen_combinations.add(key)
-            
+
+            # --- Validación 4: Cantidad no puede superar disponibles ---
+            disp_count = row.get("_disponibles", None)
+            # Fetch from the row widget directly for precision
+            for row_widget in self.grid_apartar.rows:
+                wd = row_widget.get_data()
+                if (wd["rfc_id"] == row["rfc_id"] and
+                        wd["concepto_id"] == row["concepto_id"] and
+                        wd["delegacion_id"] == row["delegacion_id"]):
+                    disp_text = row_widget.lbl_disponibles.text()
+                    # Parse count from label (e.g. "✓ 15", "⚠ 3", "✗ 0")
+                    try:
+                        disp_count = int(disp_text.split()[-1])
+                    except (ValueError, IndexError):
+                        disp_count = None
+                    break
+
+            if disp_count is not None and row["cantidad"] > disp_count:
+                rfc_name = self.grid_apartar.get_rfc_text(row["rfc_id"]) or f"RFC {row['rfc_id']}"
+                concepto_name = self.grid_apartar.get_concepto_text(row["concepto_id"]) or f"Concepto {row['concepto_id']}"
+                QMessageBox.warning(
+                    self, "Cantidad Excede Disponibles",
+                    f"Renglón {n} — {rfc_name} / {concepto_name}:\n"
+                    f"La cantidad solicitada ({row['cantidad']}) supera las referencias disponibles ({disp_count}).\n"
+                    f"Reduzca la cantidad o verifique los filtros."
+                )
+                return
+
             rows_data.append({
                 "rfc_id": row["rfc_id"],
                 "concepto_id": row["concepto_id"],
-                "desarrollo_id": row["delegacion_id"],
+                "delegacion_id": row["delegacion_id"],
+                "desarrollo_id": row.get("desarrollo_id"),
                 "cantidad": row["cantidad"]
             })
 
-        # Business rule: each (empresa, desarrollo) pair must include both AVISO and CLG
-        pair_concepts: dict = {}  # (rfc_id, desarrollo_id) -> set of concepto_ids
+        # --- Regla de negocio: cada (empresa, delegación/desarrollo) debe tener AVISO y CLG ---
+        pair_concepts: dict = {}  # (rfc_id, desarrollo_id or delegacion_id) -> set of concepto_ids
         for r in rows_data:
-            pair_key = (r["rfc_id"], r["desarrollo_id"])
+            pair_key = (r["rfc_id"], r["desarrollo_id"] if r["desarrollo_id"] else r["delegacion_id"])
             pair_concepts.setdefault(pair_key, set()).add(r["concepto_id"])
 
         missing_pairs = []
-        for (rfc_id, des_id), concepts_set in pair_concepts.items():
+        for (rfc_id, target_id), concepts_set in pair_concepts.items():
             missing = []
             if CONCEPTO_AVISO_ID not in concepts_set:
                 missing.append("Aviso Preventivo")
@@ -1259,70 +1495,96 @@ class InventoryView(QWidget):
                 missing.append("CLG")
             if missing:
                 rfc_name = self.grid_apartar.get_rfc_text(rfc_id) or f"RFC {rfc_id}"
-                des_name = self.grid_apartar.get_delegacion_text(des_id) or f"Desarrollo {des_id}"
+                des_name = None
+                has_desarrollo_id = any(
+                    r["rfc_id"] == rfc_id and r["desarrollo_id"] == target_id
+                    for r in rows_data
+                )
+                if has_desarrollo_id:
+                    des_name = self.grid_apartar.get_desarrollo_text(target_id)
+                if not des_name:
+                    des_name = self.grid_apartar.get_delegacion_text(target_id) or f"Delegación/Desarrollo {target_id}"
                 missing_pairs.append(f"• {rfc_name} / {des_name}: falta(n) {', '.join(missing)}")
 
         if missing_pairs:
             detail = "\n".join(missing_pairs)
             QMessageBox.warning(
                 self, "Regla de Negocio",
-                f"Cada combinación de Empresa + Desarrollo debe tener un renglón de "
+                f"Cada combinación de Empresa + Delegación/Desarrollo debe tener un renglón de "
                 f"Aviso Preventivo y uno de CLG.\n\nFaltan:\n{detail}"
             )
             return
 
-        # Confirmation Dialog
+        # --- Diálogo de confirmación con resumen detallado ---
+        total_refs = sum(r["cantidad"] for r in rows_data)
+        resumen_lineas = []
+        for r in rows_data:
+            rfc_name = self.grid_apartar.get_rfc_text(r["rfc_id"]) or f"RFC {r['rfc_id']}"
+            concepto_name = self.grid_apartar.get_concepto_text(r["concepto_id"]) or f"Concepto {r['concepto_id']}"
+            deleg_name = self.grid_apartar.get_delegacion_text(r["delegacion_id"]) or f"Deleg. {r['delegacion_id']}"
+            des_name = ""
+            if r["desarrollo_id"]:
+                des_name = self.grid_apartar.get_desarrollo_text(r["desarrollo_id"]) or ""
+                des_name = f" / {des_name}" if des_name else ""
+            resumen_lineas.append(
+                f"  • {rfc_name} | {concepto_name} | {deleg_name}{des_name} → {r['cantidad']} ref(s)"
+            )
+        resumen_texto = "\n".join(resumen_lineas)
+
+        confirm_msg = (
+            f"¿Confirmar el apartado de {total_refs} referencias para la notaría '{not_name}'?\n\n"
+            f"Resumen de partidas:\n{resumen_texto}\n\n"
+            f"Observaciones: {obs_text}\n\n"
+            f"Esta operación reservará las referencias en estado RESERVADA y no podrá deshacerse fácilmente."
+        )
         reply = QMessageBox.question(
             self, "Confirmar Apartado",
-            f"¿Estás seguro de que deseas apartar las referencias para esta notaría?",
+            confirm_msg,
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
         if reply != QMessageBox.Yes:
             return
 
+        # --- Ejecución del apartado ---
         try:
             parent_window = self.window()
             usuario_id = getattr(parent_window, "current_usuario_id", 1)
-            obs_text = self.txt_obs_apartar.text().strip()
-            obs_val = obs_text if obs_text else None
             
             if self.api_client.connect_via_api:
-                # API sequentially
                 for row_d in rows_data:
                     payload = {
                         "notaria_id": notaria_id,
                         "rfc_id": row_d["rfc_id"],
                         "concepto_id": row_d["concepto_id"],
+                        "delegacion_id": row_d["delegacion_id"],
                         "desarrollo_id": row_d["desarrollo_id"],
                         "cantidad": row_d["cantidad"],
                         "usuario_creacion": usuario_id,
-                        "observaciones": obs_val
+                        "observaciones": obs_text
                     }
                     self.api_client.request("POST", "/api/docs/inventario/lotes/apartar", data=payload)
             else:
-                # Single session transaction
                 with self.db_connector.get_session() as session:
                     from sar.src.storage.repositories import InventarioRepository
                     repo = InventarioRepository(session)
-                    for row_d in rows_data:
-                        repo.apartar_referencias(
-                            notaria_id=notaria_id,
-                            rfc_id=row_d["rfc_id"],
-                            concepto_id=row_d["concepto_id"],
-                            desarrollo_id=row_d["desarrollo_id"],
-                            cantidad=row_d["cantidad"],
-                            usuario_id=usuario_id,
-                            observaciones=obs_val
-                        )
+                    repo.apartar_referencias_lote(
+                        notaria_id=notaria_id,
+                        usuario_id=usuario_id,
+                        partidas=rows_data,
+                        observaciones=obs_text
+                    )
                     session.commit()
                     
-            total_refs = sum(row_d["cantidad"] for row_d in rows_data)
-            QMessageBox.information(self, "Apartado Exitoso", f"Se han reservado exitosamente {total_refs} referencias en total en estado RESERVADA.")
+            QMessageBox.information(
+                self, "Apartado Exitoso",
+                f"Se han reservado exitosamente {total_refs} referencias en total en estado RESERVADA."
+            )
             
-            # Reset table, observations and reload visor
+            # Reset tabla, observaciones y recargar visor
             self.txt_obs_apartar.clear()
             self.grid_apartar.clear()
             self.grid_apartar.add_row()
+            self.cb_notarias_apartar.setCurrentIndex(0)  # Restablecer placeholder
             self.refresh_visor_data()
         except Exception as e:
             QMessageBox.critical(self, "Error al Reservar", f"No se pudo completar el apartado de referencias:\n{str(e)}")
@@ -1907,9 +2169,23 @@ class ApartarReferenciasDialog(QDialog):
             self.cb_notarias.addItems(list(self._notarias_map.keys()))
             
             rfcs_list_tuples = [(r_id, r_name) for r_name, r_id in self._rfcs_map.items()]
-            concepts_list_tuples = [(c_id, c_name) for c_name, c_id in self._concepts_map.items()]
-            desarrollos_list_tuples = [(d_id, d_name) for d_name, d_id in self._desarrollos_map.items()]
-            self.grid.set_catalogs(rfcs_list_tuples, concepts_list_tuples, desarrollos_list_tuples)
+            CONCEPTOS_APARTADO = {2, 3}
+            concepts_list_tuples = sorted(
+                [
+                    (c_id, c_name)
+                    for c_name, c_id in self._concepts_map.items()
+                    if c_id in CONCEPTOS_APARTADO
+                ],
+                key=lambda x: x[0]
+            )
+            delegations_list_tuples = [(d["delegacion_id"] if isinstance(d, dict) else d.delegacion_id, d["nombre"] if isinstance(d, dict) else d.nombre) for d in self._catalogs_data["delegaciones"]]
+            
+            desarrollos_tuples = []
+            for d in self._catalogs_data["desarrollos"]:
+                desarrollos_tuples.append((d["desarrollo_id"], d["nombre"], d.get("delegacion_id")))
+                
+            self.grid.set_has_desarrollo(True)
+            self.grid.set_catalogs(rfcs_list_tuples, concepts_list_tuples, delegations_list_tuples, desarrollos_tuples)
             self.grid.add_row()
         except Exception as e:
             print("Error loading dialog catalog data:", e)
@@ -1930,19 +2206,22 @@ class ApartarReferenciasDialog(QDialog):
         rows_data = []
         for i, row in enumerate(data):
             if not row["rfc_id"] or not row["concepto_id"] or not row["delegacion_id"]:
-                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener todos los campos seleccionados (Empresa, Concepto y Desarrollo).")
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener todos los campos seleccionados (Empresa, Concepto y Delegación).")
                 return
                 
-            key = (row["rfc_id"], row["concepto_id"], row["delegacion_id"])
+            key = (row["rfc_id"], row["concepto_id"], row["delegacion_id"], row.get("desarrollo_id"))
             if key in seen_combinations:
-                QMessageBox.warning(self, "Validación", f"El renglón {i+1} tiene una combinación duplicada de Empresa, Concepto y Desarrollo.")
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} tiene una combinación duplicada de Empresa, Concepto, Delegación y Desarrollo.")
                 return
             seen_combinations.add(key)
+            
+            # Si el desarrollo_id no fue seleccionado (es None o "Cualquier Desarrollo"), pasamos el delegacion_id como desarrollo_id a la consulta / repo
+            final_desarrollo_id = row.get("desarrollo_id") if row.get("desarrollo_id") else row["delegacion_id"]
             
             rows_data.append({
                 "rfc_id": row["rfc_id"],
                 "concepto_id": row["concepto_id"],
-                "desarrollo_id": row["delegacion_id"],
+                "desarrollo_id": final_desarrollo_id,
                 "cantidad": row["cantidad"]
             })
             
