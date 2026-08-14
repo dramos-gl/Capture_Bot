@@ -131,6 +131,103 @@ class InventarioUIService:
             except Exception:
                 return 0
 
+    def get_rfcs_con_stock_facturadas(self) -> List[Dict[str, Any]]:
+        """Returns active RFCs that have at least one reference in 'FACTURADA' state."""
+        if self.api_client.connect_via_api:
+            try:
+                return self.api_client.request("GET", "/api/docs/inventario/rfcs-con-stock")
+            except Exception:
+                return []
+        else:
+            if not self.db_connector:
+                return []
+            try:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_rfcs_con_stock_facturadas()
+            except Exception as e:
+                print(f"Error get_rfcs_con_stock_facturadas: {e}")
+                return []
+
+
+    def get_desarrollos_activos_para_apartar(self) -> List[Dict[str, Any]]:
+        """Returns all active desarrollo_empresa entries (desarrollo+rfc+delegacion) for cascade population."""
+        if self.api_client.connect_via_api:
+            try:
+                return self.api_client.request("GET", "/api/docs/inventario/desarrollos-activos-apartar")
+            except Exception:
+                return []
+        else:
+            if not self.db_connector:
+                return []
+            try:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_desarrollos_activos_para_apartar()
+            except Exception as e:
+                print(f"Error get_desarrollos_activos_para_apartar: {e}")
+                return []
+
+    def get_rfcs_por_desarrollo(self, desarrollo_id: int) -> List[Dict[str, Any]]:
+        """Returns all RFCs linked to a desarrollo (active, from desarrollo_empresa)."""
+        if self.api_client.connect_via_api:
+            try:
+                return self.api_client.request("GET", f"/api/docs/inventario/desarrollos/{desarrollo_id}/rfcs")
+            except Exception:
+                return []
+        else:
+            if not self.db_connector:
+                return []
+            try:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_rfcs_por_desarrollo(desarrollo_id)
+            except Exception as e:
+                print(f"Error get_rfcs_por_desarrollo: {e}")
+                return []
+
+    def get_delegaciones_por_desarrollo_rfc(self, desarrollo_id: int, rfc_id: int) -> List[Dict[str, Any]]:
+        """Returns delegaciones for a (desarrollo, rfc) combination."""
+        if self.api_client.connect_via_api:
+            try:
+                return self.api_client.request(
+                    "GET", f"/api/docs/inventario/desarrollos/{desarrollo_id}/rfcs/{rfc_id}/delegaciones"
+                )
+            except Exception:
+                return []
+        else:
+            if not self.db_connector:
+                return []
+            try:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_delegaciones_por_desarrollo_rfc(desarrollo_id, rfc_id)
+            except Exception as e:
+                print(f"Error get_delegaciones_por_desarrollo_rfc: {e}")
+                return []
+
+    def get_conceptos_con_stock(self, rfc_id: int, delegacion_id: int) -> List[Dict[str, Any]]:
+        """Returns concepts that have FACTURADA stock for the given rfc + delegacion."""
+        if self.api_client.connect_via_api:
+            try:
+                return self.api_client.request(
+                    "GET", "/api/docs/inventario/conceptos-con-stock",
+                    params={"rfc_id": rfc_id, "delegacion_id": delegacion_id}
+                )
+            except Exception:
+                return []
+        else:
+            if not self.db_connector:
+                return []
+            try:
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_conceptos_con_stock(rfc_id, delegacion_id)
+            except Exception as e:
+                print(f"Error get_conceptos_con_stock: {e}")
+                return []
+
+
     def get_catalogos_data(self) -> Dict[str, Any]:
         """Fetches all catalogs required for the inventory view."""
         if self.api_client.connect_via_api:
@@ -274,6 +371,43 @@ class InventarioUIService:
                 repo = InventarioRepository(session)
                 return repo.get_lotes_asignacion()
 
+    def get_lotes_asignacion_filtered(
+        self,
+        search: str = None,
+        tipo_destino: str = None,
+        limit: int = 50,
+        offset: int = 0,
+        start_date: str = None,
+        end_date: str = None
+    ):
+        """Fetches paginated, filterable lotes. Returns (list, total_count)."""
+        if self.api_client.connect_via_api:
+            # API mode: pass filters as query params
+            params = {"limit": limit, "offset": offset}
+            if search:
+                params["search"] = search
+            if tipo_destino:
+                params["tipo_destino"] = tipo_destino
+            if start_date:
+                params["start_date"] = start_date
+            if end_date:
+                params["end_date"] = end_date
+            result = self.api_client.request("GET", "/api/docs/inventario/lotes/filtrados", params=params)
+            return result.get("lotes", []), result.get("total", 0)
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                return repo.get_lotes_asignacion_filtered(
+                    search=search,
+                    tipo_destino=tipo_destino,
+                    limit=limit,
+                    offset=offset,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+
     def get_lote_detalles(self, lote_id: int) -> List[Dict[str, Any]]:
         """Fetches details of an assignment lote."""
         if self.api_client.connect_via_api:
@@ -284,6 +418,17 @@ class InventarioUIService:
             with self.db_connector.get_session() as session:
                 repo = InventarioRepository(session)
                 return repo.get_lote_detalles(lote_id)
+
+    def get_lote_asignacion_header(self, lote_id: int) -> Dict[str, Any]:
+        """Fetches rich header info for a single lote_asignacion."""
+        if self.api_client.connect_via_api:
+            return self.api_client.request("GET", f"/api/docs/inventario/lotes/{lote_id}/header")
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                return repo.get_lote_asignacion_header(lote_id)
 
     def get_facturas_by_referencia_id(self, referencia_id: int) -> List[Dict[str, Any]]:
         """Fetches invoices (facturas) associated with a reference ID."""

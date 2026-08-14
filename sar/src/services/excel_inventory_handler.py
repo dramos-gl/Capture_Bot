@@ -45,7 +45,8 @@ class ExcelInventoryHandler:
         idx_cliente = get_idx("CLIENTE", "NOMBRE CLIENTE", "NOMBRE")
         idx_estatus_aviso = get_idx("FECHA INGRESO A RPP", "FECHA_INGRESO_A_RPP", "ESTATUS_PRIMER_AVISO", "ESTATUS RPP")
         idx_credito_titular = get_idx("CREDITO_TITULAR", "CREDITO TITULAR", "CREDITO", "TITULAR", "CREDITO_O_TITULAR")
-        idx_pa = get_idx("COMENTARIOS", "PA", "PADRON", "PADRÓN")
+        idx_pa = get_idx("P.A.", "PA", "PADRON", "PADRÓN")
+        idx_comentarios = get_idx("COMENTARIOS", "OBSERVACIONES", "OBS")
         idx_fecha_sol = get_idx("FECHA_SOLICITUD", "FECHA SOLICITUD", "FECHA")
         idx_ubicacion = get_idx("UBICACION", "UBICACIÓN")
         
@@ -112,6 +113,7 @@ class ExcelInventoryHandler:
             estatus_aviso = str(row[idx_estatus_aviso]).strip() if idx_estatus_aviso != -1 and row[idx_estatus_aviso] is not None else ""
             credito_titular = str(row[idx_credito_titular]).strip() if idx_credito_titular != -1 and row[idx_credito_titular] is not None else ""
             pa = str(row[idx_pa]).strip() if idx_pa != -1 and row[idx_pa] is not None else ""
+            comentarios = str(row[idx_comentarios]).strip() if idx_comentarios != -1 and row[idx_comentarios] is not None else ""
             delegacion = str(row[idx_delegacion]).strip() if idx_delegacion != -1 and row[idx_delegacion] is not None else ""
 
             # Check each concept reference column
@@ -142,6 +144,7 @@ class ExcelInventoryHandler:
                         "estatus_primer_aviso": estatus_aviso,
                         "credito_titular": credito_titular,
                         "pa": pa,
+                        "comentarios": comentarios,
                         "delegacion": delegacion,
                         "concepto_solicitado": concept_name,
                         "referencia_asignada": "" if is_indicator else ref_val,
@@ -220,6 +223,20 @@ class ExcelInventoryHandler:
             row_result["delegacion_nombre"] = ""
             row_result["rfc_id"] = None
             row_result["lote_detalle_id"] = None  # To track which reservation to update
+
+            # Validate critical missing fields presence: cliente, mz, lote, ext (edif), int (viv)
+            missing_fields = []
+            if not cliente or cliente.strip() == "": missing_fields.append("Cliente")
+            if not mz or mz.strip() == "": missing_fields.append("MZA")
+            if not lote or lote.strip() == "": missing_fields.append("Lote")
+            if not edif or edif.strip() == "": missing_fields.append("Ext (Exterior)")
+            if not viv or viv.strip() == "": missing_fields.append("Int (Interior)")
+            
+            if missing_fields:
+                row_result["status"] = "ERROR"
+                row_result["error_message"] = f"Faltan campos obligatorios de la ubicación: {', '.join(missing_fields)}."
+                validated_rows.append(row_result)
+                continue
             
             # Resolve Company (RFC)
             resolved_rfc_id = None
@@ -240,22 +257,46 @@ class ExcelInventoryHandler:
             desarrollo = session.execute(des_stmt).scalars().first()
             
             if not desarrollo:
+                desarrollo = Desarrollo(nombre=desarrollo_name, activo=True)
+                session.add(desarrollo)
+                session.flush()
+
+                # Default delegation logic
                 deleg_id = 2 # default Cancun
                 if "PLAYA" in desarrollo_name or "TULUM" in desarrollo_name:
                     deleg_id = 3 # Playa del Carmen
-                
-                desarrollo = Desarrollo(nombre=desarrollo_name, delegacion_id=deleg_id, activo=True)
-                session.add(desarrollo)
+
+                from sar.src.storage.models import DesarrolloEmpresa
+                # resolved_rfc_id fallback to 1 if empty
+                de = DesarrolloEmpresa(
+                    desarrollo_id=desarrollo.desarrollo_id,
+                    rfc_id=resolved_rfc_id if resolved_rfc_id else 1,
+                    delegacion_id=deleg_id,
+                    es_default=True,
+                    activo=True
+                )
+                session.add(de)
                 session.flush()
-            
+
             row_result["desarrollo_id"] = desarrollo.desarrollo_id
-            
-            # Fetch delegation details for development
-            deleg_stmt = select(Delegacion.nombre).where(Delegacion.delegacion_id == desarrollo.delegacion_id)
+
+            # Fetch delegation_id from DesarrolloEmpresa associations
+            from sar.src.storage.models import DesarrolloEmpresa
+            de_stmt = select(DesarrolloEmpresa.delegacion_id).where(DesarrolloEmpresa.desarrollo_id == desarrollo.desarrollo_id)
+            deleg_id = session.execute(de_stmt).scalars().first()
+            if not deleg_id:
+                deleg_id = 2 # default Cancun fallback
+
+            # Fetch delegation name details
+            deleg_stmt = select(Delegacion.nombre).where(Delegacion.delegacion_id == deleg_id)
             deleg_name = session.execute(deleg_stmt).scalar()
             row_result["delegacion_nombre"] = deleg_name
 
             # Check if this client already has an assignment for the same concept at this exact location
+            normalized_concept_req = concept_req
+            if normalized_concept_req == "AVISO":
+                normalized_concept_req = "AVISO PREVENTIVO"
+
             dup_stmt = (
                 select(AsignacionReferencia)
                 .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
@@ -268,7 +309,7 @@ class ExcelInventoryHandler:
                     Ubicacion.lote == lote,
                     Ubicacion.edif == edif,
                     Ubicacion.viv == viv,
-                    Concepto.alias == concept_req
+                    Concepto.alias == normalized_concept_req
                 )
             )
             dup_check = session.execute(dup_stmt).scalars().first()
@@ -280,7 +321,8 @@ class ExcelInventoryHandler:
                 # Find matching placeholder by concept
                 placeholder_match = None
                 placeholder_idx = -1
-                concept_obj = concept_alias_map.get(concept_req)
+                
+                concept_obj = concept_alias_map.get(normalized_concept_req)
                 concept_id_req = concept_obj.concepto_id if concept_obj else None
                 
                 if req_autolink or not ref_str:
@@ -300,7 +342,7 @@ class ExcelInventoryHandler:
 
                 if not placeholder_match:
                     row_result["status"] = "ERROR"
-                    row_result["error_message"] = f"No hay facturas RESERVADAS disponibles para el concepto '{concept_req}' de esta Notaría."
+                    row_result["error_message"] = f"No hay facturas RESERVADAS disponibles para el concepto '{concept_req}' (DB: '{normalized_concept_req}') de esta Notaría."
                     validated_rows.append(row_result)
                     continue
 
@@ -398,15 +440,19 @@ class ExcelInventoryHandler:
 
             # 3. Check if reference is in FACTURADA state
             if estado_cod != "FACTURADA":
-                # Wait, if it is already ASIGNADA, let's check if it is assigned to the SAME client in this lote or another
-                from sar.src.storage.models import LoteDetalle
-                ld_check = session.execute(select(LoteDetalle).where(LoteDetalle.referencia_id == ref_obj.referencia_id)).scalars().first()
-                if ld_check:
+                # Query AsignacionReferencia and join with Ubicacion to resolve the correct assigned client and format the message
+                from sar.src.storage.models import AsignacionReferencia, Ubicacion
+                ar_check = session.execute(
+                    select(AsignacionReferencia)
+                    .join(Ubicacion, AsignacionReferencia.ubicacion_id == Ubicacion.ubicacion_id)
+                    .where(AsignacionReferencia.referencia_id == ref_obj.referencia_id)
+                ).scalars().first()
+                if ar_check and ar_check.ubicacion:
                     row_result["status"] = "ERROR"
-                    row_result["error_message"] = f"La referencia ya está asignada al cliente '{ld_check.cliente}'."
+                    row_result["error_message"] = f"La referencia ya está asignada al cliente '{ar_check.ubicacion.cliente}'."
                 else:
-                    row_result["status"] = "WARNING"
-                    row_result["error_message"] = f"Advertencia: La referencia está en estado '{estado_cod}' (se esperaba 'FACTURADA')."
+                    row_result["status"] = "ERROR"
+                    row_result["error_message"] = f"La referencia ya está asignada en el sistema (Estado: '{estado_cod}')."
                 validated_rows.append(row_result)
                 continue
 
@@ -560,6 +606,216 @@ class ExcelInventoryHandler:
             ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
 
         wb.save(dest_path)
+
+    @staticmethod
+    def generate_assignment_excel(dest_path: str, header: dict, data_rows: list):
+        """Generates the assignment Excel with exact column order as specified.
+
+        Columns:
+        ID | DESARROLLO | P.A. | CLIENTE | MZA | LOTE | EXT | INT |
+        No.OFICIAL | FECHA INGRESO A RPP | AVISO | CLG |
+        CANCELACION PRIMER AVISO | CANCELACION SEGUNDO AVISO | COMENTARIOS
+
+        Each row groups all references of the same location (client+mz+lote+edif+viv).
+        AVISO = first reference with concepto AVISO/AVISO PREVENTIVO
+        CLG   = first reference with concepto CLG
+        For RESERVADA: AVISO/CLG columns show reference numbers (referencia_portal).
+        """
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Asignaciones"
+
+        # ── Styles ──────────────────────────────────────────────────────────
+        font_title    = Font(name="Calibri", size=14, bold=True)
+        font_subtitle = Font(name="Calibri", size=11, bold=True, italic=True)
+        font_header   = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        font_data     = Font(name="Calibri", size=10)
+        fill_header   = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+        fill_alt      = PatternFill(start_color="EBF3FB", end_color="EBF3FB", fill_type="solid")
+        border_thin   = Side(border_style="thin", color="BDD7EE")
+        border_data   = Border(left=border_thin, right=border_thin,
+                               top=border_thin, bottom=border_thin)
+
+        # ── Column headers (row 1) ───────────────────────────────────────────
+        COLUMNS = [
+            "ID", "DESARROLLO", "P.A.", "CLIENTE",
+            "MZA", "LOTE", "EXT", "INT",
+            "No.OFICIAL", "FECHA INGRESO A RPP",
+            "AVISO", "CLG",
+            "CANCELACION PRIMER AVISO", "CANCELACION SEGUNDO AVISO",
+            "COMENTARIOS",
+        ]
+        ALIAS_AVISO = {"AVISO", "AVISO PREVENTIVO", "NUEVO_DERECHO_AVISO"}
+        ALIAS_CLG   = {"CLG"}
+        ALIAS_CANC1 = {"CANC_1ER _AVISO", "CANCELACION_1ER_AVISO"}
+        ALIAS_CANC2 = {"CANC_2DO_AVISO", "CANCELACION_2DO_AVISO"}
+
+        ws.row_dimensions[1].height = 30
+        for ci, col_name in enumerate(COLUMNS, start=1):
+            cell = ws.cell(row=1, column=ci, value=col_name)
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = border_data
+
+        # ── Pivot data by location / sequential index ────────────────────────
+        # For ASIGNADA: group by client + location coordinates
+        # For RESERVADA: pair the N-th AVISO with the N-th CLG so they share a row.
+        pivot: dict = {}
+        
+        # Lists to keep track of RESERVADA references by concept type
+        reservada_avisos = []
+        reservada_clgs = []
+        reservada_otros = []
+
+        for r in data_rows:
+            estado_r = (r.get("estado") or "").upper()
+            is_reservada = (estado_r == "RESERVADA" or not any([
+                r.get("cliente", ""), r.get("mz", ""), r.get("viv", "")
+            ]))
+            
+            if is_reservada:
+                concepto = (r.get("concepto") or "").strip().upper()
+                if concepto in ALIAS_AVISO:
+                    reservada_avisos.append(r)
+                elif concepto in ALIAS_CLG:
+                    reservada_clgs.append(r)
+                else:
+                    reservada_otros.append(r)
+            else:
+                key = (
+                    r.get("cliente", ""),
+                    r.get("desarrollo", ""),
+                    r.get("mz", ""),
+                    r.get("lote", ""),
+                    r.get("edif", ""),
+                    r.get("viv", ""),
+                )
+                if key not in pivot:
+                    pivot[key] = {
+                        "cliente":    r.get("cliente", ""),
+                        "desarrollo": r.get("desarrollo", ""),
+                        "mz":         r.get("mz", ""),
+                        "lote_loc":   r.get("lote", ""),
+                        "edif":       r.get("edif", ""),
+                        "viv":        r.get("viv", ""),
+                        "folio":      r.get("folio_electronico", ""),
+                        "fecha_sol":  r.get("fecha_solicitud", ""),
+                        "pa":         r.get("pa", ""),
+                        "comentarios": r.get("comentarios", ""),
+                        "aviso":      "",
+                        "clg":        "",
+                        "canc1":      "",
+                        "canc2":      "",
+                    }
+                concepto = (r.get("concepto") or "").strip().upper()
+                ref_val  = r.get("referencia", "")
+                p = pivot[key]
+                if concepto in ALIAS_AVISO and not p["aviso"]:
+                    p["aviso"] = ref_val
+                elif concepto in ALIAS_CLG and not p["clg"]:
+                    p["clg"] = ref_val
+                elif concepto in ALIAS_CANC1 and not p["canc1"]:
+                    p["canc1"] = ref_val
+                elif concepto in ALIAS_CANC2 and not p["canc2"]:
+                    p["canc2"] = ref_val
+
+        # Pair up the RESERVADA Avisos and CLGs sequentially
+        max_pairs = max(len(reservada_avisos), len(reservada_clgs))
+        for idx in range(max_pairs):
+            aviso_ref = reservada_avisos[idx] if idx < len(reservada_avisos) else {}
+            clg_ref = reservada_clgs[idx] if idx < len(reservada_clgs) else {}
+            
+            # Merge details using whichever has data
+            ref_rep = aviso_ref if aviso_ref else clg_ref
+            
+            key = (f"__RESERVADA_PAIR_{idx}__", idx)
+            pivot[key] = {
+                "cliente":    ref_rep.get("cliente", "RESERVA PENDIENTE"),
+                "desarrollo": ref_rep.get("desarrollo", ""),
+                "mz":         ref_rep.get("mz", ""),
+                "lote_loc":   ref_rep.get("lote", ""),
+                "edif":       ref_rep.get("edif", ""),
+                "viv":        ref_rep.get("viv", ""),
+                "folio":      ref_rep.get("folio_electronico", ""),
+                "fecha_sol":  ref_rep.get("fecha_solicitud", ""),
+                "pa":         ref_rep.get("pa", ""),
+                "comentarios": ref_rep.get("comentarios", ""),
+                "aviso":      aviso_ref.get("referencia", ""),
+                "clg":        clg_ref.get("referencia", ""),
+                "canc1":      "",
+                "canc2":      "",
+            }
+            
+        # Append remaining non-Aviso/non-CLG RESERVADA references
+        for idx, r in enumerate(reservada_otros):
+            key = (f"__RESERVADA_OTRO_{idx}__", idx)
+            concepto = (r.get("concepto") or "").strip().upper()
+            ref_val  = r.get("referencia", "")
+            
+            pivot[key] = {
+                "cliente":    r.get("cliente", "RESERVA PENDIENTE"),
+                "desarrollo": r.get("desarrollo", ""),
+                "mz":         r.get("mz", ""),
+                "lote_loc":   r.get("lote", ""),
+                "edif":       r.get("edif", ""),
+                "viv":        r.get("viv", ""),
+                "folio":      r.get("folio_electronico", ""),
+                "fecha_sol":  r.get("fecha_solicitud", ""),
+                "pa":         r.get("pa", ""),
+                "comentarios": r.get("comentarios", ""),
+                "aviso":      "",
+                "clg":        "",
+                "canc1":      ref_val if concepto in ALIAS_CANC1 else "",
+                "canc2":      ref_val if concepto in ALIAS_CANC2 else "",
+            }
+
+
+        # ── Write data rows ──────────────────────────────────────────────────
+        row_num = 2
+        for idx, (key, p) in enumerate(pivot.items()):
+            ws.row_dimensions[row_num].height = 18
+            use_alt = (idx % 2 == 1)
+            values = [
+                idx + 1,            # ID = sequential row number
+                p["desarrollo"],
+                p["pa"],
+                p["cliente"],
+                p["mz"],
+                p["lote_loc"],
+                p["edif"] or "",
+                p["viv"],
+                p["folio"],          # No.OFICIAL
+                p["fecha_sol"],
+                p["aviso"],
+                p["clg"],
+                p["canc1"],
+                p["canc2"],
+                p.get("comentarios", ""),  # COMENTARIOS
+            ]
+            for ci, val in enumerate(values, start=1):
+                cell = ws.cell(row=row_num, column=ci, value=val)
+                cell.font = font_data
+                cell.border = border_data
+                if use_alt:
+                    cell.fill = fill_alt
+                if ci in (5, 6, 7, 8, 10):
+                    cell.alignment = Alignment(horizontal="center")
+            row_num += 1
+
+        # ── Column widths ────────────────────────────────────────────────────
+        col_widths = [18, 22, 20, 28, 8, 8, 8, 8, 18, 18, 22, 22, 22, 22, 25]
+        for ci, w in enumerate(col_widths, start=1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
+
+        # Freeze header rows
+        ws.freeze_panes = "A2"
+
+        wb.save(dest_path)
+
 
     @staticmethod
     def generate_blank_template(dest_path: str):

@@ -457,7 +457,7 @@ class LoteAsignacion(Base):
     notaria_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_catalogo.notaria.notaria_id", ondelete="RESTRICT"))
     colaborador_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_catalogo.colaborador.colaborador_id", ondelete="RESTRICT"))
     solicitante_externo: Mapped[Optional[str]] = mapped_column(String(200))
-    fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now, nullable=False)
     observaciones: Mapped[Optional[str]] = mapped_column(Text)
     usuario_creacion: Mapped[int] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id", ondelete="RESTRICT"), nullable=False)
 
@@ -484,6 +484,9 @@ class Ubicacion(Base):
     delegacion: Mapped[Optional[str]] = mapped_column(String(100))
     comentarios: Mapped[Optional[str]] = mapped_column(Text)
     lote_id_erp: Mapped[Optional[str]] = mapped_column(String(100))
+    pa: Mapped[Optional[str]] = mapped_column(String(250))
+    no_oficial: Mapped[Optional[str]] = mapped_column(String(250))
+    fecha_ingreso_rpp: Mapped[Optional[date]] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     # Relaciones
@@ -522,12 +525,12 @@ class AsignacionReferencia(Base):
     ubicacion_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_archivo.ubicacion.ubicacion_id", ondelete="RESTRICT"))
     intento: Mapped[int] = mapped_column(default=1, nullable=False)
     estado_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.estado_sistema.estado_id", ondelete="RESTRICT"), nullable=False)
-    fecha_asignacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    fecha_asignacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now, nullable=False)
     usuario_asignacion: Mapped[int] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id", ondelete="RESTRICT"), nullable=False)
     fecha_confirmacion: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     usuario_confirmacion: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id", ondelete="RESTRICT"))
     observaciones: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.now, nullable=False)
 
     # Relaciones
     lote_detalle: Mapped["LoteDetalle"] = relationship(back_populates="asignaciones")

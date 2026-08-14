@@ -954,13 +954,14 @@ def api_get_lotes_reservados_by_notaria(notaria_id: int, db: Session = Depends(g
 
 class LoteCompletarRequest(BaseModel):
     detalles: List[dict]
+    usuario_id: Optional[int] = 1
 
 @router.post("/inventario/lotes/completar")
 def api_completar_reservaciones(request: LoteCompletarRequest, db: Session = Depends(get_db)):
     from sar.src.storage.repositories import InventarioRepository
     try:
         repo = InventarioRepository(db)
-        repo.completar_reservaciones(request.detalles)
+        repo.completar_reservaciones(request.detalles, usuario_id=request.usuario_id)
         db.commit()
         return {"detail": "Reservaciones completadas con éxito"}
     except Exception as e:

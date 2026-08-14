@@ -366,6 +366,9 @@ CREATE TABLE sar_archivo.ubicacion (
     delegacion VARCHAR(100),
     lote_id_erp VARCHAR(100),
     comentarios TEXT,
+    pa VARCHAR(250),
+    no_oficial VARCHAR(250),
+    fecha_ingreso_rpp DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     FOREIGN KEY (desarrollo_id) REFERENCES sar_catalogo.desarrollo(desarrollo_id) ON DELETE RESTRICT
 );

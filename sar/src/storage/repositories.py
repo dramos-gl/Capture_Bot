@@ -1641,6 +1641,139 @@ class InventarioRepository(BaseRepository):
         self.session.flush()
         return {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "delegacion_id": delegacion_id}
 
+    def get_rfcs_con_stock_facturadas(self) -> List[dict]:
+        """Returns active RFCs that have at least one reference in 'FACTURADA' state."""
+        from sqlalchemy import text
+        stmt = text("""
+            SELECT DISTINCT rfc.rfc_id, rfc.razon_social
+            FROM sar_catalogo.rfc rfc
+            JOIN sar_produccion.grupo_referencia gr ON rfc.rfc_id = gr.rfc_id
+            JOIN sar_produccion.referencia r ON gr.grupo_id = r.grupo_id
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            WHERE rfc.activo = TRUE
+              AND es.entidad = 'referencia'
+              AND es.codigo = 'FACTURADA'
+              AND r.referencia_id NOT IN (
+                  SELECT ar.referencia_id FROM sar_archivo.asignacion_referencia ar
+                  WHERE ar.referencia_id IS NOT NULL
+              )
+            ORDER BY rfc.razon_social
+        """)
+        results = self.session.execute(stmt).all()
+        return [{"rfc_id": row.rfc_id, "razon_social": row.razon_social} for row in results]
+
+
+    def get_desarrollos_activos_para_apartar(self) -> List[dict]:
+        """Returns all active desarrollo_empresa records with their rfc and delegacion data.
+        Each record represents a valid (desarrollo, rfc, delegacion) combination.
+        Used to populate the Desarrollo combo in the Apartar tab with smart cascade defaults.
+        """
+        from sqlalchemy import select
+        from sar.src.storage.models import Desarrollo, DesarrolloEmpresa, Delegacion, Rfc
+        stmt = (
+            select(Desarrollo, DesarrolloEmpresa, Delegacion, Rfc)
+            .join(DesarrolloEmpresa, Desarrollo.desarrollo_id == DesarrolloEmpresa.desarrollo_id)
+            .join(Delegacion, DesarrolloEmpresa.delegacion_id == Delegacion.delegacion_id)
+            .join(Rfc, DesarrolloEmpresa.rfc_id == Rfc.rfc_id)
+            .where(Desarrollo.activo == True, DesarrolloEmpresa.activo == True)
+            .order_by(DesarrolloEmpresa.es_default.desc(), Desarrollo.nombre)
+        )
+        results = self.session.execute(stmt).all()
+        return [
+            {
+                "desarrollo_id": row[0].desarrollo_id,
+                "nombre": row[0].nombre,
+                "rfc_id": row[1].rfc_id,
+                "delegacion_id": row[1].delegacion_id,
+                "es_default": row[1].es_default,
+                "rfc_razon_social": row[3].razon_social,
+                "delegacion_nombre": row[2].nombre,
+            }
+            for row in results
+        ]
+
+    def get_rfcs_por_desarrollo(self, desarrollo_id: int) -> List[dict]:
+        """Returns all RFCs linked to a desarrollo via desarrollo_empresa (active only)."""
+        from sqlalchemy import select
+        from sar.src.storage.models import DesarrolloEmpresa, Rfc
+        stmt = (
+            select(Rfc, DesarrolloEmpresa.es_default)
+            .join(DesarrolloEmpresa, Rfc.rfc_id == DesarrolloEmpresa.rfc_id)
+            .where(
+                DesarrolloEmpresa.desarrollo_id == desarrollo_id,
+                DesarrolloEmpresa.activo == True
+            )
+            .order_by(DesarrolloEmpresa.es_default.desc(), Rfc.razon_social)
+        )
+        results = self.session.execute(stmt).all()
+        # Deduplicate by rfc_id, keeping es_default=True info
+        seen = set()
+        out = []
+        for rfc_obj, es_default in results:
+            if rfc_obj.rfc_id not in seen:
+                seen.add(rfc_obj.rfc_id)
+                out.append({
+                    "rfc_id": rfc_obj.rfc_id,
+                    "razon_social": rfc_obj.razon_social,
+                    "es_default": es_default
+                })
+        return out
+
+    def get_delegaciones_por_desarrollo_rfc(self, desarrollo_id: int, rfc_id: int) -> List[dict]:
+        """Returns all delegaciones for a given (desarrollo, rfc) combination (active only)."""
+        from sqlalchemy import select
+        from sar.src.storage.models import DesarrolloEmpresa, Delegacion
+        stmt = (
+            select(Delegacion, DesarrolloEmpresa.es_default)
+            .join(DesarrolloEmpresa, Delegacion.delegacion_id == DesarrolloEmpresa.delegacion_id)
+            .where(
+                DesarrolloEmpresa.desarrollo_id == desarrollo_id,
+                DesarrolloEmpresa.rfc_id == rfc_id,
+                DesarrolloEmpresa.activo == True
+            )
+            .order_by(DesarrolloEmpresa.es_default.desc(), Delegacion.nombre)
+        )
+        results = self.session.execute(stmt).all()
+        seen = set()
+        out = []
+        for del_obj, es_default in results:
+            if del_obj.delegacion_id not in seen:
+                seen.add(del_obj.delegacion_id)
+                out.append({
+                    "delegacion_id": del_obj.delegacion_id,
+                    "nombre": del_obj.nombre,
+                    "es_default": es_default
+                })
+        return out
+
+    def get_conceptos_con_stock(self, rfc_id: int, delegacion_id: int) -> List[dict]:
+        """Returns concepts (IDs 2=AVISO, 3=CLG only) that have at least one FACTURADA
+        reference available (not yet in asignacion_referencia) for the given rfc + delegacion.
+        """
+        from sqlalchemy import text
+        stmt = text("""
+            SELECT DISTINCT c.concepto_id, c.nombre
+            FROM sar_produccion.referencia r
+            JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+            JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+            JOIN sar_produccion.solicitud s ON r.solicitud_id = s.solicitud_id
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            WHERE es.entidad = 'referencia'
+              AND es.codigo = 'FACTURADA'
+              AND gr.rfc_id = :rfc_id
+              AND s.delegacion_id = :delegacion_id
+              AND c.concepto_id IN (2, 3)
+              AND r.referencia_id NOT IN (
+                  SELECT ar.referencia_id FROM sar_archivo.asignacion_referencia ar
+                  WHERE ar.referencia_id IS NOT NULL
+              )
+            ORDER BY c.concepto_id
+        """)
+        results = self.session.execute(stmt, {"rfc_id": rfc_id, "delegacion_id": delegacion_id}).all()
+        return [{"concepto_id": row.concepto_id, "nombre": row.nombre} for row in results]
+
+
+
     def get_referencias_facturadas_paginated(
         self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, rfc_id: int = None, filter_assigned: str = "Todos", start_date: str = None, end_date: str = None
     ) -> tuple[List[dict], int]:
@@ -1717,8 +1850,11 @@ class InventarioRepository(BaseRepository):
             conditions_sql.append("es.codigo = 'ASIGNADA'")
         elif filter_assigned == "Reservada":
             conditions_sql.append("es.codigo = 'RESERVADA'")
+        elif filter_assigned == "LotesControl":
+            conditions_sql.append("es.codigo IN ('ASIGNADA', 'RESERVADA')")
         else: # Todos
             conditions_sql.append("es.codigo IN ('FACTURADA', 'ASIGNADA', 'RESERVADA')")
+
             
         if concepto_id:
             conditions_sql.append("gr.concepto_id = :concepto_id")
@@ -1737,11 +1873,15 @@ class InventarioRepository(BaseRepository):
                 "c.nombre ILIKE :search",
                 "d.nombre ILIKE :search",
                 "u.nombre ILIKE :search",
-                "ubi.cliente ILIKE :search"
+                "ubi.cliente ILIKE :search",
+                "la.lote_asignacion_id::text ILIKE :search",
+                "n.nombre ILIKE :search",
+                "col.nombre ILIKE :search"
             ]
             conditions_sql.append(f"({' OR '.join(search_conds)})")
             
         where_clause = f"WHERE {' AND '.join(conditions_sql)}"
+
         
         count_stmt = text(f"SELECT COUNT(DISTINCT r.referencia_id) {sql_base} {where_clause}")
         total_count = self.session.execute(count_stmt, params).scalar()
@@ -2018,10 +2158,154 @@ class InventarioRepository(BaseRepository):
             for row in results
         ]
 
-    def get_lote_detalles(self, lote_asignacion_id: int) -> List[dict]:
+    def get_lotes_asignacion_filtered(
+        self,
+        search: str = None,
+        tipo_destino: str = None,
+        limit: int = 50,
+        offset: int = 0,
+        start_date: str = None,
+        end_date: str = None
+    ):
+        """Returns paginated lotes with optional filters including date range. Returns (list_of_dicts, total_count)."""
+        from sqlalchemy import text
+
+        where_clauses = []
+        params = {"limit": limit, "offset": offset}
+
+        if tipo_destino:
+            where_clauses.append("la.tipo_destino = :tipo_destino")
+            params["tipo_destino"] = tipo_destino
+
+        if start_date:
+            where_clauses.append("la.fecha >= :start_date")
+            params["start_date"] = start_date
+
+        if end_date:
+            where_clauses.append("la.fecha <= :end_date")
+            params["end_date"] = f"{end_date} 23:59:59"
+
+        if search:
+            where_clauses.append("""
+                (
+                    la.lote_asignacion_id::text ILIKE :search
+                    OR n.nombre ILIKE :search
+                    OR col.nombre ILIKE :search
+                    OR la.solicitante_externo ILIKE :search
+                    OR la.observaciones ILIKE :search
+                    OR u.nombre ILIKE :search
+                )
+            """)
+            params["search"] = f"%{search}%"
+
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        stmt_count = text(f"""
+            SELECT COUNT(*) FROM sar_archivo.lote_asignacion la
+            LEFT JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
+            LEFT JOIN sar_catalogo.colaborador col ON la.colaborador_id = col.colaborador_id
+            JOIN sar_seguridad.usuario u ON la.usuario_creacion = u.usuario_id
+            {where_sql}
+        """)
+        total = self.session.execute(stmt_count, params).scalar() or 0
+
+        stmt = text(f"""
+            SELECT
+                la.lote_asignacion_id,
+                la.tipo_destino,
+                COALESCE(n.nombre, col.nombre, '') AS asignado_a,
+                la.solicitante_externo,
+                la.fecha,
+                la.observaciones,
+                u.nombre AS creador,
+                (
+                    SELECT COUNT(*)
+                    FROM sar_archivo.asignacion_referencia ar
+                    JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
+                    WHERE ld.lote_asignacion_id = la.lote_asignacion_id
+                ) AS total_referencias
+            FROM sar_archivo.lote_asignacion la
+            LEFT JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
+            LEFT JOIN sar_catalogo.colaborador col ON la.colaborador_id = col.colaborador_id
+            JOIN sar_seguridad.usuario u ON la.usuario_creacion = u.usuario_id
+            {where_sql}
+            ORDER BY la.fecha DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        results = self.session.execute(stmt, params).all()
+
+        lotes = [
+            {
+                "lote_asignacion_id": row.lote_asignacion_id,
+                "tipo_destino": row.tipo_destino,
+                "asignado_a": row.asignado_a,
+                "solicitante_externo": row.solicitante_externo or "",
+                "fecha": row.fecha.strftime("%Y-%m-%d %H:%M"),
+                "observaciones": row.observaciones or "",
+                "creador": row.creador,
+                "total_referencias": row.total_referencias,
+            }
+            for row in results
+        ]
+        return lotes, int(total)
+
+
+    def get_lote_asignacion_header(self, lote_asignacion_id: int) -> dict:
+        """Returns rich header info for a single lote_asignacion."""
         from sqlalchemy import text
         stmt = text("""
-            SELECT 
+            SELECT
+                la.lote_asignacion_id,
+                la.tipo_destino,
+                COALESCE(n.nombre, col.nombre, '') AS asignado_a,
+                la.solicitante_externo,
+                la.fecha,
+                la.observaciones,
+                u.nombre AS creador,
+                COALESCE(r_emp.razon_social, '') AS empresa,
+                (
+                    SELECT es.codigo
+                    FROM sar_archivo.asignacion_referencia ar2
+                    JOIN sar_catalogo.estado_sistema es ON ar2.estado_id = es.estado_id
+                    WHERE ar2.lote_detalle_id IN (
+                        SELECT ld2.lote_detalle_id
+                        FROM sar_archivo.lote_detalle ld2
+                        WHERE ld2.lote_asignacion_id = la.lote_asignacion_id
+                    )
+                    LIMIT 1
+                ) AS estado_muestra
+            FROM sar_archivo.lote_asignacion la
+            LEFT JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
+            LEFT JOIN sar_catalogo.colaborador col ON la.colaborador_id = col.colaborador_id
+            JOIN sar_seguridad.usuario u ON la.usuario_creacion = u.usuario_id
+            LEFT JOIN (
+                SELECT ld_e.lote_asignacion_id, MIN(ld_e.rfc_id) AS rfc_id
+                FROM sar_archivo.lote_detalle ld_e
+                GROUP BY ld_e.lote_asignacion_id
+            ) first_rfc ON first_rfc.lote_asignacion_id = la.lote_asignacion_id
+            LEFT JOIN sar_catalogo.rfc r_emp ON r_emp.rfc_id = first_rfc.rfc_id
+            WHERE la.lote_asignacion_id = :lote_id
+        """)
+        row = self.session.execute(stmt, {"lote_id": lote_asignacion_id}).first()
+        if not row:
+            return {}
+        return {
+            "lote_asignacion_id": row.lote_asignacion_id,
+            "tipo_destino": row.tipo_destino,
+            "asignado_a": row.asignado_a,
+            "solicitante_externo": row.solicitante_externo or "",
+            "fecha": row.fecha.strftime("%d/%m/%Y %H:%M") if row.fecha else "",
+            "observaciones": row.observaciones or "",
+            "creador": row.creador,
+            "empresa": row.empresa,
+            "estado_refs": row.estado_muestra or "—",
+        }
+
+    def get_lote_detalles(self, lote_asignacion_id: int) -> List[dict]:
+
+        from sqlalchemy import text
+        stmt = text("""
+            SELECT
                 ar.asignacion_referencia_id AS lote_detalle_id,
                 ar.referencia_id,
                 COALESCE(ubi.cliente, 'RESERVA PENDIENTE DE COMPLETAR') AS cliente,
@@ -2033,19 +2317,22 @@ class InventarioRepository(BaseRepository):
                 ubi.edif,
                 ubi.viv,
                 ubi.lote_id_erp AS folio_electronico,
-                '' AS estatus_primer_aviso,
                 ubi.credito_titular,
                 ubi.comentarios AS pa,
                 ubi.delegacion,
                 c.alias AS concepto_solicitado,
                 ref.referencia_portal AS referencia_asignada,
-                d.nombre AS delegacion_nombre
+                d.nombre AS delegacion_nombre,
+                es.codigo AS estado_ref,
+                r.razon_social AS empresa
             FROM sar_archivo.asignacion_referencia ar
             JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
             JOIN sar_produccion.referencia ref ON ar.referencia_id = ref.referencia_id
             JOIN sar_catalogo.concepto c ON ld.concepto_id = c.concepto_id
             JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
             JOIN sar_catalogo.delegacion d ON des.delegacion_id = d.delegacion_id
+            JOIN sar_catalogo.estado_sistema es ON ar.estado_id = es.estado_id
+            JOIN sar_catalogo.rfc r ON ld.rfc_id = r.rfc_id
             LEFT JOIN sar_archivo.ubicacion ubi ON ar.ubicacion_id = ubi.ubicacion_id
             WHERE ld.lote_asignacion_id = :lote_id
             ORDER BY ar.asignacion_referencia_id ASC
@@ -2065,12 +2352,13 @@ class InventarioRepository(BaseRepository):
                 "edif": row.edif or "",
                 "viv": row.viv or "",
                 "folio_electronico": row.folio_electronico or "",
-                "estatus_primer_aviso": row.estatus_primer_aviso or "",
                 "credito_titular": row.credito_titular or "",
                 "pa": row.pa or "",
                 "delegacion_original": row.delegacion or "",
                 "concepto": row.concepto_solicitado,
-                "referencia": row.referencia_asignada
+                "referencia": row.referencia_asignada,
+                "estado": row.estado_ref,
+                "empresa": row.empresa,
             }
             for row in results
         ]
@@ -2399,7 +2687,7 @@ class InventarioRepository(BaseRepository):
             for row in results
         ]
 
-    def completar_reservaciones(self, detalles_completados: List[dict]) -> None:
+    def completar_reservaciones(self, detalles_completados: List[dict], usuario_id: Optional[int] = None) -> None:
         from sar.src.storage.models import AsignacionReferencia, Referencia, Ubicacion
         import datetime
         estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
@@ -2411,43 +2699,118 @@ class InventarioRepository(BaseRepository):
             
             ar = self.session.get(AsignacionReferencia, ar_id)
             if ar:
-                # Convert string date to datetime.date object
+                # Convert string date to datetime.date object for fecha_solicitud
                 f_sol = d.get("fecha_solicitud")
                 fecha_sol = None
                 if f_sol:
                     if isinstance(f_sol, str):
                         try:
-                            fecha_sol = datetime.datetime.strptime(f_sol.split()[0], "%Y-%m-%d").date()
+                            if "-" in f_sol:
+                                fecha_sol = datetime.datetime.strptime(f_sol.split()[0], "%Y-%m-%d").date()
+                            else:
+                                fecha_sol = datetime.datetime.strptime(f_sol.split()[0], "%d/%m/%Y").date()
                         except:
                             fecha_sol = None
                     else:
                         fecha_sol = f_sol
 
-                # Create new Ubicacion
-                ubi = Ubicacion(
-                    cliente=d["cliente"].strip().upper(),
-                    desarrollo_id=ar.lote_detalle.desarrollo_id, # Inherit from lote_detalle row!
-                    fecha_solicitud=fecha_sol,
-                    mz=d.get("mz"),
-                    lote=d.get("lote"),
-                    edif=d.get("edif"),
-                    viv=d.get("viv"),
-                    credito_titular=d.get("credito_titular"),
-                    delegacion=d.get("delegacion"),
-                    comentarios=d.get("pa"),
-                    lote_id_erp=d.get("folio_electronico")
-                )
-                self.session.add(ubi)
-                self.session.flush()
+                # Convert string date for fecha_ingreso_rpp
+                f_rpp = d.get("estatus_primer_aviso")
+                fecha_rpp = None
+                if f_rpp:
+                    if isinstance(f_rpp, str):
+                        try:
+                            # Try yyyy-mm-dd first, then dd/mm/yyyy
+                            if "-" in f_rpp:
+                                fecha_rpp = datetime.datetime.strptime(f_rpp.split()[0], "%Y-%m-%d").date()
+                            else:
+                                fecha_rpp = datetime.datetime.strptime(f_rpp.split()[0], "%d/%m/%Y").date()
+                        except:
+                            fecha_rpp = None
+                    else:
+                        fecha_rpp = f_rpp
 
-                # Link to AsignacionReferencia
+                # Check if an Ubicacion with this exact address/client already exists in this transaction/database to avoid duplication
+                from sqlalchemy import select
+                cliente_upper = d["cliente"].strip().upper()
+                desarrollo_id = ar.lote_detalle.desarrollo_id
+                mz = d.get("mz")
+                lote = d.get("lote")
+                edif = d.get("edif")
+                viv = d.get("viv")
+                
+                dup_ubi_stmt = select(Ubicacion).where(
+                    Ubicacion.cliente == cliente_upper,
+                    Ubicacion.desarrollo_id == desarrollo_id,
+                    Ubicacion.mz == mz,
+                    Ubicacion.lote == lote,
+                    Ubicacion.edif == edif,
+                    Ubicacion.viv == viv
+                )
+                ubi = self.session.execute(dup_ubi_stmt).scalars().first()
+
+                # Get correct 'pa' field from Excel payload
+                pa_val = d.get("pa")
+
+                if not ubi:
+                    # Create new Ubicacion mapping to the new database columns if not exists
+                    ubi = Ubicacion(
+                        cliente=cliente_upper,
+                        desarrollo_id=desarrollo_id,
+                        fecha_solicitud=fecha_sol,
+                        mz=mz,
+                        lote=lote,
+                        edif=edif, # ext
+                        viv=viv,   # int
+                        credito_titular=d.get("credito_titular"),
+                        delegacion=d.get("delegacion"),
+                        comentarios=d.get("comentarios"), # default comments
+                        pa=pa_val, # new column pa
+                        no_oficial=d.get("folio_electronico"), # new column no_oficial
+                        fecha_ingreso_rpp=fecha_rpp # new column fecha_ingreso_rpp
+                    )
+                    self.session.add(ubi)
+                    self.session.flush()
+                else:
+                    # If it exists, update the missing fields (pa, no_oficial, fecha_ingreso_rpp) if they are provided in Excel
+                    if pa_val and not ubi.pa:
+                        ubi.pa = pa_val
+                    if d.get("folio_electronico") and not ubi.no_oficial:
+                        ubi.no_oficial = d.get("folio_electronico")
+                    if fecha_rpp and not ubi.fecha_ingreso_rpp:
+                        ubi.fecha_ingreso_rpp = fecha_rpp
+                    self.session.flush()
+
+                # Link to AsignacionReferencia and set status to ASIGNADA
                 ar.ubicacion_id = ubi.ubicacion_id
                 ar.estado_id = estado_asignada_id
+                
+                # Calculate consecutive attempt number (intento) for this location AND concept
+                from sar.src.storage.models import LoteDetalle
+                intento_stmt = (
+                    select(AsignacionReferencia.intento)
+                    .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
+                    .where(
+                        AsignacionReferencia.ubicacion_id == ubi.ubicacion_id,
+                        AsignacionReferencia.asignacion_referencia_id != ar.asignacion_referencia_id,
+                        LoteDetalle.concepto_id == ar.lote_detalle.concepto_id
+                    )
+                    .order_by(AsignacionReferencia.intento.desc())
+                )
+                prev_intentos = self.session.execute(intento_stmt).scalars().all()
+                if prev_intentos:
+                    ar.intento = prev_intentos[0] + 1
+                else:
+                    ar.intento = 1
+                
+                # Register confirmation date and confirming user
+                ar.fecha_confirmacion = datetime.datetime.now()
+                if usuario_id:
+                    ar.usuario_confirmacion = usuario_id
                 
                 # Increment confirmed count in lote_detalle
                 ar.lote_detalle.cantidad_confirmada += 1
                 
-                # Update reference status to ASIGNADA
                 # Update reference status to ASIGNADA
                 if ar.referencia_id:
                     ref = self.session.get(Referencia, ar.referencia_id)

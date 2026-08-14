@@ -14,6 +14,7 @@ from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.theme_manager import Colors
 from sar.src.services.inventario_ui_service import InventarioUIService
 from sar.src.services.excel_inventory_handler import ExcelInventoryHandler
+from sar.src.ui.design_system.utils.icons import Icons
 
 class InventoryLoadWorker(QThread):
     """Background worker thread to load references from the DB dynamically with pagination."""
@@ -150,6 +151,11 @@ class InventoryView(QWidget):
         self._setup_tab_individual()
         self.tabs.addTab(self.tab_individual, "👤 Asignación Individual")
 
+        # 5. Tab: Gestión de Asignaciones
+        self.tab_lotes = QWidget()
+        self._setup_tab_lotes()
+        self.tabs.addTab(self.tab_lotes, "📋 Gestión de Asignaciones")
+
         # Hide tab bar headers to act as a QStackedWidget
         self.tabs.tabBar().hide()
 
@@ -168,6 +174,9 @@ class InventoryView(QWidget):
             self.tabs.setCurrentWidget(self.tab_apartar)
         elif tab_key in ("inventario_catalogos", "inventario_individual"):
             self.tabs.setCurrentWidget(self.tab_individual)
+        elif tab_key == "inventario_lotes":
+            self.tabs.setCurrentWidget(self.tab_lotes)
+
 
     def refresh_all(self, load_catalogs=True):
         if load_catalogs:
@@ -175,6 +184,8 @@ class InventoryView(QWidget):
         else:
             self._load_filters_data()
         self.refresh_visor_data()
+        self.refresh_lotes_data()
+
 
     # =========================================================================
     # TAB 1: VISOR DE INVENTARIO
@@ -549,7 +560,7 @@ class InventoryView(QWidget):
         self.form_layout_masivo.addRow("", self.chk_completar_reserva)
 
         self.cb_destino_masivo = CustomComboBox(self)
-        self.cb_destino_masivo.addItems(["NOTARIA", "COLABORADOR"])
+        self.cb_destino_masivo.addItems(["-- Seleccione un tipo de destino --", "NOTARIA", "COLABORADOR"])
         self.cb_destino_masivo.currentTextChanged.connect(self._on_destino_masivo_changed)
         self.form_layout_masivo.addRow("Tipo Destino:", self.cb_destino_masivo)
 
@@ -618,6 +629,10 @@ class InventoryView(QWidget):
         self.lbl_colab_row = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
         if self.lbl_colab_row: self.lbl_colab_row.hide()
 
+        self.cb_notarias_masivo.hide()
+        self.lbl_notaria_row = self.form_layout_masivo.labelForField(self.cb_notarias_masivo)
+        if self.lbl_notaria_row: self.lbl_notaria_row.hide()
+
     def _on_completar_reserva_changed(self, state):
         is_checked = (state == 2 or state == Qt.CheckState.Checked)
         if is_checked:
@@ -644,7 +659,7 @@ class InventoryView(QWidget):
             if lbl_c: lbl_c.hide()
             
             self.txt_solicitante_masivo.setEnabled(True)
-        else:
+        elif text == "COLABORADOR":
             self.cb_notarias_masivo.hide()
             lbl = self.form_layout_masivo.labelForField(self.cb_notarias_masivo)
             if lbl: lbl.hide()
@@ -652,6 +667,18 @@ class InventoryView(QWidget):
             self.cb_colaboradores_masivo.show()
             lbl_c = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
             if lbl_c: lbl_c.show()
+            
+            self.txt_solicitante_masivo.setEnabled(False)
+            self.txt_solicitante_masivo.clear()
+        else:
+            # Hide both if '-- Seleccione un tipo de destino --' is selected
+            self.cb_notarias_masivo.hide()
+            lbl = self.form_layout_masivo.labelForField(self.cb_notarias_masivo)
+            if lbl: lbl.hide()
+            
+            self.cb_colaboradores_masivo.hide()
+            lbl_c = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
+            if lbl_c: lbl_c.hide()
             
             self.txt_solicitante_masivo.setEnabled(False)
             self.txt_solicitante_masivo.clear()
@@ -748,7 +775,24 @@ class InventoryView(QWidget):
             self.btn_confirmar_masivo.setEnabled(len(self.validated_records) > 0)
             
             if has_errors:
-                QMessageBox.warning(self, "Errores Detectados", "El Excel contiene referencias con errores (delegación incorrecta, concepto cruzado o no facturada). Se omitirán o corregirán antes de continuar.")
+                # Group error types to show a clear diagnostic report to the QA Auditor
+                error_types = set()
+                for r in self.validated_records:
+                    if r["status"] == "ERROR":
+                        if "no existe" in r["error_message"].lower():
+                            error_types.add("Referencias inexistentes en la base de datos")
+                        elif "ya está asignada" in r["error_message"].lower():
+                            error_types.add("Referencias ya asignadas/confirmadas previamente")
+                        else:
+                            error_types.add(r["error_message"])
+                
+                err_summary = "\n- ".join(error_types)
+                QMessageBox.warning(
+                    self, 
+                    "Inconsistencias y Errores Detectados", 
+                    f"Se identificaron los siguientes problemas en el archivo Excel:\n\n- {err_summary}\n\n"
+                    "Por seguridad, estos registros marcados en ROJO se omitirán durante la importación. Puede corregirlos en el Excel y volver a validar."
+                )
 
         except Exception as e:
             import traceback
@@ -774,7 +818,7 @@ class InventoryView(QWidget):
                 return
 
         solicitante_externo = self.txt_solicitante_masivo.text().strip()
-        if tipo_destino == "NOTARIA" and not solicitante_externo:
+        if tipo_destino == "NOTARIA" and not self.chk_completar_reserva.isChecked() and not solicitante_externo:
             QMessageBox.warning(self, "Falta Acreditación", "Ingresa el nombre del Solicitante Externo (ej. Pedro Gómez) para la Notaría.")
             return
 
@@ -782,22 +826,43 @@ class InventoryView(QWidget):
 
         # Filter only correct or warned records
         valid_details = []
+        warnings_count = 0
         errors_count = 0
+        warning_messages = set()
+        
         for r in self.validated_records:
             if r["status"] == "ERROR":
                 errors_count += 1
                 continue
+            if r["status"] == "WARNING":
+                warnings_count += 1
+                if "ya tiene una asignación" in r["error_message"].lower():
+                    warning_messages.add("Duplicación de ubicación (se incrementará el número de 'Intento' consecutivamente)")
+                else:
+                    warning_messages.add(r["error_message"])
             valid_details.append(r)
 
         if not valid_details:
             QMessageBox.critical(self, "Guardado Fallido", "No hay registros válidos para importar en el lote de asignación.")
             return
 
+        # Prepare a highly detailed and professional QA confirmation prompt
+        prompt_msg = (
+            f"¿Estás seguro de que deseas guardar y confirmar este lote de asignación?\n\n"
+            f"📊 Resumen de registros:\n"
+            f"  • Listos para procesar (Reservadas/Asignadas): {len(valid_details) - warnings_count}\n"
+            f"  • Registros con advertencias (Ubicación duplicada): {warnings_count}\n"
+            f"  • Registros con error crítico (Omitidos): {errors_count}\n\n"
+        )
+        if warning_messages:
+            prompt_msg += "⚠️ ADVERTENCIAS IMPORTANTES:\n- " + "\n- ".join(warning_messages) + "\n\n"
+        
+        if errors_count > 0:
+            prompt_msg += "Nota: Los registros marcados con error crítico no se guardarán en la base de datos.\n\n"
+
         reply = QMessageBox.question(
-            self, "Confirmar Asignación",
-            f"¿Estás seguro de que deseas guardar el lote de asignación?\n\n"
-            f"Registros correctos: {len(valid_details)}\n"
-            f"Registros con error (excluidos): {errors_count}",
+            self, "Confirmar Importación de Lote",
+            prompt_msg,
             QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.No:
@@ -831,13 +896,16 @@ class InventoryView(QWidget):
                             "fecha_solicitud": det["fecha_solicitud"].strftime("%Y-%m-%d") if det.get("fecha_solicitud") and not isinstance(det.get("fecha_solicitud"), str) else det.get("fecha_solicitud")
                         }
                         detalles_payload.append(det_dict)
-                    payload = {"detalles": detalles_payload}
+                    payload = {
+                        "detalles": detalles_payload,
+                        "usuario_id": usuario_id
+                    }
                     self.api_client.request("POST", "/api/docs/inventario/lotes/completar", data=payload)
                 else:
                     with self.db_connector.get_session() as session:
                         from sar.src.storage.repositories import InventarioRepository
                         repo = InventarioRepository(session)
-                        repo.completar_reservaciones(valid_details)
+                        repo.completar_reservaciones(valid_details, usuario_id=usuario_id)
                         session.commit()
                 QMessageBox.information(self, "Lote Completado", f"Se han completado exitosamente {len(valid_details)} asignaciones reservadas.")
             else:
@@ -919,12 +987,11 @@ class InventoryView(QWidget):
         card_header_layout = QHBoxLayout()
         card_title_vbox = QVBoxLayout()
         lbl_card_title = CustomLabel("Asignación Individual Directa", variant="subheader")
-        lbl_card_subtitle = CustomLabel("Filtra referencias disponibles FIFO y asígnalas a un destino final", variant="muted")
         card_title_vbox.addWidget(lbl_card_title)
-        card_title_vbox.addWidget(lbl_card_subtitle)
         card_header_layout.addLayout(card_title_vbox)
         card_header_layout.addStretch()
         form_layout.addLayout(card_header_layout)
+
 
         # Destino Selectors
         dest_layout = QHBoxLayout()
@@ -934,10 +1001,13 @@ class InventoryView(QWidget):
         lbl_tipo = CustomLabel("Tipo de Destino", variant="body")
         lbl_tipo.setStyleSheet("font-weight: bold; background: transparent; border: none;")
         self.cb_tipo_destino_ind = CustomComboBox(self)
+        self.cb_tipo_destino_ind.addItem("-- Seleccione Destino --", None)
         self.cb_tipo_destino_ind.addItems(["NOTARIA", "COLABORADOR"])
+        self.cb_tipo_destino_ind.setCurrentIndex(0)
         self.cb_tipo_destino_ind.currentTextChanged.connect(self._on_tipo_destino_ind_changed)
         vbox_tipo.addWidget(lbl_tipo)
         vbox_tipo.addWidget(self.cb_tipo_destino_ind)
+
 
         vbox_dest = QVBoxLayout()
         lbl_dest = CustomLabel("Destinatario", variant="body")
@@ -947,56 +1017,51 @@ class InventoryView(QWidget):
         vbox_dest.addWidget(self.cb_destinatario_ind)
 
         dest_layout.addLayout(vbox_tipo, stretch=1)
-        dest_layout.addLayout(vbox_dest, stretch=2)
+        dest_layout.addLayout(vbox_dest, stretch=1)
         form_layout.addLayout(dest_layout)
-
-        # Fields for Solicitante Externo & Observaciones
-        fields_layout = QHBoxLayout()
-        fields_layout.setSpacing(16)
-
-        vbox_sol = QVBoxLayout()
-        lbl_sol = CustomLabel("Solicitante Externo", variant="body")
-        lbl_sol.setStyleSheet("font-weight: bold; background: transparent; border: none;")
-        self.txt_solicitante_ind = CustomInput("Nombre del solicitante...")
-        self.txt_solicitante_ind.setMinimumHeight(35)
-        vbox_sol.addWidget(lbl_sol)
-        vbox_sol.addWidget(self.txt_solicitante_ind)
-
-        vbox_obs = QVBoxLayout()
-        lbl_obs = CustomLabel("Observaciones", variant="body")
-        lbl_obs.setStyleSheet("font-weight: bold; background: transparent; border: none;")
-        self.txt_observaciones_ind = CustomInput("Observaciones de la asignación...")
-        self.txt_observaciones_ind.setMinimumHeight(35)
-        vbox_obs.addWidget(lbl_obs)
-        vbox_obs.addWidget(self.txt_observaciones_ind)
-
-        fields_layout.addLayout(vbox_sol, stretch=1)
-        fields_layout.addLayout(vbox_obs, stretch=1)
-        form_layout.addLayout(fields_layout)
-
+        
         # Interactive Grid for filters and counts
         self.grid_individual = InteractiveGrid(self)
+        self.grid_individual.setMinimumHeight(180)
         self.grid_individual.set_third_column_label("Delegación")
         self.grid_individual.btn_save.setVisible(False)
         self.grid_individual.btn_cancel.setVisible(False)
         
-        # We reuse the same availability worker & signals logic
+        # Connect availability and cascade signals for individual grid
         self.grid_individual.availability_requested.connect(self._on_availability_requested_ind)
-        form_layout.addWidget(self.grid_individual)
+        self.grid_individual.cascade_rfcs_needed.connect(self._on_cascade_rfcs_needed)
+        self.grid_individual.cascade_delegaciones_needed.connect(self._on_cascade_delegaciones_needed)
+        self.grid_individual.cascade_conceptos_needed.connect(self._on_cascade_conceptos_needed)
 
-        # Buttons to query & assign
-        buttons_layout = QHBoxLayout()
-        self.btn_buscar_ind = CustomButton("Buscar y Cargar Referencias (FIFO)")
+        # Create aligned action buttons to go in the header alongside + Agregar Renglón
+        from sar.src.ui.design_system.utils.icons import Icons
+
+        self.btn_buscar_ind = QPushButton("Buscar Referencias")
+        self.btn_buscar_ind.setObjectName("primaryBtn")
+        self.btn_buscar_ind.setMinimumHeight(35)
+        self.btn_buscar_ind.setIcon(Icons.get_icon("buscar", color="#FFFFFF"))
         self.btn_buscar_ind.clicked.connect(self._on_buscar_referencias_ind)
-        
-        self.btn_confirmar_ind = CustomButton("Confirmar Asignación Directa")
-        self.btn_confirmar_ind.clicked.connect(self._on_confirmar_asignacion_ind)
-        self.btn_confirmar_ind.setEnabled(False)
 
-        buttons_layout.addWidget(self.btn_buscar_ind)
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.btn_confirmar_ind)
-        form_layout.addLayout(buttons_layout)
+        self.btn_confirmar_ind = QPushButton("Continuar Asignación")
+        self.btn_confirmar_ind.setObjectName("primaryBtn")
+        self.btn_confirmar_ind.setMinimumHeight(35)
+        self.btn_confirmar_ind.setIcon(Icons.get_icon("siguiente", color="#FFFFFF"))
+        self.btn_confirmar_ind.setEnabled(False)
+        self.btn_confirmar_ind.clicked.connect(self._on_confirmar_asignacion_ind)
+
+        self.btn_limpiar_ind = QPushButton("Limpiar")
+        self.btn_limpiar_ind.setObjectName("secondaryBtn")
+        self.btn_limpiar_ind.setMinimumHeight(35)
+        self.btn_limpiar_ind.setIcon(Icons.get_icon("limpiar", color="#475569"))
+        self.btn_limpiar_ind.clicked.connect(self._on_limpiar_ind)
+
+
+        # Inject into the InteractiveGrid header layout (before stretch, so they align right next to btn_add)
+        self.grid_individual.header_layout.addWidget(self.btn_buscar_ind)
+        self.grid_individual.header_layout.addWidget(self.btn_confirmar_ind)
+        self.grid_individual.header_layout.addWidget(self.btn_limpiar_ind)
+
+        form_layout.addWidget(self.grid_individual)
 
         card_ind.layout.addLayout(form_layout)
         layout.addWidget(card_ind)
@@ -1004,33 +1069,109 @@ class InventoryView(QWidget):
         # Preview list table
         self.card_preview_ind = CustomCard(title="Referencias Disponibles a Asignar", parent=self)
         self.table_preview_ind = StyledDataTable(["✔", "ID", "Referencia (Portal)", "Concepto", "Empresa", "Importe", "Delegación"], parent=self)
+        self.table_preview_ind.setMinimumHeight(240)
         self.table_preview_ind.setColumnHidden(1, True) # Hide internal ID
         self.card_preview_ind.add_widget(self.table_preview_ind)
         layout.addWidget(self.card_preview_ind)
 
         self._pending_ind_refs = []
 
-    def _on_tipo_destino_ind_changed(self, text):
+    def _on_limpiar_ind(self):
+        """Clears individual grid rows, destination selections and preview list data."""
+        self.grid_individual.clear()
+        self.grid_individual.add_row()
+        self.table_preview_ind.clearContents()
+        self.table_preview_ind.setRowCount(0)
+        self._pending_ind_refs = []
+        self.btn_confirmar_ind.setEnabled(False)
+        self.cb_tipo_destino_ind.setCurrentIndex(0)
         self.cb_destinatario_ind.clear()
+
+    def _on_tipo_destino_ind_changed(self, text):
+
+        self.cb_destinatario_ind.clear()
+        if not text or text == "-- Seleccione Destino --":
+            self.grid_individual.clear()
+            self.grid_individual.set_cascade_mode(False)
+            return
+
         if text == "NOTARIA" and hasattr(self, "_notarias_map"):
+            self.cb_destinatario_ind.addItem("-- Seleccione Destinatario --", None)
             self.cb_destinatario_ind.addItems(list(self._notarias_map.keys()))
-        elif text == "COLABORADOR" and hasattr(self, "_colaboradores_map"):
-            self.cb_destinatario_ind.addItems(list(self._colaboradores_map.keys()))
+            self.cb_destinatario_ind.setCurrentIndex(0)
+            # NOTARIA: Enable cascade mode (Desarrollo -> RFC -> Delegación -> Concepto)
+            if hasattr(self, "_cascade_desarrollos_entries"):
+                self.grid_individual.set_cascade_mode(True, self._cascade_desarrollos_entries)
+        else:
+            if hasattr(self, "_colaboradores_map"):
+                self.cb_destinatario_ind.addItem("-- Seleccione Destinatario --", None)
+                self.cb_destinatario_ind.addItems(list(self._colaboradores_map.keys()))
+                self.cb_destinatario_ind.setCurrentIndex(0)
+
+            # COLABORADOR: Disable cascade mode (independent combos, but Desarrollo remains visible and optional)
+            self.grid_individual.set_cascade_mode(False)
+            self.grid_individual.set_has_desarrollo(True)
+            # Pre-load only RFCs that actually have 'FACTURADA' stock
+            try:
+                rfcs_con_stock = self.inventario_ui_service.get_rfcs_con_stock_facturadas()
+                rfcs_tuples = [(r["rfc_id"], r["razon_social"]) for r in rfcs_con_stock]
+                
+                concepts_all_tuples = sorted(
+                    [(c_id, c_name) for c_name, c_id in self._concepts_map.items()],
+                    key=lambda x: x[0]
+                )
+                delegations_list_tuples = [
+                    (dg_id, dg_name) for dg_name, dg_id in self._delegations_map.items()
+                ]
+                
+                # Fetch desarrollos catalog for the optional combo
+                desarrollos_tuples = sorted(
+                    [
+                        (
+                            d["desarrollo_id"],
+                            d["nombre"],
+                            d.get("delegacion_id"),
+                            d.get("es_default", False),
+                        )
+                        for d in self.inventario_ui_service.get_desarrollos()
+                    ],
+                    key=lambda x: (not x[3], x[1])
+                )
+                
+                self.grid_individual.set_catalogs(rfcs_tuples, concepts_all_tuples, delegations_list_tuples, desarrollos_tuples)
+            except Exception as e:
+                print("Error loading active stock RFCs for individual grid:", e)
+
+
+        # Clear and add a clean row to match the new mode
+        self.grid_individual.clear()
+        self.grid_individual.add_row()
+
+
 
     def _on_availability_requested_ind(self, row_widget):
         self._avail_pending_row = row_widget
         self._avail_timer.start()
 
     def _on_buscar_referencias_ind(self):
+        tipo_destino = self.cb_tipo_destino_ind.currentText()
+        if not tipo_destino or tipo_destino == "-- Seleccione Destino --":
+            QMessageBox.warning(self, "Destino Requerido", "Debe seleccionar primero un Tipo de Destino válido.")
+            return
+
         grid_data = self.grid_individual.get_all_data()
+
         if not grid_data:
             QMessageBox.warning(self, "Grilla Vacía", "Por favor, agregue al menos una partida para buscar.")
             return
 
         for i, row in enumerate(grid_data):
-            if not row["rfc_id"] or not row["concepto_id"] or not row["delegacion_id"]:
-                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener Empresa, Concepto y Desarrollo seleccionados.")
+            # If in cascade mode (NOTARIA), rfc, concepto, and delegacion are required.
+            # In non-cascade mode (COLABORADOR), desarrollo is hidden but rfc, concepto and delegacion are still required.
+            if not row.get("rfc_id") or not row.get("concepto_id") or not row.get("delegacion_id"):
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener Empresa, Concepto y Delegación seleccionados.")
                 return
+
 
         self._pending_ind_refs = []
         try:
@@ -1083,48 +1224,57 @@ class InventoryView(QWidget):
             return
 
         tipo_destino = self.cb_tipo_destino_ind.currentText()
+        if not tipo_destino or tipo_destino == "-- Seleccione Destino --":
+            QMessageBox.warning(self, "Destino Requerido", "Por favor, seleccione un tipo de destino válido.")
+            return
+
         dest_name = self.cb_destinatario_ind.currentText()
+        if not dest_name or dest_name == "-- Seleccione Destinatario --":
+            QMessageBox.warning(self, "Destinatario Requerido", "Por favor, seleccione un destinatario de la lista.")
+            return
+
         if tipo_destino == "NOTARIA":
             destino_id = self._notarias_map.get(dest_name)
-        else:
+        elif tipo_destino == "COLABORADOR":
             destino_id = self._colaboradores_map.get(dest_name)
+        else:
+            destino_id = None
+
 
         if not destino_id:
             QMessageBox.warning(self, "Destino Inválido", "Por favor, seleccione un destinatario válido.")
             return
 
-        reply = QMessageBox.question(
-            self, "Confirmar Asignación",
-            f"¿Desea asignar directamente las {len(selected_refs)} referencias seleccionadas a {dest_name}?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        if reply != QMessageBox.Yes:
-            return
+        ref_ids = [r["referencia_id"] for r in selected_refs]
+        ref_portals = [r["referencia_portal"] for r in selected_refs]
+        
+        # Instantiate ManualAssignmentDialog to capture all details, passing selected_refs to maintain referential integrity of developments
+        dialog = ManualAssignmentDialog(self.db_connector, ref_ids, ref_portals, parent=self, selected_refs=selected_refs)
 
-        try:
-            parent_window = self.window()
-            usuario_id = getattr(parent_window, "current_usuario_id", 1)
-            sol_ext = self.txt_solicitante_ind.text().strip()
-            obs = self.txt_observaciones_ind.text().strip()
+        
+        # Prepopulate the selected destination type and value in the dialog
+        idx_dest_type = dialog.cb_destino.findText(tipo_destino)
+        if idx_dest_type >= 0:
+            dialog.cb_destino.setCurrentIndex(idx_dest_type)
+        dialog._on_destino_changed(tipo_destino)
+        
+        if tipo_destino == "NOTARIA":
+            idx_not = dialog.cb_notarias.findText(dest_name)
+            if idx_not >= 0:
+                dialog.cb_notarias.setCurrentIndex(idx_not)
+        else:
+            idx_col = dialog.cb_colaboradores.findText(dest_name)
+            if idx_col >= 0:
+                dialog.cb_colaboradores.setCurrentIndex(idx_col)
 
-            lote_id = self.inventario_ui_service.asignar_referencias_directo(
-                tipo_destino, destino_id, usuario_id, selected_refs,
-                solicitante_externo=sol_ext if sol_ext else None,
-                observaciones=obs if obs else None
-            )
-
-            QMessageBox.information(self, "Asignación Completa", f"Asignaciones procesadas y registradas con éxito en el lote ID {lote_id}.")
-            
-            self.txt_solicitante_ind.clear()
-            self.txt_observaciones_ind.clear()
+        # Execute Dialog
+        if dialog.exec() == QDialog.Accepted:
             self.table_preview_ind.clearContents()
             self.table_preview_ind.setRowCount(0)
             self.grid_individual.clear()
             self.grid_individual.add_row()
             self.btn_confirmar_ind.setEnabled(False)
             self.refresh_all()
-        except Exception as e:
-            QMessageBox.critical(self, "Error al Asignar", f"No se pudo completar el proceso de asignación individual:\n{str(e)}")
 
     def _load_catalogs_data(self):
         try:
@@ -1145,7 +1295,9 @@ class InventoryView(QWidget):
 
             # Populate Notaría combos — insert explicit placeholder so no record is auto-selected
             self.cb_notarias_masivo.clear()
+            self.cb_notarias_masivo.addItem("-- Seleccione una notaría --")
             self.cb_notarias_masivo.addItems(list(self._notarias_map.keys()))
+            self.cb_notarias_masivo.setCurrentIndex(0)
 
             self.cb_notarias_apartar.clear()
             self.cb_notarias_apartar.addItem("-- Seleccione una notaría --")
@@ -1154,11 +1306,14 @@ class InventoryView(QWidget):
             self.cb_notarias_apartar.setCurrentIndex(0)  # keep placeholder selected
 
             self.cb_colaboradores_masivo.clear()
+            self.cb_colaboradores_masivo.addItem("-- Seleccione un colaborador --")
             self.cb_colaboradores_masivo.addItems(list(self._colaboradores_map.keys()))
+            self.cb_colaboradores_masivo.setCurrentIndex(0)
 
             self.cb_empresa_masivo.clear()
-            self.cb_empresa_masivo.addItem("Seleccione empresa...")
+            self.cb_empresa_masivo.addItem("-- Seleccione empresa --")
             self.cb_empresa_masivo.addItems(list(self._rfcs_map.keys()))
+            self.cb_empresa_masivo.setCurrentIndex(0)
 
             current_concept_txt = self.cb_concept_filter.currentText()
             self.cb_concept_filter.clear()
@@ -1174,6 +1329,10 @@ class InventoryView(QWidget):
             if current_empresa_txt in self._rfcs_map:
                 self.cb_empresa_filter.setCurrentText(current_empresa_txt)
 
+
+
+
+
             # Populate tables in Tab 3 — only ACTIVE delegations
             delegations_list_tuples = [
                 (
@@ -1184,46 +1343,20 @@ class InventoryView(QWidget):
                 if (d.get("activo", True) if isinstance(d, dict) else getattr(d, "activo", True))
             ]
 
-            # Populate grid_apartar catalogs — only AVISO (2) and CLG (3) allowed, sorted by ID
-            CONCEPTOS_APARTADO = {2, 3}
-            rfcs_list_tuples = [(r_id, r_name) for r_name, r_id in self._rfcs_map.items()]
-            concepts_list_tuples = sorted(
-                [
-                    (c_id, c_name)
-                    for c_name, c_id in self._concepts_map.items()
-                    if c_id in CONCEPTOS_APARTADO
-                ],
-                key=lambda x: x[0]  # 2 (AVISO) first, then 3 (CLG)
-            )
-            
-            # Map desarrollos as tuples: (desarrollo_id, nombre, delegacion_id, es_default)
-            # Los que son default se colocan al inicio de la lista.
-            desarrollos_tuples = sorted(
-                [
-                    (
-                        d["desarrollo_id"],
-                        d["nombre"],
-                        d.get("delegacion_id"),
-                        d.get("es_default", False),
-                    )
-                    for d in desarrollos
-                ],
-                key=lambda x: (not x[3], x[1])  # default primero, luego alfabetico
-            )
-                
+            # Populate grid_apartar in CASCADE MODE using desarrollos_empresa data
+            desarrollos_activos_para_apartar = self.inventario_ui_service.get_desarrollos_activos_para_apartar()
+            self._cascade_desarrollos_entries = desarrollos_activos_para_apartar  # cache for new rows
             self.grid_apartar.set_has_desarrollo(True)
-            self.grid_apartar.set_catalogs(rfcs_list_tuples, concepts_list_tuples, delegations_list_tuples, desarrollos_tuples)
+            self.grid_apartar.set_cascade_mode(True, desarrollos_activos_para_apartar)
             if not self.grid_apartar.rows:
                 self.grid_apartar.add_row()
 
-            # Populate grid_individual catalogs with ALL active concepts and DELEGATIONS
-            concepts_all_tuples = sorted(
-                [(c_id, c_name) for c_name, c_id in self._concepts_map.items()],
-                key=lambda x: x[0]
-            )
-            self.grid_individual.set_catalogs(rfcs_list_tuples, concepts_all_tuples, delegations_list_tuples)
+            # Populate grid_individual by default in CASCADE MODE to match Apartar
+            self.grid_individual.set_has_desarrollo(True)
+            self.grid_individual.set_cascade_mode(True, desarrollos_activos_para_apartar)
             if not self.grid_individual.rows:
                 self.grid_individual.add_row()
+
 
         except Exception as e:
             print("Error loading catalog data for inventory view:", e)
@@ -1251,6 +1384,7 @@ class InventoryView(QWidget):
             self.cb_empresa_filter.addItems(list(self._rfcs_map.keys()))
             if current_empresa_txt in self._rfcs_map:
                 self.cb_empresa_filter.setCurrentText(current_empresa_txt)
+
 
         except Exception as e:
             print("Error loading filter data for inventory view:", e)
@@ -1338,12 +1472,16 @@ class InventoryView(QWidget):
         inputs_layout.addLayout(obs_layout, stretch=1)
         form_layout.addLayout(inputs_layout)
 
-        # Interactive Grid (Delegación and optional Desarrollo)
+        # Interactive Grid (cascade mode: Desarrollo → RFC → Delegación → Concepto)
         self.grid_apartar = InteractiveGrid(self)
         self.grid_apartar.set_has_desarrollo(True)
         self.grid_apartar.btn_save.setVisible(False)
         self.grid_apartar.btn_cancel.setVisible(False)
         self.grid_apartar.availability_requested.connect(self._on_availability_requested)
+        # Connect cascade signals to the view's handler methods
+        self.grid_apartar.cascade_rfcs_needed.connect(self._on_cascade_rfcs_needed)
+        self.grid_apartar.cascade_delegaciones_needed.connect(self._on_cascade_delegaciones_needed)
+        self.grid_apartar.cascade_conceptos_needed.connect(self._on_cascade_conceptos_needed)
         form_layout.addWidget(self.grid_apartar)
 
         # Debounce timer and pending availability worker tracking
@@ -1395,8 +1533,50 @@ class InventoryView(QWidget):
         worker.start()
 
     def _on_availability_result(self, row_widget, count: int):
-        """Called on the main thread when the worker returns a count."""
-        self.grid_apartar.update_row_availability(row_widget, count)
+        """Called on the main thread when the worker returns a count.
+        Dynamically updates whichever grid contains the row.
+        """
+        if row_widget in self.grid_apartar.rows:
+            self.grid_apartar.update_row_availability(row_widget, count)
+        elif row_widget in self.grid_individual.rows:
+            self.grid_individual.update_row_availability(row_widget, count)
+
+
+    # ── Cascade handlers ─────────────────────────────────────────────────────
+
+    def _on_cascade_rfcs_needed(self, row_widget, desarrollo_id: int):
+        """Load RFCs for the selected Desarrollo and feed them into the row."""
+        try:
+            rfcs = self.inventario_ui_service.get_rfcs_por_desarrollo(desarrollo_id)
+            row_widget.populate_rfcs(rfcs)
+        except Exception as e:
+            print(f"Error cargando RFCs para desarrollo {desarrollo_id}: {e}")
+
+    def _on_cascade_delegaciones_needed(self, row_widget, desarrollo_id: int, rfc_id: int):
+        """Load Delegaciones for the selected Desarrollo+RFC and feed them into the row."""
+        try:
+            delegaciones = self.inventario_ui_service.get_delegaciones_por_desarrollo_rfc(desarrollo_id, rfc_id)
+            row_widget.populate_delegaciones(delegaciones)
+        except Exception as e:
+            print(f"Error cargando Delegaciones para desarrollo {desarrollo_id}, rfc {rfc_id}: {e}")
+
+    def _on_cascade_conceptos_needed(self, row_widget, rfc_id: int, delegacion_id: int):
+        """Load Conceptos for the selected RFC+Delegación and feed them into the row."""
+        try:
+            if row_widget in self.grid_individual.rows:
+                # No restriction on concepts for Asignación Individual Directa: Load all active concepts
+                conceptos_all_tuples = sorted(
+                    [{"concepto_id": c_id, "nombre": c_name} for c_name, c_id in self._concepts_map.items()],
+                    key=lambda x: x["concepto_id"]
+                )
+                row_widget.populate_conceptos(conceptos_all_tuples)
+            else:
+                # Keep stock restriction for Apartar tab
+                conceptos = self.inventario_ui_service.get_conceptos_con_stock(rfc_id, delegacion_id)
+                row_widget.populate_conceptos(conceptos)
+        except Exception as e:
+            print(f"Error cargando Conceptos para rfc {rfc_id}, delegacion {delegacion_id}: {e}")
+
 
     def _on_save_apartar(self):
         # --- Validación 1: Notaría seleccionada ---
@@ -1595,6 +1775,342 @@ class InventoryView(QWidget):
         if dialog.exec() == QDialog.Accepted:
             self.refresh_visor_data()
 
+    # =========================================================================
+    # TAB 5: GESTIÓN DE ASIGNACIONES
+    # =========================================================================
+    def _setup_tab_lotes(self):
+        """Sets up the Gestión de Asignaciones tab — shows assignment summary rows."""
+        layout = QVBoxLayout(self.tab_lotes)
+        layout.setSpacing(16)
+
+        # --- Header area ---
+        header_layout = QHBoxLayout()
+        title_lbl = CustomLabel("📋 Gestión de Asignaciones", variant="subheader")
+        header_layout.addWidget(title_lbl)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+
+        # --- Filter bar ---
+        from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
+        from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
+        from PySide6.QtWidgets import QGroupBox
+
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(10)
+
+        # Search using QLineEdit matching the design/style of filterBarSearch in FilterBar
+        self.search_lotes = QLineEdit()
+        self.search_lotes.setObjectName("filterBarSearch")
+        self.search_lotes.setPlaceholderText("🔍 Buscar por ID, notaria, colaborador, solicitante...")
+        self.search_lotes.setStyleSheet("""
+            QLineEdit#filterBarSearch {
+                background-color: white;
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+                padding: 10px 12px;
+                font-size: 13px;
+                color: #1e293b;
+            }
+            QLineEdit#filterBarSearch:focus {
+                border: 1px solid #2563eb;
+            }
+        """)
+        self.search_lotes.textChanged.connect(self._on_search_lotes)
+        
+        # Wrap in layout with margin-top: 14px to align perfectly with groupboxes
+        search_wrap = QWidget()
+        search_wrap.setStyleSheet("background: transparent;")
+        search_wrap_layout = QVBoxLayout(search_wrap)
+        search_wrap_layout.setContentsMargins(0, 14, 0, 0)
+        search_wrap_layout.addWidget(self.search_lotes)
+        filter_row.addWidget(search_wrap, stretch=3)
+
+        # Tipo Destino
+        self.labeled_destino_lotes = LabeledComboBox("Tipo Destino", ["Todos", "NOTARIA", "COLABORADOR"])
+        self.cb_destino_filter_lotes = self.labeled_destino_lotes.combo
+        self.cb_destino_filter_lotes.currentTextChanged.connect(self._on_destino_filter_lotes)
+        filter_row.addWidget(self.labeled_destino_lotes)
+
+        # Date Filters wrapped in matching style groupbox to homologate height
+        self.group_start_date = QGroupBox("Desde", self)
+        self.group_start_date.setStyleSheet("""
+            QGroupBox {
+                background-color: white;
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+                margin-top: 14px;
+                font-weight: bold;
+                color: #2563EB;
+                font-size: 11px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 10px;
+                padding: 0 4px;
+            }
+        """)
+        start_date_layout = QVBoxLayout(self.group_start_date)
+        start_date_layout.setContentsMargins(4, 4, 4, 4)
+        self.start_date_filter = QDateEdit()
+        self.start_date_filter.setCalendarPopup(True)
+        self.start_date_filter.setDate(QDate.currentDate().addMonths(-3))
+        self.start_date_filter.setStyleSheet("border: none; background-color: white; min-width: 110px;")
+        self.start_date_filter.dateChanged.connect(self._on_date_changed_lotes)
+        start_date_layout.addWidget(self.start_date_filter)
+        filter_row.addWidget(self.group_start_date)
+
+        self.group_end_date = QGroupBox("Hasta", self)
+        self.group_end_date.setStyleSheet("""
+            QGroupBox {
+                background-color: white;
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+                margin-top: 14px;
+                font-weight: bold;
+                color: #2563EB;
+                font-size: 11px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 10px;
+                padding: 0 4px;
+            }
+        """)
+        end_date_layout = QVBoxLayout(self.group_end_date)
+        end_date_layout.setContentsMargins(4, 4, 4, 4)
+        self.end_date_filter = QDateEdit()
+        self.end_date_filter.setCalendarPopup(True)
+        self.end_date_filter.setDate(QDate.currentDate())
+        self.end_date_filter.setStyleSheet("border: none; background-color: white; min-width: 110px;")
+        self.end_date_filter.dateChanged.connect(self._on_date_changed_lotes)
+        end_date_layout.addWidget(self.end_date_filter)
+        filter_row.addWidget(self.group_end_date)
+
+        # Refresh button
+        btn_refresh = CustomButton("↻ Actualizar", is_secondary=True)
+        # Shift layout margin slightly to align with the margin-top offset of inputs
+        btn_refresh.setStyleSheet("margin-top: 14px;")
+        btn_refresh.clicked.connect(self.refresh_lotes_data)
+        filter_row.addWidget(btn_refresh)
+
+        layout.addLayout(filter_row)
+
+        # --- Main Card & Table ---
+        self.card_lotes = CustomCard(title="Registro de Asignaciones", parent=self)
+
+        headers = ["ID", "Tipo Destino", "Asignado A", "Solicitante", "Fecha", "Total Refs", "Creado Por", "Observaciones"]
+        self.table_lotes = StyledDataTable(headers, parent=self)
+        self.table_lotes.setMinimumHeight(350)
+        self.table_lotes.setMinimumWidth(200)
+        self.card_lotes.add_widget(self.table_lotes)
+
+        # Pagination footer
+        footer_layout = QHBoxLayout()
+        self.lbl_pagination_info_lotes = CustomLabel("0 asignaciones encontradas", variant="muted")
+        footer_layout.addWidget(self.lbl_pagination_info_lotes)
+        footer_layout.addStretch()
+
+        self.cb_page_size_lotes = CustomComboBox(self)
+        self.cb_page_size_lotes.addItems(["50 por página", "100 por página", "200 por página"])
+        self.cb_page_size_lotes.setCurrentIndex(0)
+        self.cb_page_size_lotes.currentTextChanged.connect(self._on_page_size_changed_lotes)
+        footer_layout.addWidget(self.cb_page_size_lotes)
+
+        self.pagination_widget_lotes = QWidget(self)
+        self.pag_btn_layout_lotes = QHBoxLayout(self.pagination_widget_lotes)
+        self.pag_btn_layout_lotes.setContentsMargins(0, 0, 0, 0)
+        footer_layout.addWidget(self.pagination_widget_lotes)
+        self.card_lotes.layout.addLayout(footer_layout)
+
+        # Action buttons
+        actions_layout = QHBoxLayout()
+        self.btn_exportar_reporte_lotes = CustomButton("📊 Exportar Asignación Seleccionada", is_secondary=True)
+        self.btn_exportar_reporte_lotes.clicked.connect(self._on_exportar_lote_seleccionado)
+        self.btn_ver_detalles_lote = CustomButton("🔍 Ver Detalle", is_secondary=True)
+        self.btn_ver_detalles_lote.clicked.connect(self._on_ver_detalle_lote)
+        actions_layout.addStretch()
+        actions_layout.addWidget(self.btn_exportar_reporte_lotes)
+        actions_layout.addWidget(self.btn_ver_detalles_lote)
+        self.card_lotes.layout.addLayout(actions_layout)
+        layout.addWidget(self.card_lotes)
+
+        # Hint label
+        hint = CustomLabel("💡 Doble clic sobre una asignación para ver sus referencias.", variant="muted")
+        layout.addWidget(hint)
+
+
+        # State
+        self.current_page_lotes = 1
+        self.page_size_lotes = 50
+        self.all_lotes_data = []  # List of dicts from get_lotes_asignacion_filtered
+        self.total_lotes = 0
+        self._current_search_text_lotes = ""
+        self._current_tipo_destino_lotes = "Todos"
+        self._current_rfc_id_lotes = None
+
+        self.table_lotes.cellDoubleClicked.connect(self._on_table_cell_double_clicked_lotes)
+
+
+    def refresh_lotes_data(self):
+        """Loads assignments from service with active filters and populates the table."""
+        if not hasattr(self, 'table_lotes'):
+            return
+        self.lbl_pagination_info_lotes.setText("Cargando asignaciones...")
+        self.pagination_widget_lotes.setEnabled(False)
+
+        tipo_destino = self._current_tipo_destino_lotes if self._current_tipo_destino_lotes != "Todos" else None
+        search = self._current_search_text_lotes or None
+        
+        start_date = self.start_date_filter.date().toString("yyyy-MM-dd")
+        end_date = self.end_date_filter.date().toString("yyyy-MM-dd")
+        
+        offset = (self.current_page_lotes - 1) * self.page_size_lotes
+
+        try:
+            lotes, total = self.inventario_ui_service.get_lotes_asignacion_filtered(
+                search=search,
+                tipo_destino=tipo_destino,
+                limit=self.page_size_lotes,
+                offset=offset,
+                start_date=start_date,
+                end_date=end_date
+            )
+            self.all_lotes_data = lotes
+            self.total_lotes = total
+            self._populate_lotes_table()
+        except Exception as e:
+            self.lbl_pagination_info_lotes.setText(f"Error al cargar asignaciones: {e}")
+            print("[GestionAsignaciones] Error:", e)
+
+
+    def _populate_lotes_table(self):
+        """Populates the lotes table from self.all_lotes_data without the Empresa column."""
+        self.table_lotes.setRowCount(0)
+        rows = []
+        for l in self.all_lotes_data:
+            rows.append([
+                str(l["lote_asignacion_id"]),
+                l["tipo_destino"],
+                l["asignado_a"],
+                l.get("solicitante_externo", ""),
+                l["fecha"],
+                str(l["total_referencias"]),
+                l.get("creador", ""),
+                l.get("observaciones", "")
+            ])
+        self.table_lotes.populate_rows(rows)
+
+        total_pages = max(1, -(-self.total_lotes // self.page_size_lotes))
+        start = (self.current_page_lotes - 1) * self.page_size_lotes + 1 if self.total_lotes > 0 else 0
+        end = min(self.current_page_lotes * self.page_size_lotes, self.total_lotes)
+        self.lbl_pagination_info_lotes.setText(
+            f"Mostrando {start}–{end} de {self.total_lotes} asignaciones"
+        )
+        self.pagination_widget_lotes.setEnabled(True)
+
+        # Rebuild pagination buttons
+        while self.pag_btn_layout_lotes.count():
+            item = self.pag_btn_layout_lotes.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        def add_page_btn(text, target, enabled):
+            btn = QPushButton(text)
+            btn.setEnabled(enabled)
+            btn.clicked.connect(lambda: self._set_page_lotes(target))
+            self.pag_btn_layout_lotes.addWidget(btn)
+
+        add_page_btn("<<", 1, self.current_page_lotes > 1)
+        add_page_btn("<", self.current_page_lotes - 1, self.current_page_lotes > 1)
+        add_page_btn(str(self.current_page_lotes), self.current_page_lotes, False)
+        add_page_btn(">", self.current_page_lotes + 1, self.current_page_lotes < total_pages)
+        add_page_btn(">>", total_pages, self.current_page_lotes < total_pages)
+
+
+    def _set_page_lotes(self, page):
+        self.current_page_lotes = page
+        self.refresh_lotes_data()
+
+    def _on_search_lotes(self, text):
+        self._current_search_text_lotes = text
+        self.current_page_lotes = 1
+        self.refresh_lotes_data()
+
+    def _on_destino_filter_lotes(self, text):
+        self._current_tipo_destino_lotes = text
+        self.current_page_lotes = 1
+        self.refresh_lotes_data()
+
+    def _on_date_changed_lotes(self, qdate):
+        self.current_page_lotes = 1
+        self.refresh_lotes_data()
+
+    def _on_page_size_changed_lotes(self, text):
+        if "50" in text: self.page_size_lotes = 50
+        elif "100" in text: self.page_size_lotes = 100
+        else: self.page_size_lotes = 200
+        self.current_page_lotes = 1
+        self.refresh_lotes_data()
+
+    def _on_table_cell_double_clicked_lotes(self, row, column):
+        """Open LoteProcessingDialog on double-click."""
+        if not self.all_lotes_data or row >= len(self.all_lotes_data):
+            return
+        lote = self.all_lotes_data[row]
+        lote_id = lote.get("lote_asignacion_id")
+        if lote_id:
+            dialog = LoteProcessingDialog(self.db_connector, lote_id, self)
+            dialog.exec()
+
+    def _on_ver_detalle_lote(self):
+        """Open detail dialog for the currently selected lote row."""
+        selected = self.table_lotes.selectedItems()
+        if not selected:
+            QMessageBox.information(self, "Selección", "Selecciona una asignación de la tabla primero.")
+            return
+        row = selected[0].row()
+        self._on_table_cell_double_clicked_lotes(row, 0)
+
+    def _on_exportar_lote_seleccionado(self):
+        """Export the selected lote to Excel via ExportLotesDialog pre-filtered."""
+        selected = self.table_lotes.selectedItems()
+        if not selected:
+            QMessageBox.information(self, "Selección", "Selecciona una asignación de la tabla primero.")
+            return
+        row = selected[0].row()
+        if not self.all_lotes_data or row >= len(self.all_lotes_data):
+            return
+        lote = self.all_lotes_data[row]
+        lote_id = lote.get("lote_asignacion_id")
+        dest_name = lote.get("asignado_a", "")
+        req_name = lote.get("solicitante_externo", "")
+        date_str = lote.get("fecha", "")
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar Reporte de Asignación",
+            f"Control_Inventario_Lote_{lote_id}.xlsx",
+            "Excel Files (*.xlsx)"
+        )
+        if not file_path:
+            return
+        try:
+            details = self.inventario_ui_service.get_lote_detalles(lote_id)
+            title = "ENTREGA DE DERECHOS"
+            subtitle = f"DESTINO: {dest_name.upper()} {f'({req_name.upper()})' if req_name else ''}"
+            date_range = date_str.split()[0] if date_str else ""
+            ExcelInventoryHandler.generate_excel_inventory_file(
+                dest_path=file_path,
+                title=title,
+                subtitle=subtitle,
+                date_range=date_range,
+                data_rows=details
+            )
+            QMessageBox.information(self, "Exportación Completada", f"Archivo generado en:\n{file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error de Exportación", f"No se pudo generar el archivo:\n{str(e)}")
+
 
 # =============================================================================
 # DIALOGS
@@ -1602,11 +2118,13 @@ class InventoryView(QWidget):
 class ManualAssignmentDialog(QDialog):
     """Dialog to perform individual or bulk manual reference assignments."""
     
-    def __init__(self, db_connector, ref_ids, ref_portals, parent=None):
+    def __init__(self, db_connector, ref_ids, ref_portals, parent=None, selected_refs=None):
         super().__init__(parent)
         self.db_connector = db_connector
         self.ref_ids = ref_ids
+        self.selected_refs = selected_refs or []
         self.inventario_ui_service = InventarioUIService(self.db_connector)
+
         
         self.setWindowTitle("Asignar Factura Manualmente")
         self.setMinimumWidth(400)
@@ -1699,11 +2217,24 @@ class ManualAssignmentDialog(QDialog):
             self.cb_notarias.show()
             self.cb_colaboradores.hide()
             self.txt_solicitante.setEnabled(True)
+            # Notaria requires client and address details
+            self.txt_cliente.setEnabled(True)
+            self.cb_desarrollo.setEnabled(True)
+            self.txt_mz.setEnabled(True)
+            self.txt_lote.setEnabled(True)
+            self.txt_edif.setEnabled(True)
+            self.txt_viv.setEnabled(True)
+            self.txt_folio.setEnabled(True)
+            self.txt_estatus_aviso.setEnabled(True)
         else:
             self.cb_notarias.hide()
             self.cb_colaboradores.show()
             self.txt_solicitante.setEnabled(False)
             self.txt_solicitante.clear()
+            # For COLABORADOR, customer and address inputs are optional or bypassed.
+            # We keep them enabled so they can be captured optionally, but they won't be validated as mandatory.
+            pass
+
 
     def _load_catalogs(self):
         try:
@@ -1717,7 +2248,44 @@ class ManualAssignmentDialog(QDialog):
 
             self.cb_notarias.addItems(list(self._notarias_map.keys()))
             self.cb_colaboradores.addItems(list(self._colaboradores_map.keys()))
-            self.cb_desarrollo.addItems(list(self._desarrollos_map.keys()))
+            
+            # Filter developments to ensure referential integrity
+            # Extract unique (rfc_id, delegacion_id) pairs from the references being assigned
+            rfc_delegacion_pairs = set()
+            for ref in self.selected_refs:
+                rfc_id = ref.get("rfc_id")
+                delegacion_id = ref.get("delegacion_id")
+                # Look up mapping from grid_individual rows if not directly present in ref dict
+                if not rfc_id or not delegacion_id:
+                    for row in self.parent().grid_individual.get_all_data():
+                        rfc_id = rfc_id or row.get("rfc_id")
+                        delegacion_id = delegacion_id or row.get("delegacion_id")
+                if rfc_id and delegacion_id:
+                    rfc_delegacion_pairs.add((rfc_id, delegacion_id))
+
+            # Fetch active triadic relationships from the catalog
+            try:
+                desarrollo_empresas = self.inventario_ui_service.get_desarrollos_activos_para_apartar()
+            except Exception:
+                desarrollo_empresas = []
+
+            # Determine valid developments matching referential integrity filters
+            valid_desarrollo_ids = set()
+            for de in desarrollo_empresas:
+                for rfc_id, del_id in rfc_delegacion_pairs:
+                    if de.get("rfc_id") == rfc_id and de.get("delegacion_id") == del_id:
+                        valid_desarrollo_ids.add(de.get("desarrollo_id"))
+
+            # Populate developments combo with placeholder
+            self.cb_desarrollo.addItem("-- Seleccione Desarrollo (Opcional) --", None)
+            
+            # Load only valid filtered developments (or all if no filters resolved)
+            for d in desarrollos:
+                if not rfc_delegacion_pairs or d["desarrollo_id"] in valid_desarrollo_ids:
+                    self.cb_desarrollo.addItem(d["nombre"], d["desarrollo_id"])
+            
+            self.cb_desarrollo.setCurrentIndex(0)
+
 
         except Exception as e:
             print("Error loading catalog data for ManualAssignmentDialog:", e)
@@ -1737,15 +2305,26 @@ class ManualAssignmentDialog(QDialog):
         solicitante_externo = self.txt_solicitante.text().strip()
         cliente = self.txt_cliente.text().strip()
         des_name = self.cb_desarrollo.currentText()
-        des_id = self._desarrollos_map.get(des_name)
-        
-        if not cliente:
-            QMessageBox.warning(self, "Falta Información", "Por favor ingresa el nombre del cliente.")
-            return
+        if des_name == "-- Seleccione Desarrollo (Opcional) --":
+            des_name = None
+        des_id = self._desarrollos_map.get(des_name) if des_name else None
 
-        if not des_id:
-            QMessageBox.warning(self, "Falta Información", "Selecciona un desarrollo válido.")
-            return
+        
+        # Validation checks
+        if tipo_destino == "NOTARIA":
+            if not cliente:
+                QMessageBox.warning(self, "Falta Información", "Por favor ingresa el nombre del cliente.")
+                return
+            if not des_id:
+                QMessageBox.warning(self, "Falta Información", "Selecciona un desarrollo válido.")
+                return
+        else:
+            # For COLABORADOR, observations field is mandatory if no client data is provided.
+            if not self.txt_obs.toPlainText().strip():
+                QMessageBox.warning(self, "Falta Información", "Debe capturar observaciones en la asignación del colaborador.")
+                return
+            if not cliente:
+                cliente = "ASIGNACIÓN INTERNA"  # Default fallback if empty
 
         fecha_sol = None
         if self.txt_fecha_sol.text().strip():
@@ -1754,6 +2333,7 @@ class ManualAssignmentDialog(QDialog):
             except ValueError:
                 QMessageBox.warning(self, "Formato Incorrecto", "La fecha de solicitud debe tener formato AAAA-MM-DD")
                 return
+
 
         # Prepare details (same values for all selected references)
         detalles_list = []
@@ -1801,7 +2381,7 @@ class ManualAssignmentDialog(QDialog):
 
 
 class ExportLotesDialog(QDialog):
-    """Dialog to list historical lotes and export any to Control_Inventario.xlsx format."""
+    """Dialog to list historical assignments and export any to Control_Inventario.xlsx format."""
     
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
@@ -1812,9 +2392,9 @@ class ExportLotesDialog(QDialog):
         self.setMinimumSize(600, 400)
         self.layout = QVBoxLayout(self)
         
-        self.layout.addWidget(CustomLabel("Historial de Lotes de Asignación", variant="subheader"))
+        self.layout.addWidget(CustomLabel("Historial de Asignaciones", variant="subheader"))
         
-        self.table_lotes = StyledDataTable(["ID Lote", "Destino", "Asignado A", "Solicitante Externo", "Fecha Creación", "Refs", "Observaciones"], parent=self)
+        self.table_lotes = StyledDataTable(["ID Asignación", "Destino", "Asignado A", "Solicitante Externo", "Fecha Creación", "Refs", "Observaciones"], parent=self)
         self.layout.addWidget(self.table_lotes)
 
         # Buttons
@@ -1822,7 +2402,7 @@ class ExportLotesDialog(QDialog):
         btn_close = CustomButton("Cerrar", is_secondary=True)
         btn_close.clicked.connect(self.reject)
         
-        btn_export = CustomButton("Exportar Lote Seleccionado")
+        btn_export = CustomButton("Exportar Asignación")
         btn_export.clicked.connect(self._on_export)
         
         btns.addStretch()
@@ -1854,7 +2434,7 @@ class ExportLotesDialog(QDialog):
     def _on_export(self):
         selected = self.table_lotes.selectedItems()
         if not selected:
-            QMessageBox.warning(self, "Selección Requerida", "Por favor selecciona un lote en la lista para exportarlo.")
+            QMessageBox.warning(self, "Selección Requerida", "Por favor selecciona una asignación en la lista para exportarla.")
             return
 
         row = selected[0].row()
@@ -1866,7 +2446,7 @@ class ExportLotesDialog(QDialog):
         # Ask where to save
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Guardar Reporte de Asignación",
-            f"Control_Inventario_Lote_{lote_id}.xlsx",
+            f"Asignacion_{lote_id}.xlsx",
             "Excel Files (*.xlsx)"
         )
         if not file_path:
@@ -1898,143 +2478,320 @@ class ExportLotesDialog(QDialog):
 
 
 class LoteProcessingDialog(QDialog):
-    """Dialog to show details of a lote_asignacion and export renamed PDF invoices."""
-    
+    """Dialog to show details of an assignment with rich header, enhanced table,
+    Generar Excel and Generar PDF actions."""
+
     def __init__(self, db_connector, lote_id: int, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
         self.lote_id = lote_id
         self.inventario_ui_service = InventarioUIService(self.db_connector)
+        self.header_data: dict = {}
+        self.detalles: list = []
+
+        self.setWindowTitle(f"Detalle de Asignación #{lote_id}")
+        self.resize(1100, 680)
+        self.setMinimumSize(950, 600)
         
-        self.setWindowTitle(f"Procesar Lote de Asignación #{lote_id}")
-        self.setMinimumSize(900, 500)
-        self.layout = QVBoxLayout(self)
+        # Main Layout following design_system spacing
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
+
+        # ── Header Section using CustomLabel ─────────────────────────────────
+        self.header_layout = QHBoxLayout()
+        self.lbl_title = CustomLabel(f"Detalle de Asignación #{lote_id}", variant="header")
+        self.lbl_subtitle = CustomLabel("Cargando información del lote...", variant="body")
+        self.lbl_subtitle.setObjectName("assignmentProcessingSubtitle")
         
-        self.layout.addWidget(CustomLabel(f"Detalle de Asignación - Lote #{lote_id}", variant="subheader"))
+        title_block = QVBoxLayout()
+        title_block.addWidget(self.lbl_title)
+        title_block.addWidget(self.lbl_subtitle)
+        self.header_layout.addLayout(title_block)
+        root.addLayout(self.header_layout)
+
+        # ── Metrics Bar using design system components ───────────────────────
+        self.banner_row = QWidget()
+        self.banner_row.setStyleSheet("background: transparent;")
+        banner_row_layout = QHBoxLayout(self.banner_row)
+        banner_row_layout.setContentsMargins(0, 0, 0, 0)
+        banner_row_layout.setSpacing(0)
         
-        headers = ["✔", "ID Detalle", "Referencia ID", "Cliente", "Referencia", "Desarrollo", "Ubicación", "Mz", "Lt", "Edif", "Viv", "Folio Electrónico"]
+        self.metric_frame = QFrame()
+        self.metric_frame.setObjectName("assignmentMetricBar")
+        # Reuse style pattern of orderProcessingMetricBar
+        self.metric_frame.setStyleSheet("""
+            QFrame#assignmentMetricBar {
+                background-color: #F8FAFC;
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+            }
+        """)
+        metric_layout = QHBoxLayout(self.metric_frame)
+        metric_layout.setContentsMargins(16, 8, 16, 8)
+        metric_layout.setSpacing(20)
+        metric_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        self.lbl_metric_solicitante = CustomLabel("Solicitante: —", variant="body")
+        self.lbl_metric_solicitante.setStyleSheet("font-weight: bold;")
+        
+        self.lbl_metric_fecha = CustomLabel("Fecha: —", variant="body")
+        
+        self.lbl_metric_estado = CustomLabel("Estado: —", variant="body")
+        self.lbl_metric_estado.setStyleSheet("font-weight: bold;")
+
+        metric_layout.addWidget(self.lbl_metric_solicitante)
+        metric_layout.addWidget(self.lbl_metric_fecha)
+        metric_layout.addWidget(self.lbl_metric_estado)
+        
+        banner_row_layout.addWidget(self.metric_frame)
+        root.addWidget(self.banner_row)
+
+        # ── References table ─────────────────────────────────────────────────
+
+        headers = [
+            "✔", "ID", "Ref ID",
+            "Estado", "Empresa", "Concepto",
+            "Referencia", "Cliente", "Desarrollo",
+            "MZA", "Lote", "Ext", "Int",
+            "No.Oficial", "P.A.", "Fecha Solicitud",
+        ]
         self.table_detalles = StyledDataTable(headers, parent=self)
-        self.table_detalles.setColumnHidden(1, True) # Hide ID Detalle
-        self.table_detalles.setColumnHidden(2, True) # Hide Referencia ID
-        self.layout.addWidget(self.table_detalles)
-        
-        # Action Buttons
+        self.table_detalles.setColumnHidden(1, True)  # ID interno
+        self.table_detalles.setColumnHidden(2, True)  # Ref ID
+        self.table_detalles.setMinimumHeight(300)
+        root.addWidget(self.table_detalles)
+
+        # ── Buttons ──────────────────────────────────────────────────────────
         btns = QHBoxLayout()
+        
+        btn_excel = CustomButton("Generar Excel", is_secondary=True)
+        btn_excel.setIcon(Icons.file_excel("#16A34A")) # Excel green
+        btn_excel.setToolTip("Generar Archivos Excel Lotes")
+        btn_excel.clicked.connect(self._on_generate_excel)
+        
+        btn_pdf = CustomButton("Generar PDF", is_secondary=True)
+        btn_pdf.setIcon(Icons.file_pdf("#DC2626")) # PDF red
+        btn_pdf.setToolTip("Generar Archivos PDF Unificado")
+        btn_pdf.clicked.connect(self._on_generate_pdf)
+
         btn_close = CustomButton("Cerrar", is_secondary=True)
         btn_close.clicked.connect(self.reject)
-        
-        btn_export = CustomButton("Exportar Facturas Renombradas")
-        btn_export.clicked.connect(self._on_export_facturas)
-        
+
         btns.addStretch()
+        btns.addWidget(btn_excel)
+        btns.addWidget(btn_pdf)
         btns.addWidget(btn_close)
-        btns.addWidget(btn_export)
-        self.layout.addLayout(btns)
-        
-        self._load_detalles()
-        
-    def _load_detalles(self):
+        root.addLayout(btns)
+
+        self._load_all()
+
+    # ── Data loading ─────────────────────────────────────────────────────────
+    def _load_all(self):
+        """Load header and detail rows."""
+        try:
+            self.header_data = self.inventario_ui_service.get_lote_asignacion_header(self.lote_id)
+            self._apply_header(self.header_data)
+        except Exception as e:
+            print("[LoteProcessingDialog] Header error:", e)
+
         try:
             self.detalles = self.inventario_ui_service.get_lote_detalles(self.lote_id)
-            rows = []
-            for d in self.detalles:
-                rows.append([
-                    "",
-                    str(d.get("lote_detalle_id", "")),
-                    str(d.get("referencia_id", "") or ""),
-                    d.get("cliente", ""),
-                    d.get("referencia", ""),
-                    d.get("desarrollo", ""),
-                    d.get("ubicacion", ""),
-                    d.get("mz", ""),
-                    d.get("lote", ""),
-                    d.get("edif", ""),
-                    d.get("viv", ""),
-                    d.get("folio_electronico", "")
-                ])
-            self.table_detalles.populate_rows(rows, checkable_first_col=True)
-            
-            # Select all by default
-            for r in range(self.table_detalles.rowCount()):
-                chk_item = self.table_detalles.item(r, 0)
-                if chk_item:
-                    chk_item.setCheckState(Qt.CheckState.Checked)
+            self._populate_table()
         except Exception as e:
-            QMessageBox.critical(self, "Error al Cargar", f"No se pudieron cargar los detalles del lote:\n{str(e)}")
-            
-    def _on_export_facturas(self):
-        # Find which rows are checked
-        selected_rows = []
+            QMessageBox.critical(self, "Error al Cargar",
+                                 f"No se pudieron cargar los detalles de la asignación:\n{str(e)}")
+
+    def _apply_header(self, h: dict):
+        tipo       = h.get("tipo_destino", "")
+        asignado   = h.get("asignado_a", "—")
+        fecha      = h.get("fecha", "—")
+        estado     = h.get("estado_refs", "—")
+        solicitante = h.get("solicitante_externo", "")
+        icon = "🏛" if tipo == "NOTARIA" else "🤝"
+
+        self.lbl_title.setText(f"Detalle de Asignación #{self.lote_id}")
+        self.lbl_subtitle.setText(f"{icon} {tipo}: {asignado}")
+        
+        self.lbl_metric_solicitante.setText(f"Solicitante: {solicitante}" if solicitante else f"Asignado a: {asignado}")
+        self.lbl_metric_fecha.setText(f"Fecha: {fecha}")
+        self.lbl_metric_estado.setText(f"Estado: {estado}")
+        
+        # Color metrics conditionally
+        estado_color = "#16A34A" if estado == "ASIGNADA" else "#D97706"
+        self.lbl_metric_estado.setStyleSheet(f"font-weight: bold; color: {estado_color};")
+
+    def _populate_table(self):
+        rows = []
+        for d in self.detalles:
+            rows.append([
+                "",
+                str(d.get("lote_detalle_id", "")),
+                str(d.get("referencia_id", "") or ""),
+                d.get("estado", ""),
+                d.get("empresa", ""),
+                d.get("concepto", ""),
+                d.get("referencia", ""),
+                d.get("cliente", ""),
+                d.get("desarrollo", ""),
+                d.get("mz", ""),
+                d.get("lote", ""),
+                d.get("edif", ""),
+                d.get("viv", ""),
+                d.get("folio_electronico", ""),
+                d.get("pa", ""),
+                d.get("fecha_solicitud", ""),
+            ])
+        self.table_detalles.populate_rows(rows, checkable_first_col=True)
+        for r in range(self.table_detalles.rowCount()):
+            chk = self.table_detalles.item(r, 0)
+            if chk:
+                chk.setCheckState(Qt.CheckState.Checked)
+
+    def _get_selected_details(self) -> list:
+        """Returns detalles list filtered to checked rows."""
+        selected = []
         for r in range(self.table_detalles.rowCount()):
             if self.table_detalles.item(r, 0).checkState() == Qt.CheckState.Checked:
-                selected_rows.append(r)
-                
-        if not selected_rows:
-            QMessageBox.warning(self, "Selección Vacía", "Por favor selecciona al menos una referencia para exportar.")
+                if r < len(self.detalles):
+                    selected.append(self.detalles[r])
+        return selected
+
+    # ── Excel generation ─────────────────────────────────────────────────────
+    def _on_generate_excel(self):
+        selected = self._get_selected_details()
+        if not selected:
+            QMessageBox.warning(self, "Selección Vacía",
+                                "Por favor selecciona al menos una referencia.")
             return
-            
+
+        import re
+        def _clean(s: str) -> str:
+            return re.sub(r'[\\/:*?"<>|]', '_', s or "").strip()
+
+        asignado  = _clean(self.header_data.get("asignado_a", "Asignacion"))
+        # fecha raw: "14/08/2026 09:30" → "20260814"
+        fecha_raw = self.header_data.get("fecha", "")
+        try:
+            from datetime import datetime
+            fecha_str = datetime.strptime(fecha_raw.split()[0], "%d/%m/%Y").strftime("%Y%m%d")
+        except Exception:
+            from datetime import date
+            fecha_str = date.today().strftime("%Y%m%d")
+        total_refs   = len(selected)
+        default_name = f"{asignado}_{fecha_str}_{total_refs}refs.xlsx"
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar Excel de Asignación", default_name, "Excel Files (*.xlsx)"
+        )
+        if not file_path:
+            return
+        try:
+            ExcelInventoryHandler.generate_assignment_excel(
+                dest_path=file_path,
+                header=self.header_data,
+                data_rows=selected,
+            )
+            QMessageBox.information(self, "Excel Generado",
+                                    f"Archivo guardado exitosamente:\n{file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error al Generar Excel", str(e))
+
+    # ── PDF generation ───────────────────────────────────────────────────────
+    def _on_generate_pdf(self):
+        selected = self._get_selected_details()
+        if not selected:
+            QMessageBox.warning(self, "Selección Vacía",
+                                "Por favor selecciona al menos una referencia.")
+            return
+
         dest_dir = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Destino")
         if not dest_dir:
             return
-            
-        import shutil
+
         import re
-        
-        def sanitize_filename(name: str) -> str:
-            return re.sub(r'[^\w\s\.-]', '', name).strip()
-            
-        success_count = 0
-        error_count = 0
-        missing_count = 0
-        
-        for r in selected_rows:
-            ref_id_str = self.table_detalles.item(r, 2).text()
-            cliente_raw = self.table_detalles.item(r, 3).text()
-            ref_portal = self.table_detalles.item(r, 4).text()
-            
-            if not ref_id_str:
+        import shutil
+        from pypdf import PdfWriter, PdfReader
+
+        def sanitize(name: str) -> str:
+            return re.sub(r'[^\w\-.]', '_', name or "").strip("_") or "sin_nombre"
+
+        asignado_a   = sanitize(self.header_data.get("asignado_a", ""))
+        estado_lote  = self.header_data.get("estado_refs", "ASIGNADA")
+        success = error = missing = 0
+        consecutivo = 1
+
+        def merge_or_copy_pdfs(pdf_paths: list, dest_path: str):
+            """Merge multiple PDFs into one; if only one, just copy it."""
+            valid = [p for p in pdf_paths if p and os.path.exists(p)]
+            if not valid:
+                return False
+            if len(valid) == 1:
+                shutil.copy2(valid[0], dest_path)
+            else:
+                writer = PdfWriter()
+                for pp in valid:
+                    try:
+                        reader = PdfReader(pp)
+                        for page in reader.pages:
+                            writer.add_page(page)
+                    except Exception:
+                        pass
+                with open(dest_path, "wb") as f:
+                    writer.write(f)
+            return True
+
+        for d in selected:
+            ref_id     = d.get("referencia_id")
+            concepto   = sanitize(d.get("concepto", "CONCEPTO"))
+            cliente    = sanitize(d.get("cliente", ""))
+            referencia = sanitize(d.get("referencia", ""))
+            estado_ref = d.get("estado", estado_lote)
+
+            if not ref_id:
+                missing += 1
                 continue
-                
-            ref_id = int(ref_id_str)
-            cliente = sanitize_filename(cliente_raw) or f"Referencia_{ref_portal}"
-            
             try:
                 facturas = self.inventario_ui_service.get_facturas_by_referencia_id(ref_id)
                 if not facturas:
-                    missing_count += 1
+                    missing += 1
                     continue
-                    
-                # A reference can have multiple invoice records or two files (pdf_path and xml_path) per invoice record
-                idx = 1
+
+                # Collect all PDF paths for this reference
+                pdf_paths = []
                 for f in facturas:
-                    paths_to_copy = []
                     if f.get("pdf_path"):
-                        paths_to_copy.append(f["pdf_path"])
-                    if f.get("xml_path"):
-                        paths_to_copy.append(f["xml_path"])
-                        
-                    for src_path in paths_to_copy:
-                        if src_path and os.path.exists(src_path):
-                            ext = os.path.splitext(src_path)[1]
-                            dest_filename = f"{cliente}_{idx}{ext}"
-                            dest_path = os.path.join(dest_dir, dest_filename)
-                            shutil.copy2(src_path, dest_path)
-                            idx += 1
-                            success_count += 1
-                        else:
-                            error_count += 1
+                        pdf_paths.append(f["pdf_path"])
+                    if f.get("xml_path") and f["xml_path"].lower().endswith(".pdf"):
+                        pdf_paths.append(f["xml_path"])
+
+                if not any(os.path.exists(p) for p in pdf_paths if p):
+                    missing += 1
+                    continue
+
+                # Build output filename per state
+                consec = f"{consecutivo:03d}"
+                if estado_ref == "ASIGNADA":
+                    # nombre_cliente_Concepto_consecutivo.pdf
+                    out_name = f"{cliente}_{concepto}_{consec}.pdf"
+                else:
+                    # referencia_notaria_Concepto_consecutivo.pdf  (RESERVADA)
+                    out_name = f"{referencia}_{asignado_a}_{concepto}_{consec}.pdf"
+
+                out_path = os.path.join(dest_dir, out_name)
+                if merge_or_copy_pdfs(pdf_paths, out_path):
+                    success += 1
+                    consecutivo += 1
+                else:
+                    error += 1
             except Exception as e:
-                print(f"Error copying files for ref {ref_id}:", e)
-                error_count += 1
-                
-        # Report results
-        msg = f"Exportación finalizada:\n\n- Facturas exportadas con éxito: {success_count}\n"
-        if missing_count > 0:
-            msg += f"- Referencias sin facturas registradas: {missing_count}\n"
-        if error_count > 0:
-            msg += f"- Archivos no encontrados o con error: {error_count}\n"
-            
-        QMessageBox.information(self, "Resultado de Exportación", msg)
+                print(f"[PDF] Error ref {ref_id}:", e)
+                error += 1
+
+        msg = f"PDFs generados exitosamente: {success}\n"
+        if missing: msg += f"Referencias sin archivos: {missing}\n"
+        if error:   msg += f"Errores al procesar: {error}\n"
+        QMessageBox.information(self, "Generación de PDFs Finalizada", msg)
 
 
 class ReservaGridRow(QFrame):
@@ -2262,3 +3019,4 @@ class ApartarReferenciasDialog(QDialog):
             self.accept()
         except Exception as e:
             QMessageBox.critical(self, "Error al Reservar", f"No se pudo completar el apartado de referencias:\n{str(e)}")
+
