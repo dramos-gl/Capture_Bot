@@ -391,7 +391,7 @@ CREATE TABLE sar_archivo.factura
     rfc_emisor VARCHAR(13) NOT NULL,
     fecha_factura TIMESTAMPTZ NOT NULL,
     pdf_path VARCHAR(1000),
-    xml_path VARCHAR(1000),
+    pdf2_path VARCHAR(1000),
     estado VARCHAR(30) NOT NULL,
     FOREIGN KEY (referencia_id)
         REFERENCES sar_produccion.referencia(referencia_id)

@@ -517,7 +517,7 @@ Representa una factura derivada de una referencia autorizada.
 | RFC_EMISOR | VARCHAR(13) |
 | FECHA_FACTURA | DATETIME |
 | PDF_PATH | VARCHAR(1000) |
-| XML_PATH | VARCHAR(1000) |
+| PDF2_PATH | VARCHAR(1000) |
 | ESTADO | VARCHAR(30) |
 
 ### Restricciones

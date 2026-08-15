@@ -2762,8 +2762,8 @@ class LoteProcessingDialog(QDialog):
                 for f in facturas:
                     if f.get("pdf_path"):
                         pdf_paths.append(f["pdf_path"])
-                    if f.get("xml_path") and f["xml_path"].lower().endswith(".pdf"):
-                        pdf_paths.append(f["xml_path"])
+                    if f.get("pdf2_path") and f["pdf2_path"].lower().endswith(".pdf"):
+                        pdf_paths.append(f["pdf2_path"])
 
                 if not any(os.path.exists(p) for p in pdf_paths if p):
                     missing += 1

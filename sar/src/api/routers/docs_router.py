@@ -609,8 +609,8 @@ def registrar_factura_bot(request: RegistrarFacturaBotRequest, db: Session = Dep
         if not dup_id:
             factura_uuid = str(uuid.uuid4())
             ins_factura = text("""
-                INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, xml_path, estado)
-                VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :xml, :estado)
+                INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado)
+                VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :pdf2, :estado)
             """)
             db.execute(ins_factura, {
                 "rid": request.referencia_id,
@@ -619,18 +619,18 @@ def registrar_factura_bot(request: RegistrarFacturaBotRequest, db: Session = Dep
                 "rfc_emisor": request.rfc_emisor,
                 "fecha": datetime.datetime.now(datetime.timezone.utc),
                 "pdf": pdf_path_1,
-                "xml": pdf_path_2,
+                "pdf2": pdf_path_2,
                 "estado": "TIMBRADA"
             })
         else:
             upd_stmt = text("""
                 UPDATE sar_archivo.factura
-                SET pdf_path = :pdf, xml_path = :xml, estado = 'TIMBRADA'
+                SET pdf_path = :pdf, pdf2_path = :pdf2, estado = 'TIMBRADA'
                 WHERE factura_id = :fid
             """)
             db.execute(upd_stmt, {
                 "pdf": pdf_path_1,
-                "xml": pdf_path_2,
+                "pdf2": pdf_path_2,
                 "fid": dup_id
             })
         

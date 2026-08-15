@@ -524,8 +524,9 @@ class BillingRpaWorker(QThread):
                     del_part = "".join(c for c in self.ctx["delegacion_nombre"] if c.isalnum())[:3].upper()
                     grupo_id = self.ctx["grupo_id"]
                     
-                    # Estructura de directorio: Facturas/[Año]/[RFC]/[Concepto]/
+                    # Estructura de directorio: Facturas/[Año]/[Folio_Orden]/[RFC]/[Concepto]/
                     current_year = str(datetime.datetime.now().year)
+                    orden_folder = "".join(c for c in (self.ctx.get("orden_folio") or "ORDEN") if c.isalnum() or c in ("-", "_"))
                     concepto_folder = "".join(c for c in (self.ctx.get("concepto_alias") or "CONCEPTO") if c.isalnum() or c in ("-", "_"))
                     base_dir = self.custom_output_dir if self.custom_output_dir else getattr(self, "default_output_dir", "storage")
                     
@@ -535,9 +536,9 @@ class BillingRpaWorker(QThread):
                     
                     if not is_accessible:
                         self.status_changed.emit("ALERTA: Ruta base no accesible. Activando contingencia local temporal...")
-                        dest_dir = os.path.abspath(os.path.join("storage", "contingencia", "facturas", current_year, self.ctx["rfc"], concepto_folder))
+                        dest_dir = os.path.abspath(os.path.join("storage", "contingencia", "facturas", current_year, orden_folder, self.ctx["rfc"], concepto_folder))
                     else:
-                        dest_dir = os.path.abspath(os.path.join(base_dir, "facturas" if not self.custom_output_dir else "", current_year, self.ctx["rfc"], concepto_folder))
+                        dest_dir = os.path.abspath(os.path.join(base_dir, "facturas" if not self.custom_output_dir else "", current_year, orden_folder, self.ctx["rfc"], concepto_folder))
                         
                     os.makedirs(dest_dir, exist_ok=True)
                     
@@ -716,8 +717,8 @@ class BillingRpaWorker(QThread):
                     # Insertar nuevo registro de factura
                     factura_uuid = str(uuid.uuid4())
                     ins_factura = text("""
-                        INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, xml_path, estado)
-                        VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :xml, :estado)
+                        INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado)
+                        VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :pdf2, :estado)
                     """)
                     session.execute(ins_factura, {
                         "rid": referencia_id,
@@ -726,19 +727,19 @@ class BillingRpaWorker(QThread):
                         "rfc_emisor": self.ctx["rfc"],
                         "fecha": datetime.datetime.now(datetime.timezone.utc),
                         "pdf": pdf_path_1,
-                        "xml": pdf_path_2,
+                        "pdf2": pdf_path_2,
                         "estado": "TIMBRADA"
                     })
                 else:
                     # Actualizar rutas de PDFs si ya existe el registro
                     upd_stmt = text("""
                         UPDATE sar_archivo.factura
-                        SET pdf_path = :pdf, xml_path = :xml, estado = 'TIMBRADA'
+                        SET pdf_path = :pdf, pdf2_path = :pdf2, estado = 'TIMBRADA'
                         WHERE factura_id = :fid
                     """)
                     session.execute(upd_stmt, {
                         "pdf": pdf_path_1,
-                        "xml": pdf_path_2,
+                        "pdf2": pdf_path_2,
                         "fid": dup_id
                     })
                 

@@ -441,7 +441,7 @@ class Factura(Base):
     rfc_emisor: Mapped[str] = mapped_column(String(13), nullable=False)
     fecha_factura: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     pdf_path: Mapped[Optional[str]] = mapped_column(String(1000))
-    xml_path: Mapped[Optional[str]] = mapped_column(String(1000))
+    pdf2_path: Mapped[Optional[str]] = mapped_column(String(1000))
     estado: Mapped[str] = mapped_column(String(30), nullable=False)
 
     # Relaciones
