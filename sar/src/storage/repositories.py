@@ -2366,7 +2366,7 @@ class InventarioRepository(BaseRepository):
     def get_facturas_by_referencia_id(self, referencia_id: int) -> List[dict]:
         from sqlalchemy import text
         stmt = text("""
-            SELECT factura_id, pdf_path, pdf2_path, uuid, folio, estado
+            SELECT factura_id, pdf_path, pdf2_path, uuid, folio, estado, delegacion
             FROM sar_archivo.factura
             WHERE referencia_id = :referencia_id
         """)
@@ -2378,7 +2378,8 @@ class InventarioRepository(BaseRepository):
                 "pdf2_path": row.pdf2_path,
                 "uuid": row.uuid,
                 "folio": row.folio,
-                "estado": row.estado
+                "estado": row.estado,
+                "delegacion": row.delegacion
             }
             for row in results
         ]

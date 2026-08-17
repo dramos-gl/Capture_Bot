@@ -334,6 +334,7 @@ CREATE TABLE sar_archivo.factura (
     pdf_path VARCHAR(1000),
     pdf2_path VARCHAR(1000),
     estado VARCHAR(30) NOT NULL,
+    delegacion VARCHAR(100),
     FOREIGN KEY (referencia_id) REFERENCES sar_produccion.referencia(referencia_id) ON DELETE RESTRICT
 );
 

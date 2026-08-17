@@ -110,20 +110,22 @@ def main():
 
         # Cargar grupos de referencia de la Orden 4
         grupos_db = session.execute(text("""
-            SELECT gr.grupo_id, r.rfc, c.alias AS concepto_alias, gr.cantidad_solicitada
+            SELECT gr.grupo_id, gr.rfc_id, r.rfc, gr.concepto_id, c.alias AS concepto_alias, gr.cantidad_solicitada
             FROM sar_produccion.grupo_referencia gr
             JOIN sar_catalogo.rfc r ON gr.rfc_id = r.rfc_id
             JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
             WHERE gr.orden_id = :oid
         """), {"oid": ORDEN_ID}).mappings().all()
 
-        map_grupos = {}  # (rfc, concepto) -> grupo_db
+        map_grupos = {}  # (rfc_id/rfc_code, concepto_id/concepto_alias) -> grupo_db
         for g in grupos_db:
+            # Soportar busqueda tanto por ID numerico como por codigo de negocio
+            map_grupos[(str(g['rfc_id']), str(g['concepto_id']))] = g
             map_grupos[(g['rfc'].upper(), g['concepto_alias'].upper())] = g
 
         # Cargar solicitudes de la Orden 4
         solicitudes_db = session.execute(text("""
-            SELECT s.solicitud_id, s.grupo_id, d.nombre AS delegacion, s.cantidad_solicitada,
+            SELECT s.solicitud_id, s.grupo_id, s.delegacion_id, d.nombre AS delegacion, s.cantidad_solicitada,
                    s.consecutivo_inicio, s.consecutivo_fin
             FROM sar_produccion.solicitud s
             JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
@@ -144,7 +146,6 @@ def main():
         print("\n Mapeando referencias a grupos y solicitudes...")
         
         # Estructura temporal para llevar el consecutivo de insercion
-        # grupo_id -> consecutivo_actual (inicia en el minimo consecutivo_inicio de la primera solicitud)
         consecutivos_actuales = {}
         for gid, sols in map_solicitudes.items():
             consecutivos_actuales[gid] = min(s['consecutivo_inicio'] for s in sols)
@@ -157,9 +158,9 @@ def main():
         referencias_set = set()
 
         for reg in registros:
-            rfc = reg['rfc'].upper()
-            concepto = reg['concepto'].upper()
-            deleg = reg['delegacion'].upper()
+            rfc_val = reg['rfc'].upper()
+            concepto_val = reg['concepto'].upper()
+            deleg_val = reg['delegacion'].upper()
             ref_portal = reg['referencia_portal']
 
             # Evitar duplicados en el mismo CSV
@@ -168,29 +169,29 @@ def main():
                 return
             referencias_set.add(ref_portal)
 
-            # Buscar grupo_id
-            g_key = (rfc, concepto)
+            # Buscar grupo_id probando por valor exacto del CSV (pueden ser IDs como '2' o codigos)
+            g_key = (rfc_val, concepto_val)
             if g_key not in map_grupos:
-                print(f" Error: El grupo con RFC '{rfc}' y Concepto '{concepto}' no pertenece a la Orden 4 (linea {reg['linea']}).")
+                print(f" Error: El grupo con RFC '{rfc_val}' y Concepto '{concepto_val}' no pertenece a la Orden 4 (linea {reg['linea']}).")
                 return
             grupo = map_grupos[g_key]
             gid = grupo['grupo_id']
 
-            # Buscar solicitudes de este grupo que correspondan a la delegacion
+            # Buscar solicitudes de este grupo
             sols_grupo = map_solicitudes.get(gid, [])
             solicitud_destino = None
             
-            # Buscamos la solicitud de la delegacion que tenga espacio disponible
+            # Buscamos la primera solicitud de este grupo que tenga espacio disponible,
+            # sin obligar a que coincida estrictamente la delegacion por fila si esta viene
+            # desalineada con las cuotas asignadas en la UI (distribucion secuencial por grupo).
             for s in sols_grupo:
-                if s['delegacion'].upper() == deleg:
-                    # Verificar cuantas llevamos asignadas a esta solicitud
-                    asignadas = conteo_solicitudes.get(s['solicitud_id'], 0)
-                    if asignadas < s['cantidad_solicitada']:
-                        solicitud_destino = s
-                        break
+                asignadas = conteo_solicitudes.get(s['solicitud_id'], 0)
+                if asignadas < s['cantidad_solicitada']:
+                    solicitud_destino = s
+                    break
 
             if not solicitud_destino:
-                print(f" Error: No hay solicitudes disponibles para la Delegacion '{deleg}' bajo el grupo ID {gid} (linea {reg['linea']}).")
+                print(f" Error: No hay solicitudes disponibles (todas estan llenas) bajo el grupo ID {gid} (linea {reg['linea']}).")
                 return
 
             sid = solicitud_destino['solicitud_id']

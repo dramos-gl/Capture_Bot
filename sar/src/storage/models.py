@@ -443,6 +443,7 @@ class Factura(Base):
     pdf_path: Mapped[Optional[str]] = mapped_column(String(1000))
     pdf2_path: Mapped[Optional[str]] = mapped_column(String(1000))
     estado: Mapped[str] = mapped_column(String(30), nullable=False)
+    delegacion: Mapped[Optional[str]] = mapped_column(String(100))
 
     # Relaciones
     referencia: Mapped["Referencia"] = relationship(back_populates="facturas")

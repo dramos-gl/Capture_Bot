@@ -173,6 +173,11 @@ class BillingBotView(QWidget):
         self.chk_omitir_ya_generadas.setToolTip("Activado: Las referencias confirmadas en el portal ya facturadas se omitiran")
         c_layout.addWidget(self.chk_omitir_ya_generadas)
         
+        self.chk_capturar_delegacion = CustomSwitch("Capturar Delegación")
+        self.chk_capturar_delegacion.setChecked(False)
+        self.chk_capturar_delegacion.setToolTip("Extraer temporalmente la delegación (Cancun o Playa del Carmen) desde las facturas PDF")
+        c_layout.addWidget(self.chk_capturar_delegacion)
+        
         # Custom Download Path selector
         lbl_path_title = CustomLabel("📁 Ruta de Descarga / Facturas:", variant="body")
         lbl_path_title.setStyleSheet("font-weight: bold;")
@@ -541,6 +546,7 @@ class BillingBotView(QWidget):
         self.table.setEnabled(False)
         self.chk_autonomo.setEnabled(False)
         self.chk_omitir_ya_generadas.setEnabled(False)
+        self.chk_capturar_delegacion.setEnabled(False)
         self.chk_ver_todas.setEnabled(False)
         self.btn_browse.setEnabled(False)
         self.btn_gear.setEnabled(False)
@@ -550,12 +556,14 @@ class BillingBotView(QWidget):
         self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.ACCENT_EMERALD}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
         
         omitir_ya_gen = self.chk_omitir_ya_generadas.isChecked()
+        capturar_del = self.chk_capturar_delegacion.isChecked()
         self.worker = BillingRpaWorker(
             db_connector=self.db_connector,
             context=self.current_bot_context,
             headless=headless_mode,
             custom_output_dir=self.selected_custom_path,
-            omitir_ya_generadas=omitir_ya_gen
+            omitir_ya_generadas=omitir_ya_gen,
+            capturar_delegacion=capturar_del
         )
         
         # Connect Signals
@@ -594,6 +602,7 @@ class BillingBotView(QWidget):
         self.table.setEnabled(True)
         self.chk_autonomo.setEnabled(True)
         self.chk_omitir_ya_generadas.setEnabled(True)
+        self.chk_capturar_delegacion.setEnabled(True)
         self.chk_ver_todas.setEnabled(True)
         self.btn_browse.setEnabled(True)
         self.btn_gear.setEnabled(True)

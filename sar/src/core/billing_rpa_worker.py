@@ -28,13 +28,14 @@ class BillingRpaWorker(QThread):
     referencia_generada = Signal(str, str, str)  # ref_portal, rfc, status
     finished_processing = Signal(bool, str)  # success, message
 
-    def __init__(self, db_connector, context: dict, headless: bool = False, custom_output_dir: Optional[str] = None, omitir_ya_generadas: bool = True, parent=None):
+    def __init__(self, db_connector, context: dict, headless: bool = False, custom_output_dir: Optional[str] = None, omitir_ya_generadas: bool = True, capturar_delegacion: bool = False, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
         self.ctx = context
         self.headless = headless
         self.custom_output_dir = custom_output_dir
         self.omitir_ya_generadas = omitir_ya_generadas
+        self.capturar_delegacion = capturar_delegacion
         self._stop_requested = False
         
         from sar.src.storage.api_client import APIClient
@@ -691,8 +692,30 @@ class BillingRpaWorker(QThread):
             except:
                 pass
 
+    def _extract_delegacion(self, pdf_paths: list) -> Optional[str]:
+        """Extracts delegation (Cancun or Playa del Carmen) from PDF text if the feature is enabled."""
+        if not getattr(self, "capturar_delegacion", False):
+            return None
+        try:
+            from pypdf import PdfReader
+            for path in pdf_paths:
+                if path and os.path.exists(path):
+                    reader = PdfReader(path)
+                    for page in reader.pages:
+                        text_content = page.extract_text()
+                        if text_content:
+                            text_lower = text_content.lower()
+                            if "delegación cancun" in text_lower or "delegacion cancun" in text_lower:
+                                return "Cancun"
+                            elif "delegación playa del carmen" in text_lower or "delegacion playa del carmen" in text_lower:
+                                return "Playa del Carmen"
+        except Exception as e:
+            self.status_changed.emit(f"Advertencia al extraer delegación de PDF: {str(e)}")
+        return None
+
     def _save_facturas_db(self, referencia_id: int, pdf_paths: list, consecutivo: int):
         """Persiste los registros de factura para una referencia con múltiples archivos PDF."""
+        delegacion_val = self._extract_delegacion(pdf_paths)
         if self.api_client.connect_via_api:
             payload = {
                 "referencia_id": referencia_id,
@@ -700,7 +723,8 @@ class BillingRpaWorker(QThread):
                 "rfc_emisor": self.ctx["rfc"],
                 "consecutivo": consecutivo,
                 "solicitud_id": self.ctx["solicitud_id"],
-                "grupo_id": self.ctx["grupo_id"]
+                "grupo_id": self.ctx["grupo_id"],
+                "delegacion": delegacion_val
             }
             self.api_client.request("POST", "/api/docs/facturas/bot", data=payload)
         else:
@@ -717,8 +741,8 @@ class BillingRpaWorker(QThread):
                     # Insertar nuevo registro de factura
                     factura_uuid = str(uuid.uuid4())
                     ins_factura = text("""
-                        INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado)
-                        VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :pdf2, :estado)
+                        INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado, delegacion)
+                        VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :pdf2, :estado, :delegacion)
                     """)
                     session.execute(ins_factura, {
                         "rid": referencia_id,
@@ -728,19 +752,21 @@ class BillingRpaWorker(QThread):
                         "fecha": datetime.datetime.now(datetime.timezone.utc),
                         "pdf": pdf_path_1,
                         "pdf2": pdf_path_2,
-                        "estado": "TIMBRADA"
+                        "estado": "TIMBRADA",
+                        "delegacion": delegacion_val
                     })
                 else:
                     # Actualizar rutas de PDFs si ya existe el registro
                     upd_stmt = text("""
                         UPDATE sar_archivo.factura
-                        SET pdf_path = :pdf, pdf2_path = :pdf2, estado = 'TIMBRADA'
+                        SET pdf_path = :pdf, pdf2_path = :pdf2, estado = 'TIMBRADA', delegacion = :delegacion
                         WHERE factura_id = :fid
                     """)
                     session.execute(upd_stmt, {
                         "pdf": pdf_path_1,
                         "pdf2": pdf_path_2,
-                        "fid": dup_id
+                        "fid": dup_id,
+                        "delegacion": delegacion_val
                     })
                 
                 # Actualizar estado de la referencia a FACTURADA
