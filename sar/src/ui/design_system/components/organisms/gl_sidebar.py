@@ -135,9 +135,8 @@ class NavigationSidebar(QFrame):
         self.menu_items = [
             ("Dashboard", "dashboard", "dashboard"),
             ("Órdenes", "ordenes", "list_icon"),
-            ("Solicitudes", "solicitudes", "file_text"),
             ("Referencias", "referencias", "database"),
-            ("Inventario", "inventario", "tabla"),
+            ("Control de Derechos", "inventario", "tabla"),
             ("Administración", "configuracion", "shield_lock")
         ]
         
@@ -165,12 +164,20 @@ class NavigationSidebar(QFrame):
         self.btn_capturar_nueva.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_capturar_nueva.setVisible(False)
         
+        self.btn_solicitudes = QPushButton("Solicitudes")
+        self.btn_solicitudes.setObjectName("subNavBtn")
+        self.btn_solicitudes.setCheckable(True)
+        self.btn_solicitudes.setIcon(Icons.hollow_dot("#94A3B8"))
+        self.btn_solicitudes.setVisible(False)
+        
         self.submenu_layout.addWidget(self.btn_capturar_nueva)
         self.submenu_layout.addWidget(self.btn_ordenes_capturadas)
+        self.submenu_layout.addWidget(self.btn_solicitudes)
         
         self.buttons["ordenes_capturadas"] = self.btn_ordenes_capturadas
         self.buttons["capturar_orden"] = self.btn_capturar_nueva
-
+        self.buttons["solicitudes"] = self.btn_solicitudes
+ 
         # --- SUBMENU 2: INVENTARIO ---
         self.inv_submenu_container = QWidget()
         self.inv_submenu_container.setObjectName("invSubmenuContainer")
@@ -178,43 +185,43 @@ class NavigationSidebar(QFrame):
         self.inv_submenu_layout = QVBoxLayout(self.inv_submenu_container)
         self.inv_submenu_layout.setContentsMargins(0, 0, 0, 0)
         self.inv_submenu_layout.setSpacing(4)
-
-        self.btn_inv_facturas = QPushButton("Inventario de Facturas")
+ 
+        self.btn_inv_facturas = QPushButton("Inventario")
         self.btn_inv_facturas.setObjectName("subNavBtn")
         self.btn_inv_facturas.setCheckable(True)
         self.btn_inv_facturas.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_facturas.setVisible(False)
-
-        self.btn_inv_masivo = QPushButton("Asignación Masiva")
+ 
+        self.btn_inv_masivo = QPushButton("Asignar & Validar por lotes")
         self.btn_inv_masivo.setObjectName("subNavBtn")
         self.btn_inv_masivo.setCheckable(True)
         self.btn_inv_masivo.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_masivo.setVisible(False)
-
-        self.btn_inv_apartar = QPushButton("Apartar Referencias")
+ 
+        self.btn_inv_apartar = QPushButton("Reserva de Derechos")
         self.btn_inv_apartar.setObjectName("subNavBtn")
         self.btn_inv_apartar.setCheckable(True)
         self.btn_inv_apartar.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_apartar.setVisible(False)
-
-        self.btn_inv_catalogos = QPushButton("Asignación Individual")
+ 
+        self.btn_inv_catalogos = QPushButton("Asignar Derechos")
         self.btn_inv_catalogos.setObjectName("subNavBtn")
         self.btn_inv_catalogos.setCheckable(True)
         self.btn_inv_catalogos.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_catalogos.setVisible(False)
-
+ 
         self.btn_inv_lotes = QPushButton("Gesti\u00f3n de Asignaciones")
         self.btn_inv_lotes.setObjectName("subNavBtn")
         self.btn_inv_lotes.setCheckable(True)
         self.btn_inv_lotes.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_lotes.setVisible(False)
-
+ 
         self.inv_submenu_layout.addWidget(self.btn_inv_facturas)
         self.inv_submenu_layout.addWidget(self.btn_inv_catalogos)
         self.inv_submenu_layout.addWidget(self.btn_inv_masivo)
         self.inv_submenu_layout.addWidget(self.btn_inv_apartar)
         self.inv_submenu_layout.addWidget(self.btn_inv_lotes)
-
+ 
         self.buttons["inventario_facturas"] = self.btn_inv_facturas
         self.buttons["inventario_masivo"] = self.btn_inv_masivo
         self.buttons["inventario_apartar"] = self.btn_inv_apartar
@@ -278,6 +285,7 @@ class NavigationSidebar(QFrame):
             
         self.btn_ordenes_capturadas.clicked.connect(lambda: self._on_sub_nav_clicked("ordenes_capturadas"))
         self.btn_capturar_nueva.clicked.connect(lambda: self._on_sub_nav_clicked("capturar_orden"))
+        self.btn_solicitudes.clicked.connect(lambda: self._on_sub_nav_clicked("solicitudes"))
 
         self.btn_inv_facturas.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_facturas"))
         self.btn_inv_masivo.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_masivo"))
@@ -358,9 +366,10 @@ class NavigationSidebar(QFrame):
             else:
                 self.chevron_label2.setPixmap(Icons.chevron_down(color).pixmap(12, 12))
             self._on_sub_nav_clicked("inventario_facturas")
+            return
         # Regular main navigation click - Keep the submenus fixed
         for key, btn in self.buttons.items():
-            if key in ["ordenes_capturadas", "capturar_orden", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+            if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                 btn.setChecked(False)
                 btn.setIcon(Icons.hollow_dot("#94A3B8"))
             else:
@@ -374,7 +383,7 @@ class NavigationSidebar(QFrame):
         
     def _on_sub_nav_clicked(self, clicked_key: str):
         # 1. Handle Órdenes Submenu
-        if clicked_key in ["ordenes_capturadas", "capturar_orden"]:
+        if clicked_key in ["ordenes_capturadas", "capturar_orden", "solicitudes"]:
             self.buttons["ordenes"].setChecked(True)
             self.chevron_label.setPixmap(Icons.chevron_up("#2563EB").pixmap(12, 12))
             self.submenu_visible = True
@@ -382,13 +391,13 @@ class NavigationSidebar(QFrame):
             
             # Uncheck all other parent items except ordenes
             for key, btn in self.buttons.items():
-                if key not in ["ordenes", "ordenes_capturadas", "capturar_orden"]:
+                if key not in ["ordenes", "ordenes_capturadas", "capturar_orden", "solicitudes"]:
                     btn.setChecked(False)
                     if key in ["inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                         btn.setIcon(Icons.hollow_dot("#94A3B8"))
             
             # Handle Órdenes submenus check states
-            for key in ["ordenes_capturadas", "capturar_orden"]:
+            for key in ["ordenes_capturadas", "capturar_orden", "solicitudes"]:
                 btn = self.buttons[key]
                 if key == clicked_key:
                     btn.setChecked(True)
@@ -408,7 +417,7 @@ class NavigationSidebar(QFrame):
             for key, btn in self.buttons.items():
                 if key not in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                     btn.setChecked(False)
-                    if key in ["ordenes_capturadas", "capturar_orden"]:
+                    if key in ["ordenes_capturadas", "capturar_orden", "solicitudes"]:
                         btn.setIcon(Icons.hollow_dot("#94A3B8"))
             
             # Handle Inventario submenus check states
@@ -426,7 +435,7 @@ class NavigationSidebar(QFrame):
 
     def select_item(self, key: str):
         """Allows programmatically checking a navigation item button."""
-        if key in ["ordenes_capturadas", "capturar_orden", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+        if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
             self._on_sub_nav_clicked(key)
         elif key in self.buttons:
             self._on_main_nav_clicked(key)
@@ -440,7 +449,7 @@ class NavigationSidebar(QFrame):
     def show_item(self, key: str):
         """Shows a specific navigation item by its key."""
         if key in self.buttons:
-            if self.is_collapsed and key in ["ordenes_capturadas", "capturar_orden", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+            if self.is_collapsed and key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                 self.buttons[key].setVisible(False)
             else:
                 self.buttons[key].setVisible(True)
@@ -470,7 +479,7 @@ class NavigationSidebar(QFrame):
             
             # Hide labels of parent buttons and center icons
             for key, btn in self.buttons.items():
-                if key not in ["ordenes_capturadas", "capturar_orden", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
+                if key not in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
                     btn.setText("")
                     btn.setStyleSheet("padding: 12px 0px; text-align: center;")
                 else:
@@ -508,11 +517,14 @@ class NavigationSidebar(QFrame):
                 self.submenu_container.show()
                 self.btn_ordenes_capturadas.setVisible(True)
                 self.btn_capturar_nueva.setVisible(True)
+                self.btn_solicitudes.setVisible(True)
             if self.inv_submenu_visible:
                 self.inv_submenu_container.show()
                 self.btn_inv_facturas.setVisible(True)
-                self.btn_inv_masivo.setVisible(True)
                 self.btn_inv_catalogos.setVisible(True)
+                self.btn_inv_masivo.setVisible(True)
+                self.btn_inv_apartar.setVisible(True)
+                self.btn_inv_lotes.setVisible(True)
                 
             self.theme_btn.setText("Cambiar Tema")
             self.theme_btn.setStyleSheet("")

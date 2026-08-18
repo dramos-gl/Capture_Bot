@@ -1775,7 +1775,7 @@ class InventarioRepository(BaseRepository):
 
 
     def get_referencias_facturadas_paginated(
-        self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, rfc_id: int = None, filter_assigned: str = "Todos", start_date: str = None, end_date: str = None
+        self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, rfc_id: int = None, filter_assigned: str = "Todos", start_date: str = None, end_date: str = None, orden_ids: list = None
     ) -> tuple[List[dict], int]:
         from sqlalchemy import text
         
@@ -1865,6 +1865,9 @@ class InventarioRepository(BaseRepository):
             conditions_sql.append("la.fecha::date >= :start_date")
         if end_date:
             conditions_sql.append("la.fecha::date <= :end_date")
+        if orden_ids:
+            conditions_sql.append("og.orden_id IN :orden_ids_param")
+            params["orden_ids_param"] = tuple(orden_ids)
             
         if search_text:
             search_conds = [
@@ -1949,7 +1952,7 @@ class InventarioRepository(BaseRepository):
         return res, total_count
 
     def get_inventario_summary(
-        self, search_text: str = "", concepto_id: int = None, rfc_id: int = None, start_date: str = None, end_date: str = None
+        self, search_text: str = "", concepto_id: int = None, rfc_id: int = None, start_date: str = None, end_date: str = None, orden_ids: list = None
     ) -> dict:
         from sqlalchemy import text
         
@@ -1964,6 +1967,8 @@ class InventarioRepository(BaseRepository):
             params["start_date"] = start_date
         if end_date:
             params["end_date"] = end_date
+        if orden_ids:
+            params["orden_ids_param"] = tuple(orden_ids)
             
         sql_base = """
             FROM sar_produccion.referencia r
@@ -1990,6 +1995,8 @@ class InventarioRepository(BaseRepository):
             base_conditions.append("la.fecha::date >= :start_date")
         if end_date:
             base_conditions.append("la.fecha::date <= :end_date")
+        if orden_ids:
+            base_conditions.append("og.orden_id IN :orden_ids_param")
         if search_text:
             search_conds = [
                 "r.referencia_portal ILIKE :search",
@@ -2165,7 +2172,8 @@ class InventarioRepository(BaseRepository):
         limit: int = 50,
         offset: int = 0,
         start_date: str = None,
-        end_date: str = None
+        end_date: str = None,
+        orden_ids: list = None
     ):
         """Returns paginated lotes with optional filters including date range. Returns (list_of_dicts, total_count)."""
         from sqlalchemy import text
@@ -2184,6 +2192,19 @@ class InventarioRepository(BaseRepository):
         if end_date:
             where_clauses.append("la.fecha <= :end_date")
             params["end_date"] = f"{end_date} 23:59:59"
+
+        if orden_ids:
+            where_clauses.append("""
+                la.lote_asignacion_id IN (
+                    SELECT DISTINCT ld.lote_asignacion_id 
+                    FROM sar_archivo.lote_detalle ld
+                    JOIN sar_archivo.asignacion_referencia ar ON ld.lote_detalle_id = ar.lote_detalle_id
+                    JOIN sar_produccion.referencia r ON ar.referencia_id = r.referencia_id
+                    JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+                    WHERE gr.orden_id IN :orden_ids_param
+                )
+            """)
+            params["orden_ids_param"] = tuple(orden_ids)
 
         if search:
             where_clauses.append("""
@@ -2384,7 +2405,7 @@ class InventarioRepository(BaseRepository):
             for row in results
         ]
 
-    def count_referencias_disponibles(self, rfc_id: int, concepto_id: int, delegacion_id: int) -> int:
+    def count_referencias_disponibles(self, rfc_id: int, concepto_id: int, delegacion_id: int, orden_ids: list = None) -> int:
         """Returns the count of FACTURADA references available for the given combination.
         Used for real-time UI feedback without side effects.
         """
@@ -2422,6 +2443,8 @@ class InventarioRepository(BaseRepository):
                 )
             )
         )
+        if orden_ids:
+            count_stmt = count_stmt.where(GrupoReferencia.orden_id.in_(orden_ids))
         result = self.session.execute(count_stmt).scalar()
         return result if result is not None else 0
 
@@ -2820,7 +2843,7 @@ class InventarioRepository(BaseRepository):
         self.session.flush()
 
     def get_referencias_disponibles_filtro(
-        self, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int
+        self, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int, orden_ids: list = None
     ) -> List[dict]:
         """Fetches available references matching criteria using FIFO order, returning lightweight dicts."""
         from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto
@@ -2863,6 +2886,8 @@ class InventarioRepository(BaseRepository):
             .order_by(Referencia.fecha_generacion.asc(), Referencia.referencia_id.asc())
             .limit(cantidad)
         )
+        if orden_ids:
+            stmt = stmt.where(GrupoReferencia.orden_id.in_(orden_ids))
         rows = self.session.execute(stmt).all()
         return [
             {

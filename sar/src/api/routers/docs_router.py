@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -799,6 +799,7 @@ def get_disponibles_count(
     rfc_id: int,
     concepto_id: int,
     delegacion_id: int,
+    orden_ids: Optional[List[int]] = Query(None),
     db: Session = Depends(get_db)
 ):
     """Returns the count of FACTURADA references available for a given (rfc, concepto, delegacion) combination.
@@ -806,7 +807,7 @@ def get_disponibles_count(
     """
     from sar.src.storage.repositories import InventarioRepository
     try:
-        count = InventarioRepository(db).count_referencias_disponibles(rfc_id, concepto_id, delegacion_id)
+        count = InventarioRepository(db).count_referencias_disponibles(rfc_id, concepto_id, delegacion_id, orden_ids=orden_ids)
         return {"count": count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -860,13 +861,14 @@ def save_desarrollo(request: DesarrolloCreateRequest, db: Session = Depends(get_
 def get_referencias_facturadas(
     limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None, filter_assigned: str = "Todos",
     start_date: Optional[str] = None, end_date: Optional[str] = None,
+    orden_ids: Optional[List[int]] = Query(None),
     db: Session = Depends(get_db)
 ):
     from sar.src.storage.repositories import InventarioRepository
     repo = InventarioRepository(db)
     records, total = repo.get_referencias_facturadas_paginated(
         limit=limit, offset=offset, search_text=search_text, concepto_id=concepto_id, rfc_id=rfc_id, filter_assigned=filter_assigned,
-        start_date=start_date, end_date=end_date
+        start_date=start_date, end_date=end_date, orden_ids=orden_ids
     )
     return {"records": records, "total_count": total}
 
@@ -874,13 +876,14 @@ def get_referencias_facturadas(
 def get_referencias_facturadas_summary(
     search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None,
     start_date: Optional[str] = None, end_date: Optional[str] = None,
+    orden_ids: Optional[List[int]] = Query(None),
     db: Session = Depends(get_db)
 ):
     from sar.src.storage.repositories import InventarioRepository
     repo = InventarioRepository(db)
     return repo.get_inventario_summary(
         search_text=search_text, concepto_id=concepto_id, rfc_id=rfc_id,
-        start_date=start_date, end_date=end_date
+        start_date=start_date, end_date=end_date, orden_ids=orden_ids
     )
 
 @router.get("/inventario/referencias/{referencia_id}/facturas")
@@ -981,12 +984,35 @@ class AsignarDirectoRequest(BaseModel):
 @router.get("/inventario/disponibles/filtro")
 def get_referencias_disponibles_filtro(
     rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int,
+    orden_ids: Optional[List[int]] = Query(None),
     db: Session = Depends(get_db)
 ):
     from sar.src.storage.repositories import InventarioRepository
     try:
         repo = InventarioRepository(db)
-        return repo.get_referencias_disponibles_filtro(rfc_id, concepto_id, delegacion_id, cantidad)
+        return repo.get_referencias_disponibles_filtro(rfc_id, concepto_id, delegacion_id, cantidad, orden_ids=orden_ids)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/lotes/filtrados")
+def get_lotes_asignacion_filtered(
+    search: Optional[str] = None,
+    tipo_destino: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    orden_ids: Optional[List[int]] = Query(None),
+    db: Session = Depends(get_db)
+):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        lotes, total = repo.get_lotes_asignacion_filtered(
+            search=search, tipo_destino=tipo_destino, limit=limit, offset=offset,
+            start_date=start_date, end_date=end_date, orden_ids=orden_ids
+        )
+        return {"lotes": lotes, "total": total}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

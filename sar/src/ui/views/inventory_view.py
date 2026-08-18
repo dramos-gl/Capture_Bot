@@ -21,7 +21,7 @@ class InventoryLoadWorker(QThread):
     result_ready = Signal(list, int, dict) # data, total_count, summary
     error_occurred = Signal(str)
     
-    def __init__(self, inventario_ui_service, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str, start_date: str = None, end_date: str = None):
+    def __init__(self, inventario_ui_service, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str, start_date: str = None, end_date: str = None, orden_ids: list = None):
         super().__init__()
         self.inventario_ui_service = inventario_ui_service
         self.limit = limit
@@ -32,6 +32,7 @@ class InventoryLoadWorker(QThread):
         self.filter_assigned = filter_assigned
         self.start_date = start_date
         self.end_date = end_date
+        self.orden_ids = orden_ids
         self._is_cancelled = False
         
     def cancel(self):
@@ -49,7 +50,8 @@ class InventoryLoadWorker(QThread):
                 rfc_id=self.rfc_id,
                 filter_assigned=self.filter_assigned,
                 start_date=self.start_date,
-                end_date=self.end_date
+                end_date=self.end_date,
+                orden_ids=self.orden_ids
             )
             if self._is_cancelled:
                 return
@@ -58,7 +60,8 @@ class InventoryLoadWorker(QThread):
                 concepto_id=self.concepto_id,
                 rfc_id=self.rfc_id,
                 start_date=self.start_date,
-                end_date=self.end_date
+                end_date=self.end_date,
+                orden_ids=self.orden_ids
             )
             if not self._is_cancelled:
                 self.result_ready.emit(res["records"], res["total_count"], summary)
@@ -73,17 +76,18 @@ class AvailabilityWorker(QThread):
     """Lightweight worker to fetch disponibles count for a single grid row without blocking UI."""
     result_ready = Signal(object, int)  # row_widget, count
 
-    def __init__(self, service, row_widget, rfc_id: int, concepto_id: int, delegacion_id: int):
+    def __init__(self, service, row_widget, rfc_id: int, concepto_id: int, delegacion_id: int, orden_ids: list = None):
         super().__init__()
         self.service = service
         self.row_widget = row_widget
         self.rfc_id = rfc_id
         self.concepto_id = concepto_id
         self.delegacion_id = delegacion_id
+        self.orden_ids = orden_ids
 
     def run(self):
         try:
-            count = self.service.get_disponibles_count(self.rfc_id, self.concepto_id, self.delegacion_id)
+            count = self.service.get_disponibles_count(self.rfc_id, self.concepto_id, self.delegacion_id, orden_ids=self.orden_ids)
             self.result_ready.emit(self.row_widget, count)
         except Exception:
             self.result_ready.emit(self.row_widget, 0)
@@ -98,6 +102,11 @@ class InventoryView(QWidget):
         self.inventario_ui_service = InventarioUIService(self.db_connector)
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
+        from sar.src.services.referencias_service import ReferenciasService
+        self.referencias_service = ReferenciasService(self.db_connector)
+        self.selected_orden_ids = []
+        self.todas_las_ordenes = []
+        self.is_custom_filter = False
         self.active_worker = None
         
         self.main_layout = QVBoxLayout(self)
@@ -134,22 +143,22 @@ class InventoryView(QWidget):
         # 1. Tab: Visor de Inventario
         self.tab_visor = QWidget()
         self._setup_tab_visor()
-        self.tabs.addTab(self.tab_visor, "📋 Inventario de Facturas")
+        self.tabs.addTab(self.tab_visor, "📋 Inventario")
 
         # 2. Tab: Asignación Masiva
         self.tab_masivo = QWidget()
         self._setup_tab_masivo()
-        self.tabs.addTab(self.tab_masivo, "⚡ Asignación Masiva (Excel)")
+        self.tabs.addTab(self.tab_masivo, "⚡ Asignar & Validar por lotes")
 
         # 3. Tab: Apartar Referencia
         self.tab_apartar = QWidget()
         self._setup_tab_apartar()
-        self.tabs.addTab(self.tab_apartar, "🔑 Apartar Referencia")
+        self.tabs.addTab(self.tab_apartar, "🔑 Reserva de Derechos")
 
         # 4. Tab: Asignación Individual
         self.tab_individual = QWidget()
         self._setup_tab_individual()
-        self.tabs.addTab(self.tab_individual, "👤 Asignación Individual")
+        self.tabs.addTab(self.tab_individual, "👤 Asignar Derechos")
 
         # 5. Tab: Gestión de Asignaciones
         self.tab_lotes = QWidget()
@@ -196,15 +205,16 @@ class InventoryView(QWidget):
 
         # Filter bar
         self.filter_bar = FilterBar(
-            search_placeholder="Buscar por referencia, cliente, folio...",
+            search_placeholder="",
             state_options=["Todos", "Disponible", "Asignada", "Reservadas"],
-            on_search=self._on_search_visor,
+            on_search=None,
             on_state_change=self._on_state_filter_visor,
             on_action=self.refresh_visor_data,
             action_icon_name="actualizar",
             action_tooltip="Actualizar Vista",
             parent=self
         )
+        self.filter_bar.inp_search.setVisible(False)
         
         # Add Labeled Concept combo filter to filter bar
         from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
@@ -218,6 +228,7 @@ class InventoryView(QWidget):
         self.cb_empresa_filter = self.labeled_empresa.combo
         self.cb_empresa_filter.currentTextChanged.connect(self._on_empresa_filter_visor)
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.labeled_empresa)
+        
         layout.addWidget(self.filter_bar)
 
         # KPI summary cards
@@ -228,18 +239,18 @@ class InventoryView(QWidget):
         self.kpi_layout.setSpacing(12)
         
         self.card_total = StatCard(
-            "Total Referencias",
+            "Total de Derechos",
             "0",
             icon_name="file_text",
             color_hex=Colors.ACCENT,
             show_sparkline=False,
             parent=kpi_widget
         )
-        self.card_total.lbl_sub.setText("Disponibles + Asignadas + Reservadas")
+        self.card_total.lbl_sub.setText("Disponibles + Asignados + Reservados")
         self.kpi_layout.addWidget(self.card_total, stretch=1)
         
         self.card_disponibles = StatCard(
-            "Referencias Disponibles",
+            "Derechos Disponibles",
             "0",
             icon_name="clock",
             color_hex=Colors.PRIMARY,
@@ -250,32 +261,67 @@ class InventoryView(QWidget):
         self.kpi_layout.addWidget(self.card_disponibles, stretch=1)
         
         self.card_asignadas = StatCard(
-            "Referencias Asignadas",
+            "Derechos Asignados",
             "0",
             icon_name="shield_check",
             color_hex=Colors.SUCCESS,
             show_sparkline=False,
             parent=kpi_widget
         )
-        self.card_asignadas.lbl_sub.setText("Total asignadas")
+        self.card_asignadas.lbl_sub.setText("Total asignados")
         self.kpi_layout.addWidget(self.card_asignadas, stretch=1)
 
         self.card_reservadas = StatCard(
-            "Referencias Reservadas",
+            "Derechos Reservados",
             "0",
             icon_name="archive",
             color_hex="#F59E0B",
             show_sparkline=False,
             parent=kpi_widget
         )
-        self.card_reservadas.lbl_sub.setText("Total reservadas")
+        self.card_reservadas.lbl_sub.setText("Total reservados")
         self.kpi_layout.addWidget(self.card_reservadas, stretch=1)
         self.kpi_layout.addStretch()
         
         layout.addWidget(kpi_widget)
 
         # Main Card & Table
-        self.card = CustomCard(title="Referencias en Estado FACTURADA", parent=self)
+        self.card = CustomCard(title="", parent=self)
+        
+        # Table Header Layout (Title + Search + Filter)
+        self.table_header_layout = QHBoxLayout()
+        self.table_header_layout.setContentsMargins(0, 0, 0, 0)
+        self.table_header_layout.setSpacing(12)
+        
+        # Section icon & label
+        self.lbl_table_icon = QLabel()
+        self.lbl_table_icon.setPixmap(Icons.file_text("#2563EB").pixmap(18, 18))
+        self.lbl_table_icon.setStyleSheet("background: transparent;")
+        
+        self.lbl_table_title = CustomLabel("Referencias en Estado FACTURADA", variant="subheader")
+        
+        self.table_header_layout.addWidget(self.lbl_table_icon)
+        self.table_header_layout.addWidget(self.lbl_table_title)
+        self.table_header_layout.addStretch()
+        
+        # Search Box inside Table Header
+        self.search_input_visor = QLineEdit(self)
+        self.search_input_visor.setPlaceholderText("Buscar referencia...")
+        self.search_input_visor.setFixedWidth(240)
+        self.search_input_visor.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
+        self.search_input_visor.textChanged.connect(self._on_search_visor)
+        self.table_header_layout.addWidget(self.search_input_visor)
+        
+        # Filter Button (Funnel) inside Table Header
+        self.btn_filter_orden = QPushButton()
+        self.btn_filter_orden.setObjectName("secondaryBtn")
+        self.btn_filter_orden.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden.setFixedSize(36, 36)
+        self.btn_filter_orden.setToolTip("Filtrar por Órdenes")
+        self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
+        self.table_header_layout.addWidget(self.btn_filter_orden)
+        
+        self.card.layout.addLayout(self.table_header_layout)
         
         headers = ["✔", "ID", "Referencia", "Concepto", "Empresa", "Importe", "Estado", "Asignado A", "Tipo", "Solicitante", "Desarrollo", "Cliente", "Mz", "Lt", "Edif", "Viv", "Folio Electrónico", "Fecha Asignación"]
         self.table = StyledDataTable(headers, parent=self)
@@ -307,17 +353,9 @@ class InventoryView(QWidget):
         actions_layout = QHBoxLayout()
         self.btn_marcar_visibles = CustomButton("Marcar Visibles", is_secondary=True)
         self.btn_marcar_visibles.clicked.connect(self._on_marcar_visibles)
-        
-        self.btn_asignar_manual = CustomButton("Asignar Selección")
-        self.btn_asignar_manual.clicked.connect(self._on_asignar_manual)
-        
-        self.btn_exportar_lotes = CustomButton("Exportar Control Inventario", is_secondary=True)
-        self.btn_exportar_lotes.clicked.connect(self._on_exportar_reporte)
 
         actions_layout.addWidget(self.btn_marcar_visibles)
         actions_layout.addStretch()
-        actions_layout.addWidget(self.btn_exportar_lotes)
-        actions_layout.addWidget(self.btn_asignar_manual)
         
         self.card.layout.addLayout(actions_layout)
         layout.addWidget(self.card)
@@ -349,6 +387,8 @@ class InventoryView(QWidget):
                 pass
             self.active_worker.wait()
 
+        self._load_available_orders(preserve_selection=True)
+        
         self.lbl_pagination_info.setText("Cargando inventario...")
         self.pagination_widget.setEnabled(False)
 
@@ -363,7 +403,8 @@ class InventoryView(QWidget):
             rfc_id=self._current_rfc_id,
             filter_assigned=self._current_estado_filter,
             start_date=None,
-            end_date=None
+            end_date=None,
+            orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
         )
         self.active_worker.result_ready.connect(self._on_visor_data_loaded)
         self.active_worker.error_occurred.connect(self._on_visor_load_error)
@@ -482,6 +523,117 @@ class InventoryView(QWidget):
         self.current_page = 1
         self.refresh_visor_data()
 
+    def _load_available_orders(self, preserve_selection=False):
+        try:
+            self.todas_las_ordenes = self.referencias_service.get_ordenes()
+            if self.todas_las_ordenes:
+                valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
+                if preserve_selection and self.is_custom_filter and self.selected_orden_ids:
+                    self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
+                
+                if not self.selected_orden_ids or (preserve_selection and not self.is_custom_filter):
+                    self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
+            else:
+                self.selected_orden_ids = []
+        except Exception as e:
+            print("Error loading available orders for inventory:", e)
+            self.todas_las_ordenes = []
+            self.selected_orden_ids = []
+
+    def _show_order_filter_menu(self):
+        from PySide6.QtWidgets import QMenu
+        from PySide6.QtGui import QAction
+        
+        sender_btn = self.sender()
+        if not sender_btn:
+            sender_btn = self.btn_filter_orden
+            
+        if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
+            self._load_available_orders()
+            
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 8px;
+                border-radius: 4px;
+                color: #1E293B;
+            }
+            QMenu::item:selected {
+                background-color: #F1F5F9;
+                color: #0F172A;
+            }
+        """)
+        
+        action_all = QAction("Todas las órdenes", menu, checkable=True)
+        is_all_selected = len(self.selected_orden_ids) == len(self.todas_las_ordenes) and len(self.todas_las_ordenes) > 0
+        action_all.setChecked(is_all_selected)
+        
+        def toggle_all(checked):
+            self.is_custom_filter = True
+            if checked:
+                self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
+            else:
+                self.selected_orden_ids = []
+            self.current_page = 1
+            self.current_page_lotes = 1
+            self._refresh_active_tab_data()
+            
+        action_all.triggered.connect(toggle_all)
+        menu.addAction(action_all)
+        menu.addSeparator()
+        
+        for ord in self.todas_las_ordenes:
+            label = f"{ord['folio']} ({ord['fecha_creacion'].split()[0] if isinstance(ord['fecha_creacion'], str) else ord['fecha_creacion'].strftime('%Y-%m-%d')})"
+            action = QAction(label, menu, checkable=True)
+            action.setChecked(ord["orden_id"] in self.selected_orden_ids)
+            
+            def make_toggle_handler(oid):
+                def handler(checked):
+                    self.is_custom_filter = True
+                    if checked:
+                        if oid not in self.selected_orden_ids:
+                            self.selected_orden_ids.append(oid)
+                    else:
+                        if oid in self.selected_orden_ids:
+                            self.selected_orden_ids.remove(oid)
+                    self.current_page = 1
+                    self.current_page_lotes = 1
+                    self._refresh_active_tab_data()
+                return handler
+                
+            action.triggered.connect(make_toggle_handler(ord["orden_id"]))
+            menu.addAction(action)
+            
+        menu.exec(sender_btn.mapToGlobal(sender_btn.rect().bottomLeft()))
+
+    def _refresh_active_tab_data(self):
+        active = self.tabs.currentWidget()
+        if active == self.tab_visor:
+            self.refresh_visor_data()
+        elif active == self.tab_individual:
+            self._update_all_grids_availability()
+            if self._pending_ind_refs:
+                self._on_buscar_referencias_ind()
+        elif active == self.tab_apartar:
+            self._update_all_grids_availability()
+        elif active == self.tab_lotes:
+            self.refresh_lotes_data()
+
+    def _update_all_grids_availability(self):
+        active = self.tabs.currentWidget()
+        if active == self.tab_individual:
+            for row in self.grid_individual.rows:
+                self.grid_individual.availability_requested.emit(row)
+        elif active == self.tab_apartar:
+            for row in self.grid_apartar.rows:
+                self.grid_apartar.availability_requested.emit(row)
+
     def _on_page_size_changed(self, text):
         if "50" in text: self.page_size = 50
         elif "100" in text: self.page_size = 100
@@ -552,8 +704,25 @@ class InventoryView(QWidget):
         layout = QVBoxLayout(self.tab_masivo)
         layout.setSpacing(16)
 
-        card_form = CustomCard(title="Configuración de la Asignación", parent=self)
+        card_form = CustomCard(title="", parent=self)
+        
+        # Header Layout with Filter Button
+        header_layout_masivo = QHBoxLayout()
+        lbl_title_masivo = CustomLabel("Asignación Masiva por Lotes", variant="subheader")
+        header_layout_masivo.addWidget(lbl_title_masivo)
+        header_layout_masivo.addStretch()
+        
+        self.btn_filter_orden_masivo = QPushButton()
+        self.btn_filter_orden_masivo.setObjectName("secondaryBtn")
+        self.btn_filter_orden_masivo.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden_masivo.setFixedSize(36, 36)
+        self.btn_filter_orden_masivo.setToolTip("Filtrar por Órdenes")
+        self.btn_filter_orden_masivo.clicked.connect(self._show_order_filter_menu)
+        header_layout_masivo.addWidget(self.btn_filter_orden_masivo)
+        
         self.form_layout_masivo = QFormLayout()
+        card_form.layout.addLayout(header_layout_masivo)
+        card_form.layout.addLayout(self.form_layout_masivo)
         
         self.chk_completar_reserva = CustomCheckBox("Completar Lote Apartado (Reserva)", self)
         self.chk_completar_reserva.stateChanged.connect(self._on_completar_reserva_changed)
@@ -983,13 +1152,22 @@ class InventoryView(QWidget):
         form_layout = QVBoxLayout()
         form_layout.setSpacing(16)
 
-        # Header
+        # Header with Filter Button
         card_header_layout = QHBoxLayout()
         card_title_vbox = QVBoxLayout()
-        lbl_card_title = CustomLabel("Asignación Individual Directa", variant="subheader")
+        lbl_card_title = CustomLabel("Asignación de Derechos Directa", variant="subheader")
         card_title_vbox.addWidget(lbl_card_title)
         card_header_layout.addLayout(card_title_vbox)
         card_header_layout.addStretch()
+        
+        self.btn_filter_orden_ind = QPushButton()
+        self.btn_filter_orden_ind.setObjectName("secondaryBtn")
+        self.btn_filter_orden_ind.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden_ind.setFixedSize(36, 36)
+        self.btn_filter_orden_ind.setToolTip("Filtrar por Órdenes")
+        self.btn_filter_orden_ind.clicked.connect(self._show_order_filter_menu)
+        card_header_layout.addWidget(self.btn_filter_orden_ind)
+        
         form_layout.addLayout(card_header_layout)
 
 
@@ -1034,7 +1212,6 @@ class InventoryView(QWidget):
         self.grid_individual.cascade_conceptos_needed.connect(self._on_cascade_conceptos_needed)
 
         # Create aligned action buttons to go in the header alongside + Agregar Renglón
-        from sar.src.ui.design_system.utils.icons import Icons
 
         self.btn_buscar_ind = QPushButton("Buscar Referencias")
         self.btn_buscar_ind.setObjectName("primaryBtn")
@@ -1177,7 +1354,8 @@ class InventoryView(QWidget):
         try:
             for row in grid_data:
                 refs = self.inventario_ui_service.get_referencias_disponibles_filtro(
-                    row["rfc_id"], row["concepto_id"], row["delegacion_id"], row["cantidad"]
+                    row["rfc_id"], row["concepto_id"], row["delegacion_id"], row["cantidad"],
+                    orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
                 )
                 for r in refs:
                     r["desarrollo_id"] = None
@@ -1434,15 +1612,24 @@ class InventoryView(QWidget):
         form_layout = QVBoxLayout()
         form_layout.setSpacing(16)
 
-        # Build custom header for the card
+        # Build custom header for the card with Filter Button
         card_header_layout = QHBoxLayout()
         card_title_vbox = QVBoxLayout()
-        lbl_card_title = CustomLabel("Apartar Referencias (Reserva)", variant="subheader")
-        lbl_card_subtitle = CustomLabel("Completa los datos para reservar referencias para una notaría", variant="muted")
+        lbl_card_title = CustomLabel("Reserva de Derechos (Apartados)", variant="subheader")
+        lbl_card_subtitle = CustomLabel("Completa los datos para reservar derechos para una notaría", variant="muted")
         card_title_vbox.addWidget(lbl_card_title)
         card_title_vbox.addWidget(lbl_card_subtitle)
         card_header_layout.addLayout(card_title_vbox)
         card_header_layout.addStretch()
+        
+        self.btn_filter_orden_apartar = QPushButton()
+        self.btn_filter_orden_apartar.setObjectName("secondaryBtn")
+        self.btn_filter_orden_apartar.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden_apartar.setFixedSize(36, 36)
+        self.btn_filter_orden_apartar.setToolTip("Filtrar por Órdenes")
+        self.btn_filter_orden_apartar.clicked.connect(self._show_order_filter_menu)
+        card_header_layout.addWidget(self.btn_filter_orden_apartar)
+        
         form_layout.addLayout(card_header_layout)
 
         # Two-column input layout: Notaria on the left, Observaciones on the right
@@ -1525,7 +1712,8 @@ class InventoryView(QWidget):
             return
 
         worker = AvailabilityWorker(
-            self.inventario_ui_service, row, rfc_id, concepto_id, delegacion_id
+            self.inventario_ui_service, row, rfc_id, concepto_id, delegacion_id,
+            orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
         )
         worker.result_ready.connect(self._on_availability_result)
         worker.finished.connect(lambda: self._active_avail_workers.remove(worker) if worker in self._active_avail_workers else None)
@@ -1895,6 +2083,16 @@ class InventoryView(QWidget):
         btn_refresh.clicked.connect(self.refresh_lotes_data)
         filter_row.addWidget(btn_refresh)
 
+        # Filter Button (Funnel) for Lotes
+        self.btn_filter_orden_lotes = QPushButton()
+        self.btn_filter_orden_lotes.setObjectName("secondaryBtn")
+        self.btn_filter_orden_lotes.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden_lotes.setFixedSize(36, 36)
+        self.btn_filter_orden_lotes.setToolTip("Filtrar por Órdenes")
+        self.btn_filter_orden_lotes.setStyleSheet("margin-top: 14px;")
+        self.btn_filter_orden_lotes.clicked.connect(self._show_order_filter_menu)
+        filter_row.addWidget(self.btn_filter_orden_lotes)
+
         layout.addLayout(filter_row)
 
         # --- Main Card & Table ---
@@ -1975,7 +2173,8 @@ class InventoryView(QWidget):
                 limit=self.page_size_lotes,
                 offset=offset,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
+                orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
             )
             self.all_lotes_data = lotes
             self.total_lotes = total
@@ -2878,7 +3077,7 @@ class ApartarReferenciasDialog(QDialog):
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
         
-        self.setWindowTitle("Apartar Referencias (Reserva)")
+        self.setWindowTitle("Reserva de Derechos (Apartados)")
         self.setMinimumWidth(750)
         self.setMinimumHeight(450)
         self.layout = QVBoxLayout(self)
