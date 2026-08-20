@@ -3,8 +3,17 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QPushButton, QTabWidget,
     QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
-    QDateEdit, QFrame
+    QDateEdit, QFrame, QMenu
 )
+
+class KeepOpenMenu(QMenu):
+    def mouseReleaseEvent(self, event):
+        action = self.actionAt(event.position().toPoint())
+        if action and action.isCheckable():
+            action.trigger()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 from PySide6.QtCore import Qt, QThread, Signal, QDate
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
@@ -541,7 +550,6 @@ class InventoryView(QWidget):
             self.selected_orden_ids = []
 
     def _show_order_filter_menu(self):
-        from PySide6.QtWidgets import QMenu
         from PySide6.QtGui import QAction
         
         sender_btn = self.sender()
@@ -551,7 +559,7 @@ class InventoryView(QWidget):
         if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
             self._load_available_orders()
             
-        menu = QMenu(self)
+        menu = KeepOpenMenu(self)
         menu.setStyleSheet("""
             QMenu {
                 background-color: #FFFFFF;
@@ -560,7 +568,7 @@ class InventoryView(QWidget):
                 padding: 4px;
             }
             QMenu::item {
-                padding: 6px 24px 6px 8px;
+                padding: 6px 24px 6px 32px;
                 border-radius: 4px;
                 color: #1E293B;
             }
@@ -908,7 +916,8 @@ class InventoryView(QWidget):
             # Validate rows against database
             with self.db_connector.get_session() as session:
                 self.validated_records = ExcelInventoryHandler.validate_parsed_rows(
-                    session, self.parsed_records, default_rfc_id=default_rfc_id, completar_notaria_id=completar_notaria_id
+                    session, self.parsed_records, default_rfc_id=default_rfc_id, completar_notaria_id=completar_notaria_id,
+                    orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
                 )
 
             # Populate preview table
@@ -1928,7 +1937,8 @@ class InventoryView(QWidget):
                         "desarrollo_id": row_d["desarrollo_id"],
                         "cantidad": row_d["cantidad"],
                         "usuario_creacion": usuario_id,
-                        "observaciones": obs_text
+                        "observaciones": obs_text,
+                        "orden_ids": list(self.selected_orden_ids) if self.selected_orden_ids else None
                     }
                     self.api_client.request("POST", "/api/docs/inventario/lotes/apartar", data=payload)
             else:
@@ -1939,7 +1949,8 @@ class InventoryView(QWidget):
                         notaria_id=notaria_id,
                         usuario_id=usuario_id,
                         partidas=rows_data,
-                        observaciones=obs_text
+                        observaciones=obs_text,
+                        orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
                     )
                     session.commit()
                     

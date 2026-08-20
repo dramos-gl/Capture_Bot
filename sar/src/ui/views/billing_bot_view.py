@@ -70,7 +70,7 @@ class BillingBotView(QWidget):
         h_layout.setContentsMargins(0, 0, 0, 0)
         h_layout.setSpacing(12)
         
-        lbl = QLabel("🚀 BOT - FACTURACIÓN Y TIMBRADO (FACE C)")
+        lbl = QLabel("🚀 BOT - FACTURACIÓN Y TIMBRADO DE DERECHOS")
         h_layout.addWidget(lbl)
         h_layout.addStretch()
         
@@ -168,10 +168,10 @@ class BillingBotView(QWidget):
         self.chk_autonomo.setEnabled(False)
         c_layout.addWidget(self.chk_autonomo)
         
-        self.chk_omitir_ya_generadas = CustomSwitch("Omitir 'Ya Generadas'")
-        self.chk_omitir_ya_generadas.setChecked(True)
-        self.chk_omitir_ya_generadas.setToolTip("Activado: Las referencias confirmadas en el portal ya facturadas se omitiran")
-        c_layout.addWidget(self.chk_omitir_ya_generadas)
+        self.chk_incluir_ya_descargadas = CustomSwitch("Incluir 'Ya descargadas'")
+        self.chk_incluir_ya_descargadas.setChecked(False)
+        self.chk_incluir_ya_descargadas.setToolTip("Activado: Procesa y vuelve a descargar facturas ya descargadas/registradas en base de datos")
+        c_layout.addWidget(self.chk_incluir_ya_descargadas)
         
         self.chk_capturar_delegacion = CustomSwitch("Capturar Delegación")
         self.chk_capturar_delegacion.setChecked(False)
@@ -224,7 +224,7 @@ class BillingBotView(QWidget):
         m_layout.addWidget(lbl_m)
         
         grid_m = QGridLayout()
-        self.box_pendientes = MetricBox("Autorizadas", "0", "#3b82f6")
+        self.box_pendientes = MetricBox("Por Facturar", "0", "#3b82f6")
         self.box_exitosos = MetricBox("Facturadas", "0", "#10b981")
         self.box_errores = MetricBox("Errores", "0", "#ef4444")
         
@@ -264,6 +264,8 @@ class BillingBotView(QWidget):
         
         mon_layout.addWidget(CustomLabel("Progreso Lote", variant="body"))
         self.progress_bar = QProgressBar()
+        self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_bar.setTextVisible(True)
         self.progress_bar.setValue(0)
         mon_layout.addWidget(self.progress_bar)
         
@@ -363,12 +365,23 @@ class BillingBotView(QWidget):
             
             data_rows = []
             for s in solicitudes:
+                del_raw = (s.get("delegacion") or "").upper()
+                del_abrev = ""
+                if "CANCUN" in del_raw or "CANCÚN" in del_raw:
+                    del_abrev = "CUN"
+                elif "PLAYA" in del_raw:
+                    del_abrev = "PYA"
+                else:
+                    del_abrev = "".join(c for c in del_raw if c.isalnum())[:3]
+                
+                concepto_formatted = f"{s['concepto']}-{del_abrev}" if del_abrev else s["concepto"]
+                
                 data_rows.append([
                     str(s["solicitud_id"]),
                     s["folio"],
                     s["rfc"],
                     s["razon_social"],
-                    s["concepto"],
+                    concepto_formatted,
                     str(s["cantidad_solicitada"]),
                     str(s.get("cantidad_autorizada", 0)),
                     str(s.get("cantidad_facturada", 0)),
@@ -430,10 +443,17 @@ class BillingBotView(QWidget):
             # Facturas ya procesadas/timbradas exitosamente.
             facturadas = ctx["facturas_procesadas"]
             errores = ctx.get("referencias_con_error", 0)
+            
+            # Guardar variables de estado para el decremento dinámico
+            self.total_referencias = total
+            self.errores_iniciales = errores
+            self.current_success = facturadas
+            self.current_errors = errores
+            
             # Referencias autorizadas pendientes de facturar (total autorizado menos lo ya facturado y lo que falló)
             autorizadas_pendientes = total - facturadas - errores
             
-            # Tarjeta "Autorizadas": muestra cuántas referencias aún están por facturar
+            # Tarjeta "Por Facturar": muestra cuántas referencias aún están por facturar
             self.box_pendientes.set_value(str(max(0, autorizadas_pendientes)))
             # Tarjeta "Facturadas": muestra cuántas ya fueron timbradas en sesiones previas
             self.box_exitosos.set_value(str(max(0, facturadas)))
@@ -545,7 +565,7 @@ class BillingBotView(QWidget):
         self.btn_seleccionar.setEnabled(False)
         self.table.setEnabled(False)
         self.chk_autonomo.setEnabled(False)
-        self.chk_omitir_ya_generadas.setEnabled(False)
+        self.chk_incluir_ya_descargadas.setEnabled(False)
         self.chk_capturar_delegacion.setEnabled(False)
         self.chk_ver_todas.setEnabled(False)
         self.btn_browse.setEnabled(False)
@@ -555,7 +575,7 @@ class BillingBotView(QWidget):
         self.lbl_portal_status.setText("Portal: ACTIVO")
         self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.ACCENT_EMERALD}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
         
-        omitir_ya_gen = self.chk_omitir_ya_generadas.isChecked()
+        omitir_ya_gen = not self.chk_incluir_ya_descargadas.isChecked()
         capturar_del = self.chk_capturar_delegacion.isChecked()
         self.worker = BillingRpaWorker(
             db_connector=self.db_connector,
@@ -577,13 +597,20 @@ class BillingBotView(QWidget):
         self.worker.start()
 
     def _on_metric_updated(self, name: str, value: int):
-        if name in ("pendientes", "autorizadas"):
-            # "autorizadas": referencias autorizadas restantes por facturar
-            self.box_pendientes.set_value(str(value))
-        elif name == "exitosos":
+        if name == "exitosos":
+            self.current_success = value
             self.box_exitosos.set_value(str(value))
         elif name == "errores":
-            self.box_errores.set_value(str(value))
+            self.current_errors = self.errores_iniciales + value
+            self.box_errores.set_value(str(self.current_errors))
+        elif name in ("pendientes", "autorizadas"):
+            self.box_pendientes.set_value(str(value))
+            return
+
+        # Recalculate remaining pending/por facturar dynamically
+        if hasattr(self, "total_referencias"):
+            remaining = self.total_referencias - self.current_success - self.current_errors
+            self.box_pendientes.set_value(str(max(0, remaining)))
 
     def _on_referencia_generada(self, ref_portal: str, rfc: str, status: str):
         self.lbl_m_ref.setText(ref_portal)
@@ -601,7 +628,7 @@ class BillingBotView(QWidget):
         self.btn_seleccionar.setEnabled(True)
         self.table.setEnabled(True)
         self.chk_autonomo.setEnabled(True)
-        self.chk_omitir_ya_generadas.setEnabled(True)
+        self.chk_incluir_ya_descargadas.setEnabled(True)
         self.chk_capturar_delegacion.setEnabled(True)
         self.chk_ver_todas.setEnabled(True)
         self.btn_browse.setEnabled(True)

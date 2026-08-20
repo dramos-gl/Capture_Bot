@@ -1,8 +1,17 @@
 """Dashboard Main View matching the target design mockup."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QLineEdit, QPushButton, QComboBox, QLabel
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QLineEdit, QPushButton, QComboBox, QLabel, QMenu, QDialog
 )
+
+class KeepOpenMenu(QMenu):
+    def mouseReleaseEvent(self, event):
+        action = self.actionAt(event.position().toPoint())
+        if action and action.isCheckable():
+            action.trigger()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 from PySide6.QtCore import Qt, QDateTime, QThread, Signal, QTimer
 from sar.src.ui.design_system.components import CustomCard, CustomLabel, StyledDataTable, CustomButton, CustomComboBox
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
@@ -123,7 +132,7 @@ class DashboardView(QWidget):
         self.lbl_title = CustomLabel("Tablero de Control Operativo", variant="header")
         self.lbl_title.setObjectName("dashboardTitle")
         
-        self.lbl_subtitle = CustomLabel("Resumen general del estado de referencias", variant="muted")
+        self.lbl_subtitle = CustomLabel("Resumen general del estado de los derechos", variant="muted")
         self.lbl_subtitle.setObjectName("dashboardSubtitle")
         
         self.title_text_layout.addWidget(self.lbl_title)
@@ -166,13 +175,17 @@ class DashboardView(QWidget):
         
         self.card_generadas = StatCard("Total Generadas", "0", "file_text", color_hex=Colors.ACCENT, parent=self)
         self.card_pendientes = StatCard("Pendientes Autorización", "0", "clock", color_hex=Colors.WARNING, parent=self)
-        self.card_autorizadas = StatCard("Autorizadas", "0", "shield_check", color_hex=Colors.SUCCESS, parent=self)
+        self.card_autorizadas = StatCard("Autorizadas por Facturar", "0", "shield_check", color_hex=Colors.SUCCESS, parent=self)
+        self.card_rechazadas = StatCard("Rechazadas", "0", "x_circle", color_hex="#EA580C", parent=self)
         self.card_error = StatCard("Con Error", "0", "alert_triangle", color_hex=Colors.ERROR, parent=self)
+        self.card_invalidas = StatCard("Derechos Invalidadas", "0", "alert_triangle", color_hex="#64748B", parent=self)
         
         self.kpi_layout.addWidget(self.card_generadas, 0, 0)
         self.kpi_layout.addWidget(self.card_pendientes, 0, 1)
         self.kpi_layout.addWidget(self.card_autorizadas, 0, 2)
-        self.kpi_layout.addWidget(self.card_error, 0, 3)
+        self.kpi_layout.addWidget(self.card_rechazadas, 0, 3)
+        self.kpi_layout.addWidget(self.card_error, 0, 4)
+        self.kpi_layout.addWidget(self.card_invalidas, 0, 5)
         
         self.layout.addLayout(self.kpi_layout)
         
@@ -193,7 +206,7 @@ class DashboardView(QWidget):
         self.lbl_table_icon.setPixmap(Icons.file_text("#2563EB").pixmap(18, 18))
         self.lbl_table_icon.setStyleSheet("background: transparent;")
         
-        self.lbl_table_title = CustomLabel("Últimas Referencias Generadas", variant="subheader")
+        self.lbl_table_title = CustomLabel("Últimos derechos generados", variant="subheader")
         self.lbl_table_title.setObjectName("dashboardTableTitle")
         
         self.table_header_layout.addWidget(self.lbl_table_icon)
@@ -202,7 +215,7 @@ class DashboardView(QWidget):
         
         # Search Box
         self.search_input = QLineEdit(self)
-        self.search_input.setPlaceholderText("Buscar referencia...")
+        self.search_input.setPlaceholderText("Buscar derechos...")
         self.search_input.setFixedWidth(240)
         self.search_input.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
         self.search_input.textChanged.connect(self._on_search_changed)
@@ -235,7 +248,7 @@ class DashboardView(QWidget):
         self.footer_layout = QHBoxLayout()
         self.footer_layout.setContentsMargins(0, 8, 0, 0)
         
-        self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 referencias", variant="muted")
+        self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 derechos", variant="muted")
         self.lbl_pagination_info.setObjectName("dashboardPaginationInfo")
         self.footer_layout.addWidget(self.lbl_pagination_info)
         
@@ -261,13 +274,38 @@ class DashboardView(QWidget):
         
         self.btn_filter.clicked.connect(self._show_filter_menu)
         
-        self.card_generadas.mouseDoubleClickEvent = self._on_card_generadas_double_clicked
+        self.card_generadas.mouseDoubleClickEvent = self._on_card_double_clicked
+        self.card_pendientes.mouseDoubleClickEvent = self._on_card_double_clicked
+        self.card_autorizadas.mouseDoubleClickEvent = self._on_card_double_clicked
+        self.card_rechazadas.mouseDoubleClickEvent = self._on_card_double_clicked
+        self.card_error.mouseDoubleClickEvent = self._on_error_card_double_clicked
+        self.card_invalidas.mouseDoubleClickEvent = self._on_invalidas_card_double_clicked
         self.layout.addWidget(self.activity_card)
         self._load_available_orders()
         self.refresh_data()
         
-    def _on_card_generadas_double_clicked(self, event):
+    def _on_card_double_clicked(self, event):
         self.show_metrics_requested.emit(list(self.selected_orden_ids))
+
+    def _on_error_card_double_clicked(self, event):
+        dialog = ErrorDetailDialog(
+            db_connector=self.db_connector,
+            title="Detalle de Derechos con Error",
+            states=["ERROR", "FALLIDO"],
+            orden_ids=list(self.selected_orden_ids),
+            parent=self
+        )
+        dialog.exec()
+
+    def _on_invalidas_card_double_clicked(self, event):
+        dialog = ErrorDetailDialog(
+            db_connector=self.db_connector,
+            title="Detalle de Derechos Invalidados",
+            states=["ERROR_VALIDACION"],
+            orden_ids=list(self.selected_orden_ids),
+            parent=self
+        )
+        dialog.exec()
 
     def refresh_data(self):
         """Fetches latest KPI metrics and launches background thread for paginated references."""
@@ -290,7 +328,9 @@ class DashboardView(QWidget):
         self.card_generadas.set_value("...")
         self.card_pendientes.set_value("...")
         self.card_autorizadas.set_value("...")
+        self.card_rechazadas.set_value("...")
         self.card_error.set_value("...")
+        self.card_invalidas.set_value("...")
 
         # Start KPI background worker
         self.active_kpis_worker = DashboardKPIsLoadWorker(
@@ -307,14 +347,18 @@ class DashboardView(QWidget):
         self.card_generadas.set_value(str(kpis.get("total_generadas", 0)))
         self.card_pendientes.set_value(str(kpis.get("pendientes", 0)))
         self.card_autorizadas.set_value(str(kpis.get("autorizadas", 0)))
+        self.card_rechazadas.set_value(str(kpis.get("rechazadas", 0)))
         self.card_error.set_value(str(kpis.get("con_error", 0)))
+        self.card_invalidas.set_value(str(kpis.get("invalidas", 0)))
 
     def _on_kpis_error(self, err_msg):
         print("Error refreshing dashboard KPIs in background:", err_msg)
         self.card_generadas.set_value("0")
         self.card_pendientes.set_value("0")
         self.card_autorizadas.set_value("0")
+        self.card_rechazadas.set_value("0")
         self.card_error.set_value("0")
+        self.card_invalidas.set_value("0")
 
     def refresh_data_references(self):
         """Starts background thread to fetch dashboard references."""
@@ -328,7 +372,7 @@ class DashboardView(QWidget):
                 pass
             self.active_worker.wait()
 
-        self.lbl_pagination_info.setText("Cargando referencias...")
+        self.lbl_pagination_info.setText("Cargando derechos...")
         self.pagination_widget.setEnabled(False)
         self.cb_page_size.setEnabled(False)
 
@@ -359,7 +403,7 @@ class DashboardView(QWidget):
     def _on_load_error(self, err_msg):
         self.pagination_widget.setEnabled(True)
         self.cb_page_size.setEnabled(True)
-        self.lbl_pagination_info.setText("Error al cargar referencias.")
+        self.lbl_pagination_info.setText("Error al cargar los derechos.")
         print("Dashboard references load error:", err_msg)
 
     def _on_search_changed(self, text):
@@ -401,9 +445,9 @@ class DashboardView(QWidget):
         
         # Update Footer Info
         if total_items == 0:
-            self.lbl_pagination_info.setText("Mostrando 0 a 0 de 0 referencias")
+            self.lbl_pagination_info.setText("Mostrando 0 a 0 de 0 derechos")
         else:
-            self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {total_items} referencias")
+            self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {total_items} derechos")
             
         # Redraw Pagination Buttons
         while self.pag_btn_layout.count():
@@ -469,14 +513,13 @@ class DashboardView(QWidget):
             self.selected_orden_ids = []
 
     def _show_filter_menu(self):
-        from PySide6.QtWidgets import QMenu
         from PySide6.QtGui import QAction
         
         # Load orders if not loaded yet
         if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
             self._load_available_orders()
             
-        menu = QMenu(self)
+        menu = KeepOpenMenu(self)
         menu.setStyleSheet("""
             QMenu {
                 background-color: #FFFFFF;
@@ -485,7 +528,7 @@ class DashboardView(QWidget):
                 padding: 4px;
             }
             QMenu::item {
-                padding: 6px 24px 6px 8px;
+                padding: 6px 24px 6px 32px;
                 border-radius: 4px;
                 color: #1E293B;
             }
@@ -535,3 +578,171 @@ class DashboardView(QWidget):
             
         # Display the menu directly under the filter button
         menu.exec(self.btn_filter.mapToGlobal(self.btn_filter.rect().bottomLeft()))
+
+
+class ErrorDetailDialog(QDialog):
+    def __init__(self, db_connector, title: str, states: list, orden_ids: list = None, parent=None):
+        super().__init__(parent)
+        self.db_connector = db_connector
+        self.title_text = title
+        self.states = states
+        self.orden_ids = orden_ids
+        self.raw_data = []
+        self.setWindowTitle(title)
+        self.resize(1000, 600)
+        self._setup_ui()
+        self._load_data()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # Title Label
+        lbl_title = CustomLabel(self.title_text, variant="subheader")
+        layout.addWidget(lbl_title)
+
+        # Header Row: Search and Export
+        header_layout = QHBoxLayout()
+        self.txt_search = QLineEdit(self)
+        self.txt_search.setPlaceholderText("🔍 Buscar referencia, RFC o empresa...")
+        self.txt_search.setStyleSheet("""
+            QLineEdit {
+                padding: 6px 12px;
+                border: 1px solid #CBD5E1;
+                border-radius: 4px;
+                background-color: #FFFFFF;
+                color: #1E293B;
+            }
+        """)
+        self.txt_search.textChanged.connect(self._on_search_changed)
+        header_layout.addWidget(self.txt_search)
+
+        btn_export = CustomButton("Exportar Excel", is_secondary=True)
+        btn_export.setIcon(Icons.file_excel("#16A34A"))
+        btn_export.clicked.connect(self._export_to_excel)
+        header_layout.addWidget(btn_export)
+
+        layout.addLayout(header_layout)
+
+        # Table
+        headers = ["Folio Referencia", "RFC", "Razón Social", "Concepto", "Delegación", "Estado", "Importe", "Fecha Generación"]
+        self.table = StyledDataTable(headers, parent=self)
+        layout.addWidget(self.table)
+
+    def _load_data(self):
+        from sqlalchemy import select
+        from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, Solicitud, Concepto, Rfc, Delegacion
+
+        self.raw_data = []
+        try:
+            with self.db_connector.get_session() as session:
+                stmt = (
+                    select(
+                        Referencia.referencia_portal,
+                        Rfc.rfc,
+                        Rfc.razon_social,
+                        Concepto.nombre.label("concepto_nombre"),
+                        Delegacion.nombre.label("delegacion_nombre"),
+                        EstadoSistema.codigo.label("estado_codigo"),
+                        Referencia.importe,
+                        Referencia.fecha_generacion
+                    )
+                    .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+                    .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
+                    .join(Rfc, GrupoReferencia.rfc_id == Rfc.rfc_id)
+                    .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
+                    .join(Solicitud, Referencia.solicitud_id == Solicitud.solicitud_id)
+                    .join(Delegacion, Solicitud.delegacion_id == Delegacion.delegacion_id)
+                    .where(EstadoSistema.codigo.in_(self.states))
+                )
+                if self.orden_ids:
+                    stmt = stmt.where(GrupoReferencia.orden_id.in_(self.orden_ids))
+
+                stmt = stmt.order_by(Referencia.fecha_generacion.desc())
+                results = session.execute(stmt).all()
+
+                for r in results:
+                    self.raw_data.append({
+                        "referencia_portal": r.referencia_portal,
+                        "rfc": r.rfc,
+                        "razon_social": r.razon_social,
+                        "concepto_nombre": r.concepto_nombre,
+                        "delegacion_nombre": r.delegacion_nombre,
+                        "estado_codigo": r.estado_codigo,
+                        "importe": r.importe,
+                        "fecha_generacion": r.fecha_generacion
+                    })
+            self._populate_table(self.raw_data)
+        except Exception as e:
+            print("Error loading details for ErrorDetailDialog:", e)
+
+    def _populate_table(self, data_list):
+        table_rows = []
+        for r in data_list:
+            table_rows.append([
+                r["referencia_portal"],
+                r["rfc"],
+                r["razon_social"],
+                r["concepto_nombre"],
+                r["delegacion_nombre"],
+                r["estado_codigo"],
+                f"${float(r['importe']):,.2f}" if r.get("importe") is not None else "$0.00",
+                r["fecha_generacion"].strftime("%Y-%m-%d %H:%M:%S") if r.get("fecha_generacion") else ""
+            ])
+        self.table.populate_rows(table_rows)
+
+    def _on_search_changed(self, text):
+        query = text.strip().lower()
+        if not query:
+            self._populate_table(self.raw_data)
+            return
+
+        filtered = []
+        for r in self.raw_data:
+            if (query in r["referencia_portal"].lower() or 
+                query in r["rfc"].lower() or 
+                query in r["razon_social"].lower() or 
+                query in r["concepto_nombre"].lower() or 
+                query in r["delegacion_nombre"].lower()):
+                filtered.append(r)
+        self._populate_table(filtered)
+
+    def _export_to_excel(self):
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        import openpyxl
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Exportar a Excel", f"{self.title_text}.xlsx", "Excel Files (*.xlsx)"
+        )
+        if not file_path:
+            return
+
+        try:
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Detalle"
+
+            headers = ["Folio Referencia", "RFC Empresa", "Razón Social", "Concepto", "Delegación", "Estado", "Importe", "Fecha Generación"]
+            ws.append(headers)
+
+            for r in self.raw_data:
+                ws.append([
+                    r["referencia_portal"],
+                    r["rfc"],
+                    r["razon_social"],
+                    r["concepto_nombre"],
+                    r["delegacion_nombre"],
+                    r["estado_codigo"],
+                    float(r["importe"]) if r["importe"] is not None else 0.0,
+                    r["fecha_generacion"].strftime("%Y-%m-%d %H:%M:%S") if r["fecha_generacion"] else ""
+                ])
+
+            wb.save(file_path)
+            QMessageBox.information(
+                self, "Exportación Completada", f"Se ha exportado el reporte con éxito a:\n{file_path}"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error", f"No se pudo exportar el archivo Excel:\n{str(e)}"
+            )

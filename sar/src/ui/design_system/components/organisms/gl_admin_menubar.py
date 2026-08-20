@@ -64,3 +64,14 @@ class AdminMenuBar(QMenuBar):
         
         act_parametros.triggered.connect(lambda: self.view_requested.emit("parametros"))
         act_locs.triggered.connect(lambda: self.view_requested.emit("localizadores"))
+        
+        # Procesos Especiales
+        menu_procesos = self.addMenu("Procesos Especiales")
+        menu_procesos.setWindowFlag(Qt.FramelessWindowHint, True)
+        act_migracion = menu_procesos.addAction("Migración de Referencias")
+        act_carga = menu_procesos.addAction("Carga Masiva de Referencias")
+        act_update = menu_procesos.addAction("Escanear Delegaciones en PDFs")
+        
+        act_migracion.triggered.connect(lambda: self.view_requested.emit("migracion"))
+        act_carga.triggered.connect(lambda: self.view_requested.emit("carga_masiva"))
+        act_update.triggered.connect(lambda: self.view_requested.emit("update_facturas"))

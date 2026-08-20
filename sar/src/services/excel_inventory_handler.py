@@ -155,7 +155,7 @@ class ExcelInventoryHandler:
 
     @staticmethod
     def validate_parsed_rows(
-        session, parsed_rows: List[Dict[str, Any]], default_rfc_id: Optional[int] = None, completar_notaria_id: Optional[int] = None
+        session, parsed_rows: List[Dict[str, Any]], default_rfc_id: Optional[int] = None, completar_notaria_id: Optional[int] = None, orden_ids: Optional[List[int]] = None
     ) -> List[Dict[str, Any]]:
         """Validates parsed rows against the database, enforcing:
         1. Reference exists and is FACTURADA (or auto-assigns an available one if empty).
@@ -396,6 +396,9 @@ class ExcelInventoryHandler:
                         GrupoReferencia.rfc_id == resolved_rfc_id
                     )
                 )
+                if orden_ids:
+                    available_stmt = available_stmt.where(GrupoReferencia.orden_id.in_(orden_ids))
+
                 if allocated_ref_ids:
                     available_stmt = available_stmt.where(Referencia.referencia_id.not_in(list(allocated_ref_ids)))
 
@@ -419,7 +422,7 @@ class ExcelInventoryHandler:
 
             # 2. Query reference details
             ref_stmt = (
-                select(Referencia, EstadoSistema.codigo, Concepto.alias, Delegacion.nombre, Delegacion.delegacion_id)
+                select(Referencia, EstadoSistema.codigo, Concepto.alias, Delegacion.nombre, Delegacion.delegacion_id, GrupoReferencia.orden_id)
                 .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
                 .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
                 .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
@@ -435,7 +438,15 @@ class ExcelInventoryHandler:
                 validated_rows.append(row_result)
                 continue
                 
-            ref_obj, estado_cod, concept_alias, ref_deleg_name, ref_deleg_id = ref_res
+            ref_obj, estado_cod, concept_alias, ref_deleg_name, ref_deleg_id, ref_orden_id = ref_res
+            
+            # Check if reference belongs to the selected orders
+            if orden_ids and ref_orden_id not in orden_ids:
+                row_result["status"] = "ERROR"
+                row_result["error_message"] = f"La referencia '{ref_str}' pertenece a una orden que no está seleccionada en los filtros."
+                validated_rows.append(row_result)
+                continue
+                
             row_result["referencia_id"] = ref_obj.referencia_id
 
             # 3. Check if reference is in FACTURADA state

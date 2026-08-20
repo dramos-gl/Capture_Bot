@@ -792,16 +792,20 @@ class ThemeManager:
             padding: 8px;
         }}
         BotView QProgressBar, BillingBotView QProgressBar, R2FCancunView QProgressBar {{
-            border: 1px solid #e5e7eb;
+            border: 1px solid #d1d5db;
             border-radius: 4px;
             text-align: center;
             background-color: #f3f4f6;
+            color: #111827;
+            font-weight: bold;
         }}
         BotView QProgressBar::chunk {{
-            background-color: #1e293b;
+            background-color: #3b82f6;
+            border-radius: 3px;
         }}
         BillingBotView QProgressBar::chunk, R2FCancunView QProgressBar::chunk {{
-            background-color: #1e293b;
+            background-color: #3b82f6;
+            border-radius: 3px;
         }}
         QFrame#botHeaderFaceA {{
             background-color: #1e293b;

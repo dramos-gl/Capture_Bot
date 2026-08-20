@@ -610,13 +610,13 @@ def registrar_factura_bot(request: RegistrarFacturaBotRequest, db: Session = Dep
         if not dup_id:
             factura_uuid = str(uuid.uuid4())
             ins_factura = text("""
-                INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado, delegacion)
-                VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :pdf2, :estado, :delegacion)
+                INSERT INTO sar_archivo.factura (referencia_id, uuid, nombre_archivo, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado, delegacion)
+                VALUES (:rid, :uuid, :nombre_archivo, :rfc_emisor, :fecha, :pdf, :pdf2, :estado, :delegacion)
             """)
             db.execute(ins_factura, {
                 "rid": request.referencia_id,
                 "uuid": factura_uuid,
-                "folio": filename_1.replace(".pdf", ""),
+                "nombre_archivo": filename_1.replace(".pdf", ""),
                 "rfc_emisor": request.rfc_emisor,
                 "fecha": datetime.datetime.now(datetime.timezone.utc),
                 "pdf": pdf_path_1,
@@ -793,6 +793,7 @@ class LoteApartarRequest(BaseModel):
     cantidad: int
     usuario_creacion: int
     observaciones: Optional[str] = None
+    orden_ids: Optional[List[int]] = None
 
 @router.get("/inventario/disponibles")
 def get_disponibles_count(
@@ -946,7 +947,8 @@ def api_apartar_referencias(request: LoteApartarRequest, db: Session = Depends(g
             cantidad=request.cantidad,
             usuario_id=request.usuario_creacion,
             desarrollo_id=request.desarrollo_id,
-            observaciones=request.observaciones
+            observaciones=request.observaciones,
+            orden_ids=request.orden_ids
         )
         db.commit()
         return {"lote_id": lote_id, "detail": "Referencias apartadas con éxito"}

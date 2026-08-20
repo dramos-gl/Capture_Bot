@@ -493,15 +493,53 @@ class OperacionRepository(BaseRepository):
         
     def get_solicitudes(self, orden_ids: list = None) -> List[dict]:
         from sqlalchemy import text
+        from sar.src.storage.models import EstadoSistema
+        from sqlalchemy import select
+        
+        # Get the ID of the 'FACTURADA' state for references precisely
+        try:
+            facturada_state_id = self.session.execute(
+                select(EstadoSistema.estado_id).where(
+                    EstadoSistema.entidad == "referencia",
+                    EstadoSistema.codigo == "FACTURADA"
+                )
+            ).scalar()
+        except Exception:
+            facturada_state_id = None
+
+        if facturada_state_id:
+            subquery_count = f"""
+                COALESCE((
+                    SELECT COUNT(*) 
+                    FROM sar_produccion.referencia 
+                    WHERE solicitud_id = v.solicitud_id AND estado_id = {facturada_state_id}
+                ), 0)
+            """
+        else:
+            subquery_count = """
+                COALESCE((
+                    SELECT COUNT(*) 
+                    FROM sar_produccion.referencia r 
+                    JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id 
+                    WHERE r.solicitud_id = v.solicitud_id AND esr.codigo = 'FACTURADA'
+                ), 0)
+            """
+
         if orden_ids:
-            stmt = text("""
-                SELECT * FROM sar_produccion.vw_solicitudes_detalle 
-                WHERE grupo_id IN (SELECT g_ref.grupo_id FROM sar_produccion.grupo_referencia g_ref WHERE g_ref.orden_id IN :orden_ids_param)
-                ORDER BY grupo_id ASC, solicitud_id ASC
+            stmt = text(f"""
+                SELECT v.*, {subquery_count} AS cantidad_facturada
+                FROM sar_produccion.vw_solicitudes_detalle v
+                JOIN sar_produccion.grupo_referencia gr ON v.grupo_id = gr.grupo_id
+                WHERE gr.orden_id IN :orden_ids_param
+                ORDER BY v.grupo_id ASC, v.solicitud_id ASC
             """)
             result = self.session.execute(stmt, {"orden_ids_param": tuple(orden_ids)})
         else:
-            stmt = text("SELECT * FROM sar_produccion.vw_solicitudes_detalle ORDER BY grupo_id ASC, solicitud_id ASC")
+            stmt = text(f"""
+                SELECT v.*, {subquery_count} AS cantidad_facturada
+                FROM sar_produccion.vw_solicitudes_detalle v
+                ORDER BY v.grupo_id ASC, v.solicitud_id ASC
+            """)
             result = self.session.execute(stmt)
         res = []
         for row in result:
@@ -514,6 +552,7 @@ class OperacionRepository(BaseRepository):
                 "delegacion": row.delegacion_nombre or "Sin Delegación",
                 "cantidad_solicitada": row.cantidad_solicitada,
                 "cantidad_generada": row.cantidad_generada,
+                "cantidad_facturada": getattr(row, "cantidad_facturada", 0),
                 "estado": row.estado_codigo,
                 "usuario_asignado": row.usuario_asignado_nombre or "Sin Asignar"
             })
@@ -584,7 +623,7 @@ class OperacionRepository(BaseRepository):
         from sqlalchemy import text
         query_str = """
             SELECT s.solicitud_id, s.grupo_id, o.folio, rfc.rfc, rfc.razon_social, 
-                   c.nombre as concepto, d.nombre as delegacion, 
+                   c.alias as concepto, d.nombre as delegacion, 
                    s.cantidad_solicitada, s.cantidad_generada, es.codigo as estado
             FROM sar_produccion.solicitud s
             JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
@@ -624,7 +663,7 @@ class OperacionRepository(BaseRepository):
         from sqlalchemy import text
         query_str = """
             SELECT s.solicitud_id, s.grupo_id, o.folio, rfc.rfc, rfc.razon_social, 
-                   c.nombre as concepto, d.nombre as delegacion, 
+                   c.alias as concepto, d.nombre as delegacion, 
                    s.cantidad_solicitada,
                    COALESCE((
                        SELECT COUNT(*)
@@ -1446,7 +1485,7 @@ class ProduccionRepository(BaseRepository):
         total_generadas = self.session.execute(query_total).scalar_one()
         
         try:
-            pdte_codes = ["GENERADA", "ASIGNADA", "PENDIENTE"]
+            pdte_codes = ["GENERADA", "ASIGNADA", "PENDIENTE", "PENDIENTE_AUTORIZACION"]
             pdte_ids = []
             for code in pdte_codes:
                 try:
@@ -1462,7 +1501,7 @@ class ProduccionRepository(BaseRepository):
                 except ValueError:
                     pass
                     
-            err_codes = ["ERROR", "RECHAZADA", "FALLIDO"]
+            err_codes = ["ERROR", "FALLIDO"]
             err_ids = []
             for code in err_codes:
                 try:
@@ -1470,28 +1509,55 @@ class ProduccionRepository(BaseRepository):
                 except ValueError:
                     pass
             
+            rech_codes = ["RECHAZADA"]
+            rech_ids = []
+            for code in rech_codes:
+                try:
+                    rech_ids.append(self._get_estado_id("referencia", code))
+                except ValueError:
+                    pass
+            
+            invalid_codes = ["ERROR_VALIDACION"]
+            invalid_ids = []
+            for code in invalid_codes:
+                try:
+                    invalid_ids.append(self._get_estado_id("referencia", code))
+                except ValueError:
+                    pass
+            
             query_pdte = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(pdte_ids))
             query_aut = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(aut_ids))
             query_err = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(err_ids))
+            query_rech = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(rech_ids))
+            query_invalid = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(invalid_ids)) if invalid_ids else None
             
             if orden_ids:
                 query_pdte = query_pdte.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
                 query_aut = query_aut.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
                 query_err = query_err.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
+                query_rech = query_rech.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
+                if query_invalid is not None:
+                    query_invalid = query_invalid.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
                 
             pendientes = self.session.execute(query_pdte).scalar_one() if pdte_ids else 0
             autorizadas = self.session.execute(query_aut).scalar_one() if aut_ids else 0
             con_error = self.session.execute(query_err).scalar_one() if err_ids else 0
+            rechazadas = self.session.execute(query_rech).scalar_one() if rech_ids else 0
+            invalidas = self.session.execute(query_invalid).scalar_one() if (query_invalid is not None and invalid_ids) else 0
         except Exception:
             pendientes = 0
             autorizadas = 0
             con_error = 0
+            rechazadas = 0
+            invalidas = 0
             
         return {
             "total_generadas": total_generadas,
             "pendientes": pendientes,
             "autorizadas": autorizadas,
-            "con_error": con_error
+            "con_error": con_error,
+            "rechazadas": rechazadas,
+            "invalidas": invalidas
         }
 
     def get_orden_detalle_edicion(self, orden_id: int) -> dict:
@@ -2387,7 +2453,7 @@ class InventarioRepository(BaseRepository):
     def get_facturas_by_referencia_id(self, referencia_id: int) -> List[dict]:
         from sqlalchemy import text
         stmt = text("""
-            SELECT factura_id, pdf_path, pdf2_path, uuid, folio, estado, delegacion
+            SELECT factura_id, pdf_path, pdf2_path, uuid, nombre_archivo, estado, delegacion
             FROM sar_archivo.factura
             WHERE referencia_id = :referencia_id
         """)
@@ -2398,7 +2464,7 @@ class InventarioRepository(BaseRepository):
                 "pdf_path": row.pdf_path,
                 "pdf2_path": row.pdf2_path,
                 "uuid": row.uuid,
-                "folio": row.folio,
+                "nombre_archivo": row.nombre_archivo,
                 "estado": row.estado,
                 "delegacion": row.delegacion
             }
@@ -2449,7 +2515,7 @@ class InventarioRepository(BaseRepository):
         return result if result is not None else 0
 
     def apartar_referencias(
-        self, notaria_id: int, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int, usuario_id: int, desarrollo_id: Optional[int] = None, observaciones: Optional[str] = None
+        self, notaria_id: int, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int, usuario_id: int, desarrollo_id: Optional[int] = None, observaciones: Optional[str] = None, orden_ids: Optional[list] = None
     ) -> int:
         from sar.src.storage.models import LoteAsignacion, LoteDetalle, AsignacionReferencia, Referencia, EstadoSistema, Desarrollo, GrupoReferencia, Solicitud, Concepto
         from sqlalchemy import select
@@ -2510,8 +2576,11 @@ class InventarioRepository(BaseRepository):
                     select(AsignacionReferencia.referencia_id)
                 )
             )
-            .limit(cantidad)
         )
+        if orden_ids:
+            available_stmt = available_stmt.where(GrupoReferencia.orden_id.in_(orden_ids))
+            
+        available_stmt = available_stmt.limit(cantidad)
         available_refs = self.session.execute(available_stmt).scalars().all()
         
         if len(available_refs) < cantidad:
@@ -2553,11 +2622,10 @@ class InventarioRepository(BaseRepository):
             self.session.add(asig)
             ref.estado_id = estado_reservada_id
 
-        self.session.flush()
         return lote.lote_asignacion_id
 
     def apartar_referencias_lote(
-        self, notaria_id: int, usuario_id: int, partidas: List[dict], observaciones: Optional[str] = None
+        self, notaria_id: int, usuario_id: int, partidas: List[dict], observaciones: Optional[str] = None, orden_ids: Optional[list] = None
     ) -> int:
         """
         Reserva referencias para múltiples partidas bajo un único lote_asignacion.
@@ -2641,8 +2709,11 @@ class InventarioRepository(BaseRepository):
                         select(AsignacionReferencia.referencia_id)
                     )
                 )
-                .limit(cantidad)
             )
+            if orden_ids:
+                available_stmt = available_stmt.where(GrupoReferencia.orden_id.in_(orden_ids))
+                
+            available_stmt = available_stmt.limit(cantidad)
             available_refs = self.session.execute(available_stmt).scalars().all()
             
             if len(available_refs) < cantidad:

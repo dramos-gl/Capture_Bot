@@ -20,6 +20,9 @@ from sar.src.ui.views.admin.rfcs_view import RfcsView
 from sar.src.ui.views.admin.status_view import StatusView
 from sar.src.ui.views.admin.parameters_view import ParametersView
 from sar.src.ui.views.admin.localizers_view import LocalizersView
+from sar.src.ui.views.admin.migration_view import MigrationView
+from sar.src.ui.views.admin.bulk_load_view import BulkLoadView
+from sar.src.ui.views.admin.update_facturas_view import UpdateFacturasView
 
 
 class AdminWindow(QMainWindow):
@@ -163,7 +166,10 @@ class AdminWindow(QMainWindow):
             "rfcs": RfcsView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
             "estados": StatusView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
             "parametros": ParametersView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
-            "localizadores": LocalizersView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION"))
+            "localizadores": LocalizersView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
+            "migracion": MigrationView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
+            "carga_masiva": BulkLoadView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
+            "update_facturas": UpdateFacturasView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION"))
         }
         
         # Add a default placeholder view

@@ -134,11 +134,11 @@ class BillingRpaWorker(QThread):
             if self.api_client.connect_via_api:
                 # Query all references via API once and filter in Python memory
                 refs_data = self.api_client.request("GET", f"/api/docs/solicitudes/{self.ctx['solicitud_id']}/referencias")
-                status_filter_list = ['AUTORIZADA', 'ERROR', 'ERROR_VALIDACION'] if self.omitir_ya_generadas else ['AUTORIZADA', 'FACTURADA', 'ERROR', 'ERROR_VALIDACION']
+                status_filter_list = ['AUTORIZADA', 'ERROR'] if self.omitir_ya_generadas else ['AUTORIZADA', 'FACTURADA', 'ERROR']
                 consecutivos_to_process = [r["consecutivo_grupo"] for r in refs_data if r["estado_codigo"] in status_filter_list]
             else:
                 with self.db_connector.get_session() as db_session:
-                    status_filter = "('AUTORIZADA', 'ERROR', 'ERROR_VALIDACION')" if self.omitir_ya_generadas else "('AUTORIZADA', 'FACTURADA', 'ERROR', 'ERROR_VALIDACION')"
+                    status_filter = "('AUTORIZADA', 'ERROR')" if self.omitir_ya_generadas else "('AUTORIZADA', 'FACTURADA', 'ERROR')"
                     stmt = text(f"""
                         SELECT r.consecutivo_grupo
                         FROM sar_produccion.referencia r
@@ -479,6 +479,46 @@ class BillingRpaWorker(QThread):
                             raise Exception("El primer archivo PDF de la referencia no fue descargado correctamente.")
                             
                     except Exception as e:
+                        # Check if the page/browser is dead
+                        is_browser_dead = False
+                        try:
+                            page.title()
+                        except Exception:
+                            is_browser_dead = True
+                        
+                        if is_browser_dead:
+                            self.status_changed.emit("Navegador cerrado o desconectado de forma repentina. Intentando reabrir...")
+                            try:
+                                if context:
+                                    try: context.close()
+                                    except: pass
+                                if playwright_inst:
+                                    try: playwright_inst.stop()
+                                    except: pass
+                            except:
+                                pass
+                            
+                            try:
+                                playwright_inst = sync_playwright().start()
+                                context = playwright_inst.chromium.launch_persistent_context(
+                                    user_data_dir,
+                                    **launch_persistent_kwargs
+                                )
+                                context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                                page = context.pages[0] if len(context.pages) > 0 else context.new_page()
+                                page.set_default_timeout(35000)
+                                self.status_changed.emit("Navegador reabierto con éxito. Reanudando proceso...")
+                            except Exception as re_err:
+                                self.status_changed.emit(f"Error crítico al reabrir el navegador: {str(re_err)}")
+                            
+                            # Clean up temporary paths and retry immediately without incrementing retry_attempt
+                            for tp in temp_pdf_paths:
+                                if tp and os.path.exists(tp):
+                                    try: os.remove(tp)
+                                    except: pass
+                            temp_pdf_paths = [None, None]
+                            continue
+                            
                         if isinstance(e, ValueError) and str(e).startswith("VALIDACION:"):
                             retry_attempt = max_retries
                         else:
@@ -741,13 +781,13 @@ class BillingRpaWorker(QThread):
                     # Insertar nuevo registro de factura
                     factura_uuid = str(uuid.uuid4())
                     ins_factura = text("""
-                        INSERT INTO sar_archivo.factura (referencia_id, uuid, folio, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado, delegacion)
-                        VALUES (:rid, :uuid, :folio, :rfc_emisor, :fecha, :pdf, :pdf2, :estado, :delegacion)
+                        INSERT INTO sar_archivo.factura (referencia_id, uuid, nombre_archivo, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado, delegacion)
+                        VALUES (:rid, :uuid, :nombre_archivo, :rfc_emisor, :fecha, :pdf, :pdf2, :estado, :delegacion)
                     """)
                     session.execute(ins_factura, {
                         "rid": referencia_id,
                         "uuid": factura_uuid,
-                        "folio": filename_1.replace(".pdf", ""),
+                        "nombre_archivo": filename_1.replace(".pdf", ""),
                         "rfc_emisor": self.ctx["rfc"],
                         "fecha": datetime.datetime.now(datetime.timezone.utc),
                         "pdf": pdf_path_1,

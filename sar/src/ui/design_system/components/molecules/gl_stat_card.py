@@ -47,12 +47,19 @@ class StatCard(QFrame):
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(16, 16, 16, 12)
-        self.layout.setSpacing(12)
+        self.layout.setSpacing(10)
         
-        # Header layout (Icon on Left + Text on Right)
-        self.header_layout = QHBoxLayout()
-        self.header_layout.setContentsMargins(0, 0, 0, 0)
-        self.header_layout.setSpacing(12)
+        # 1. Title at the top spanning full width
+        self.lbl_title = CustomLabel(title, variant="body")
+        self.lbl_title.setObjectName("statCardTitle")
+        self.lbl_title.setWordWrap(True)
+        self.lbl_title.setStyleSheet("font-weight: bold; background: transparent;")
+        self.layout.addWidget(self.lbl_title)
+        
+        # 2. Content layout (Icon on Left + Value/Sub on Right)
+        self.content_layout = QHBoxLayout()
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(12)
         
         # Convert hex to rgba for the 10% opacity background
         h = color_hex.lstrip('#')
@@ -61,7 +68,7 @@ class StatCard(QFrame):
         b = int(h[4:6], 16)
         rgba_bg = f"rgba({r}, {g}, {b}, 0.1)"
         
-        # Left Icon Frame with 10% opacity colored background
+        # Left Icon Frame
         self.icon_frame = QFrame(self)
         self.icon_frame.setFixedSize(48, 48)
         self.icon_frame.setStyleSheet(f"""
@@ -82,15 +89,12 @@ class StatCard(QFrame):
             self.lbl_icon.setPixmap(icon_fn(color_hex).pixmap(24, 24))
             
         self.icon_layout.addWidget(self.lbl_icon)
-        self.header_layout.addWidget(self.icon_frame)
+        self.content_layout.addWidget(self.icon_frame)
         
-        # Right Text Layout (Title + Large Value + Label)
-        self.text_layout = QVBoxLayout()
-        self.text_layout.setContentsMargins(0, 0, 0, 0)
-        self.text_layout.setSpacing(2)
-        
-        self.lbl_title = CustomLabel(title, variant="body")
-        self.lbl_title.setObjectName("statCardTitle")
+        # Right Value & Sub layout
+        self.value_layout = QVBoxLayout()
+        self.value_layout.setContentsMargins(0, 0, 0, 0)
+        self.value_layout.setSpacing(0)
         
         self.lbl_value = CustomLabel(initial_value, variant="header")
         self.lbl_value.setStyleSheet(f"color: {color_hex}; font-size: 26px; font-weight: bold; background: transparent;")
@@ -98,14 +102,13 @@ class StatCard(QFrame):
         self.lbl_sub = CustomLabel("Referencias", variant="muted")
         self.lbl_sub.setObjectName("statCardSub")
         
-        self.text_layout.addWidget(self.lbl_title)
-        self.text_layout.addWidget(self.lbl_value)
-        self.text_layout.addWidget(self.lbl_sub)
+        self.value_layout.addWidget(self.lbl_value)
+        self.value_layout.addWidget(self.lbl_sub)
         
-        self.header_layout.addLayout(self.text_layout)
-        self.header_layout.addStretch()
+        self.content_layout.addLayout(self.value_layout)
+        self.content_layout.addStretch()
         
-        self.layout.addLayout(self.header_layout)
+        self.layout.addLayout(self.content_layout)
         
         # Bottom Sparkline wave graph (Conditional)
         if show_sparkline:

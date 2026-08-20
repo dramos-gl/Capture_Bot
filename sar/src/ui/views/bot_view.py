@@ -69,7 +69,7 @@ class BotView(QWidget):
         h_layout.setContentsMargins(0, 0, 0, 0)
         h_layout.setSpacing(12)
         
-        lbl = QLabel("🚀 OPTIMA CAPTURE BOT — FACE A")
+        lbl = QLabel("🚀 BOT - GENERACIÓN Y DESCARGA DE BOLETAS DE DERECHOS")
         h_layout.addWidget(lbl)
         h_layout.addStretch()
         
@@ -207,12 +207,12 @@ class BotView(QWidget):
         m_layout = QVBoxLayout(metricas_frame)
         m_layout.setContentsMargins(8, 8, 8, 8)
         
-        lbl_m = CustomLabel("📊 MÉTRICAS DEL LOTE", variant="subheader")
+        lbl_m = CustomLabel("📊 MÉTRICAS DE GENERACIÓN DE BOLETAS DE DERECHOS", variant="subheader")
         m_layout.addWidget(lbl_m)
         
         grid_m = QGridLayout()
-        self.box_pendientes = MetricBox("Pendientes", "0", "#3b82f6")
-        self.box_exitosos = MetricBox("Exitosos", "0", "#10b981")
+        self.box_pendientes = MetricBox("Por Generar", "0", "#3b82f6")
+        self.box_exitosos = MetricBox("Generados", "0", "#10b981")
         self.box_errores = MetricBox("Errores", "0", "#ef4444")
         
         grid_m.addWidget(self.box_pendientes, 0, 0)
@@ -251,6 +251,8 @@ class BotView(QWidget):
         
         mon_layout.addWidget(CustomLabel("Progreso", variant="body"))
         self.progress_bar = QProgressBar()
+        self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_bar.setTextVisible(True)
         self.progress_bar.setValue(0)
         mon_layout.addWidget(self.progress_bar)
         
@@ -349,12 +351,23 @@ class BotView(QWidget):
                 
             data_rows = []
             for s in solicitudes:
+                del_raw = (s.get("delegacion") or "").upper()
+                del_abrev = ""
+                if "CANCUN" in del_raw or "CANCÚN" in del_raw:
+                    del_abrev = "CUN"
+                elif "PLAYA" in del_raw:
+                    del_abrev = "PYA"
+                else:
+                    del_abrev = "".join(c for c in del_raw if c.isalnum())[:3]
+                
+                concepto_formatted = f"{s['concepto']}-{del_abrev}" if del_abrev else s["concepto"]
+                
                 data_rows.append([
                     str(s["solicitud_id"]),
                     s["folio"],
                     s["rfc"],
                     s["razon_social"],
-                    s["concepto"],
+                    concepto_formatted,
                     str(s["cantidad_solicitada"]),
                     str(s["cantidad_generada"]),
                     s["estado"]
@@ -409,6 +422,12 @@ class BotView(QWidget):
             
             total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
             completados = ctx["ultimo_consecutivo"] - ctx["consecutivo_inicio"] + 1 if ctx["ultimo_consecutivo"] >= ctx["consecutivo_inicio"] else 0
+            
+            # Guardar variables de estado para el decremento dinámico
+            self.total_referencias = total
+            self.current_success = completados
+            self.current_errors = 0
+            
             pendientes = total - completados
             
             self.box_pendientes.set_value(str(pendientes))
@@ -530,12 +549,20 @@ class BotView(QWidget):
         self.worker.start()
 
     def _on_metric_updated(self, name: str, value: int):
-        if name == "pendientes":
-            self.box_pendientes.set_value(str(value))
-        elif name == "exitosos":
+        if name == "exitosos":
+            self.current_success = value
             self.box_exitosos.set_value(str(value))
         elif name == "errores":
+            self.current_errors = value
             self.box_errores.set_value(str(value))
+        elif name == "pendientes":
+            self.box_pendientes.set_value(str(value))
+            return
+
+        # Recalculate remaining pending/por generar dynamically
+        if hasattr(self, "total_referencias"):
+            remaining = self.total_referencias - self.current_success - self.current_errors
+            self.box_pendientes.set_value(str(max(0, remaining)))
 
     def _on_referencia_generada(self, ref_portal: str, rfc: str, status: str):
         self.lbl_m_ref.setText(ref_portal)

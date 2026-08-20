@@ -172,13 +172,7 @@ class MetricsDashboardDialog(QWidget):
         header_layout.addLayout(txt)
         header_layout.addStretch()
 
-        # Botón Exportar PDF con estilo minimalista e icono
-        self.btn_export = QPushButton(" Exportar Reporte (PDF)")
-        self.btn_export.setObjectName("primaryBtn")
-        self.btn_export.setFixedHeight(32)
-        self.btn_export.setIcon(Icons.file_pdf("#FFFFFF"))
-        self.btn_export.clicked.connect(self._export_to_pdf)
-        header_layout.addWidget(self.btn_export)
+
 
         self.main_layout.addLayout(header_layout)
 

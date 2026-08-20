@@ -1,9 +1,18 @@
 """Requests (Bandeja de Trabajo) View."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QDialog, QLineEdit
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QDialog, QLineEdit, QMenu
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components import CustomCard, CustomLabel, CustomButton, StyledDataTable
 from sar.src.ui.design_system.tokens.colors import Colors
+
+class KeepOpenMenu(QMenu):
+    def mouseReleaseEvent(self, event):
+        action = self.actionAt(event.position().toPoint())
+        if action and action.isCheckable():
+            action.trigger()
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 from PySide6.QtCore import QThread, Signal
 from sar.src.services.solicitudes_ui_service import SolicitudesUIService
 from sar.src.services.fase_b_service import FaseBService, FaseBWorker
@@ -126,7 +135,7 @@ class RequestsView(QWidget):
         self.card = CustomCard(title="Solicitudes Pendientes y en Proceso", parent=self)
         
         # Table Organism
-        headers = ["ID Solicitud", "Grupo", "Folio Orden", "Empresa (RFC)", "Concepto", "Delegación", "Solicitadas", "Generadas", "Estado", "Asignado a"]
+        headers = ["ID Solicitud", "Grupo", "Folio Orden", "Empresa (RFC)", "Concepto", "Delegación", "Solicitadas", "Generadas", "Facturadas", "Estado", "Asignado a"]
         self.table = StyledDataTable(headers, parent=self)
         from PySide6.QtWidgets import QAbstractItemView
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -174,7 +183,6 @@ class RequestsView(QWidget):
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.btn_filter_orden, alignment=Qt.AlignmentFlag.AlignBottom)
         
         self._load_available_orders()
-        self.refresh_data()
         
     def _get_selected_solicitud_id(self) -> int:
         selected = self.table.selectedItems()
@@ -489,6 +497,7 @@ class RequestsView(QWidget):
                 s["delegacion"],
                 str(s["cantidad_solicitada"]),
                 str(s["cantidad_generada"]),
+                str(s.get("cantidad_facturada", 0)),
                 s["estado"],
                 s["usuario_asignado"]
             ])
@@ -512,7 +521,7 @@ class RequestsView(QWidget):
         estado_filter = getattr(self, '_current_estado_filter', "Todas")
         
         for row in range(self.table.rowCount()):
-            estado = self.table.item(row, 8).text() if self.table.item(row, 8) else ""
+            estado = self.table.item(row, 9).text() if self.table.item(row, 9) else ""
             
             # 1. State Filter Logic
             state_match = True
@@ -567,14 +576,13 @@ class RequestsView(QWidget):
             self.selected_orden_ids = []
 
     def _show_order_filter_menu(self):
-        from PySide6.QtWidgets import QMenu
         from PySide6.QtGui import QAction
         
         # Load orders if not loaded yet
         if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
             self._load_available_orders()
             
-        menu = QMenu(self)
+        menu = KeepOpenMenu(self)
         menu.setStyleSheet("""
             QMenu {
                 background-color: #FFFFFF;
@@ -583,7 +591,7 @@ class RequestsView(QWidget):
                 padding: 4px;
             }
             QMenu::item {
-                padding: 6px 24px 6px 8px;
+                padding: 6px 24px 6px 32px;
                 border-radius: 4px;
                 color: #1E293B;
             }

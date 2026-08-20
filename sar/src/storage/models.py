@@ -437,7 +437,7 @@ class Factura(Base):
     factura_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     referencia_id: Mapped[int] = mapped_column(ForeignKey("sar_produccion.referencia.referencia_id", ondelete="RESTRICT"), nullable=False)
     uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
-    folio: Mapped[Optional[str]] = mapped_column(String(100))
+    nombre_archivo: Mapped[Optional[str]] = mapped_column(String(100))
     rfc_emisor: Mapped[str] = mapped_column(String(13), nullable=False)
     fecha_factura: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     pdf_path: Mapped[Optional[str]] = mapped_column(String(1000))
