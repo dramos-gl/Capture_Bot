@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 
 # Asegurar que el modulo principal esta en el path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from sar.src.storage.db_connector import DatabaseConnector
 from sar.src.storage.models import Solicitud, GrupoReferencia, Referencia, EstadoSistema

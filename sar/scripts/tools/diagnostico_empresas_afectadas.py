@@ -3,7 +3,7 @@ Diagnostico de las 2 empresas afectadas: CAD1001263P4 (CADURMA) e INM1309035E8 (
 Verifica referencias, facturas y archivos PDF vinculados para evaluar el impacto de la migracion.
 """
 import sys, os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from sar.src.storage.db_connector import DatabaseConnector
 from sqlalchemy import text

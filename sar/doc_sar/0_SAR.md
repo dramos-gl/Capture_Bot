@@ -15,7 +15,7 @@ A continuación se presenta la relación de documentos técnicos oficiales que c
 | **SAR-UIX-001** | Especificación UX/UI | Experiencia de Usuario | [4_SAR-UIX-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/4_SAR-UIX-001.md) |
 | **SAR-TEC-001** | Arquitectura Técnica | Arquitectura de Solución | [6_SAR-TEC-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/6_SAR-TEC-001.md) |
 | **SAR-SEC-001** | Arquitectura de Seguridad y Auditoría | Seguridad | [8_SAR-SEC-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/8_SAR-SEC-001.md) |
-| **SAR-DB-001** | Diseño Físico de Base de Datos | Ingeniería de Datos | [10_SAR-DB-001 v2.0.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/10_SAR-DB-001%20v2.0.md) |
+| **SAR-DB-001** | Diseño Físico de Base de Datos | Ingeniería de Datos | [10_SAR-DB-001 v3.0.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/10_SAR-DB-001%20v3.0.md) |
 | **SAR-DEV-001** | Guía de Desarrollo y Estándares | Ingeniería de Software | [7_SAR-DEV-001.md](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/doc_sar/7_SAR-DEV-001.md) |
 
 ---

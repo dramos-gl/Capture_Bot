@@ -3,7 +3,7 @@ import os
 import traceback
 
 # Ensure the root dir is in Python path when run from scratch/
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from PySide6.QtWidgets import QApplication
 from sar.src.storage.db_connector import DatabaseConnector

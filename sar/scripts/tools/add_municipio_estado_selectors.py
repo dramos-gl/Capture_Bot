@@ -3,7 +3,7 @@ import os
 from sqlalchemy import text
 
 # Ensure root dir is in path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from sar.src.storage.db_connector import DatabaseConnector
 

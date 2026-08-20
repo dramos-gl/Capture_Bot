@@ -5,7 +5,7 @@ El usuario solo necesita corregir la columna 'delegacion_id' donde sea necesario
 El script de migración ignorará las filas cuya delegacion_id no haya cambiado.
 """
 import sys, os, csv
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 from sar.src.storage.db_connector import DatabaseConnector
 from sqlalchemy import text
 

@@ -208,7 +208,7 @@ class BulkLoadView(QWidget):
         try:
             # Reutilizar el script de carga masiva en runtime
             import importlib.util
-            spec = importlib.util.spec_from_file_location("cargar_script", "sar/scripts/cargar_referencias_masivas.py")
+            spec = importlib.util.spec_from_file_location("cargar_script", "sar/scripts/core/cargar_referencias_masivas.py")
             cargar_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(cargar_module)
             

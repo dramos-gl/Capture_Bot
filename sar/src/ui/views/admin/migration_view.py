@@ -228,7 +228,7 @@ class MigrationView(QWidget):
             # Reutilizar el script avanzado para ejecutar de forma transaccional
             # Modificamos variables del script en runtime
             import importlib.util
-            spec = importlib.util.spec_from_file_location("migrar_script", "sar/scripts/migrar_orden4_a_orden5.py")
+            spec = importlib.util.spec_from_file_location("migrar_script", "sar/scripts/core/migrar_orden4_a_orden5.py")
             migrar_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(migrar_module)
             

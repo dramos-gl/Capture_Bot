@@ -2,12 +2,12 @@ import sys
 import os
 from sqlalchemy import text
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from sar.src.storage.db_connector import DatabaseConnector
 
 def run_cleanup():
-    sql_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../sar/scripts/limpiar_produccion.sql"))
+    sql_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../tools/limpiar_produccion.sql"))
     print(f"Reading SQL script from: {sql_path}")
     
     if not os.path.exists(sql_path):
