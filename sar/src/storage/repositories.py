@@ -901,7 +901,24 @@ class ProduccionRepository(BaseRepository):
         stmt = text("""
             SELECT 
                 r.*, 
-                es.codigo AS estado_codigo
+                es.codigo AS estado_codigo,
+                (
+                    SELECT COUNT(ref.referencia_id)
+                    FROM sar_produccion.referencia ref
+                    JOIN sar_catalogo.estado_sistema es_ref ON ref.estado_id = es_ref.estado_id
+                    JOIN sar_produccion.grupo_referencia gr ON ref.grupo_id = gr.grupo_id
+                    LEFT JOIN sar_archivo.asignacion_referencia ar ON ref.referencia_id = ar.referencia_id
+                    WHERE es_ref.entidad = 'referencia' AND es_ref.codigo = 'FACTURADA' 
+                      AND ar.referencia_id IS NULL AND gr.orden_id = o.orden_id
+                ) AS total_disponibles,
+                (
+                    SELECT COUNT(ref.referencia_id)
+                    FROM sar_produccion.referencia ref
+                    JOIN sar_catalogo.estado_sistema es_ref ON ref.estado_id = es_ref.estado_id
+                    JOIN sar_produccion.grupo_referencia gr ON ref.grupo_id = gr.grupo_id
+                    WHERE es_ref.entidad = 'referencia' AND es_ref.codigo = 'PENDIENTE_AUTORIZACION'
+                      AND gr.orden_id = o.orden_id
+                ) AS total_pendiente_autorizacion
             FROM sar_produccion.vw_ordenes_resumen r
             JOIN sar_produccion.orden_generacion o ON r.orden_id = o.orden_id
             JOIN sar_catalogo.estado_sistema es ON o.estado_id = es.estado_id
@@ -918,6 +935,8 @@ class ProduccionRepository(BaseRepository):
                 "creador": row.creador,
                 "total_solicitadas": row.total_solicitadas,
                 "total_generadas": row.total_generadas,
+                "total_disponibles": row.total_disponibles,
+                "total_pendiente_autorizacion": row.total_pendiente_autorizacion,
                 "estado": row.estado_codigo
             })
         return res
@@ -1976,6 +1995,7 @@ class InventarioRepository(BaseRepository):
                 des.nombre AS desarrollo_nombre,
                 ubi.cliente AS cliente_nombre,
                 ubi.mz, ubi.lote, ubi.edif, ubi.viv, ubi.lote_id_erp AS folio_electronico,
+                ubi.fecha_ingreso_rpp, ubi.fecha_reporte_notaria, ubi.fecha_escritura, ubi.fecha_titulacion,
                 la.lote_asignacion_id AS lote_asignacion_id,
                 es.codigo AS estado_codigo
             {sql_base}
@@ -2011,6 +2031,10 @@ class InventarioRepository(BaseRepository):
                 "edif": row.edif or "",
                 "viv": row.viv or "",
                 "folio_electronico": row.folio_electronico or "",
+                "fecha_ingreso_rpp": row.fecha_ingreso_rpp.strftime("%Y-%m-%d") if row.fecha_ingreso_rpp else "",
+                "fecha_reporte_notaria": row.fecha_reporte_notaria.strftime("%Y-%m-%d") if row.fecha_reporte_notaria else "",
+                "fecha_escritura": row.fecha_escritura.strftime("%Y-%m-%d") if row.fecha_escritura else "",
+                "fecha_titulacion": row.fecha_titulacion.strftime("%Y-%m-%d") if row.fecha_titulacion else "",
                 "lote_asignacion_id": row.lote_asignacion_id,
                 "estado_codigo": row.estado_codigo
             })
@@ -2103,7 +2127,7 @@ class InventarioRepository(BaseRepository):
     def crear_lote_asignacion(
         self, tipo_destino: str, notaria_id: Optional[int], colaborador_id: Optional[int],
         solicitante_externo: Optional[str], observaciones: Optional[str], usuario_creacion: int,
-        detalles_list: List[dict]
+        detalles_list: List[dict], solo_reservar: bool = False
     ) -> int:
         from sar.src.storage.models import LoteAsignacion, LoteDetalle, Ubicacion, AsignacionReferencia, Referencia, Concepto
         from sqlalchemy import select
@@ -2120,6 +2144,8 @@ class InventarioRepository(BaseRepository):
         self.session.flush()
 
         estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
+        estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
+        target_estado_id = estado_reservada_id if solo_reservar else estado_asignada_id
 
         # Load concepts map
         concepto_stmt = select(Concepto)
@@ -2181,14 +2207,14 @@ class InventarioRepository(BaseRepository):
                 referencia_id=d["referencia_id"],
                 ubicacion_id=ubi.ubicacion_id,
                 intento=1,
-                estado_id=estado_asignada_id,
+                estado_id=target_estado_id,
                 usuario_asignacion=usuario_creacion,
                 observaciones=d.get("pa")
             )
             self.session.add(asig)
             
             if ref:
-                ref.estado_id = estado_asignada_id
+                ref.estado_id = target_estado_id
 
         self.session.flush()
         return lote.lote_asignacion_id
@@ -2417,7 +2443,8 @@ class InventarioRepository(BaseRepository):
             JOIN sar_produccion.referencia ref ON ar.referencia_id = ref.referencia_id
             JOIN sar_catalogo.concepto c ON ld.concepto_id = c.concepto_id
             JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
-            JOIN sar_catalogo.delegacion d ON des.delegacion_id = d.delegacion_id
+            LEFT JOIN sar_produccion.solicitud s ON ref.solicitud_id = s.solicitud_id
+            LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
             JOIN sar_catalogo.estado_sistema es ON ar.estado_id = es.estado_id
             JOIN sar_catalogo.rfc r ON ld.rfc_id = r.rfc_id
             LEFT JOIN sar_archivo.ubicacion ubi ON ar.ubicacion_id = ubi.ubicacion_id
@@ -2825,14 +2852,35 @@ class InventarioRepository(BaseRepository):
                     else:
                         fecha_rpp = f_rpp
 
+                # Helper to parse helper string dates safely
+                def _parse_date(val):
+                    if not val:
+                        return None
+                    if isinstance(val, (datetime.date, datetime.datetime)):
+                        return val.date() if hasattr(val, "date") else val
+                    if isinstance(val, str):
+                        try:
+                            if "-" in val:
+                                return datetime.datetime.strptime(val.split()[0], "%Y-%m-%d").date()
+                            else:
+                                return datetime.datetime.strptime(val.split()[0], "%d/%m/%Y").date()
+                        except:
+                            return None
+                    return None
+
+                fecha_rep_not = _parse_date(d.get("fecha_reporte_notaria"))
+                fecha_escr = _parse_date(d.get("fecha_escritura"))
+                fecha_titul = _parse_date(d.get("fecha_titulacion"))
+
                 # Check if an Ubicacion with this exact address/client already exists in this transaction/database to avoid duplication
                 from sqlalchemy import select
-                cliente_upper = d["cliente"].strip().upper()
+                cliente_val = d.get("cliente")
+                cliente_upper = cliente_val.strip().upper() if cliente_val else "RESERVA MASIVA MANUAL"
                 desarrollo_id = ar.lote_detalle.desarrollo_id
-                mz = d.get("mz")
-                lote = d.get("lote")
-                edif = d.get("edif")
-                viv = d.get("viv")
+                mz = d.get("mz") or "-"
+                lote = d.get("lote") or "-"
+                edif = d.get("edif") or "-"
+                viv = d.get("viv") or "-"
                 
                 dup_ubi_stmt = select(Ubicacion).where(
                     Ubicacion.cliente == cliente_upper,
@@ -2862,18 +2910,27 @@ class InventarioRepository(BaseRepository):
                         comentarios=d.get("comentarios"), # default comments
                         pa=pa_val, # new column pa
                         no_oficial=d.get("folio_electronico"), # new column no_oficial
-                        fecha_ingreso_rpp=fecha_rpp # new column fecha_ingreso_rpp
+                        fecha_ingreso_rpp=fecha_rpp, # new column fecha_ingreso_rpp
+                        fecha_reporte_notaria=fecha_rep_not,
+                        fecha_escritura=fecha_escr,
+                        fecha_titulacion=fecha_titul
                     )
                     self.session.add(ubi)
                     self.session.flush()
                 else:
-                    # If it exists, update the missing fields (pa, no_oficial, fecha_ingreso_rpp) if they are provided in Excel
+                    # If it exists, update the missing fields (pa, no_oficial, fecha_ingreso_rpp, new dates) if they are provided in Excel
                     if pa_val and not ubi.pa:
                         ubi.pa = pa_val
                     if d.get("folio_electronico") and not ubi.no_oficial:
                         ubi.no_oficial = d.get("folio_electronico")
                     if fecha_rpp and not ubi.fecha_ingreso_rpp:
                         ubi.fecha_ingreso_rpp = fecha_rpp
+                    if fecha_rep_not and not ubi.fecha_reporte_notaria:
+                        ubi.fecha_reporte_notaria = fecha_rep_not
+                    if fecha_escr and not ubi.fecha_escritura:
+                        ubi.fecha_escritura = fecha_escr
+                    if fecha_titul and not ubi.fecha_titulacion:
+                        ubi.fecha_titulacion = fecha_titul
                     self.session.flush()
 
                 # Link to AsignacionReferencia and set status to ASIGNADA
@@ -3045,5 +3102,98 @@ class InventarioRepository(BaseRepository):
 
         self.session.flush()
         return lote.lote_asignacion_id
+
+    def reservar_lote_manual_colaborador(
+        self, colaborador_id: int, observaciones: Optional[str], usuario_id: int, referencias_estados: List[dict]
+    ) -> dict:
+        """Processes bulk manual references status updates, registering them under a selected Colaborador.
+        
+        referencias_estados is a list of dicts: [{'referencia_portal': '...', 'estado_codigo': 'RESERVADA' | 'ASIGNADA'}]
+        Returns summary with count of updated and failed references.
+        """
+        import datetime
+        from sar.src.storage.models import LoteAsignacion, LoteDetalle, AsignacionReferencia, Referencia, EstadoSistema
+        
+        # 1. Resolve target states
+        estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
+        estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
+
+        # 2. Create the LoteAsignacion for this COLABORADOR
+        lote = LoteAsignacion(
+            tipo_destino="COLABORADOR",
+            colaborador_id=colaborador_id,
+            observaciones=observaciones.strip() if observaciones else "Carga Masiva Manual de Reservas",
+            usuario_creacion=usuario_id,
+            fecha=datetime.datetime.now()
+        )
+        self.session.add(lote)
+        self.session.flush()
+
+        success_count = 0
+        error_count = 0
+        details = []
+
+        # 3. Process each reference
+        for item in referencias_estados:
+            ref_str = item["referencia_portal"]
+            target_status = item["estado_codigo"]
+
+            # Lookup reference by portal text
+            ref = self.session.execute(
+                select(Referencia).where(Referencia.referencia_portal == ref_str)
+            ).scalars().first()
+
+            if not ref:
+                error_count += 1
+                details.append({"referencia": ref_str, "status": "ERROR", "message": "La referencia no existe."})
+                continue
+
+            # Fallback development
+            from sar.src.storage.models import Desarrollo
+            des_stmt = select(Desarrollo.desarrollo_id).where(Desarrollo.nombre == "GENERAL")
+            desarrollo_id = self.session.execute(des_stmt).scalar() or 1
+
+            # Determine state ID
+            status_id = estado_asignada_id if target_status == "ASIGNADA" else estado_reservada_id
+
+            # Create LoteDetalle for grouping
+            ld = LoteDetalle(
+                lote_asignacion_id=lote.lote_asignacion_id,
+                rfc_id=ref.grupo.rfc_id,
+                concepto_id=ref.grupo.concepto_id,
+                desarrollo_id=desarrollo_id,
+                cantidad_solicitada=1,
+                cantidad_confirmada=1 if target_status == "ASIGNADA" else 0
+            )
+            self.session.add(ld)
+            self.session.flush()
+
+            # Create the assignation record
+            asig = AsignacionReferencia(
+                lote_detalle_id=ld.lote_detalle_id,
+                referencia_id=ref.referencia_id,
+                ubicacion_id=None,
+                intento=1,
+                estado_id=status_id,
+                usuario_asignacion=usuario_id,
+                fecha_asignacion=datetime.datetime.now(),
+                observaciones="Asignación Masiva Manual"
+            )
+            self.session.add(asig)
+            
+            # Update reference state
+            ref.estado_id = status_id
+            
+            success_count += 1
+            details.append({"referencia": ref_str, "status": "CORRECTO", "message": f"Promovida a {target_status}."})
+
+        self.session.flush()
+        return {
+            "lote_asignacion_id": lote.lote_asignacion_id,
+            "exitos": success_count,
+            "errores": error_count,
+            "detalles": details
+        }
+
 
 

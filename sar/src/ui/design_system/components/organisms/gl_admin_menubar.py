@@ -71,7 +71,9 @@ class AdminMenuBar(QMenuBar):
         act_migracion = menu_procesos.addAction("Migración de Referencias")
         act_carga = menu_procesos.addAction("Carga Masiva de Referencias")
         act_update = menu_procesos.addAction("Escanear Delegaciones en PDFs")
+        act_reserva_masiva = menu_procesos.addAction("Reserva Masiva de Referencias")
         
         act_migracion.triggered.connect(lambda: self.view_requested.emit("migracion"))
         act_carga.triggered.connect(lambda: self.view_requested.emit("carga_masiva"))
         act_update.triggered.connect(lambda: self.view_requested.emit("update_facturas"))
+        act_reserva_masiva.triggered.connect(lambda: self.view_requested.emit("reserva_masiva"))

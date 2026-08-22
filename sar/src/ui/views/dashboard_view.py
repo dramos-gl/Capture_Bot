@@ -504,7 +504,9 @@ class DashboardView(QWidget):
                     self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
                 
                 if not self.selected_orden_ids or (preserve_selection and not self.is_custom_filter):
-                    self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
+                    self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes if ord.get("total_pendiente_autorizacion", 0) > 0]
+                    if not self.selected_orden_ids and self.todas_las_ordenes:
+                        self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
             else:
                 self.selected_orden_ids = []
         except Exception as e:

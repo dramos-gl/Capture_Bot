@@ -49,6 +49,9 @@ class ExcelInventoryHandler:
         idx_comentarios = get_idx("COMENTARIOS", "OBSERVACIONES", "OBS")
         idx_fecha_sol = get_idx("FECHA_SOLICITUD", "FECHA SOLICITUD", "FECHA")
         idx_ubicacion = get_idx("UBICACION", "UBICACIÓN")
+        idx_fecha_reporte_notaria = get_idx("FECHA REPORTA LA NOTARIA", "FECHA_REPORTA_LA_NOTARIA", "FECHA REPORTA NOTARIA")
+        idx_fecha_escritura = get_idx("FECHA ESCRITURA", "FECHA_ESCRITURA")
+        idx_fecha_titulacion = get_idx("FECHA TITULACION", "FECHA_TITULACION", "FECHA DE TITULACION", "FECHA DE TITULACIÓN")
         
         # Concept reference columns (resilient to accents, spaces, and abbreviations)
         concept_cols = {
@@ -69,11 +72,18 @@ class ExcelInventoryHandler:
                 continue
                 
             cliente = str(row[idx_cliente]).strip() if idx_cliente != -1 and row[idx_cliente] is not None else ""
-            if not cliente:
-                continue # Skip rows without client name
-
-            desarrollo = str(row[idx_desarrollo]).strip().upper() if idx_desarrollo != -1 and row[idx_desarrollo] is not None else "GENERICO"
+            desarrollo = str(row[idx_desarrollo]).strip().upper() if idx_desarrollo != -1 and row[idx_desarrollo] is not None else ""
             empresa = str(row[idx_empresa]).strip().upper() if idx_empresa != -1 and row[idx_empresa] is not None else ""
+
+            # Check if row has at least one concept reference
+            has_reference = False
+            for col_idx in concept_cols.values():
+                if col_idx != -1 and row[col_idx] is not None and str(row[col_idx]).strip() != "":
+                    has_reference = True
+                    break
+
+            if not cliente and not (desarrollo and has_reference):
+                continue # Skip rows if neither client nor development+reference combination exists
             
             # Format date
             fecha_sol = None
@@ -115,6 +125,10 @@ class ExcelInventoryHandler:
             pa = str(row[idx_pa]).strip() if idx_pa != -1 and row[idx_pa] is not None else ""
             comentarios = str(row[idx_comentarios]).strip() if idx_comentarios != -1 and row[idx_comentarios] is not None else ""
             delegacion = str(row[idx_delegacion]).strip() if idx_delegacion != -1 and row[idx_delegacion] is not None else ""
+            
+            f_rep_notaria = row[idx_fecha_reporte_notaria] if idx_fecha_reporte_notaria != -1 else None
+            f_escritura = row[idx_fecha_escritura] if idx_fecha_escritura != -1 else None
+            f_titulacion = row[idx_fecha_titulacion] if idx_fecha_titulacion != -1 else None
 
             # Check each concept reference column
             for concept_name, col_idx in concept_cols.items():
@@ -145,6 +159,9 @@ class ExcelInventoryHandler:
                         "credito_titular": credito_titular,
                         "pa": pa,
                         "comentarios": comentarios,
+                        "fecha_reporte_notaria": f_rep_notaria,
+                        "fecha_escritura": f_escritura,
+                        "fecha_titulacion": f_titulacion,
                         "delegacion": delegacion,
                         "concepto_solicitado": concept_name,
                         "referencia_asignada": "" if is_indicator else ref_val,
@@ -155,7 +172,7 @@ class ExcelInventoryHandler:
 
     @staticmethod
     def validate_parsed_rows(
-        session, parsed_rows: List[Dict[str, Any]], default_rfc_id: Optional[int] = None, completar_notaria_id: Optional[int] = None, orden_ids: Optional[List[int]] = None
+        session, parsed_rows: List[Dict[str, Any]], default_rfc_id: Optional[int] = None, completar_notaria_id: Optional[int] = None, orden_ids: Optional[List[int]] = None, solo_reservar: bool = False
     ) -> List[Dict[str, Any]]:
         """Validates parsed rows against the database, enforcing:
         1. Reference exists and is FACTURADA (or auto-assigns an available one if empty).
@@ -226,11 +243,12 @@ class ExcelInventoryHandler:
 
             # Validate critical missing fields presence: cliente, mz, lote, ext (edif), int (viv)
             missing_fields = []
-            if not cliente or cliente.strip() == "": missing_fields.append("Cliente")
-            if not mz or mz.strip() == "": missing_fields.append("MZA")
-            if not lote or lote.strip() == "": missing_fields.append("Lote")
-            if not edif or edif.strip() == "": missing_fields.append("Ext (Exterior)")
-            if not viv or viv.strip() == "": missing_fields.append("Int (Interior)")
+            if not solo_reservar:
+                if not cliente or cliente.strip() == "": missing_fields.append("Cliente")
+                if not mz or mz.strip() == "": missing_fields.append("MZA")
+                if not lote or lote.strip() == "": missing_fields.append("Lote")
+                if not edif or edif.strip() == "": missing_fields.append("Ext (Exterior)")
+                if not viv or viv.strip() == "": missing_fields.append("Int (Interior)")
             
             if missing_fields:
                 row_result["status"] = "ERROR"
@@ -448,6 +466,7 @@ class ExcelInventoryHandler:
                 continue
                 
             row_result["referencia_id"] = ref_obj.referencia_id
+            row_result["concepto_solicitado"] = concept_alias
 
             # 3. Check if reference is in FACTURADA state
             if estado_cod != "FACTURADA":
@@ -474,14 +493,14 @@ class ExcelInventoryHandler:
             elif concept_req in ("AVISO", "NUEVO_DERECHO_AVISO"): expected_aliases = ["AVISO PREVENTIVO"]
             elif concept_req == "ANALISIS": expected_aliases = ["ANALISIS"]
 
-            if expected_aliases and concept_alias not in expected_aliases:
+            if not solo_reservar and expected_aliases and concept_alias not in expected_aliases:
                 row_result["status"] = "ERROR"
                 row_result["error_message"] = f"Concepto incorrecto: Referencia es de tipo '{concept_alias}' pero se solicitó '{concept_req}'."
                 validated_rows.append(row_result)
                 continue
 
             # 5. Check Geolocation Match
-            if ref_deleg_id != desarrollo.delegacion_id:
+            if not solo_reservar and ref_deleg_id != deleg_id:
                 row_result["status"] = "ERROR"
                 row_result["error_message"] = f"Error geográfico: Referencia pertenece a '{ref_deleg_name}' pero el desarrollo '{desarrollo_name}' pertenece a '{deleg_name}'."
                 validated_rows.append(row_result)
@@ -654,8 +673,9 @@ class ExcelInventoryHandler:
         COLUMNS = [
             "ID", "DESARROLLO", "P.A.", "CLIENTE",
             "MZA", "LOTE", "EXT", "INT",
-            "No.OFICIAL", "FECHA INGRESO A RPP",
-            "AVISO", "CLG",
+            "No.OFICIAL", "FECHA REPORTA LA NOTARIA",
+            "FECHA INGRESO A RPP", "FECHA ESCRITURA",
+            "FECHA TITULACION", "AVISO", "CLG",
             "CANCELACION PRIMER AVISO", "CANCELACION SEGUNDO AVISO",
             "COMENTARIOS",
         ]
@@ -717,6 +737,10 @@ class ExcelInventoryHandler:
                         "fecha_sol":  r.get("fecha_solicitud", ""),
                         "pa":         r.get("pa", ""),
                         "comentarios": r.get("comentarios", ""),
+                        "fecha_reporte_notaria": r.get("fecha_reporte_notaria", ""),
+                        "fecha_ingreso_rpp": r.get("fecha_ingreso_rpp", ""),
+                        "fecha_escritura": r.get("fecha_escritura", ""),
+                        "fecha_titulacion": r.get("fecha_titulacion", ""),
                         "aviso":      "",
                         "clg":        "",
                         "canc1":      "",
@@ -755,6 +779,10 @@ class ExcelInventoryHandler:
                 "fecha_sol":  ref_rep.get("fecha_solicitud", ""),
                 "pa":         ref_rep.get("pa", ""),
                 "comentarios": ref_rep.get("comentarios", ""),
+                "fecha_reporte_notaria": ref_rep.get("fecha_reporte_notaria", ""),
+                "fecha_ingreso_rpp": ref_rep.get("fecha_ingreso_rpp", ""),
+                "fecha_escritura": ref_rep.get("fecha_escritura", ""),
+                "fecha_titulacion": ref_rep.get("fecha_titulacion", ""),
                 "aviso":      aviso_ref.get("referencia", ""),
                 "clg":        clg_ref.get("referencia", ""),
                 "canc1":      "",
@@ -778,6 +806,10 @@ class ExcelInventoryHandler:
                 "fecha_sol":  r.get("fecha_solicitud", ""),
                 "pa":         r.get("pa", ""),
                 "comentarios": r.get("comentarios", ""),
+                "fecha_reporte_notaria": r.get("fecha_reporte_notaria", ""),
+                "fecha_ingreso_rpp": r.get("fecha_ingreso_rpp", ""),
+                "fecha_escritura": r.get("fecha_escritura", ""),
+                "fecha_titulacion": r.get("fecha_titulacion", ""),
                 "aviso":      "",
                 "clg":        "",
                 "canc1":      ref_val if concepto in ALIAS_CANC1 else "",
@@ -799,13 +831,16 @@ class ExcelInventoryHandler:
                 p["lote_loc"],
                 p["edif"] or "",
                 p["viv"],
-                p["folio"],          # No.OFICIAL
-                p["fecha_sol"],
+                p["folio"],                 # No.OFICIAL
+                p["fecha_reporte_notaria"], # FECHA REPORTA LA NOTARIA
+                p["fecha_ingreso_rpp"],     # FECHA INGRESO A RPP
+                p["fecha_escritura"],       # FECHA ESCRITURA
+                p["fecha_titulacion"],       # FECHA TITULACION
                 p["aviso"],
                 p["clg"],
                 p["canc1"],
                 p["canc2"],
-                p.get("comentarios", ""),  # COMENTARIOS
+                p.get("comentarios", ""),   # COMENTARIOS
             ]
             for ci, val in enumerate(values, start=1):
                 cell = ws.cell(row=row_num, column=ci, value=val)
@@ -813,12 +848,12 @@ class ExcelInventoryHandler:
                 cell.border = border_data
                 if use_alt:
                     cell.fill = fill_alt
-                if ci in (5, 6, 7, 8, 10):
+                if ci in (5, 6, 7, 8, 10, 11, 12, 13):
                     cell.alignment = Alignment(horizontal="center")
             row_num += 1
 
         # ── Column widths ────────────────────────────────────────────────────
-        col_widths = [18, 22, 20, 28, 8, 8, 8, 8, 18, 18, 22, 22, 22, 22, 25]
+        col_widths = [10, 22, 12, 28, 8, 8, 8, 8, 18, 22, 22, 22, 22, 22, 22, 22, 22, 25]
         for ci, w in enumerate(col_widths, start=1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
 
@@ -843,7 +878,8 @@ class ExcelInventoryHandler:
 
         headers = [
             "RAZON SOCIAL", "DESARROLLO", "DELEGACION", "MZA", "LOTE", "EXT", "INT", "No.OFICIAL",
-            "CLIENTE", "FECHA INGRESO A RPP", "ANALISIS", "AVISO", "CLG", "CANC_1ER _AVISO",
+            "FECHA REPORTA LA NOTARIA", "FECHA INGRESO A RPP", "FECHA ESCRITURA", "FECHA TITULACION",
+            "CLIENTE", "ANALISIS", "AVISO", "CLG", "CANC_1ER _AVISO",
             "CANC_2DO_AVISO", "COMENTARIOS", "FECHA_SOLICITUD"
         ]
         
@@ -859,7 +895,8 @@ class ExcelInventoryHandler:
         ws.row_dimensions[2].height = 18
         mock_data = [
             "PROMOTORA RESIDENCIAL", "ALDEA TULUM", "TULUM", "10", "5", "", "3", "123456",
-            "JUAN PEREZ", "2026-07-21", "", "70028350819888101", "", "", "", "Sin observaciones", "2026-07-20"
+            "2026-07-20", "2026-07-21", "2026-07-22", "2026-07-25",
+            "JUAN PEREZ", "", "70028350819888101", "", "", "", "Sin observaciones", "2026-07-20"
         ]
         for col_idx, val in enumerate(mock_data, start=1):
             cell = ws.cell(row=2, column=col_idx, value=val)

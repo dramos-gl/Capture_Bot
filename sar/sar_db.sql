@@ -403,6 +403,9 @@ CREATE TABLE sar_archivo.ubicacion (
     pa VARCHAR(250),
     no_oficial VARCHAR(250),
     fecha_ingreso_rpp DATE,
+    fecha_reporte_notaria DATE,
+    fecha_escritura DATE,
+    fecha_titulacion DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     FOREIGN KEY (desarrollo_id) REFERENCES sar_catalogo.desarrollo(desarrollo_id) ON DELETE RESTRICT
 );
@@ -1124,13 +1127,13 @@ SELECT setval(COALESCE(pg_get_serial_sequence('sar_catalogo.evento_sistema', 'ev
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_catalogo.notaria', 'notaria_id'), 'sar_catalogo.notaria_notaria_id_seq'), COALESCE((SELECT MAX(notaria_id) FROM sar_catalogo.notaria), 0) + 1, false);
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_catalogo.colaborador', 'colaborador_id'), 'sar_catalogo.colaborador_colaborador_id_seq'), COALESCE((SELECT MAX(colaborador_id) FROM sar_catalogo.colaborador), 0) + 1, false);
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_catalogo.desarrollo', 'desarrollo_id'), 'sar_catalogo.desarrollo_desarrollo_id_seq'), COALESCE((SELECT MAX(desarrollo_id) FROM sar_catalogo.desarrollo), 0) + 1, false);
+SELECT setval(COALESCE(pg_get_serial_sequence('sar_catalogo.desarrollo_empresa', 'desarrollo_empresa_id'), 'sar_catalogo.desarrollo_empresa_desarrollo_empresa_id_seq'), COALESCE((SELECT MAX(desarrollo_empresa_id) FROM sar_catalogo.desarrollo_empresa), 0) + 1, false);
 
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_produccion.orden_generacion', 'orden_id'), 'sar_produccion.orden_generacion_orden_id_seq'), COALESCE((SELECT MAX(orden_id) FROM sar_produccion.orden_generacion), 0) + 1, false);
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_produccion.grupo_referencia', 'grupo_id'), 'sar_produccion.grupo_referencia_grupo_id_seq'), COALESCE((SELECT MAX(grupo_id) FROM sar_produccion.grupo_referencia), 0) + 1, false);
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_produccion.solicitud', 'solicitud_id'), 'sar_produccion.solicitud_solicitud_id_seq'), COALESCE((SELECT MAX(solicitud_id) FROM sar_produccion.solicitud), 0) + 1, false);
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_produccion.referencia', 'referencia_id'), 'sar_produccion.referencia_referencia_id_seq'), COALESCE((SELECT MAX(referencia_id) FROM sar_produccion.referencia), 0) + 1, false);
 
-SELECT setval(COALESCE(pg_get_serial_sequence('sar_catalogo.desarrollo_empresa', 'desarrollo_empresa_id'), 'sar_catalogo.desarrollo_empresa_desarrollo_empresa_id_seq'), COALESCE((SELECT MAX(desarrollo_empresa_id) FROM sar_catalogo.desarrollo_empresa), 0) + 1, false);
 
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_archivo.archivo_pdf', 'archivo_id'), 'sar_archivo.archivo_pdf_archivo_id_seq'), COALESCE((SELECT MAX(archivo_id) FROM sar_archivo.archivo_pdf), 0) + 1, false);
 SELECT setval(COALESCE(pg_get_serial_sequence('sar_archivo.factura', 'factura_id'), 'sar_archivo.factura_factura_id_seq'), COALESCE((SELECT MAX(factura_id) FROM sar_archivo.factura), 0) + 1, false);

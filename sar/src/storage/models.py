@@ -488,6 +488,9 @@ class Ubicacion(Base):
     pa: Mapped[Optional[str]] = mapped_column(String(250))
     no_oficial: Mapped[Optional[str]] = mapped_column(String(250))
     fecha_ingreso_rpp: Mapped[Optional[date]] = mapped_column(Date)
+    fecha_reporte_notaria: Mapped[Optional[date]] = mapped_column(Date)
+    fecha_escritura: Mapped[Optional[date]] = mapped_column(Date)
+    fecha_titulacion: Mapped[Optional[date]] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     # Relaciones

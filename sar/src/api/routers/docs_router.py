@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from sar.src.storage.db_connector import DatabaseConnector
 from sar.src.storage.repositories import OperacionRepository, ProduccionRepository, SolicitudRepository
@@ -127,6 +128,137 @@ def get_referencias_paginated(
         return {"records": records, "total_count": total_count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener referencias: {str(e)}")
+
+@router.get("/referencias/metrics")
+def get_metrics_report(
+    rfc_id: Optional[int] = None,
+    concepto_id: Optional[int] = None,
+    delegacion_id: Optional[int] = None,
+    orden_ids: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Retorna el reporte de métricas agrupadas por rfc, concepto y delegación."""
+    try:
+        conditions = ["1=1"]
+        params = {}
+
+        if orden_ids:
+            try:
+                parsed_ids = tuple(int(x) for x in orden_ids.split(",") if x.strip())
+                if parsed_ids:
+                    conditions.append("orden_id IN :orden_ids")
+                    params["orden_ids"] = parsed_ids
+            except ValueError:
+                raise HTTPException(status_code=400, detail="El parámetro orden_ids debe ser una lista de enteros separados por comas.")
+
+        if rfc_id:
+            conditions.append("rfc_id = :rfc_id")
+            params["rfc_id"] = rfc_id
+        if concepto_id:
+            conditions.append("concepto_id = :concepto_id")
+            params["concepto_id"] = concepto_id
+        if delegacion_id:
+            conditions.append("delegacion_id = :delegacion_id")
+            params["delegacion_id"] = delegacion_id
+
+        where_clause = " AND ".join(conditions)
+
+        query = f"""
+            SELECT
+                rfc_nombre                         AS rfc_name,
+                concepto_nombre                    AS concepto_name,
+                COALESCE(delegacion_nombre, 'Sin Delegacion') AS delegacion_name,
+                COUNT(referencia_id)               AS total_referencias,
+                COALESCE(SUM(importe), 0)          AS importe_total
+            FROM sar_produccion.vw_metricas_referencias
+            WHERE {where_clause}
+            GROUP BY rfc_nombre, concepto_nombre, delegacion_nombre
+            ORDER BY rfc_nombre, concepto_nombre, delegacion_nombre
+        """
+
+        rows = db.execute(text(query), params).fetchall()
+        return [
+            {
+                "rfc_name": r[0],
+                "concepto_name": r[1],
+                "delegacion_name": r[2],
+                "total_referencias": r[3],
+                "importe_total": float(r[4])
+            }
+            for r in rows
+        ]
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener métricas agrupadas: {str(e)}")
+
+
+@router.get("/referencias/metrics-summary")
+def get_metrics_summary(
+    rfc_id: Optional[int] = None,
+    concepto_id: Optional[int] = None,
+    delegacion_id: Optional[int] = None,
+    orden_ids: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Retorna el resumen de KPIs y desglose por estado de las referencias."""
+    try:
+        conditions = ["1=1"]
+        params = {}
+
+        if orden_ids:
+            try:
+                parsed_ids = tuple(int(x) for x in orden_ids.split(",") if x.strip())
+                if parsed_ids:
+                    conditions.append("orden_id IN :orden_ids")
+                    params["orden_ids"] = parsed_ids
+            except ValueError:
+                raise HTTPException(status_code=400, detail="El parámetro orden_ids debe ser una lista de enteros separados por comas.")
+
+        if rfc_id:
+            conditions.append("rfc_id = :rfc_id")
+            params["rfc_id"] = rfc_id
+        if concepto_id:
+            conditions.append("concepto_id = :concepto_id")
+            params["concepto_id"] = concepto_id
+        if delegacion_id:
+            conditions.append("delegacion_id = :delegacion_id")
+            params["delegacion_id"] = delegacion_id
+
+        where_clause = " AND ".join(conditions)
+
+        # Totales globales
+        total_query = f"""
+            SELECT COUNT(referencia_id), COALESCE(SUM(importe), 0)
+            FROM sar_produccion.vw_metricas_referencias
+            WHERE {where_clause}
+        """
+        total_row = db.execute(text(total_query), params).fetchone()
+
+        # Desglose por estado
+        estado_query = f"""
+            SELECT estado_codigo, COUNT(referencia_id), COALESCE(SUM(importe), 0)
+            FROM sar_produccion.vw_metricas_referencias
+            WHERE {where_clause}
+            GROUP BY estado_codigo
+            ORDER BY estado_codigo
+        """
+        estado_rows = db.execute(text(estado_query), params).fetchall()
+
+        por_estado = {
+            r[0]: {"total": r[1], "importe": float(r[2])}
+            for r in estado_rows
+        }
+
+        return {
+            "total_referencias": total_row[0] if total_row else 0,
+            "importe_total": float(total_row[1]) if total_row else 0.0,
+            "por_estado": por_estado,
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener resumen de métricas: {str(e)}")
 
 @router.post("/referencias")
 def registrar_referencia(request: RegistrarReferenciaRequest, db: Session = Depends(get_db)):

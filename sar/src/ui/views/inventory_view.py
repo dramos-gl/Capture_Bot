@@ -541,7 +541,9 @@ class InventoryView(QWidget):
                     self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
                 
                 if not self.selected_orden_ids or (preserve_selection and not self.is_custom_filter):
-                    self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
+                    self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes if ord.get("total_disponibles", 0) > 0]
+                    if not self.selected_orden_ids and self.todas_las_ordenes:
+                        self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
             else:
                 self.selected_orden_ids = []
         except Exception as e:
@@ -736,6 +738,9 @@ class InventoryView(QWidget):
         self.chk_completar_reserva.stateChanged.connect(self._on_completar_reserva_changed)
         self.form_layout_masivo.addRow("", self.chk_completar_reserva)
 
+        self.chk_solo_reservar = CustomCheckBox("Solo Reservar (Validar únicamente AVISO/CLG y Desarrollo)", self)
+        self.form_layout_masivo.addRow("", self.chk_solo_reservar)
+
         self.cb_destino_masivo = CustomComboBox(self)
         self.cb_destino_masivo.addItems(["-- Seleccione un tipo de destino --", "NOTARIA", "COLABORADOR"])
         self.cb_destino_masivo.currentTextChanged.connect(self._on_destino_masivo_changed)
@@ -917,7 +922,8 @@ class InventoryView(QWidget):
             with self.db_connector.get_session() as session:
                 self.validated_records = ExcelInventoryHandler.validate_parsed_rows(
                     session, self.parsed_records, default_rfc_id=default_rfc_id, completar_notaria_id=completar_notaria_id,
-                    orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
+                    orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None,
+                    solo_reservar=self.chk_solo_reservar.isChecked()
                 )
 
             # Populate preview table
@@ -1132,7 +1138,8 @@ class InventoryView(QWidget):
                             solicitante_externo=solicitante_externo,
                             observaciones=observaciones,
                             usuario_creacion=usuario_id,
-                            detalles_list=valid_details
+                            detalles_list=valid_details,
+                            solo_reservar=self.chk_solo_reservar.isChecked()
                         )
                         session.commit()
                 QMessageBox.information(self, "Lote Guardado", f"Se ha registrado exitosamente el lote ID {lote_id} con {len(valid_details)} asignaciones.")

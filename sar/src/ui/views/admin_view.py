@@ -23,6 +23,7 @@ from sar.src.ui.views.admin.localizers_view import LocalizersView
 from sar.src.ui.views.admin.migration_view import MigrationView
 from sar.src.ui.views.admin.bulk_load_view import BulkLoadView
 from sar.src.ui.views.admin.update_facturas_view import UpdateFacturasView
+from sar.src.ui.views.admin.reservas_proceso_view import ReservasProcesoView
 
 
 class AdminWindow(QMainWindow):
@@ -169,7 +170,8 @@ class AdminWindow(QMainWindow):
             "localizadores": LocalizersView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
             "migracion": MigrationView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
             "carga_masiva": BulkLoadView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
-            "update_facturas": UpdateFacturasView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION"))
+            "update_facturas": UpdateFacturasView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
+            "reserva_masiva": ReservasProcesoView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION"))
         }
         
         # Add a default placeholder view
