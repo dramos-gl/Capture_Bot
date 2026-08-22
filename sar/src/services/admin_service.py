@@ -211,18 +211,20 @@ class AdminService:
         if data.get("notaria_id"):
             notaria = self.session.get(Notaria, data["notaria_id"])
             action = "ACTUALIZAR_REGISTRO"
-            old_val = {"nombre": notaria.nombre, "activo": notaria.activo}
+            old_val = {"nombre": notaria.nombre, "alias": notaria.alias, "activo": notaria.activo}
             notaria.nombre = data.get("nombre", notaria.nombre).strip().upper()
+            notaria.alias = data.get("alias", notaria.alias).strip() if data.get("alias") else None
             if "activo" in data:
                 notaria.activo = data["activo"]
         else:
             notaria = Notaria(
                 nombre=data["nombre"].strip().upper(),
+                alias=data.get("alias").strip() if data.get("alias") else None,
                 activo=data.get("activo", True)
             )
 
         self.cat_repo.save_notaria(notaria)
-        new_val = {"notaria_id": notaria.notaria_id, "nombre": notaria.nombre, "activo": notaria.activo}
+        new_val = {"notaria_id": notaria.notaria_id, "nombre": notaria.nombre, "alias": notaria.alias, "activo": notaria.activo}
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": notaria.nombre})
         return notaria
 

@@ -239,6 +239,7 @@ class Notaria(Base):
 
     notaria_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     nombre: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    alias: Mapped[Optional[str]] = mapped_column(String(50))
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
@@ -506,7 +507,7 @@ class LoteDetalle(Base):
     lote_asignacion_id: Mapped[int] = mapped_column(ForeignKey("sar_archivo.lote_asignacion.lote_asignacion_id", ondelete="CASCADE"), nullable=False)
     rfc_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.rfc.rfc_id", ondelete="RESTRICT"), nullable=False)
     concepto_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.concepto.concepto_id", ondelete="RESTRICT"), nullable=False)
-    desarrollo_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id", ondelete="RESTRICT"), nullable=False)
+    desarrollo_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id", ondelete="RESTRICT"), nullable=True)
     cantidad_solicitada: Mapped[int] = mapped_column(Integer, nullable=False)
     cantidad_confirmada: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)

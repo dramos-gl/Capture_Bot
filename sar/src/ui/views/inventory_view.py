@@ -102,6 +102,149 @@ class AvailabilityWorker(QThread):
             self.result_ready.emit(self.row_widget, 0)
 
 
+from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
+
+class ExcelWorker(QThread):
+    finished = Signal(bool, str)  # success, message/error
+
+    def __init__(self, file_path, header, data_rows):
+        super().__init__()
+        self.file_path = file_path
+        self.header = header
+        self.data_rows = data_rows
+
+    def run(self):
+        try:
+            from sar.src.services.excel_inventory_handler import ExcelInventoryHandler
+            ExcelInventoryHandler.generate_assignment_excel(
+                dest_path=self.file_path,
+                header=self.header,
+                data_rows=self.data_rows,
+            )
+            self.finished.emit(True, "Excel generado exitosamente.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+
+class PdfWorker(QThread):
+    finished = Signal(dict) # success, missing, error
+
+    def __init__(self, selected, dest_dir, header_data, inventario_ui_service):
+        super().__init__()
+        self.selected = selected
+        self.dest_dir = dest_dir
+        self.header_data = header_data
+        self.inventario_ui_service = inventario_ui_service
+
+    def run(self):
+        import os
+        import re
+        import shutil
+        from pypdf import PdfWriter, PdfReader
+
+        def sanitize(name: str) -> str:
+            return re.sub(r'[^\w\-.]', '_', name or "").strip("_") or "sin_nombre"
+
+        def merge_or_copy_pdfs(pdf_paths: list, dest_path: str):
+            valid = [p for p in pdf_paths if p and os.path.exists(p)]
+            if not valid:
+                return False
+            if len(valid) == 1:
+                shutil.copy2(valid[0], dest_path)
+            else:
+                writer = PdfWriter()
+                for pp in valid:
+                    try:
+                        reader = PdfReader(pp)
+                        for page in reader.pages:
+                            writer.add_page(page)
+                    except Exception:
+                        pass
+                with open(dest_path, "wb") as f:
+                    writer.write(f)
+            return True
+
+        # Mapeos
+        DELEG_MAP = {
+            "CANCUN": "CUN",
+            "CANCÚN": "CUN",
+            "PLAYA DEL CARMEN": "PYA",
+            "PLAYA": "PYA",
+            "CHETUMAL": "CHE"
+        }
+        
+        CONCEPTO_MAP = {
+            "AVISO PREVENTIVO": "Aviso",
+            "AVISO": "Aviso",
+            "NUEVO_DERECHO_AVISO": "Aviso",
+            "ANALISIS": "Analisis",
+            "ANÁLISIS": "Analisis",
+            "CLG": "CLG"
+        }
+
+        success = error = missing = 0
+        consecutivo = 1
+        estado_lote = self.header_data.get("estado_refs", "ASIGNADA")
+
+        for d in self.selected:
+            ref_id     = d.get("referencia_id")
+            concepto   = sanitize(d.get("concepto", "CONCEPTO"))
+            cliente    = sanitize(d.get("cliente", ""))
+            referencia = sanitize(d.get("referencia", ""))
+            estado_ref = d.get("estado", estado_lote)
+
+            if not ref_id:
+                missing += 1
+                continue
+            try:
+                facturas = self.inventario_ui_service.get_facturas_by_referencia_id(ref_id)
+                if not facturas:
+                    missing += 1
+                    continue
+
+                pdf_paths = []
+                for f in facturas:
+                    if f.get("pdf_path"):
+                        pdf_paths.append(f["pdf_path"])
+                    if f.get("pdf2_path") and f["pdf2_path"].lower().endswith(".pdf"):
+                        pdf_paths.append(f["pdf2_path"])
+
+                if not any(os.path.exists(p) for p in pdf_paths if p):
+                    missing += 1
+                    continue
+
+                concepto_pretty = CONCEPTO_MAP.get((d.get("concepto") or "").strip().upper(), concepto)
+                deleg_raw = (d.get("delegacion") or "").strip().upper()
+                deleg_abbr = DELEG_MAP.get(deleg_raw, deleg_raw[:3] if deleg_raw else "CUN")
+
+                consec = f"{consecutivo:03d}"
+                tipo_lote = self.header_data.get("tipo_asignacion", "NOTARIA")
+
+                if estado_ref == "ASIGNADA":
+                    out_name = f"{cliente}_{concepto_pretty}_{consec}.pdf"
+                else:
+                    if tipo_lote == "COLABORADOR":
+                        out_name = f"{referencia}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
+                    else:
+                        notaria_alias = self.header_data.get("notaria_alias")
+                        if not notaria_alias:
+                            notaria_raw = self.header_data.get("asignado_a", "Notaria")
+                            nums = re.findall(r'\d+', notaria_raw)
+                            notaria_alias = f"Not{nums[0]}" if nums else sanitize(notaria_raw)
+                        out_name = f"{referencia}_{notaria_alias}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
+
+                out_path = os.path.join(self.dest_dir, out_name)
+                if merge_or_copy_pdfs(pdf_paths, out_path):
+                    success += 1
+                    consecutivo += 1
+                else:
+                    error += 1
+            except Exception:
+                error += 1
+
+        self.finished.emit({"success": success, "missing": missing, "error": error})
+
+
 class InventoryView(QWidget):
     """View to manage Invoice/Reference Inventory Control (state: FACTURADA)."""
 
@@ -734,12 +877,26 @@ class InventoryView(QWidget):
         card_form.layout.addLayout(header_layout_masivo)
         card_form.layout.addLayout(self.form_layout_masivo)
         
-        self.chk_completar_reserva = CustomCheckBox("Completar Lote Apartado (Reserva)", self)
+        # Checkbox 1 Layout
+        chk1_layout = QVBoxLayout()
+        self.chk_completar_reserva = CustomCheckBox("Completar Lote Reservado", self)
         self.chk_completar_reserva.stateChanged.connect(self._on_completar_reserva_changed)
-        self.form_layout_masivo.addRow("", self.chk_completar_reserva)
+        chk1_layout.addWidget(self.chk_completar_reserva)
+        
+        lbl_desc1 = QLabel("Asigna ubicación definitiva a derechos que ya han sido reservados.")
+        lbl_desc1.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 24px;")
+        chk1_layout.addWidget(lbl_desc1)
+        self.form_layout_masivo.addRow("", chk1_layout)
 
-        self.chk_solo_reservar = CustomCheckBox("Solo Reservar (Validar únicamente AVISO/CLG y Desarrollo)", self)
-        self.form_layout_masivo.addRow("", self.chk_solo_reservar)
+        # Checkbox 2 Layout
+        chk2_layout = QVBoxLayout()
+        self.chk_solo_reservar = CustomCheckBox("Reservar Derechos", self)
+        chk2_layout.addWidget(self.chk_solo_reservar)
+        
+        lbl_desc2 = QLabel("Reserva derechos ya usados de forma manual sin validación de clientes/dirección.")
+        lbl_desc2.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 24px;")
+        chk2_layout.addWidget(lbl_desc2)
+        self.form_layout_masivo.addRow("", chk2_layout)
 
         self.cb_destino_masivo = CustomComboBox(self)
         self.cb_destino_masivo.addItems(["-- Seleccione un tipo de destino --", "NOTARIA", "COLABORADOR"])
@@ -2887,7 +3044,6 @@ class LoteProcessingDialog(QDialog):
             return re.sub(r'[\\/:*?"<>|]', '_', s or "").strip()
 
         asignado  = _clean(self.header_data.get("asignado_a", "Asignacion"))
-        # fecha raw: "14/08/2026 09:30" → "20260814"
         fecha_raw = self.header_data.get("fecha", "")
         try:
             from datetime import datetime
@@ -2903,16 +3059,25 @@ class LoteProcessingDialog(QDialog):
         )
         if not file_path:
             return
-        try:
-            ExcelInventoryHandler.generate_assignment_excel(
-                dest_path=file_path,
-                header=self.header_data,
-                data_rows=selected,
-            )
-            QMessageBox.information(self, "Excel Generado",
-                                    f"Archivo guardado exitosamente:\n{file_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error al Generar Excel", str(e))
+
+        # Show Loading Spinner
+        self.loading_dialog = GLLoadingDialog("Generando archivo Excel...", self)
+
+        # Start Worker Thread
+        self.excel_worker = ExcelWorker(file_path, self.header_data, selected)
+        
+        def on_excel_finished(success, message):
+            self.loading_dialog.close()
+            if success:
+                QMessageBox.information(self, "Excel Generado",
+                                        f"Archivo guardado exitosamente:\n{file_path}")
+            else:
+                QMessageBox.critical(self, "Error al Generar Excel", message)
+            self.excel_worker.deleteLater()
+
+        self.excel_worker.finished.connect(on_excel_finished)
+        self.excel_worker.start()
+        self.loading_dialog.exec()
 
     # ── PDF generation ───────────────────────────────────────────────────────
     def _on_generate_pdf(self):
@@ -2926,89 +3091,27 @@ class LoteProcessingDialog(QDialog):
         if not dest_dir:
             return
 
-        import re
-        import shutil
-        from pypdf import PdfWriter, PdfReader
+        # Show Loading Spinner
+        self.loading_dialog = GLLoadingDialog("Generando y uniendo PDFs...", self)
 
-        def sanitize(name: str) -> str:
-            return re.sub(r'[^\w\-.]', '_', name or "").strip("_") or "sin_nombre"
+        # Start Worker Thread
+        self.pdf_worker = PdfWorker(selected, dest_dir, self.header_data, self.inventario_ui_service)
 
-        asignado_a   = sanitize(self.header_data.get("asignado_a", ""))
-        estado_lote  = self.header_data.get("estado_refs", "ASIGNADA")
-        success = error = missing = 0
-        consecutivo = 1
+        def on_pdf_finished(result):
+            self.loading_dialog.close()
+            success = result["success"]
+            missing = result["missing"]
+            error = result["error"]
+            
+            msg = f"PDFs generados exitosamente: {success}\n"
+            if missing: msg += f"Referencias sin archivos: {missing}\n"
+            if error:   msg += f"Errores al procesar: {error}\n"
+            QMessageBox.information(self, "Generación de PDFs Finalizada", msg)
+            self.pdf_worker.deleteLater()
 
-        def merge_or_copy_pdfs(pdf_paths: list, dest_path: str):
-            """Merge multiple PDFs into one; if only one, just copy it."""
-            valid = [p for p in pdf_paths if p and os.path.exists(p)]
-            if not valid:
-                return False
-            if len(valid) == 1:
-                shutil.copy2(valid[0], dest_path)
-            else:
-                writer = PdfWriter()
-                for pp in valid:
-                    try:
-                        reader = PdfReader(pp)
-                        for page in reader.pages:
-                            writer.add_page(page)
-                    except Exception:
-                        pass
-                with open(dest_path, "wb") as f:
-                    writer.write(f)
-            return True
-
-        for d in selected:
-            ref_id     = d.get("referencia_id")
-            concepto   = sanitize(d.get("concepto", "CONCEPTO"))
-            cliente    = sanitize(d.get("cliente", ""))
-            referencia = sanitize(d.get("referencia", ""))
-            estado_ref = d.get("estado", estado_lote)
-
-            if not ref_id:
-                missing += 1
-                continue
-            try:
-                facturas = self.inventario_ui_service.get_facturas_by_referencia_id(ref_id)
-                if not facturas:
-                    missing += 1
-                    continue
-
-                # Collect all PDF paths for this reference
-                pdf_paths = []
-                for f in facturas:
-                    if f.get("pdf_path"):
-                        pdf_paths.append(f["pdf_path"])
-                    if f.get("pdf2_path") and f["pdf2_path"].lower().endswith(".pdf"):
-                        pdf_paths.append(f["pdf2_path"])
-
-                if not any(os.path.exists(p) for p in pdf_paths if p):
-                    missing += 1
-                    continue
-
-                # Build output filename per state
-                consec = f"{consecutivo:03d}"
-                if estado_ref == "ASIGNADA":
-                    # nombre_cliente_Concepto_consecutivo.pdf
-                    out_name = f"{cliente}_{concepto}_{consec}.pdf"
-                else:
-                    # referencia_notaria_Concepto_consecutivo.pdf  (RESERVADA)
-                    out_name = f"{referencia}_{asignado_a}_{concepto}_{consec}.pdf"
-
-                out_path = os.path.join(dest_dir, out_name)
-                if merge_or_copy_pdfs(pdf_paths, out_path):
-                    success += 1
-                    consecutivo += 1
-                else:
-                    error += 1
-            except Exception as e:
-                print(f"[PDF] Error ref {ref_id}:", e)
-                error += 1
-
-        msg = f"PDFs generados exitosamente: {success}\n"
-        if missing: msg += f"Referencias sin archivos: {missing}\n"
-        if error:   msg += f"Errores al procesar: {error}\n"
-        QMessageBox.information(self, "Generación de PDFs Finalizada", msg)
+        self.pdf_worker.finished.connect(on_pdf_finished)
+        self.pdf_worker.start()
+        self.loading_dialog.exec()
 
 
 class ReservaGridRow(QFrame):

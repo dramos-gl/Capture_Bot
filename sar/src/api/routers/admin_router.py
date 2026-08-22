@@ -69,7 +69,7 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: 
         elif entity == "notarias":
             items = cat_repo.get_all_notarias()
             return [
-                {"notaria_id": n.notaria_id, "nombre": n.nombre, "activo": n.activo}
+                {"notaria_id": n.notaria_id, "nombre": n.nombre, "alias": n.alias, "activo": n.activo}
                 for n in items
             ]
         elif entity == "colaboradores":

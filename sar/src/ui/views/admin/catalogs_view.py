@@ -55,7 +55,7 @@ class CatalogsView(QWidget):
         lay_notarias = QHBoxLayout(self.tab_notarias)
         lay_notarias.setContentsMargins(0, 0, 0, 0)
         self.tbl_notarias = CrudTablePanel("Catálogo de Notarías")
-        self.tbl_notarias.setup_table(["ID", "Nombre", "Estado"], ["notaria_id", "nombre", "activo"])
+        self.tbl_notarias.setup_table(["ID", "Nombre", "Alias", "Estado"], ["notaria_id", "nombre", "alias", "activo"])
         self.tbl_notarias.add_requested.connect(self._on_new_notaria)
         self.tbl_notarias.edit_requested.connect(self._on_edit_notaria)
         self.tbl_notarias.btn_add.setVisible(self.can_edit)
@@ -178,15 +178,18 @@ class CatalogsView(QWidget):
         dialog = CustomDialog(title, self)
         
         self.inp_n_nombre = LabeledInput("Nombre de la Notaría")
+        self.inp_n_alias = LabeledInput("Alias (Opcional)")
         self.chk_n_activo = QCheckBox("Notaría Activa")
         self.chk_n_activo.setChecked(True)
         
         dialog.add_widget(self.inp_n_nombre)
+        dialog.add_widget(self.inp_n_alias)
         dialog.add_widget(self.chk_n_activo)
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
             self.inp_n_nombre.input.setReadOnly(True)
+            self.inp_n_alias.input.setReadOnly(True)
             self.chk_n_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
@@ -196,6 +199,8 @@ class CatalogsView(QWidget):
     def _on_new_notaria(self):
         self.current_notaria_id = None
         dialog = self._create_notaria_dialog("Nueva Notaría")
+        self.inp_n_nombre.set_text("")
+        self.inp_n_alias.set_text("")
         self.inp_n_nombre.set_focus()
         dialog.exec()
 
@@ -203,6 +208,7 @@ class CatalogsView(QWidget):
         self.current_notaria_id = data.get("notaria_id")
         dialog = self._create_notaria_dialog(f"Editar Notaría: {data.get('nombre')}")
         self.inp_n_nombre.set_text(data.get("nombre", ""))
+        self.inp_n_alias.set_text(data.get("alias", ""))
         self.chk_n_activo.setChecked(bool(data.get("activo", False)))
         self.inp_n_nombre.set_focus()
         dialog.exec()
@@ -211,6 +217,7 @@ class CatalogsView(QWidget):
         data = {
             "notaria_id": self.current_notaria_id,
             "nombre": self.inp_n_nombre.text().strip().upper(),
+            "alias": self.inp_n_alias.text().strip(),
             "activo": self.chk_n_activo.isChecked()
         }
         if not data["nombre"]:
@@ -512,7 +519,7 @@ class CatalogsView(QWidget):
                     concepts_data = [{"concepto_id": c.concepto_id, "codigo_portal": c.codigo_portal, "nombre": c.nombre, "alias": c.alias, "activo": c.activo} for c in concepts]
                     
                     notarias = repo.get_all_notarias()
-                    notarias_data = [{"notaria_id": n.notaria_id, "nombre": n.nombre, "activo": n.activo} for n in notarias]
+                    notarias_data = [{"notaria_id": n.notaria_id, "nombre": n.nombre, "alias": n.alias, "activo": n.activo} for n in notarias]
                     
                     colabs = repo.get_all_colaboradores()
                     colaboradores_data = [{"colaborador_id": c.colaborador_id, "nombre": c.nombre, "activo": c.activo} for c in colabs]

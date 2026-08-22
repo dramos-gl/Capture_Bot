@@ -2184,28 +2184,31 @@ class InventarioRepository(BaseRepository):
             ld_parent.cantidad_solicitada += 1
             ld_parent.cantidad_confirmada += 1
 
-            # Create Ubicacion record
-            ubi = Ubicacion(
-                cliente=d["cliente"].strip().upper(),
-                desarrollo_id=desarrollo_id,
-                fecha_solicitud=d.get("fecha_solicitud"),
-                mz=d.get("mz"),
-                lote=d.get("lote"),
-                edif=d.get("edif"),
-                viv=d.get("viv"),
-                credito_titular=d.get("credito_titular"),
-                delegacion=d.get("delegacion"),
-                comentarios=d.get("pa"),
-                lote_id_erp=d.get("folio_electronico")
-            )
-            self.session.add(ubi)
-            self.session.flush()
+            # Create Ubicacion record (only if not solo_reservar)
+            ubi_id = None
+            if not solo_reservar:
+                ubi = Ubicacion(
+                    cliente=d["cliente"].strip().upper() if d.get("cliente") else "RESERVA MASIVA MANUAL",
+                    desarrollo_id=desarrollo_id,
+                    fecha_solicitud=d.get("fecha_solicitud"),
+                    mz=d.get("mz"),
+                    lote=d.get("lote"),
+                    edif=d.get("edif"),
+                    viv=d.get("viv"),
+                    credito_titular=d.get("credito_titular"),
+                    delegacion=d.get("delegacion"),
+                    comentarios=d.get("pa"),
+                    lote_id_erp=d.get("folio_electronico")
+                )
+                self.session.add(ubi)
+                self.session.flush()
+                ubi_id = ubi.ubicacion_id
 
             # Create AsignacionReferencia record
             asig = AsignacionReferencia(
                 lote_detalle_id=ld_parent.lote_detalle_id,
                 referencia_id=d["referencia_id"],
-                ubicacion_id=ubi.ubicacion_id,
+                ubicacion_id=ubi_id,
                 intento=1,
                 estado_id=target_estado_id,
                 usuario_asignacion=usuario_creacion,
@@ -2371,6 +2374,7 @@ class InventarioRepository(BaseRepository):
                 la.lote_asignacion_id,
                 la.tipo_destino,
                 COALESCE(n.nombre, col.nombre, '') AS asignado_a,
+                n.alias AS notaria_alias,
                 la.solicitante_externo,
                 la.fecha,
                 la.observaciones,
@@ -2406,6 +2410,7 @@ class InventarioRepository(BaseRepository):
             "lote_asignacion_id": row.lote_asignacion_id,
             "tipo_destino": row.tipo_destino,
             "asignado_a": row.asignado_a,
+            "notaria_alias": row.notaria_alias or "",
             "solicitante_externo": row.solicitante_externo or "",
             "fecha": row.fecha.strftime("%d/%m/%Y %H:%M") if row.fecha else "",
             "observaciones": row.observaciones or "",
@@ -2442,7 +2447,7 @@ class InventarioRepository(BaseRepository):
             JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
             JOIN sar_produccion.referencia ref ON ar.referencia_id = ref.referencia_id
             JOIN sar_catalogo.concepto c ON ld.concepto_id = c.concepto_id
-            JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
+            LEFT JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
             LEFT JOIN sar_produccion.solicitud s ON ref.solicitud_id = s.solicitud_id
             LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
             JOIN sar_catalogo.estado_sistema es ON ar.estado_id = es.estado_id
@@ -2457,8 +2462,8 @@ class InventarioRepository(BaseRepository):
                 "lote_detalle_id": row.lote_detalle_id,
                 "referencia_id": row.referencia_id,
                 "cliente": row.cliente,
-                "desarrollo": row.desarrollo_nombre,
-                "delegacion": row.delegacion_nombre,
+                "desarrollo": row.desarrollo_nombre or "SIN ASIGNAR",
+                "delegacion": row.delegacion_nombre or "SIN ASIGNAR",
                 "fecha_solicitud": row.fecha_solicitud.strftime("%Y-%m-%d") if row.fecha_solicitud else "",
                 "ubicacion": row.ubicacion or "",
                 "mz": row.mz or "",

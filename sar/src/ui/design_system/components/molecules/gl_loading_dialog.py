@@ -50,7 +50,7 @@ class GLLoadingDialog(QDialog):
 
     def __init__(self, message: str = "Procesando...", parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setModal(True)
         
         # Main layout

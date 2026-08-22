@@ -82,8 +82,8 @@ class ExcelInventoryHandler:
                     has_reference = True
                     break
 
-            if not cliente and not (desarrollo and has_reference):
-                continue # Skip rows if neither client nor development+reference combination exists
+            if not cliente and not has_reference:
+                continue # Skip rows if neither client nor references exist
             
             # Format date
             fecha_sol = None
@@ -271,68 +271,79 @@ class ExcelInventoryHandler:
             row_result["rfc_id"] = resolved_rfc_id
             
             # 1. Lookup/register Desarrollo first
-            des_stmt = select(Desarrollo).where(Desarrollo.nombre == desarrollo_name)
-            desarrollo = session.execute(des_stmt).scalars().first()
-            
-            if not desarrollo:
-                desarrollo = Desarrollo(nombre=desarrollo_name, activo=True)
-                session.add(desarrollo)
-                session.flush()
+            if solo_reservar and not desarrollo_name:
+                desarrollo = None
+                row_result["desarrollo_id"] = None
+                deleg_name = "SIN ASIGNAR"
+                row_result["delegacion_nombre"] = deleg_name
+            else:
+                if not desarrollo_name:
+                    desarrollo_name = "GENERICO"
+                des_stmt = select(Desarrollo).where(Desarrollo.nombre == desarrollo_name)
+                desarrollo = session.execute(des_stmt).scalars().first()
+                
+                if not desarrollo:
+                    desarrollo = Desarrollo(nombre=desarrollo_name, activo=True)
+                    session.add(desarrollo)
+                    session.flush()
 
-                # Default delegation logic
-                deleg_id = 2 # default Cancun
-                if "PLAYA" in desarrollo_name or "TULUM" in desarrollo_name:
-                    deleg_id = 3 # Playa del Carmen
+                    # Default delegation logic
+                    deleg_id = 2 # default Cancun
+                    if "PLAYA" in desarrollo_name or "TULUM" in desarrollo_name:
+                        deleg_id = 3 # Playa del Carmen
 
+                    from sar.src.storage.models import DesarrolloEmpresa
+                    # resolved_rfc_id fallback to 1 if empty
+                    de = DesarrolloEmpresa(
+                        desarrollo_id=desarrollo.desarrollo_id,
+                        rfc_id=resolved_rfc_id if resolved_rfc_id else 1,
+                        delegacion_id=deleg_id,
+                        es_default=True,
+                        activo=True
+                    )
+                    session.add(de)
+                    session.flush()
+
+                row_result["desarrollo_id"] = desarrollo.desarrollo_id
+
+                # Fetch delegation_id from DesarrolloEmpresa associations
                 from sar.src.storage.models import DesarrolloEmpresa
-                # resolved_rfc_id fallback to 1 if empty
-                de = DesarrolloEmpresa(
-                    desarrollo_id=desarrollo.desarrollo_id,
-                    rfc_id=resolved_rfc_id if resolved_rfc_id else 1,
-                    delegacion_id=deleg_id,
-                    es_default=True,
-                    activo=True
-                )
-                session.add(de)
-                session.flush()
+                de_stmt = select(DesarrolloEmpresa.delegacion_id).where(DesarrolloEmpresa.desarrollo_id == desarrollo.desarrollo_id)
+                deleg_id = session.execute(de_stmt).scalars().first()
+                if not deleg_id:
+                    deleg_id = 2 # default Cancun fallback
 
-            row_result["desarrollo_id"] = desarrollo.desarrollo_id
-
-            # Fetch delegation_id from DesarrolloEmpresa associations
-            from sar.src.storage.models import DesarrolloEmpresa
-            de_stmt = select(DesarrolloEmpresa.delegacion_id).where(DesarrolloEmpresa.desarrollo_id == desarrollo.desarrollo_id)
-            deleg_id = session.execute(de_stmt).scalars().first()
-            if not deleg_id:
-                deleg_id = 2 # default Cancun fallback
-
-            # Fetch delegation name details
-            deleg_stmt = select(Delegacion.nombre).where(Delegacion.delegacion_id == deleg_id)
-            deleg_name = session.execute(deleg_stmt).scalar()
-            row_result["delegacion_nombre"] = deleg_name
+                # Fetch delegation name details
+                deleg_stmt = select(Delegacion.nombre).where(Delegacion.delegacion_id == deleg_id)
+                deleg_name = session.execute(deleg_stmt).scalar()
+                row_result["delegacion_nombre"] = deleg_name
 
             # Check if this client already has an assignment for the same concept at this exact location
-            normalized_concept_req = concept_req
-            if normalized_concept_req == "AVISO":
-                normalized_concept_req = "AVISO PREVENTIVO"
+            has_dup = False
+            dup_ref = None
+            if not solo_reservar:
+                normalized_concept_req = concept_req
+                if normalized_concept_req == "AVISO":
+                    normalized_concept_req = "AVISO PREVENTIVO"
 
-            dup_stmt = (
-                select(AsignacionReferencia)
-                .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
-                .join(Ubicacion, AsignacionReferencia.ubicacion_id == Ubicacion.ubicacion_id)
-                .join(Concepto, LoteDetalle.concepto_id == Concepto.concepto_id)
-                .where(
-                    Ubicacion.cliente == cliente,
-                    Ubicacion.desarrollo_id == desarrollo.desarrollo_id,
-                    Ubicacion.mz == mz,
-                    Ubicacion.lote == lote,
-                    Ubicacion.edif == edif,
-                    Ubicacion.viv == viv,
-                    Concepto.alias == normalized_concept_req
+                dup_stmt = (
+                    select(AsignacionReferencia)
+                    .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
+                    .join(Ubicacion, AsignacionReferencia.ubicacion_id == Ubicacion.ubicacion_id)
+                    .join(Concepto, LoteDetalle.concepto_id == Concepto.concepto_id)
+                    .where(
+                        Ubicacion.cliente == cliente,
+                        Ubicacion.desarrollo_id == (desarrollo.desarrollo_id if desarrollo else None),
+                        Ubicacion.mz == mz,
+                        Ubicacion.lote == lote,
+                        Ubicacion.edif == edif,
+                        Ubicacion.viv == viv,
+                        Concepto.alias == normalized_concept_req
+                    )
                 )
-            )
-            dup_check = session.execute(dup_stmt).scalars().first()
-            has_dup = dup_check is not None
-            dup_ref = dup_check.referencia.referencia_portal if dup_check else None
+                dup_check = session.execute(dup_stmt).scalars().first()
+                has_dup = dup_check is not None
+                dup_ref = dup_check.referencia.referencia_portal if dup_check else None
 
             # Scenario A: We are completing a Notary Reservation
             if completar_notaria_id:
