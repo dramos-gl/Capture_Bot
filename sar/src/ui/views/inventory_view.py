@@ -183,7 +183,7 @@ class PdfWorker(QThread):
         }
 
         success = error = missing = 0
-        consecutivo = 1
+        consecutivo_por_concepto = {}
         estado_lote = self.header_data.get("estado_refs", "ASIGNADA")
 
         for d in self.selected:
@@ -216,27 +216,33 @@ class PdfWorker(QThread):
                 concepto_pretty = CONCEPTO_MAP.get((d.get("concepto") or "").strip().upper(), concepto)
                 deleg_raw = (d.get("delegacion") or "").strip().upper()
                 deleg_abbr = DELEG_MAP.get(deleg_raw, deleg_raw[:3] if deleg_raw else "CUN")
-
-                consec = f"{consecutivo:03d}"
+                # Determine assignment type (NOTARIA or COLABORADOR)
                 tipo_lote = self.header_data.get("tipo_asignacion", "NOTARIA")
+                # Determine concept folder (lowercase) and ensure it exists
+                concept_key = concepto_pretty.lower()
+                folder_path = os.path.join(self.dest_dir, concept_key)
+                os.makedirs(folder_path, exist_ok=True)
 
-                if estado_ref == "ASIGNADA":
-                    out_name = f"{cliente}_{concepto_pretty}_{consec}.pdf"
+                # Per‑concept consecutive counter
+                consec_num = consecutivo_por_concepto.get(concept_key, 1)
+                consec = f"{consec_num:03d}"
+
+                # Build file name using NOTARIA style (also for ASIGNADA)
+                if tipo_lote == "COLABORADOR":
+                    out_name = f"{referencia}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
                 else:
-                    if tipo_lote == "COLABORADOR":
-                        out_name = f"{referencia}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
-                    else:
-                        notaria_alias = self.header_data.get("notaria_alias")
-                        if not notaria_alias:
-                            notaria_raw = self.header_data.get("asignado_a", "Notaria")
-                            nums = re.findall(r'\d+', notaria_raw)
-                            notaria_alias = f"Not{nums[0]}" if nums else sanitize(notaria_raw)
-                        out_name = f"{referencia}_{notaria_alias}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
+                    notaria_alias = self.header_data.get("notaria_alias")
+                    if not notaria_alias:
+                        notaria_raw = self.header_data.get("asignado_a", "Notaria")
+                        nums = re.findall(r'\\d+', notaria_raw)
+                        notaria_alias = f"Not{nums[0]}" if nums else sanitize(notaria_raw)
+                    out_name = f"{referencia}_{notaria_alias}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
 
-                out_path = os.path.join(self.dest_dir, out_name)
+                out_path = os.path.join(folder_path, out_name)
                 if merge_or_copy_pdfs(pdf_paths, out_path):
                     success += 1
-                    consecutivo += 1
+                    # Increment per‑concept counter
+                    consecutivo_por_concepto[concept_key] = consec_num + 1
                 else:
                     error += 1
             except Exception:
@@ -450,7 +456,7 @@ class InventoryView(QWidget):
         self.lbl_table_icon.setPixmap(Icons.file_text("#2563EB").pixmap(18, 18))
         self.lbl_table_icon.setStyleSheet("background: transparent;")
         
-        self.lbl_table_title = CustomLabel("Referencias en Estado FACTURADA", variant="subheader")
+        self.lbl_table_title = CustomLabel("Derechos en Estado FACTURADA", variant="subheader")
         
         self.table_header_layout.addWidget(self.lbl_table_icon)
         self.table_header_layout.addWidget(self.lbl_table_title)
@@ -484,7 +490,7 @@ class InventoryView(QWidget):
 
         # Paging Info and Size
         footer_layout = QHBoxLayout()
-        self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 referencias", variant="muted")
+        self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 derechos", variant="muted")
         footer_layout.addWidget(self.lbl_pagination_info)
         footer_layout.addStretch()
 
@@ -622,7 +628,7 @@ class InventoryView(QWidget):
         start_idx = (self.current_page - 1) * self.page_size
         end_idx = min(start_idx + len(self.all_data), self.total_items)
 
-        self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {self.total_items} referencias")
+        self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {self.total_items} derechos")
 
         # Re-draw pagination buttons
         while self.pag_btn_layout.count():
@@ -925,7 +931,7 @@ class InventoryView(QWidget):
         self.lbl_excel_path = QLabel("Ningún archivo seleccionado", self)
         self.lbl_excel_path.setStyleSheet("color: #64748B; font-style: italic;")
         
-        btn_pick_excel = CustomButton("Seleccionar Excel de Control", is_secondary=True)
+        btn_pick_excel = CustomButton("Seleccionar Excel", is_secondary=True)
         btn_pick_excel.clicked.connect(self._on_pick_excel_masivo)
         
         btn_download_template = CustomButton("Descargar Plantilla", is_secondary=True)
@@ -949,10 +955,10 @@ class InventoryView(QWidget):
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        self.btn_limpiar_preview = CustomButton("Limpiar Previsualización", is_secondary=True)
+        self.btn_limpiar_preview = CustomButton("Limpiar", is_clean_btn=True)
         self.btn_limpiar_preview.clicked.connect(self._on_limpiar_preview)
         btn_layout.addWidget(self.btn_limpiar_preview)
-        self.btn_confirmar_masivo = CustomButton("Confirmar e Importar Lote de Asignación")
+        self.btn_confirmar_masivo = CustomButton("Confirmar")
         self.btn_confirmar_masivo.setEnabled(False)
         self.btn_confirmar_masivo.clicked.connect(self._on_confirmar_masivo)
         btn_layout.addWidget(self.btn_confirmar_masivo)
@@ -1386,7 +1392,7 @@ class InventoryView(QWidget):
 
         # Create aligned action buttons to go in the header alongside + Agregar Renglón
 
-        self.btn_buscar_ind = QPushButton("Buscar Referencias")
+        self.btn_buscar_ind = QPushButton("Buscar Derechos")
         self.btn_buscar_ind.setObjectName("primaryBtn")
         self.btn_buscar_ind.setMinimumHeight(35)
         self.btn_buscar_ind.setIcon(Icons.get_icon("buscar", color="#FFFFFF"))
@@ -1399,10 +1405,7 @@ class InventoryView(QWidget):
         self.btn_confirmar_ind.setEnabled(False)
         self.btn_confirmar_ind.clicked.connect(self._on_confirmar_asignacion_ind)
 
-        self.btn_limpiar_ind = QPushButton("Limpiar")
-        self.btn_limpiar_ind.setObjectName("secondaryBtn")
-        self.btn_limpiar_ind.setMinimumHeight(35)
-        self.btn_limpiar_ind.setIcon(Icons.get_icon("limpiar", color="#475569"))
+        self.btn_limpiar_ind = CustomButton("Limpiar", is_clean_btn=True)
         self.btn_limpiar_ind.clicked.connect(self._on_limpiar_ind)
 
 
@@ -1436,6 +1439,13 @@ class InventoryView(QWidget):
         self.btn_confirmar_ind.setEnabled(False)
         self.cb_tipo_destino_ind.setCurrentIndex(0)
         self.cb_destinatario_ind.clear()
+
+    def _on_limpiar_apartar(self):
+        """Clears the apartar grid, selected destination, and input fields."""
+        self.grid_apartar.clear()
+        self.grid_apartar.add_row()
+        self.cb_notarias_apartar.setCurrentIndex(-1)
+        self.txt_obs_apartar.clear()
 
     def _on_tipo_destino_ind_changed(self, text):
 
@@ -1853,9 +1863,12 @@ class InventoryView(QWidget):
         self._avail_timer.timeout.connect(self._launch_availability_worker)
         self._active_avail_workers = []  # track to avoid premature GC
 
-        # Confirm Button at the bottom
+        # Confirm and Clean Buttons at the bottom
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
+        self.btn_limpiar_apartar = CustomButton("Limpiar", is_clean_btn=True)
+        self.btn_limpiar_apartar.clicked.connect(self._on_limpiar_apartar)
+        btn_layout.addWidget(self.btn_limpiar_apartar)
         self.btn_save_apartar = CustomButton("Confirmar Apartados")
         self.btn_save_apartar.clicked.connect(self._on_save_apartar)
         btn_layout.addWidget(self.btn_save_apartar)

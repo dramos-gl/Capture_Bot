@@ -2518,7 +2518,7 @@ class InventarioRepository(BaseRepository):
         if conc.alias == "CLG":
             expected_aliases = ["CLG"]
         elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO", "AVISO PREVENTIVO"):
-            expected_aliases = ["AVISO PREVENTIVO"]
+            expected_aliases = ["AVISO", "AVISO PREVENTIVO"]
         elif conc.alias == "ANALISIS":
             expected_aliases = ["ANALISIS"]
         else:
@@ -2588,7 +2588,7 @@ class InventarioRepository(BaseRepository):
         
         expected_aliases = []
         if conc.alias == "CLG": expected_aliases = ["CLG"]
-        elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO"): expected_aliases = ["AVISO PREVENTIVO"]
+        elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO", "AVISO PREVENTIVO"): expected_aliases = ["AVISO", "AVISO PREVENTIVO"]
         elif conc.alias == "ANALISIS": expected_aliases = ["ANALISIS"]
         else: expected_aliases = [conc.alias]
 

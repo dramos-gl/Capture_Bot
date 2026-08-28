@@ -31,6 +31,21 @@ class MigrationView(QWidget):
         self.refresh_data()
         
     def _build_ui(self):
+        # Label de descripción completa de la funcionalidad
+        self.lbl_desc = CustomLabel(
+            "<b>Descripción del Proceso:</b><br/>"
+            "Este proceso permite reubicar y transferir masivamente referencias mal clasificadas "
+            "(ej. asignadas a una delegación incorrecta en la orden original) hacia una nueva Orden de Generación de corrección.<br/>"
+            "1. <b>Selecciona</b> la orden de origen.<br/>"
+            "2. Presiona <b>Generar Plantilla CSV</b> para descargar el mapeo actual.<br/>"
+            "3. Edita el CSV en Excel cambiando únicamente los IDs en la columna <b>delegacion_id</b> (1: CHETUMAL, 2: CANCUN, 3: PLAYA DEL CARMEN, 4: COZUMEL).<br/>"
+            "4. Presiona <b>Ejecutar Migración</b> y sube el archivo modificado para mover transaccionalmente las referencias en BD y reubicar/renombrar físicamente las facturas PDF en el storage.",
+            variant="body"
+        )
+        self.lbl_desc.setWordWrap(True)
+        self.lbl_desc.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; color: #475569;")
+        self.layout.addWidget(self.lbl_desc)
+
         # Top Controls Layout
         self.controls_layout = QHBoxLayout()
         

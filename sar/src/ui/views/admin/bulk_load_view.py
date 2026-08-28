@@ -30,6 +30,20 @@ class BulkLoadView(QWidget):
         self.refresh_data()
         
     def _build_ui(self):
+        # Label de descripción completa de la funcionalidad
+        self.lbl_desc = CustomLabel(
+            "<b>Descripción del Proceso:</b><br/>"
+            "Esta herramienta permite insertar masivamente un gran volumen de referencias autorizadas externamente de forma manual a una Orden de Generación.<br/>"
+            "1. <b>Selecciona</b> la orden destino sobre la cual deseas importar las referencias.<br/>"
+            "2. Presiona <b>Generar Plantilla CSV</b> para descargar el formato adecuado con los RFCs y conceptos vigentes de la orden.<br/>"
+            "3. Abre el archivo en Excel e introduce la información solicitada sin duplicar números de referencia.<br/>"
+            "4. Presiona <b>Ejecutar Carga Masiva</b> para validar e insertar transaccionalmente todas las referencias y actualizar los acumuladores del sistema.",
+            variant="body"
+        )
+        self.lbl_desc.setWordWrap(True)
+        self.lbl_desc.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; color: #475569;")
+        self.layout.addWidget(self.lbl_desc)
+
         # Top Controls Layout
         self.controls_layout = QHBoxLayout()
         

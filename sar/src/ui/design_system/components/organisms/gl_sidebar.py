@@ -135,7 +135,7 @@ class NavigationSidebar(QFrame):
         self.menu_items = [
             ("Dashboard", "dashboard", "dashboard"),
             ("Órdenes", "ordenes", "list_icon"),
-            ("Referencias", "referencias", "database"),
+            ("Derechos", "referencias", "database"),
             ("Control de Derechos", "inventario", "tabla"),
             ("Administración", "configuracion", "shield_lock")
         ]
@@ -192,7 +192,7 @@ class NavigationSidebar(QFrame):
         self.btn_inv_facturas.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_facturas.setVisible(False)
  
-        self.btn_inv_masivo = QPushButton("Asignar & Validar por lotes")
+        self.btn_inv_masivo = QPushButton("Asignar/Validar por Lotes")
         self.btn_inv_masivo.setObjectName("subNavBtn")
         self.btn_inv_masivo.setCheckable(True)
         self.btn_inv_masivo.setIcon(Icons.hollow_dot("#94A3B8"))

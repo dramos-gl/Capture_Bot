@@ -173,6 +173,19 @@ class UpdateFacturasView(QWidget):
         self._build_ui()
         
     def _build_ui(self):
+        # Label de descripción completa de la funcionalidad
+        self.lbl_desc = CustomLabel(
+            "<b>Descripción del Proceso:</b><br/>"
+            "Este proceso automatizado escanea los archivos PDF de facturas físicas almacenados en el storage para recuperar información faltante de forma retrospectiva.<br/>"
+            "1. Marca la opción <b>Escanear Delegación</b> para extraer del texto la delegación (Cancún, Playa del Carmen o Chetumal).<br/>"
+            "2. Marca la opción <b>Escanear UUID</b> para recuperar de forma automática el folio fiscal (UUID de 36 caracteres).<br/>"
+            "3. Presiona <b>Iniciar Escaneo e Importación</b> para procesar en segundo plano todas las facturas con metadatos vacíos sin congelar la aplicación.",
+            variant="body"
+        )
+        self.lbl_desc.setWordWrap(True)
+        self.lbl_desc.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; color: #475569;")
+        self.layout.addWidget(self.lbl_desc)
+
         # Checkboxes for fields to scan
         self.chk_layout = QHBoxLayout()
         self.chk_delegacion = QCheckBox("Escanear Delegación (Cancun, Playa, Chetumal)")
