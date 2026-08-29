@@ -81,11 +81,12 @@ class BillingRpaWorker(QThread):
             self.status_changed.emit("Verificando navegador Playwright...")
             playwright_inst = sync_playwright().start()
             
-            # Persist profile to save cache
-            user_data_dir = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "perfil_bot_facturacion")
+            # Persist profile to save cache (isolated per solicitud to support concurrent bots)
+            sol_id = self.ctx.get("solicitud_id", "default")
+            user_data_dir = os.path.join(os.environ.get("TEMP", "C:\\Temp"), f"perfil_bot_facturacion_{sol_id}")
             os.makedirs(user_data_dir, exist_ok=True)
             
-            playwright_downloads = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "playwright_downloads_facturacion")
+            playwright_downloads = os.path.join(os.environ.get("TEMP", "C:\\Temp"), f"playwright_downloads_facturacion_{sol_id}")
             os.makedirs(playwright_downloads, exist_ok=True)
             
             # Resolve browser executable (handles frozen PyInstaller deployments)

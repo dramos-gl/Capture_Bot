@@ -547,6 +547,33 @@ class BotView(QWidget):
         
         # Start Worker Thread
         self.worker.start()
+        
+        # Visually update the status of the request to "PROCESANDO" in the table
+        self._update_row_status_ui(sol_id, "PROCESANDO")
+
+    def _update_row_status_ui(self, sol_id: int, new_status: str):
+        from sar.src.ui.design_system.components.atoms.gl_status_badge import StatusBadge
+        from sar.src.ui.design_system.components.organisms.gl_data_table import StatusTableWidgetItem
+        from PySide6.QtWidgets import QWidget, QHBoxLayout
+        from PySide6.QtCore import Qt
+        
+        status_col = 7
+        for row in range(self.table.rowCount()):
+            item_id = self.table.item(row, 0)
+            if item_id and item_id.text() == str(sol_id):
+                badge_container = QWidget()
+                badge_container.setStyleSheet("background-color: transparent;")
+                badge_layout = QHBoxLayout(badge_container)
+                badge_layout.setContentsMargins(0, 0, 0, 0)
+                badge_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+                badge = StatusBadge(new_status)
+                badge_layout.addWidget(badge)
+                
+                item = StatusTableWidgetItem(new_status)
+                self.table.setItem(row, status_col, item)
+                self.table.setCellWidget(row, status_col, badge_container)
+                break
 
     def _on_metric_updated(self, name: str, value: int):
         if name == "exitosos":

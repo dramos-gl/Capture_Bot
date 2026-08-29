@@ -182,8 +182,12 @@ class PdfWorker(QThread):
             "CLG": "CLG"
         }
 
+        def clean_folder_name(name: str) -> str:
+            cleaned = re.sub(r'[\\/:*?"<>|]', '_', name or "").strip()
+            return cleaned if cleaned else "sin_desarrollo"
+
         success = error = missing = 0
-        consecutivo_por_concepto = {}
+        consecutivo_por_concepto = {}  # key: (desarrollo, concepto), value: counter
         estado_lote = self.header_data.get("estado_refs", "ASIGNADA")
 
         for d in self.selected:
@@ -192,6 +196,8 @@ class PdfWorker(QThread):
             cliente    = sanitize(d.get("cliente", ""))
             referencia = sanitize(d.get("referencia", ""))
             estado_ref = d.get("estado", estado_lote)
+            desarrollo_raw = d.get("desarrollo") or "Sin Desarrollo"
+            desarrollo_clean = clean_folder_name(desarrollo_raw)
 
             if not ref_id:
                 missing += 1
@@ -218,31 +224,40 @@ class PdfWorker(QThread):
                 deleg_abbr = DELEG_MAP.get(deleg_raw, deleg_raw[:3] if deleg_raw else "CUN")
                 # Determine assignment type (NOTARIA or COLABORADOR)
                 tipo_lote = self.header_data.get("tipo_asignacion", "NOTARIA")
-                # Determine concept folder (lowercase) and ensure it exists
                 concept_key = concepto_pretty.lower()
-                folder_path = os.path.join(self.dest_dir, concept_key)
-                os.makedirs(folder_path, exist_ok=True)
 
-                # Per‑concept consecutive counter
-                consec_num = consecutivo_por_concepto.get(concept_key, 1)
-                consec = f"{consec_num:03d}"
-
-                # Build file name using NOTARIA style (also for ASIGNADA)
-                if tipo_lote == "COLABORADOR":
-                    out_name = f"{referencia}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
-                else:
+                # Rule: organize by Desarrollo/Concept folder and use Notaria naming pattern
+                # ONLY for RESERVADA references assigned to a NOTARIA.
+                if estado_ref == "RESERVADA" and tipo_lote == "NOTARIA":
+                    folder_path = os.path.join(self.dest_dir, desarrollo_clean, concept_key)
+                    os.makedirs(folder_path, exist_ok=True)
+                    consec_key = (desarrollo_clean.lower(), concept_key)
+                    consec_num = consecutivo_por_concepto.get(consec_key, 1)
+                    consec = f"{consec_num:03d}"
+                    
                     notaria_alias = self.header_data.get("notaria_alias")
                     if not notaria_alias:
                         notaria_raw = self.header_data.get("asignado_a", "Notaria")
                         nums = re.findall(r'\\d+', notaria_raw)
                         notaria_alias = f"Not{nums[0]}" if nums else sanitize(notaria_raw)
                     out_name = f"{referencia}_{notaria_alias}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
+                else:
+                    # Flat destination folder
+                    folder_path = self.dest_dir
+                    consec_key = concept_key
+                    consec_num = consecutivo_por_concepto.get(consec_key, 1)
+                    consec = f"{consec_num:03d}"
+
+                    if estado_ref == "ASIGNADA":
+                        out_name = f"{cliente}_{concepto_pretty}_{consec}.pdf"
+                    else:  # COLABORADOR
+                        out_name = f"{referencia}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
 
                 out_path = os.path.join(folder_path, out_name)
                 if merge_or_copy_pdfs(pdf_paths, out_path):
                     success += 1
                     # Increment per‑concept counter
-                    consecutivo_por_concepto[concept_key] = consec_num + 1
+                    consecutivo_por_concepto[consec_key] = consec_num + 1
                 else:
                     error += 1
             except Exception:
