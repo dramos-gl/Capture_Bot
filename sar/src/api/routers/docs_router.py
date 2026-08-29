@@ -916,6 +916,14 @@ class LoteAsignacionCreateRequest(BaseModel):
     solicitante_externo: Optional[str] = None
     observaciones: Optional[str] = None
     usuario_creacion: int
+    detalles: List[LoteDetalleItem]
+
+class LoteValidarRequest(BaseModel):
+    parsed_rows: List[dict]
+    default_rfc_id: Optional[int] = None
+    completar_notaria_id: Optional[int] = None
+    orden_ids: Optional[List[int]] = None
+    solo_reservar: bool = False
 class LoteApartarRequest(BaseModel):
     notaria_id: int
     rfc_id: int
@@ -990,6 +998,46 @@ def save_desarrollo(request: DesarrolloCreateRequest, db: Session = Depends(get_
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.get("/inventario/rfcs-con-stock")
+def get_rfcs_con_stock_facturadas(db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_rfcs_con_stock_facturadas()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/desarrollos-activos-apartar")
+def get_desarrollos_activos_para_apartar(db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_desarrollos_activos_para_apartar()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/desarrollos/{desarrollo_id}/rfcs")
+def get_rfcs_por_desarrollo(desarrollo_id: int, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_rfcs_por_desarrollo(desarrollo_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/desarrollos/{desarrollo_id}/rfcs/{rfc_id}/delegaciones")
+def get_delegaciones_por_desarrollo_rfc(desarrollo_id: int, rfc_id: int, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_delegaciones_por_desarrollo_rfc(desarrollo_id, rfc_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/conceptos-con-stock")
+def get_conceptos_con_stock(rfc_id: int, delegacion_id: int, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_conceptos_con_stock(rfc_id, delegacion_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/inventario/referencias-facturadas")
 def get_referencias_facturadas(
     limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None, filter_assigned: str = "Todos",
@@ -1056,6 +1104,27 @@ def create_lote_asignacion(request: LoteAsignacionCreateRequest, db: Session = D
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/inventario/lotes/validar")
+def api_validar_lote(request: LoteValidarRequest, db: Session = Depends(get_db)):
+    from sar.src.services.excel_inventory_handler import ExcelInventoryHandler
+    import datetime
+    try:
+        validated = ExcelInventoryHandler.validate_parsed_rows(
+            db, request.parsed_rows,
+            default_rfc_id=request.default_rfc_id,
+            completar_notaria_id=request.completar_notaria_id,
+            orden_ids=request.orden_ids,
+            solo_reservar=request.solo_reservar
+        )
+        # Convert datetime.date and datetime.datetime to ISO format strings for JSON compatibility
+        for row in validated:
+            for key, val in row.items():
+                if isinstance(val, (datetime.date, datetime.datetime)):
+                    row[key] = val.strftime("%Y-%m-%d")
+        return validated
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/inventario/lotes")
 def get_lotes_asignacion(db: Session = Depends(get_db)):
     from sar.src.storage.repositories import InventarioRepository
@@ -1065,6 +1134,14 @@ def get_lotes_asignacion(db: Session = Depends(get_db)):
 def get_lote_detalles(lote_id: int, db: Session = Depends(get_db)):
     from sar.src.storage.repositories import InventarioRepository
     return InventarioRepository(db).get_lote_detalles(lote_id)
+
+@router.get("/inventario/lotes/{lote_id}/header")
+def get_lote_asignacion_header(lote_id: int, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_lote_asignacion_header(lote_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/inventario/lotes/apartar")
 def api_apartar_referencias(request: LoteApartarRequest, db: Session = Depends(get_db)):

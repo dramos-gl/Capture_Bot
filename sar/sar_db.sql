@@ -279,7 +279,7 @@ CREATE TABLE sar_produccion.grupo_referencia (
     ultimo_consecutivo INTEGER DEFAULT 0,
     estado_id BIGINT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    FOREIGN KEY (orden_id) REFERENCES sar_produccion.orden_generacion(orden_id) ON DELETE CASCADE,
+    FOREIGN KEY (orden_id) REFERENCES sar_produccion.orden_generacion(orden_id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (rfc_id) REFERENCES sar_catalogo.rfc(rfc_id) ON DELETE RESTRICT,
     FOREIGN KEY (concepto_id) REFERENCES sar_catalogo.concepto(concepto_id) ON DELETE RESTRICT,
     FOREIGN KEY (estado_id) REFERENCES sar_catalogo.estado_sistema(estado_id) ON DELETE RESTRICT,

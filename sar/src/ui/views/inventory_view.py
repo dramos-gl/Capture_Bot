@@ -1082,12 +1082,22 @@ class InventoryView(QWidget):
                     return
 
             # Validate rows against database
-            with self.db_connector.get_session() as session:
-                self.validated_records = ExcelInventoryHandler.validate_parsed_rows(
-                    session, self.parsed_records, default_rfc_id=default_rfc_id, completar_notaria_id=completar_notaria_id,
-                    orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None,
-                    solo_reservar=self.chk_solo_reservar.isChecked()
-                )
+            if self.api_client.connect_via_api:
+                payload = {
+                    "parsed_rows": self.parsed_records,
+                    "default_rfc_id": default_rfc_id,
+                    "completar_notaria_id": completar_notaria_id,
+                    "orden_ids": list(self.selected_orden_ids) if self.selected_orden_ids else None,
+                    "solo_reservar": self.chk_solo_reservar.isChecked()
+                }
+                self.validated_records = self.api_client.request("POST", "/api/docs/inventario/lotes/validar", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    self.validated_records = ExcelInventoryHandler.validate_parsed_rows(
+                        session, self.parsed_records, default_rfc_id=default_rfc_id, completar_notaria_id=completar_notaria_id,
+                        orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None,
+                        solo_reservar=self.chk_solo_reservar.isChecked()
+                    )
 
             # Populate preview table
             preview_rows = []
@@ -3311,6 +3321,7 @@ class ApartarReferenciasDialog(QDialog):
             rows_data.append({
                 "rfc_id": row["rfc_id"],
                 "concepto_id": row["concepto_id"],
+                "delegacion_id": row["delegacion_id"],
                 "desarrollo_id": final_desarrollo_id,
                 "cantidad": row["cantidad"]
             })
@@ -3326,6 +3337,7 @@ class ApartarReferenciasDialog(QDialog):
                         "notaria_id": notaria_id,
                         "rfc_id": row_d["rfc_id"],
                         "concepto_id": row_d["concepto_id"],
+                        "delegacion_id": row_d["delegacion_id"],
                         "desarrollo_id": row_d["desarrollo_id"],
                         "cantidad": row_d["cantidad"],
                         "usuario_creacion": usuario_id
@@ -3341,6 +3353,7 @@ class ApartarReferenciasDialog(QDialog):
                             notaria_id=notaria_id,
                             rfc_id=row_d["rfc_id"],
                             concepto_id=row_d["concepto_id"],
+                            delegacion_id=row_d["delegacion_id"],
                             desarrollo_id=row_d["desarrollo_id"],
                             cantidad=row_d["cantidad"],
                             usuario_id=usuario_id

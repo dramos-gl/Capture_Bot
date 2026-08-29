@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QTextEdit,
-    QProgressBar, QCheckBox
+    QProgressBar, QCheckBox, QComboBox
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
@@ -16,11 +16,12 @@ class UpdateWorker(QThread):
     progress_signal = Signal(str, int)  # message, progress_percentage
     finished_signal = Signal(dict)       # summary stats
 
-    def __init__(self, db_connector, scan_delegation, scan_uuid, parent=None):
+    def __init__(self, db_connector, scan_delegation, scan_uuid, orden_id=None, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
         self.scan_delegation = scan_delegation
         self.scan_uuid = scan_uuid
+        self.orden_id = orden_id
 
     def extract_delegacion_from_pdf(self, pdf_path: str) -> str:
         if not pdf_path or not os.path.exists(pdf_path):
@@ -32,11 +33,23 @@ class UpdateWorker(QThread):
                 text_content = page.extract_text()
                 if text_content:
                     text_lower = text_content.lower()
-                    if "delegación cancun" in text_lower or "delegacion cancun" in text_lower:
+                    replacements = {
+                        "\xf3": "o", "ó": "o",
+                        "\xe1": "a", "á": "a",
+                        "\xe9": "e", "é": "e",
+                        "\xed": "i", "í": "i",
+                        "\xfa": "u", "ú": "u",
+                        "\xf1": "n", "ñ": "n",
+                        "\ufffd": "o"
+                    }
+                    for old, new in replacements.items():
+                        text_lower = text_lower.replace(old, new)
+
+                    if "delegacion cancun" in text_lower:
                         return "Cancun"
-                    elif "delegación playa del carmen" in text_lower or "delegacion playa del carmen" in text_lower:
+                    elif "delegacion playa del carmen" in text_lower:
                         return "Playa del Carmen"
-                    elif "delegación chetumal" in text_lower or "delegacion chetumal" in text_lower:
+                    elif "delegacion chetumal" in text_lower:
                         return "Chetumal"
         except Exception as e:
             self.progress_signal.emit(f"  [Advertencia] Error al leer {os.path.basename(pdf_path)}: {e}", -1)
@@ -78,12 +91,24 @@ class UpdateWorker(QThread):
                     self.finished_signal.emit(stats)
                     return
 
-                query_str = f"""
-                    SELECT factura_id, pdf_path, pdf2_path, uuid, nombre_archivo
-                    FROM sar_archivo.factura
-                    WHERE {" OR ".join(conditions)}
-                """
-                facturas = session.execute(text(query_str)).all()
+                conditions_str = " OR ".join(conditions)
+                params = {}
+                if self.orden_id:
+                    query_str = f"""
+                        SELECT f.factura_id, f.pdf_path, f.pdf2_path, f.uuid, f.nombre_archivo, f.delegacion
+                        FROM sar_archivo.factura f
+                        JOIN sar_produccion.referencia r ON f.referencia_id = r.referencia_id
+                        JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+                        WHERE ({conditions_str}) AND gr.orden_id = :orden_id
+                    """
+                    params["orden_id"] = self.orden_id
+                else:
+                    query_str = f"""
+                        SELECT factura_id, pdf_path, pdf2_path, uuid, nombre_archivo, delegacion
+                        FROM sar_archivo.factura
+                        WHERE {conditions_str}
+                    """
+                facturas = session.execute(text(query_str), params).all()
                 stats["total"] = len(facturas)
                 
                 if stats["total"] == 0:
@@ -105,7 +130,7 @@ class UpdateWorker(QThread):
                     updates = {}
                     
                     # 1. Escaneo de Delegación
-                    if self.scan_delegation and (not row.uuid or not row.nombre_archivo): # Si el usuario eligió y la delegación está vacía
+                    if self.scan_delegation and (not row.delegacion): # Si el usuario eligió y la delegación está vacía
                         delegacion = None
                         if pdf_path:
                             delegacion = self.extract_delegacion_from_pdf(pdf_path)
@@ -186,6 +211,15 @@ class UpdateFacturasView(QWidget):
         self.lbl_desc.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; color: #475569;")
         self.layout.addWidget(self.lbl_desc)
 
+        # Selector de orden
+        self.order_layout = QHBoxLayout()
+        self.order_layout.addWidget(CustomLabel("Filtrar por Orden:", variant="body"))
+        self.combo_orden = QComboBox()
+        self.combo_orden.setMinimumWidth(300)
+        self.order_layout.addWidget(self.combo_orden)
+        self.order_layout.addStretch()
+        self.layout.addLayout(self.order_layout)
+
         # Checkboxes for fields to scan
         self.chk_layout = QHBoxLayout()
         self.chk_delegacion = QCheckBox("Escanear Delegación (Cancun, Playa, Chetumal)")
@@ -217,19 +251,44 @@ class UpdateFacturasView(QWidget):
         self.layout.addWidget(self.console)
 
     def refresh_data(self):
-        """Clean UI state."""
+        """Clean UI state and populate orders."""
         self.console.clear()
         self.progress_bar.setValue(0)
+        
+        self.combo_orden.blockSignals(True)
+        self.combo_orden.clear()
+        self.combo_orden.addItem("Todas las Órdenes", None)
+        
+        try:
+            with self.db_connector.get_session() as session:
+                res = session.execute(text("""
+                    SELECT orden_id, folio, descripcion, fecha_creacion 
+                    FROM sar_produccion.orden_generacion 
+                    ORDER BY orden_id DESC
+                """)).mappings().all()
+                
+                for r in res:
+                    desc_part = f" - {r['descripcion'][:30]}" if r['descripcion'] else ""
+                    label = f"{r['folio']}{desc_part} ({r['fecha_creacion'].strftime('%Y-%m-%d')})"
+                    self.combo_orden.addItem(label, r['orden_id'])
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudieron cargar las órdenes: {e}")
+            
+        self.combo_orden.blockSignals(False)
 
     def _on_start_scan(self):
         self.console.clear()
         self.btn_iniciar.setEnabled(False)
         
+        # Obtener el orden_id seleccionado
+        orden_id = self.combo_orden.currentData()
+        
         # Iniciar thread worker
         self.worker = UpdateWorker(
             self.db_connector,
             scan_delegation=self.chk_delegacion.isChecked(),
-            scan_uuid=self.chk_uuid.isChecked()
+            scan_uuid=self.chk_uuid.isChecked(),
+            orden_id=orden_id
         )
         self.worker.progress_signal.connect(self._on_progress)
         self.worker.finished_signal.connect(self._on_finished)

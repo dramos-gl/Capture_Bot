@@ -50,7 +50,7 @@ def extract_base_ruta(pdf_path: str, anio: str, folio_orden_4: str) -> str:
 
 def main():
     print("=" * 90)
-    print("  MIGRACIÓN TRANSACCIONAL ORDEN 4 → ORDEN 5 (CON SOPORTE MULTI-DELEGACIÓN)")
+    print(f"  MIGRACIÓN TRANSACCIONAL ORDEN {ORDEN_4_ID} → ORDEN DESTINO (CON SOPORTE MULTI-DELEGACIÓN)")
     print("=" * 90)
 
     print(f"\n[1/7] Leyendo CSV de mapeo: {CSV_PATH}")
@@ -59,17 +59,15 @@ def main():
         return
 
     # Leer el CSV mapeando referencia_portal -> delegacion_id_correcta
-    # y agrupar por grupo_id_ord4 -> {referencia_portal: delegacion_id_correcta}
-    mapeo_referencias = defaultdict(dict)
+    mapeo_referencias = {}
     with open(CSV_PATH, encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for row in reader:
             ref_portal = row['referencia_portal'].strip()
-            gid_ord4   = int(row['grupo_id_ord4'].strip())
             del_id_v   = int(row['delegacion_id'].strip())
-            mapeo_referencias[gid_ord4][ref_portal] = del_id_v
+            mapeo_referencias[ref_portal] = del_id_v
 
-    total_refs_csv = sum(len(v) for v in mapeo_referencias.values())
+    total_refs_csv = len(mapeo_referencias)
     print(f"  Total referencias cargadas desde CSV: {total_refs_csv}")
 
     db = DatabaseConnector()
@@ -116,8 +114,8 @@ def main():
             "SELECT usuario_id FROM sar_seguridad.usuario WHERE username='admin' LIMIT 1"
         )).scalar()
 
-        # ── 3. Crear Orden 5 ──────────────────────────────────────────────
-        print("\n[3/7] Creando/Recuperando Orden 5...")
+        # ── 3. Crear Orden Destino ──────────────────────────────────────────
+        print("\n[3/7] Creando/Recuperando Orden Destino...")
         orden5_existente = session.execute(text(
             "SELECT orden_id, folio FROM sar_produccion.orden_generacion WHERE descripcion=:desc LIMIT 1"
         ), {"desc": DESCRIPCION_ORDEN_5}).mappings().one_or_none()
@@ -125,7 +123,7 @@ def main():
         if orden5_existente:
             orden5_id = orden5_existente['orden_id']
             folio_orden5 = orden5_existente['folio']
-            print(f"  Orden 5 ya existe: ID={orden5_id} | Folio={folio_orden5}")
+            print(f"  Orden Destino ya existe: ID={orden5_id} | Folio={folio_orden5}")
         else:
             fecha_ahora = datetime.now()
             folio_orden5 = f"ORD-{fecha_ahora.strftime('%Y%m%d-%H%M%S')}-MIG"
@@ -138,7 +136,7 @@ def main():
                 "folio": folio_orden5, "desc": DESCRIPCION_ORDEN_5, "estado": estado_ord_autorizada,
                 "uid": usuario_sistema, "fecha": orden4['fecha_creacion'], "mun": orden4['municipio_id']
             }).scalar()
-            print(f"  Orden 5 creada: ID={orden5_id} | Folio={folio_orden5}")
+            print(f"  Orden Destino creada: ID={orden5_id} | Folio={folio_orden5}")
 
         # ── 4. Procesar Grupos y Solicitudes dinámicamente ────────────────
         print("\n[4/7] Creando grupos y segmentando solicitudes por delegación real...")
@@ -167,8 +165,20 @@ def main():
                 }).scalar()
             mapa_grupos_nuevos[old_gid] = new_gid
 
-            # Identificar qué delegaciones reales se usan en este grupo en el CSV
-            delegaciones_del_grupo = set(mapeo_referencias[old_gid].values())
+            # Identificar qué delegaciones reales se usan en este grupo (desde el CSV + originales de base de datos)
+            refs_in_db = session.execute(text("""
+                SELECT r.referencia_portal, s.delegacion_id 
+                FROM sar_produccion.referencia r
+                JOIN sar_produccion.solicitud s ON r.solicitud_id = s.solicitud_id
+                WHERE r.grupo_id = :gid
+            """), {"gid": old_gid}).all()
+            
+            delegaciones_del_grupo = set()
+            for r in refs_in_db:
+                dest_del = mapeo_referencias.get(r.referencia_portal)
+                if dest_del is None:
+                    dest_del = r.delegacion_id
+                delegaciones_del_grupo.add(dest_del)
             
             # Obtener consecutivos mínimos/máximos del grupo original para prorratear rangos
             rango_original = session.execute(text(
@@ -216,7 +226,7 @@ def main():
             ref_portal = ref['referencia_portal']
             
             # Obtener delegación destino desde el CSV
-            dest_del_id = mapeo_referencias[old_gid].get(ref_portal)
+            dest_del_id = mapeo_referencias.get(ref_portal)
             if dest_del_id is None:
                 # Si no está en el CSV, mantiene la original
                 dest_del_id = session.execute(text(
@@ -237,7 +247,7 @@ def main():
         print(f"  Referencias asociadas correctamente: {total_migradas}")
 
         # ── 6. Actualizar contadores y estados ──────────────────────────────
-        print("\n[6/7] Actualizando contadores e inactivando Orden 4...")
+        print(f"\n[6/7] Actualizando contadores e inactivando Orden {ORDEN_4_ID}...")
         
         # Vaciar y Cancelar grupos y solicitudes de Orden 4
         for old_gid in grupos_ord4:
@@ -254,8 +264,8 @@ def main():
                 WHERE grupo_id=:gid
             """), {"est": estado_sol_cancelada, "gid": old_gid})
 
-        # Recalcular contadores reales de Orden 5
-        print("  Recalculando contadores en Orden 5...")
+        # Recalcular contadores reales de Orden Destino
+        print("  Recalculando contadores en Orden Destino...")
         for old_gid, new_gid in mapa_grupos_nuevos.items():
             cnt_ref = session.execute(text("SELECT COUNT(*) FROM sar_produccion.referencia WHERE grupo_id=:gid"), {"gid": new_gid}).scalar()
             cnt_fac = session.execute(text("""
@@ -290,59 +300,78 @@ def main():
 
         # ── 7. Mover y renombrar archivos PDF en disco ──────────────────────
         print("\n[7/7] Renombrando y organizando archivos PDF en disco...")
-        muestra_path = session.execute(text("SELECT pdf_path FROM sar_archivo.factura WHERE pdf_path IS NOT NULL LIMIT 1")).scalar()
+        muestra_path = session.execute(text("""
+            SELECT f.pdf_path 
+            FROM sar_archivo.factura f
+            JOIN sar_produccion.referencia r ON f.referencia_id = r.referencia_id
+            JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+            WHERE gr.orden_id = :oid AND f.pdf_path IS NOT NULL 
+            LIMIT 1
+        """), {"oid": orden5_id}).scalar()
         
         if not muestra_path:
             print("  ADVERTENCIA: No se encontraron facturas con PDF. Omitiendo movimiento de archivos.")
         else:
-            base_storage = extract_base_ruta(muestra_path, anio_str, folio_orden4)
+            # Extraer ruta base y año real de almacenamiento físico dinámicamente
+            from pathlib import Path
+            p_muestra = Path(muestra_path)
+            parts = p_muestra.parts
+            if len(parts) >= 6:
+                anio_str = parts[-5]
+                base_storage = os.path.join(*parts[:-5])
+                print(f"  Ruta base detectada: {base_storage}")
+                print(f"  Año físico detectado: {anio_str}")
+            else:
+                print(f"  ADVERTENCIA: La ruta de muestra no tiene suficientes carpetas: {muestra_path}. Omitiendo movimiento de archivos.")
+                base_storage = None
             
-            facturas = session.execute(text("""
-                SELECT f.factura_id, f.referencia_id, f.pdf_path, f.pdf2_path,
-                       ref.grupo_id, r.rfc, c.alias AS concepto_alias, sol.delegacion_id
-                FROM sar_archivo.factura f
-                JOIN sar_produccion.referencia ref ON f.referencia_id = ref.referencia_id
-                JOIN sar_produccion.grupo_referencia gr ON ref.grupo_id = gr.grupo_id
-                JOIN sar_catalogo.rfc r ON gr.rfc_id = r.rfc_id
-                JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
-                JOIN sar_produccion.solicitud sol ON ref.solicitud_id = sol.solicitud_id
-                WHERE gr.orden_id = :oid
-            """), {"oid": orden5_id}).mappings().all()
+            if base_storage:
+                facturas = session.execute(text("""
+                    SELECT f.factura_id, f.referencia_id, f.pdf_path, f.pdf2_path,
+                           ref.grupo_id, r.rfc, c.alias AS concepto_alias, sol.delegacion_id
+                    FROM sar_archivo.factura f
+                    JOIN sar_produccion.referencia ref ON f.referencia_id = ref.referencia_id
+                    JOIN sar_produccion.grupo_referencia gr ON ref.grupo_id = gr.grupo_id
+                    JOIN sar_catalogo.rfc r ON gr.rfc_id = r.rfc_id
+                    JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+                    JOIN sar_produccion.solicitud sol ON ref.solicitud_id = sol.solicitud_id
+                    WHERE gr.orden_id = :oid
+                """), {"oid": orden5_id}).mappings().all()
 
-            archivos_movidos = 0
-            for f in facturas:
-                del_id = f['delegacion_id']
-                del_info = delegaciones.get(del_id, {'nombre': 'CANCUN', 'del': 'CAN'})
-                nueva_dir = build_new_dir(base_storage, anio_str, folio_orden5, f['rfc'], f['concepto_alias'])
-                os.makedirs(nueva_dir, exist_ok=True)
+                archivos_movidos = 0
+                for f in facturas:
+                    del_id = f['delegacion_id']
+                    del_info = delegaciones.get(del_id, {'nombre': 'CANCUN', 'del': 'CAN'})
+                    nueva_dir = build_new_dir(base_storage, anio_str, folio_orden5, f['rfc'], f['concepto_alias'])
+                    os.makedirs(nueva_dir, exist_ok=True)
 
-                ref_portal = session.execute(text("SELECT referencia_portal FROM sar_produccion.referencia WHERE referencia_id=:rid"), {"rid": f['referencia_id']}).scalar()
+                    ref_portal = session.execute(text("SELECT referencia_portal FROM sar_produccion.referencia WHERE referencia_id=:rid"), {"rid": f['referencia_id']}).scalar()
 
-                nuevos_paths = {}
-                for idx, path_key in [(1, 'pdf_path'), (2, 'pdf2_path')]:
-                    old_path = f[path_key]
-                    if not old_path:
-                        nuevos_paths[path_key] = None
-                        continue
+                    nuevos_paths = {}
+                    for idx, path_key in [(1, 'pdf_path'), (2, 'pdf2_path')]:
+                        old_path = f[path_key]
+                        if not old_path:
+                            nuevos_paths[path_key] = None
+                            continue
 
-                    nuevo_nombre = build_new_filename(ref_portal, del_info['del'], f['grupo_id'], idx)
-                    nuevo_path = os.path.join(nueva_dir, nuevo_nombre)
+                        nuevo_nombre = build_new_filename(ref_portal, del_info['del'], f['grupo_id'], idx)
+                        nuevo_path = os.path.join(nueva_dir, nuevo_nombre)
 
-                    if os.path.exists(old_path):
-                        shutil.move(old_path, nuevo_path)
-                        archivos_movidos += 1
-                    nuevos_paths[path_key] = nuevo_path
+                        if os.path.exists(old_path):
+                            shutil.move(old_path, nuevo_path)
+                            archivos_movidos += 1
+                        nuevos_paths[path_key] = nuevo_path
 
-                session.execute(text("""
-                    UPDATE sar_archivo.factura
-                    SET pdf_path=:pdf, pdf2_path=:pdf2, delegacion=:del
-                    WHERE factura_id=:fid
-                """), {"pdf": nuevos_paths['pdf_path'], "pdf2": nuevos_paths['pdf2_path'], "del": del_info['nombre'], "fid": f['factura_id']})
+                    session.execute(text("""
+                        UPDATE sar_archivo.factura
+                        SET pdf_path=:pdf, pdf2_path=:pdf2, delegacion=:del
+                        WHERE factura_id=:fid
+                    """), {"pdf": nuevos_paths['pdf_path'], "pdf2": nuevos_paths['pdf2_path'], "del": del_info['nombre'], "fid": f['factura_id']})
 
-            print(f"  Proceso de archivos completado. Movidos en disco: {archivos_movidos}")
+                print(f"  Proceso de archivos completado. Movidos en disco: {archivos_movidos}")
 
     print("\n" + "=" * 90)
-    print("  MIGRACIÓN GLOBAL DE ORDEN 4 A ORDEN 5 COMPLETADA CON ÉXITO")
+    print(f"  MIGRACIÓN GLOBAL DE ORDEN {ORDEN_4_ID} A ORDEN DESTINO COMPLETADA CON ÉXITO")
     print("=" * 90)
 
 if __name__ == "__main__":

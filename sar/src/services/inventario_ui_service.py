@@ -125,7 +125,7 @@ class InventarioUIService:
                     params["orden_ids"] = orden_ids
                 result = self.api_client.request(
                     "GET", "/api/docs/inventario/disponibles",
-                    params=params
+                    data=params
                 )
                 return result.get("count", 0) if isinstance(result, dict) else 0
             except Exception:
@@ -221,7 +221,7 @@ class InventarioUIService:
             try:
                 return self.api_client.request(
                     "GET", "/api/docs/inventario/conceptos-con-stock",
-                    params={"rfc_id": rfc_id, "delegacion_id": delegacion_id}
+                    data={"rfc_id": rfc_id, "delegacion_id": delegacion_id}
                 )
             except Exception:
                 return []
@@ -404,7 +404,7 @@ class InventarioUIService:
                 params["end_date"] = end_date
             if orden_ids:
                 params["orden_ids"] = orden_ids
-            result = self.api_client.request("GET", "/api/docs/inventario/lotes/filtrados", params=params)
+            result = self.api_client.request("GET", "/api/docs/inventario/lotes/filtrados", data=params)
             return result.get("lotes", []), result.get("total", 0)
         else:
             if not self.db_connector:

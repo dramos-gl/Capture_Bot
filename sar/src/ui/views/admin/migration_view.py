@@ -2,16 +2,46 @@
 
 import os
 import csv
+from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QFileDialog,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QComboBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.storage.repositories import ConfigRepository
 from sar.src.services.admin_service import AdminService
 from sqlalchemy import text
+
+class MigrationWorker(QThread):
+    finished_signal = Signal()
+    error_signal = Signal(str)
+
+    def __init__(self, orden_id, csv_path, parent=None):
+        super().__init__(parent)
+        self.orden_id = orden_id
+        self.csv_path = csv_path
+
+    def run(self):
+        try:
+            import importlib.util
+            from datetime import datetime
+            
+            spec = importlib.util.spec_from_file_location("migrar_script", "sar/scripts/core/migrar_orden4_a_orden5.py")
+            migrar_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migrar_module)
+            
+            # Sobrescribir constantes del script
+            migrar_module.ORDEN_4_ID = self.orden_id
+            migrar_module.CSV_PATH = self.csv_path
+            migrar_module.DESCRIPCION_ORDEN_5 = f"Migración desde Orden {self.orden_id} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            
+            # Ejecutar main del script
+            migrar_module.main()
+            self.finished_signal.emit()
+        except Exception as e:
+            self.error_signal.emit(str(e))
 
 class MigrationView(QWidget):
     """View to download the migration template and trigger the Order migration process."""
@@ -240,22 +270,26 @@ class MigrationView(QWidget):
             return
             
         try:
-            # Reutilizar el script avanzado para ejecutar de forma transaccional
-            # Modificamos variables del script en runtime
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("migrar_script", "sar/scripts/core/migrar_orden4_a_orden5.py")
-            migrar_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(migrar_module)
-            
-            # Sobrescribir constantes del script
-            migrar_module.ORDEN_4_ID = orden_id
-            migrar_module.CSV_PATH = os.path.abspath(file_path)
-            migrar_module.DESCRIPCION_ORDEN_5 = f"Migración desde Orden {orden_id} - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            
-            # Ejecutar main del script
-            migrar_module.main()
-            
-            QMessageBox.information(self, "Éxito", "La migración se completó con éxito.")
-            self.refresh_data()
+            from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
+            self.loading_dialog = GLLoadingDialog("Ejecutando proceso de migración de orden...", self)
+            self.loading_dialog.show()
+
+            self.worker = MigrationWorker(orden_id, os.path.abspath(file_path))
+            self.worker.finished_signal.connect(self._on_migration_success)
+            self.worker.error_signal.connect(self._on_migration_error)
+            self.worker.start()
         except Exception as e:
-            QMessageBox.critical(self, "Error de Migración", f"Error durante la migración:\n\n{e}")
+            QMessageBox.critical(self, "Error de Migración", f"Error al iniciar la migración:\n\n{e}")
+
+    def _on_migration_success(self):
+        if hasattr(self, "loading_dialog") and self.loading_dialog:
+            self.loading_dialog.accept()
+            self.loading_dialog = None
+        QMessageBox.information(self, "Éxito", "La migración se completó con éxito.")
+        self.refresh_data()
+
+    def _on_migration_error(self, err_msg):
+        if hasattr(self, "loading_dialog") and self.loading_dialog:
+            self.loading_dialog.accept()
+            self.loading_dialog = None
+        QMessageBox.critical(self, "Error de Migración", f"Error durante la migración:\n\n{err_msg}")
