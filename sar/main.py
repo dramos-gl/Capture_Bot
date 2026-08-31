@@ -177,13 +177,28 @@ class MainWindow(QMainWindow):
                 self.active_module.setCentralWidget(lbl)
                 
             if selected_mod_code in ("BOT_FACE_A", "BOT_C", "R2F_CANCUN"):
+                # Dynamically calculate optimal window size based on available screen geometry
+                screen = QApplication.primaryScreen()
+                avail_geom = screen.availableGeometry() if screen else None
+                
+                target_w = 1100
+                target_h = 590
+                
+                if avail_geom:
+                    # Cap height to available space minus taskbar and window decorations buffer
+                    max_h = max(450, avail_geom.height() - 35)
+                    target_h = min(target_h, max_h)
+                    target_w = min(target_w, avail_geom.width() - 20)
+                
+                self.active_module.resize(target_w, target_h)
                 self.active_module.show()
-                # Center window on primary screen
-                screen_geometry = QApplication.primaryScreen().geometry()
-                window_geometry = self.active_module.frameGeometry()
-                x = (screen_geometry.width() - window_geometry.width()) // 2
-                y = (screen_geometry.height() - window_geometry.height()) // 2
-                self.active_module.move(x, y)
+                
+                # Center window within available geometry
+                if avail_geom:
+                    frame_geom = self.active_module.frameGeometry()
+                    x = avail_geom.x() + (avail_geom.width() - frame_geom.width()) // 2
+                    y = avail_geom.y() + (avail_geom.height() - frame_geom.height()) // 2
+                    self.active_module.move(max(0, x), max(0, y))
             else:
                 self.active_module.showMaximized()
 

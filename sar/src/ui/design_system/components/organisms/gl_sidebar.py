@@ -20,17 +20,28 @@ class NavigationSidebar(QFrame):
         super().__init__(parent)
         self.setObjectName("sidebarFrame")
         self.setFixedWidth(250)
-        self.setMinimumHeight(100)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
+        self.setMinimumHeight(0)
         
-        # Main outer layout to contain the QScrollArea
+        # Main outer layout to contain the 3 decoupled areas
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
         
-        # Scroll Area for sidebar content
+        # 1. Brand Area Container (Fixed Top)
+        self.brand_widget = QWidget(self)
+        self.brand_widget.setObjectName("sidebarBrandContainer")
+        self.brand_widget.setStyleSheet("QWidget#sidebarBrandContainer { background: transparent; }")
+        self.brand_layout = QVBoxLayout(self.brand_widget)
+        self.brand_layout.setContentsMargins(16, 20, 16, 12)
+        self.brand_layout.setSpacing(10)
+        outer_layout.addWidget(self.brand_widget)
+        
+        # 2. Scroll Area for navigation items (Middle - Flexible)
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setMinimumHeight(100)
+        self.scroll_area.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Ignored)
+        self.scroll_area.setMinimumHeight(50)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.scroll_area.setStyleSheet("""
@@ -64,13 +75,23 @@ class NavigationSidebar(QFrame):
         
         scroll_content = QWidget()
         scroll_content.setObjectName("scrollContent")
+        scroll_content.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         
-        self.layout = QVBoxLayout(scroll_content)
-        self.layout.setContentsMargins(16, 24, 16, 16)
-        self.layout.setSpacing(10)
+        self.nav_layout = QVBoxLayout(scroll_content)
+        self.nav_layout.setContentsMargins(16, 0, 16, 0)
+        self.nav_layout.setSpacing(6)
         
         self.scroll_area.setWidget(scroll_content)
-        outer_layout.addWidget(self.scroll_area)
+        outer_layout.addWidget(self.scroll_area, stretch=1)
+        
+        # 3. Footer Area Container (Fixed Bottom - Pinned Logout and Profile)
+        self.footer_widget = QWidget(self)
+        self.footer_widget.setObjectName("sidebarFooterContainer")
+        self.footer_widget.setStyleSheet("QWidget#sidebarFooterContainer { background: transparent; border-top: 1px solid #E2E8F0; }")
+        self.footer_layout = QVBoxLayout(self.footer_widget)
+        self.footer_layout.setContentsMargins(16, 12, 16, 16)
+        self.footer_layout.setSpacing(8)
+        outer_layout.addWidget(self.footer_widget)
         
         self._setup_brand_area()
         self._setup_navigation()
@@ -78,11 +99,6 @@ class NavigationSidebar(QFrame):
         
     def _setup_brand_area(self):
         self.is_collapsed = False
-        
-        # 1. Brand Logo & Title Area + Hamburger Button
-        self.brand_outer_layout = QVBoxLayout()
-        self.brand_outer_layout.setContentsMargins(0, 0, 0, 0)
-        self.brand_outer_layout.setSpacing(10)
         
         # Row with Hamburger
         self.hamburger_layout = QHBoxLayout()
@@ -97,12 +113,12 @@ class NavigationSidebar(QFrame):
         
         self.hamburger_layout.addStretch()
         self.hamburger_layout.addWidget(self.btn_hamburger)
-        self.brand_outer_layout.addLayout(self.hamburger_layout)
+        self.brand_layout.addLayout(self.hamburger_layout)
         
         # Row with Brand info
-        self.brand_layout = QHBoxLayout()
-        self.brand_layout.setContentsMargins(0, 0, 0, 0)
-        self.brand_layout.setSpacing(12)
+        self.brand_info_layout = QHBoxLayout()
+        self.brand_info_layout.setContentsMargins(0, 0, 0, 0)
+        self.brand_info_layout.setSpacing(12)
         
         # Rounded logo box
         self.logo_label = QLabel(self)
@@ -110,7 +126,7 @@ class NavigationSidebar(QFrame):
         self.logo_label.setObjectName("sidebarLogo")
         self.logo_label.setAlignment(Qt.AlignCenter)
         self.logo_label.setPixmap(Icons.file_text("#FFFFFF").pixmap(24, 24))
-        self.brand_layout.addWidget(self.logo_label)
+        self.brand_info_layout.addWidget(self.logo_label)
         
         self.title_text_layout = QVBoxLayout()
         self.title_text_layout.setContentsMargins(0, 0, 0, 0)
@@ -124,11 +140,9 @@ class NavigationSidebar(QFrame):
         
         self.title_text_layout.addWidget(self.brand_title)
         self.title_text_layout.addWidget(self.brand_subtitle)
-        self.brand_layout.addLayout(self.title_text_layout)
+        self.brand_info_layout.addLayout(self.title_text_layout)
         
-        self.brand_outer_layout.addLayout(self.brand_layout)
-        self.layout.addLayout(self.brand_outer_layout)
-        self.layout.addSpacing(24)
+        self.brand_layout.addLayout(self.brand_info_layout)
         
     def _setup_navigation(self):
         # 2. Navigation Button Group
@@ -248,7 +262,7 @@ class NavigationSidebar(QFrame):
             else:
                 _update_btn_icon(btn, icon_name, False)
                 
-            self.layout.addWidget(btn)
+            self.nav_layout.addWidget(btn)
             btn.setVisible(False)
             self.buttons[key] = btn
             
@@ -263,7 +277,7 @@ class NavigationSidebar(QFrame):
                 arrow_layout.addWidget(self.chevron_label)
                 
                 # Add submenu container immediately below "Órdenes"
-                self.layout.addWidget(self.submenu_container)
+                self.nav_layout.addWidget(self.submenu_container)
                 self.submenu_container.hide()
 
             elif key == "inventario":
@@ -277,7 +291,7 @@ class NavigationSidebar(QFrame):
                 arrow_layout2.addWidget(self.chevron_label2)
                 
                 # Add submenu container immediately below "Inventario"
-                self.layout.addWidget(self.inv_submenu_container)
+                self.nav_layout.addWidget(self.inv_submenu_container)
                 self.inv_submenu_container.hide()
             
             # Connect clicked handler
@@ -293,25 +307,24 @@ class NavigationSidebar(QFrame):
         self.btn_inv_catalogos.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_catalogos"))
         self.btn_inv_lotes.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_lotes"))
 
+        self.nav_layout.addStretch()
+
     def _setup_footer(self):
-        # Add spacer
-        self.layout.addSpacerItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
-        
         # 3. Bottom controls
         self.theme_btn = QPushButton("Cambiar Tema")
         self.theme_btn.setObjectName("themeToggleBtn")
         self.theme_btn.setIcon(Icons.calendar())
         self.theme_btn.clicked.connect(self.theme_toggled.emit)
-        self.layout.addWidget(self.theme_btn)
+        self.footer_layout.addWidget(self.theme_btn)
         
-        # Logout button
+        # Logout button (Pinned and always visible)
         self.logout_btn = QPushButton(" Cerrar Sesión")
         self.logout_btn.setObjectName("logoutBtn")
         self.logout_btn.setIcon(Icons.power("#DC2626"))
         self.logout_btn.clicked.connect(self._on_logout_clicked)
-        self.layout.addWidget(self.logout_btn)
+        self.footer_layout.addWidget(self.logout_btn)
         
-        self.layout.addSpacing(16)
+        self.footer_layout.addSpacing(6)
         
         # 4. User profile status block at the bottom
         self.profile_widget = QWidget(self)
@@ -341,7 +354,7 @@ class NavigationSidebar(QFrame):
         self.profile_layout.addLayout(self.profile_text_layout)
         self.profile_layout.addStretch()
         
-        self.layout.addWidget(self.profile_widget)
+        self.footer_layout.addWidget(self.profile_widget)
 
     def _on_main_nav_clicked(self, clicked_key: str):
         if self.is_collapsed:
@@ -349,6 +362,11 @@ class NavigationSidebar(QFrame):
         if clicked_key == "ordenes":
             self.submenu_visible = not self.submenu_visible
             self.submenu_container.setVisible(self.submenu_visible)
+            # Accordion: close inventario submenu if open
+            if self.submenu_visible and self.inv_submenu_visible:
+                self.inv_submenu_visible = False
+                self.inv_submenu_container.setVisible(False)
+                self.chevron_label2.setPixmap(Icons.chevron_down("#475569").pixmap(12, 12))
             color = "#2563EB" if self.buttons["ordenes"].isChecked() else "#475569"
             if self.submenu_visible:
                 self.chevron_label.setPixmap(Icons.chevron_up(color).pixmap(12, 12))
@@ -360,6 +378,11 @@ class NavigationSidebar(QFrame):
         if clicked_key == "inventario":
             self.inv_submenu_visible = not self.inv_submenu_visible
             self.inv_submenu_container.setVisible(self.inv_submenu_visible)
+            # Accordion: close ordenes submenu if open
+            if self.inv_submenu_visible and self.submenu_visible:
+                self.submenu_visible = False
+                self.submenu_container.setVisible(False)
+                self.chevron_label.setPixmap(Icons.chevron_down("#475569").pixmap(12, 12))
             color = "#2563EB" if self.buttons["inventario"].isChecked() else "#475569"
             if self.inv_submenu_visible:
                 self.chevron_label2.setPixmap(Icons.chevron_up(color).pixmap(12, 12))
@@ -473,13 +496,16 @@ class NavigationSidebar(QFrame):
         self.is_collapsed = not self.is_collapsed
         if self.is_collapsed:
             self.setFixedWidth(70)
+            self.brand_layout.setContentsMargins(8, 20, 8, 12)
+            self.nav_layout.setContentsMargins(8, 0, 8, 0)
+            self.footer_layout.setContentsMargins(8, 10, 8, 16)
             self.logo_label.hide()
             self.brand_title.hide()
             self.brand_subtitle.hide()
             
             # Hide labels of parent buttons and center icons
             for key, btn in self.buttons.items():
-                if key not in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_catalogos"]:
+                if key not in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                     btn.setText("")
                     btn.setStyleSheet("padding: 12px 0px; text-align: center;")
                 else:
@@ -499,6 +525,9 @@ class NavigationSidebar(QFrame):
             self.profile_widget.hide()
         else:
             self.setFixedWidth(250)
+            self.brand_layout.setContentsMargins(16, 20, 16, 12)
+            self.nav_layout.setContentsMargins(16, 0, 16, 0)
+            self.footer_layout.setContentsMargins(16, 12, 16, 16)
             self.logo_label.show()
             self.brand_title.show()
             self.brand_subtitle.show()

@@ -30,8 +30,8 @@ class BotView(QWidget):
         self.current_bot_context = None
         
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
-        self.main_layout.setSpacing(10)
+        self.main_layout.setContentsMargins(8, 8, 8, 8)
+        self.main_layout.setSpacing(6)
         
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
@@ -156,7 +156,8 @@ class BotView(QWidget):
         controles_frame = QFrame()
         controles_frame.setObjectName("card")
         c_layout = QVBoxLayout(controles_frame)
-        c_layout.setContentsMargins(8, 8, 8, 8)
+        c_layout.setContentsMargins(8, 6, 8, 6)
+        c_layout.setSpacing(4)
         
         lbl_c = CustomLabel("⚙ CONTROLES OPERATIVOS", variant="subheader")
         c_layout.addWidget(lbl_c)
@@ -174,13 +175,13 @@ class BotView(QWidget):
         path_input_layout = QHBoxLayout()
         display_label_text = f"Por defecto ({self.default_output_dir})"
         self.lbl_download_path_display = CustomLabel(display_label_text, variant="body")
-        self.lbl_download_path_display.setStyleSheet("background-color: #f9fafb; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px;")
+        self.lbl_download_path_display.setStyleSheet("background-color: #f9fafb; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px;")
         self.selected_custom_path = None
         path_input_layout.addWidget(self.lbl_download_path_display, stretch=4)
         
         self.btn_browse = CustomButton("...", is_secondary=True)
         self.btn_browse.setObjectName("secondaryBtn")
-        self.btn_browse.setStyleSheet("padding: 4px 8px; font-weight: bold;")
+        self.btn_browse.setStyleSheet("padding: 2px 6px; font-weight: bold;")
         self.btn_browse.clicked.connect(self._on_browse_path_clicked)
         path_input_layout.addWidget(self.btn_browse, stretch=1)
         c_layout.addLayout(path_input_layout)
@@ -191,11 +192,13 @@ class BotView(QWidget):
         
         self.btn_iniciar = CustomButton("▶ Iniciar Bot", is_secondary=False)
         self.btn_iniciar.setObjectName("primaryBtn")
+        self.btn_iniciar.setFixedHeight(30)
         self.btn_iniciar.clicked.connect(self._on_iniciar_bot)
         c_layout.addWidget(self.btn_iniciar)
         
         self.btn_seleccionar = CustomButton("📥 Cargar Solicitud Seleccionada", is_secondary=True)
         self.btn_seleccionar.setObjectName("secondaryBtn")
+        self.btn_seleccionar.setFixedHeight(30)
         self.btn_seleccionar.clicked.connect(self._on_cargar_solicitud)
         c_layout.addWidget(self.btn_seleccionar)
         
@@ -205,7 +208,8 @@ class BotView(QWidget):
         metricas_frame = QFrame()
         metricas_frame.setObjectName("card")
         m_layout = QVBoxLayout(metricas_frame)
-        m_layout.setContentsMargins(8, 8, 8, 8)
+        m_layout.setContentsMargins(8, 6, 8, 6)
+        m_layout.setSpacing(4)
         
         lbl_m = CustomLabel("📊 MÉTRICAS DE GENERACIÓN DE BOLETAS DE DERECHOS", variant="subheader")
         m_layout.addWidget(lbl_m)
@@ -220,7 +224,7 @@ class BotView(QWidget):
         grid_m.addWidget(self.box_errores, 0, 2)
         
         self.lbl_rfc_info = CustomLabel("RFC: -- | Razón Social: --\nCP: --", variant="muted")
-        self.lbl_rfc_info.setStyleSheet("color: #6b7280; font-size: 11px; background: #f9fafb; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px;")
+        self.lbl_rfc_info.setStyleSheet("color: #6b7280; font-size: 11px; background: #f9fafb; padding: 4px; border: 1px solid #e5e7eb; border-radius: 4px;")
         grid_m.addWidget(self.lbl_rfc_info, 1, 0, 1, 3)
         
         m_layout.addLayout(grid_m)
@@ -230,7 +234,8 @@ class BotView(QWidget):
         monitoreo_frame = QFrame()
         monitoreo_frame.setObjectName("card")
         mon_layout = QVBoxLayout(monitoreo_frame)
-        mon_layout.setContentsMargins(8, 8, 8, 8)
+        mon_layout.setContentsMargins(8, 6, 8, 6)
+        mon_layout.setSpacing(4)
         
         lbl_mon = CustomLabel("📡 MONITOREO EN TIEMPO REAL", variant="subheader")
         mon_layout.addWidget(lbl_mon)
@@ -286,6 +291,8 @@ class BotView(QWidget):
         panel = QFrame()
         panel.setObjectName("card")
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
         
         header_layout = QHBoxLayout()
         lbl = CustomLabel("⚙ SOLICITUDES ASIGNADAS", variant="subheader")
@@ -307,8 +314,8 @@ class BotView(QWidget):
         self.table = StyledDataTable(headers, parent=self)
         self.table.setObjectName("botTable")
         self.table.doubleClicked.connect(lambda index: self._on_cargar_solicitud())
-        self.table.setMinimumHeight(150)
-        self.table.setMaximumHeight(200)
+        self.table.setMinimumHeight(110)
+        self.table.setMaximumHeight(160)
         layout.addWidget(self.table)
         
         self.main_layout.addWidget(panel, stretch=2)
@@ -317,6 +324,8 @@ class BotView(QWidget):
         panel = QFrame()
         panel.setObjectName("card")
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
         
         lbl = CustomLabel("⚙ CONSOLA DE LOGS DE ACTIVIDAD", variant="subheader")
         layout.addWidget(lbl)
@@ -324,8 +333,8 @@ class BotView(QWidget):
         self.console = QTextEdit()
         self.console.setObjectName("console")
         self.console.setReadOnly(True)
-        self.console.setMinimumHeight(100)
-        self.console.setMaximumHeight(140)
+        self.console.setMinimumHeight(65)
+        self.console.setMaximumHeight(100)
         layout.addWidget(self.console)
         
         self.log("Sistema listo. Esperando carga de solicitud...")

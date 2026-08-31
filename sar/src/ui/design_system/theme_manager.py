@@ -810,21 +810,21 @@ class ThemeManager:
         QFrame#botHeaderFaceA {{
             background-color: #1e293b;
             border-radius: 8px;
-            padding: 12px 24px;
+            padding: 8px 16px;
         }}
         QFrame#botHeaderFaceA QLabel {{
             color: white;
-            font-size: 18px;
+            font-size: 15px;
             font-weight: bold;
         }}
         QFrame#botHeaderFaceC {{
             background-color: #1e293b;
             border-radius: 8px;
-            padding: 12px 24px;
+            padding: 8px 16px;
         }}
         QFrame#botHeaderFaceC QLabel {{
             color: white;
-            font-size: 18px;
+            font-size: 15px;
             font-weight: bold;
         }}
         

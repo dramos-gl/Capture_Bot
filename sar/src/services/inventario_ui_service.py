@@ -454,6 +454,30 @@ class InventarioUIService:
                 repo = InventarioRepository(session)
                 return repo.get_facturas_by_referencia_id(referencia_id)
 
+    def get_ubicacion_by_coordenadas(
+        self, desarrollo_id: int, mz: str, lote: str, edif: str = None, viv: str = None
+    ) -> Optional[Dict[str, Any]]:
+        """Searches for existing Ubicacion by development and coordinates."""
+        if not desarrollo_id or not mz or not lote:
+            return None
+        if self.api_client.connect_via_api:
+            params = {
+                "desarrollo_id": desarrollo_id,
+                "mz": mz,
+                "lote": lote
+            }
+            if edif:
+                params["edif"] = edif
+            if viv:
+                params["viv"] = viv
+            return self.api_client.request("GET", "/api/docs/inventario/ubicaciones/buscar", data=params)
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                return repo.get_ubicacion_by_coordenadas(desarrollo_id, mz, lote, edif, viv)
+
     def get_referencias_disponibles_filtro(
         self, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int, orden_ids: list = None
     ) -> List[Dict[str, Any]]:

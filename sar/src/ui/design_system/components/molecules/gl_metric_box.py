@@ -8,7 +8,7 @@ class MetricBox(QFrame):
     
     def __init__(self, title: str, value: str, color: str, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(105)
+        self.setFixedHeight(72)
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: #ffffff;
@@ -18,15 +18,15 @@ class MetricBox(QFrame):
             }}
         """)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(2)
         
         lbl_title = CustomLabel(title, variant="muted")
         lbl_title.setStyleSheet("font-weight: bold; color: #6b7280; font-size: 11px;")
         layout.addWidget(lbl_title)
         
         self.lbl_value = CustomLabel(value, variant="header")
-        self.lbl_value.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {color};")
+        self.lbl_value.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {color};")
         layout.addWidget(self.lbl_value)
         
     def set_value(self, value: str):

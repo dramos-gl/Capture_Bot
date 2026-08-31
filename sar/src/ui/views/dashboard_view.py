@@ -1,7 +1,7 @@
 """Dashboard Main View matching the target design mockup."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QLineEdit, QPushButton, QComboBox, QLabel, QMenu, QDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QLineEdit, QPushButton, QComboBox, QLabel, QMenu, QDialog, QScrollArea
 )
 
 class KeepOpenMenu(QMenu):
@@ -92,7 +92,27 @@ class DashboardView(QWidget):
         self.referencias_service = ReferenciasService(self.db_connector)
         self.active_kpis_worker = None
         
-        self.layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QWidget#dashboardScrollContent {
+                background-color: transparent;
+            }
+        """)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("dashboardScrollContent")
+        self.layout = QVBoxLayout(scroll_content)
         self.layout.setContentsMargins(24, 24, 24, 24)
         self.layout.setSpacing(20)
         
@@ -160,8 +180,7 @@ class DashboardView(QWidget):
         self.header_layout.addWidget(self.time_widget)
         
         # Actualizar Button
-        self.btn_update = QPushButton(" Actualizar")
-        self.btn_update.setObjectName("primaryBtn")
+        self.btn_update = CustomButton(" Actualizar", parent=self)
         self.btn_update.setIcon(Icons.refresh())
         self.btn_update.setFixedHeight(36)
         self.btn_update.clicked.connect(self.refresh_data)
@@ -169,25 +188,29 @@ class DashboardView(QWidget):
         
         self.layout.addLayout(self.header_layout)
         
-        # 2. KPI Cards Row (Grid)
-        self.kpi_layout = QGridLayout()
-        self.kpi_layout.setSpacing(16)
+        # 2. KPI Cards Row (Single dynamic row with stretch=1 across all 6 cards)
+        self.kpi_widget = QWidget(self)
+        self.kpi_widget.setObjectName("kpiRowWidget")
+        self.kpi_widget.setStyleSheet("QWidget#kpiRowWidget { background: transparent; }")
+        self.kpi_layout = QHBoxLayout(self.kpi_widget)
+        self.kpi_layout.setContentsMargins(0, 0, 0, 0)
+        self.kpi_layout.setSpacing(10)
         
-        self.card_generadas = StatCard("Total Generadas", "0", "file_text", color_hex=Colors.ACCENT, parent=self)
-        self.card_pendientes = StatCard("Pendientes Autorización", "0", "clock", color_hex=Colors.WARNING, parent=self)
-        self.card_autorizadas = StatCard("Autorizadas por Facturar", "0", "shield_check", color_hex=Colors.SUCCESS, parent=self)
-        self.card_rechazadas = StatCard("Rechazadas", "0", "x_circle", color_hex="#EA580C", parent=self)
-        self.card_error = StatCard("Con Error", "0", "alert_triangle", color_hex=Colors.ERROR, parent=self)
-        self.card_invalidas = StatCard("Derechos Invalidadas", "0", "alert_triangle", color_hex="#64748B", parent=self)
+        self.card_generadas = StatCard("Total Generadas", "0", "file_text", color_hex=Colors.ACCENT, parent=self.kpi_widget)
+        self.card_pendientes = StatCard("Pendientes Autorización", "0", "clock", color_hex=Colors.WARNING, parent=self.kpi_widget)
+        self.card_autorizadas = StatCard("Autorizadas por Facturar", "0", "shield_check", color_hex=Colors.SUCCESS, parent=self.kpi_widget)
+        self.card_rechazadas = StatCard("Rechazadas", "0", "x_circle", color_hex="#EA580C", parent=self.kpi_widget)
+        self.card_error = StatCard("Con Error", "0", "alert_triangle", color_hex=Colors.ERROR, parent=self.kpi_widget)
+        self.card_invalidas = StatCard("Derechos Invalidadas", "0", "alert_triangle", color_hex="#64748B", parent=self.kpi_widget)
         
-        self.kpi_layout.addWidget(self.card_generadas, 0, 0)
-        self.kpi_layout.addWidget(self.card_pendientes, 0, 1)
-        self.kpi_layout.addWidget(self.card_autorizadas, 0, 2)
-        self.kpi_layout.addWidget(self.card_rechazadas, 0, 3)
-        self.kpi_layout.addWidget(self.card_error, 0, 4)
-        self.kpi_layout.addWidget(self.card_invalidas, 0, 5)
+        self.kpi_layout.addWidget(self.card_generadas, stretch=1)
+        self.kpi_layout.addWidget(self.card_pendientes, stretch=1)
+        self.kpi_layout.addWidget(self.card_autorizadas, stretch=1)
+        self.kpi_layout.addWidget(self.card_rechazadas, stretch=1)
+        self.kpi_layout.addWidget(self.card_error, stretch=1)
+        self.kpi_layout.addWidget(self.card_invalidas, stretch=1)
         
-        self.layout.addLayout(self.kpi_layout)
+        self.layout.addWidget(self.kpi_widget)
         
         # 3. Main Action Container (Recent Activity Card)
         self.activity_card = QFrame(self)
@@ -281,6 +304,9 @@ class DashboardView(QWidget):
         self.card_error.mouseDoubleClickEvent = self._on_error_card_double_clicked
         self.card_invalidas.mouseDoubleClickEvent = self._on_invalidas_card_double_clicked
         self.layout.addWidget(self.activity_card)
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area)
+
         self._load_available_orders()
         self.refresh_data()
         

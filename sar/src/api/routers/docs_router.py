@@ -1038,6 +1038,18 @@ def get_conceptos_con_stock(rfc_id: int, delegacion_id: int, db: Session = Depen
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/inventario/ubicaciones/buscar")
+def api_buscar_ubicacion(
+    desarrollo_id: int, mz: str, lote: str, edif: Optional[str] = None, viv: Optional[str] = None, db: Session = Depends(get_db)
+):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_ubicacion_by_coordenadas(
+            desarrollo_id=desarrollo_id, mz=mz, lote=lote, edif=edif, viv=viv
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/inventario/referencias-facturadas")
 def get_referencias_facturadas(
     limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None, filter_assigned: str = "Todos",

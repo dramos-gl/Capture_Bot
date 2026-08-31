@@ -3,7 +3,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QPushButton, QTabWidget,
     QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
-    QDateEdit, QFrame, QMenu
+    QDateEdit, QFrame, QMenu, QScrollArea
 )
 
 class KeepOpenMenu(QMenu):
@@ -373,7 +373,23 @@ class InventoryView(QWidget):
     # TAB 1: VISOR DE INVENTARIO
     # =========================================================================
     def _setup_tab_visor(self):
-        layout = QVBoxLayout(self.tab_visor)
+        tab_layout = QVBoxLayout(self.tab_visor)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(0)
+
+        scroll_area = QScrollArea(self.tab_visor)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea { border: none; background-color: transparent; }
+            QWidget#visorScrollContent { background-color: transparent; }
+        """)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("visorScrollContent")
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
         # Filter bar
@@ -498,10 +514,15 @@ class InventoryView(QWidget):
         
         headers = ["✔", "ID", "Referencia", "Concepto", "Empresa", "Importe", "Estado", "Asignado A", "Tipo", "Solicitante", "Desarrollo", "Cliente", "Mz", "Lt", "Edif", "Viv", "Folio Electrónico", "Fecha Asignación"]
         self.table = StyledDataTable(headers, parent=self)
-        self.table.setMinimumHeight(200)
+        self.table.setMinimumHeight(180)
         self.table.setMinimumWidth(200)
         self.table.setColumnHidden(1, True) # Hide internal ID
         self.card.add_widget(self.table)
+
+        layout.addWidget(self.card)
+
+        scroll_area.setWidget(scroll_content)
+        tab_layout.addWidget(scroll_area)
 
         # Paging Info and Size
         footer_layout = QHBoxLayout()
@@ -821,24 +842,35 @@ class InventoryView(QWidget):
             self.btn_marcar_visibles.setText("Desmarcar Visibles" if checked else "Marcar Visibles")
 
     def _on_table_cell_double_clicked(self, row, column):
-        state_item = self.table.item(row, 6)
-        if not state_item or state_item.text() not in ("Asignada", "Reservada"):
+        ref_id_item = self.table.item(row, 1)
+        if not ref_id_item or not ref_id_item.text():
             return
-            
-        ref_id_str = self.table.item(row, 1).text()
-        if not ref_id_str:
+
+        try:
+            ref_id = int(ref_id_item.text())
+        except ValueError:
             return
-            
-        ref_id = int(ref_id_str)
-        lote_id = None
+
+        ref_portal = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
+        
+        # Match dictionary from self.all_data
+        selected_ref = None
         for r in self.all_data:
             if r.get("referencia_id") == ref_id:
-                lote_id = r.get("lote_asignacion_id")
+                selected_ref = r
                 break
-                
-        if lote_id:
-            dialog = LoteProcessingDialog(self.db_connector, lote_id, self)
-            dialog.exec()
+
+        selected_refs = [selected_ref] if selected_ref else []
+
+        dialog = ManualAssignmentDialog(
+            self.db_connector,
+            [ref_id],
+            [ref_portal],
+            parent=self,
+            selected_refs=selected_refs
+        )
+        if dialog.exec() == QDialog.Accepted:
+            self.refresh_visor_data()
 
     def _on_marcar_visibles(self):
         any_checked = any(self.table.item(r, 0).checkState() == Qt.CheckState.Checked for r in range(self.table.rowCount()))
@@ -875,8 +907,30 @@ class InventoryView(QWidget):
     # TAB 2: ASIGNACIÓN MASIVA (EXCEL)
     # =========================================================================
     def _setup_tab_masivo(self):
-        layout = QVBoxLayout(self.tab_masivo)
-        layout.setSpacing(16)
+        tab_layout = QVBoxLayout(self.tab_masivo)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(0)
+
+        # 1. Scroll Area to guarantee responsiveness in 1366x768 and small screens
+        scroll_area = QScrollArea(self.tab_masivo)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QWidget#masivoScrollContent {
+                background-color: transparent;
+            }
+        """)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("masivoScrollContent")
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
 
         card_form = CustomCard(title="", parent=self)
         
@@ -893,31 +947,42 @@ class InventoryView(QWidget):
         self.btn_filter_orden_masivo.setToolTip("Filtrar por Órdenes")
         self.btn_filter_orden_masivo.clicked.connect(self._show_order_filter_menu)
         header_layout_masivo.addWidget(self.btn_filter_orden_masivo)
-        
-        self.form_layout_masivo = QFormLayout()
         card_form.layout.addLayout(header_layout_masivo)
-        card_form.layout.addLayout(self.form_layout_masivo)
         
-        # Checkbox 1 Layout
-        chk1_layout = QVBoxLayout()
+        # Checkboxes Container in a sleek 2-column horizontal layout
+        chk_container = QWidget(self)
+        chk_container.setStyleSheet("background: transparent;")
+        chk_layout = QHBoxLayout(chk_container)
+        chk_layout.setContentsMargins(4, 4, 4, 8)
+        chk_layout.setSpacing(20)
+
+        # Checkbox 1 (Completar Lote Reservado)
+        chk1_box = QVBoxLayout()
+        chk1_box.setSpacing(2)
         self.chk_completar_reserva = CustomCheckBox("Completar Lote Reservado", self)
         self.chk_completar_reserva.stateChanged.connect(self._on_completar_reserva_changed)
-        chk1_layout.addWidget(self.chk_completar_reserva)
-        
+        chk1_box.addWidget(self.chk_completar_reserva)
         lbl_desc1 = QLabel("Asigna ubicación definitiva a derechos que ya han sido reservados.")
         lbl_desc1.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 24px;")
-        chk1_layout.addWidget(lbl_desc1)
-        self.form_layout_masivo.addRow("", chk1_layout)
+        chk1_box.addWidget(lbl_desc1)
+        chk_layout.addLayout(chk1_box, stretch=1)
 
-        # Checkbox 2 Layout
-        chk2_layout = QVBoxLayout()
+        # Checkbox 2 (Reservar Derechos)
+        chk2_box = QVBoxLayout()
+        chk2_box.setSpacing(2)
         self.chk_solo_reservar = CustomCheckBox("Reservar Derechos", self)
-        chk2_layout.addWidget(self.chk_solo_reservar)
-        
+        chk2_box.addWidget(self.chk_solo_reservar)
         lbl_desc2 = QLabel("Reserva derechos ya usados de forma manual sin validación de clientes/dirección.")
         lbl_desc2.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 24px;")
-        chk2_layout.addWidget(lbl_desc2)
-        self.form_layout_masivo.addRow("", chk2_layout)
+        chk2_box.addWidget(lbl_desc2)
+        chk_layout.addLayout(chk2_box, stretch=1)
+
+        card_form.layout.addWidget(chk_container)
+
+        self.form_layout_masivo = QFormLayout()
+        self.form_layout_masivo.setVerticalSpacing(8)
+        self.form_layout_masivo.setHorizontalSpacing(16)
+        self.form_layout_masivo.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         self.cb_destino_masivo = CustomComboBox(self)
         self.cb_destino_masivo.addItems(["-- Seleccione un tipo de destino --", "NOTARIA", "COLABORADOR"])
@@ -935,21 +1000,26 @@ class InventoryView(QWidget):
 
         self.txt_solicitante_masivo = QLineEdit(self)
         self.txt_solicitante_masivo.setPlaceholderText("Ej. Pedro Gómez")
+        self.txt_solicitante_masivo.setMinimumHeight(36)
         self.form_layout_masivo.addRow("Solicitante Externo (Persona):", self.txt_solicitante_masivo)
 
         self.txt_obs_masivo = QTextEdit(self)
-        self.txt_obs_masivo.setMaximumHeight(80)
+        self.txt_obs_masivo.setFixedHeight(45)
+        self.txt_obs_masivo.setPlaceholderText("Notas u observaciones adicionales para el lote (opcional)...")
         self.form_layout_masivo.addRow("Observaciones:", self.txt_obs_masivo)
 
         # File picker row
         file_layout = QHBoxLayout()
+        file_layout.setSpacing(10)
         self.lbl_excel_path = QLabel("Ningún archivo seleccionado", self)
         self.lbl_excel_path.setStyleSheet("color: #64748B; font-style: italic;")
         
         btn_pick_excel = CustomButton("Seleccionar Excel", is_secondary=True)
+        btn_pick_excel.setMinimumHeight(36)
         btn_pick_excel.clicked.connect(self._on_pick_excel_masivo)
         
         btn_download_template = CustomButton("Descargar Plantilla", is_secondary=True)
+        btn_download_template.setMinimumHeight(36)
         btn_download_template.clicked.connect(self._on_download_template)
         
         file_layout.addWidget(btn_pick_excel)
@@ -964,22 +1034,29 @@ class InventoryView(QWidget):
         # Preview list card
         self.card_preview = CustomCard(title="Previsualización de Coincidencias y Validaciones", parent=self)
         self.preview_table = StyledDataTable(["Fila Excel", "Cliente", "Desarrollo", "Delegación", "Concepto", "Referencia", "Ubicación", "Estatus Validation"], parent=self)
-        self.preview_table.setMinimumHeight(150)
+        self.preview_table.setMinimumHeight(160)
         self.preview_table.setMinimumWidth(200)
         self.card_preview.add_widget(self.preview_table)
 
         btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(0, 8, 0, 0)
+        btn_layout.setSpacing(12)
         btn_layout.addStretch()
         self.btn_limpiar_preview = CustomButton("Limpiar", is_clean_btn=True)
+        self.btn_limpiar_preview.setMinimumHeight(36)
         self.btn_limpiar_preview.clicked.connect(self._on_limpiar_preview)
         btn_layout.addWidget(self.btn_limpiar_preview)
         self.btn_confirmar_masivo = CustomButton("Confirmar")
+        self.btn_confirmar_masivo.setMinimumHeight(36)
         self.btn_confirmar_masivo.setEnabled(False)
         self.btn_confirmar_masivo.clicked.connect(self._on_confirmar_masivo)
         btn_layout.addWidget(self.btn_confirmar_masivo)
         self.card_preview.layout.addLayout(btn_layout)
 
         layout.addWidget(self.card_preview)
+
+        scroll_area.setWidget(scroll_content)
+        tab_layout.addWidget(scroll_area)
 
         self.parsed_records = []
         self.validated_records = []
@@ -1349,7 +1426,23 @@ class InventoryView(QWidget):
     # TAB 3: GESTIÓN DE CATALOGOS
     # =========================================================================
     def _setup_tab_individual(self):
-        layout = QVBoxLayout(self.tab_individual)
+        tab_layout = QVBoxLayout(self.tab_individual)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(0)
+
+        scroll_area = QScrollArea(self.tab_individual)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea { border: none; background-color: transparent; }
+            QWidget#indScrollContent { background-color: transparent; }
+        """)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("indScrollContent")
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
         card_ind = CustomCard(parent=self)
@@ -1417,14 +1510,12 @@ class InventoryView(QWidget):
 
         # Create aligned action buttons to go in the header alongside + Agregar Renglón
 
-        self.btn_buscar_ind = QPushButton("Buscar Derechos")
-        self.btn_buscar_ind.setObjectName("primaryBtn")
+        self.btn_buscar_ind = CustomButton("Buscar Derechos", parent=self)
         self.btn_buscar_ind.setMinimumHeight(35)
         self.btn_buscar_ind.setIcon(Icons.get_icon("buscar", color="#FFFFFF"))
         self.btn_buscar_ind.clicked.connect(self._on_buscar_referencias_ind)
 
-        self.btn_confirmar_ind = QPushButton("Continuar Asignación")
-        self.btn_confirmar_ind.setObjectName("primaryBtn")
+        self.btn_confirmar_ind = CustomButton("Continuar Asignación", parent=self)
         self.btn_confirmar_ind.setMinimumHeight(35)
         self.btn_confirmar_ind.setIcon(Icons.get_icon("siguiente", color="#FFFFFF"))
         self.btn_confirmar_ind.setEnabled(False)
@@ -1451,6 +1542,9 @@ class InventoryView(QWidget):
         self.table_preview_ind.setColumnHidden(1, True) # Hide internal ID
         self.card_preview_ind.add_widget(self.table_preview_ind)
         layout.addWidget(self.card_preview_ind)
+
+        scroll_area.setWidget(scroll_content)
+        tab_layout.addWidget(scroll_area)
 
         self._pending_ind_refs = []
 
@@ -1813,7 +1907,23 @@ class InventoryView(QWidget):
 
 
     def _setup_tab_apartar(self):
-        layout = QVBoxLayout(self.tab_apartar)
+        tab_layout = QVBoxLayout(self.tab_apartar)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(0)
+
+        scroll_area = QScrollArea(self.tab_apartar)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea { border: none; background-color: transparent; }
+            QWidget#apartarScrollContent { background-color: transparent; }
+        """)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("apartarScrollContent")
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
         card_apartar = CustomCard(parent=self)
@@ -1901,6 +2011,9 @@ class InventoryView(QWidget):
 
         card_apartar.layout.addLayout(form_layout)
         layout.addWidget(card_apartar)
+        
+        scroll_area.setWidget(scroll_content)
+        tab_layout.addWidget(scroll_area)
         
         # Wait, since _setup_tab_apartar is called during __init__, self._rfcs_map might not exist yet.
         # So we trigger it dynamically when the catalogs are loaded.
@@ -2181,7 +2294,23 @@ class InventoryView(QWidget):
     # =========================================================================
     def _setup_tab_lotes(self):
         """Sets up the Gestión de Asignaciones tab — shows assignment summary rows."""
-        layout = QVBoxLayout(self.tab_lotes)
+        tab_layout = QVBoxLayout(self.tab_lotes)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(0)
+
+        scroll_area = QScrollArea(self.tab_lotes)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea { border: none; background-color: transparent; }
+            QWidget#lotesScrollContent { background-color: transparent; }
+        """)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("lotesScrollContent")
+        layout = QVBoxLayout(scroll_content)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
 
         # --- Header area ---
@@ -2350,6 +2479,9 @@ class InventoryView(QWidget):
         # Hint label
         hint = CustomLabel("💡 Doble clic sobre una asignación para ver sus referencias.", variant="muted")
         layout.addWidget(hint)
+
+        scroll_area.setWidget(scroll_content)
+        tab_layout.addWidget(scroll_area)
 
 
         # State
@@ -2534,22 +2666,28 @@ class ManualAssignmentDialog(QDialog):
         super().__init__(parent)
         self.db_connector = db_connector
         self.ref_ids = ref_ids
+        self.ref_portals = ref_portals or []
         self.selected_refs = selected_refs or []
         self.inventario_ui_service = InventarioUIService(self.db_connector)
 
-        
-        self.setWindowTitle("Asignar Factura Manualmente")
-        self.setMinimumWidth(400)
+        self.setWindowTitle("Asignar Facturas Manualmente")
+        self.setMinimumWidth(440)
         self.layout = QVBoxLayout(self)
         
         form = QFormLayout()
         
-        self.lbl_info = QLabel(f"Asignando {len(ref_ids)} referencias seleccionadas.", self)
+        if len(ref_ids) == 1 and self.ref_portals:
+            info_text = f"Asignando derecho: {self.ref_portals[0]}"
+        else:
+            info_text = f"Asignando {len(ref_ids)} derechos seleccionados."
+
+        self.lbl_info = QLabel(info_text, self)
         self.lbl_info.setStyleSheet("font-weight: bold; color: #2563EB;")
         form.addRow("Info:", self.lbl_info)
 
         self.cb_destino = CustomComboBox(self)
-        self.cb_destino.addItems(["NOTARIA", "COLABORADOR"])
+        self.cb_destino.addItems(["-- Seleccione Tipo Destino --", "NOTARIA", "COLABORADOR"])
+        self.cb_destino.setCurrentIndex(0)
         self.cb_destino.currentTextChanged.connect(self._on_destino_changed)
         form.addRow("Tipo Destino:", self.cb_destino)
 
@@ -2594,6 +2732,11 @@ class ManualAssignmentDialog(QDialog):
         loc_lay2.addWidget(self.txt_viv)
         form.addRow("Ubicación 2:", loc_lay2)
 
+        # Ubicación existing match indicator
+        self.lbl_ubi_match = QLabel("", self)
+        self.lbl_ubi_match.setStyleSheet("color: #16A34A; font-size: 11px; font-weight: bold;")
+        form.addRow("", self.lbl_ubi_match)
+
         self.txt_folio = QLineEdit(self)
         form.addRow("Folio Electrónico:", self.txt_folio)
 
@@ -2606,6 +2749,19 @@ class ManualAssignmentDialog(QDialog):
         form.addRow("Observaciones:", self.txt_obs)
 
         self.layout.addLayout(form)
+
+        # Debounce timer for predictive location lookup
+        from PySide6.QtCore import QTimer
+        self._ubi_timer = QTimer(self)
+        self._ubi_timer.setSingleShot(True)
+        self._ubi_timer.setInterval(250)
+        self._ubi_timer.timeout.connect(self._lookup_existing_ubicacion)
+
+        self.cb_desarrollo.currentIndexChanged.connect(lambda: self._ubi_timer.start())
+        self.txt_mz.textChanged.connect(lambda: self._ubi_timer.start())
+        self.txt_lote.textChanged.connect(lambda: self._ubi_timer.start())
+        self.txt_edif.textChanged.connect(lambda: self._ubi_timer.start())
+        self.txt_viv.textChanged.connect(lambda: self._ubi_timer.start())
 
         # Buttons
         btns = QHBoxLayout()
@@ -2620,16 +2776,52 @@ class ManualAssignmentDialog(QDialog):
         btns.addWidget(btn_save)
         self.layout.addLayout(btns)
 
-        # Hide internal widgets initially
+        # Hide internal widgets initially until a destination type is chosen
+        self.cb_notarias.hide()
         self.cb_colaboradores.hide()
         self._load_catalogs()
+
+    def _lookup_existing_ubicacion(self):
+        des_name = self.cb_desarrollo.currentText()
+        if not des_name or des_name == "-- Seleccione Desarrollo (Opcional) --":
+            self.lbl_ubi_match.setText("")
+            return
+        des_id = self._desarrollos_map.get(des_name)
+        mz = self.txt_mz.text().strip()
+        lote = self.txt_lote.text().strip()
+        edif = self.txt_edif.text().strip() or None
+        viv = self.txt_viv.text().strip() or None
+
+        if not des_id or not mz or not lote:
+            self.lbl_ubi_match.setText("")
+            return
+
+        try:
+            ubi_data = self.inventario_ui_service.get_ubicacion_by_coordenadas(
+                desarrollo_id=des_id, mz=mz, lote=lote, edif=edif, viv=viv
+            )
+            if ubi_data:
+                self.lbl_ubi_match.setText(f"✓ Ubicación existente encontrada (ID #{ubi_data['ubicacion_id']})")
+                # Autocomplete empty fields
+                if not self.txt_cliente.text().strip() and ubi_data.get("cliente") and ubi_data.get("cliente") != "RESERVA MASIVA MANUAL":
+                    self.txt_cliente.setText(ubi_data["cliente"])
+                if not self.txt_edif.text().strip() and ubi_data.get("edif"):
+                    self.txt_edif.setText(ubi_data["edif"])
+                if not self.txt_viv.text().strip() and ubi_data.get("viv"):
+                    self.txt_viv.setText(ubi_data["viv"])
+                if not self.txt_folio.text().strip() and ubi_data.get("folio_electronico"):
+                    self.txt_folio.setText(ubi_data["folio_electronico"])
+            else:
+                self.lbl_ubi_match.setText("")
+        except Exception as e:
+            print("[ManualAssignmentDialog] Error checking ubicacion:", e)
+            self.lbl_ubi_match.setText("")
 
     def _on_destino_changed(self, text):
         if text == "NOTARIA":
             self.cb_notarias.show()
             self.cb_colaboradores.hide()
             self.txt_solicitante.setEnabled(True)
-            # Notaria requires client and address details
             self.txt_cliente.setEnabled(True)
             self.cb_desarrollo.setEnabled(True)
             self.txt_mz.setEnabled(True)
@@ -2638,15 +2830,14 @@ class ManualAssignmentDialog(QDialog):
             self.txt_viv.setEnabled(True)
             self.txt_folio.setEnabled(True)
             self.txt_estatus_aviso.setEnabled(True)
-        else:
+        elif text == "COLABORADOR":
             self.cb_notarias.hide()
             self.cb_colaboradores.show()
             self.txt_solicitante.setEnabled(False)
             self.txt_solicitante.clear()
-            # For COLABORADOR, customer and address inputs are optional or bypassed.
-            # We keep them enabled so they can be captured optionally, but they won't be validated as mandatory.
-            pass
-
+        else:
+            self.cb_notarias.hide()
+            self.cb_colaboradores.hide()
 
     def _load_catalogs(self):
         try:
@@ -2658,8 +2849,17 @@ class ManualAssignmentDialog(QDialog):
             self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
             self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
 
-            self.cb_notarias.addItems(list(self._notarias_map.keys()))
-            self.cb_colaboradores.addItems(list(self._colaboradores_map.keys()))
+            self.cb_notarias.clear()
+            self.cb_notarias.addItem("-- Seleccione Notaría --", None)
+            for n in notarias:
+                self.cb_notarias.addItem(n["nombre"], n["notaria_id"])
+            self.cb_notarias.setCurrentIndex(0)
+
+            self.cb_colaboradores.clear()
+            self.cb_colaboradores.addItem("-- Seleccione Colaborador --", None)
+            for c in colaboradores:
+                self.cb_colaboradores.addItem(c["nombre"], c["colaborador_id"])
+            self.cb_colaboradores.setCurrentIndex(0)
             
             # Filter developments to ensure referential integrity
             # Extract unique (rfc_id, delegacion_id) pairs from the references being assigned
@@ -2669,9 +2869,10 @@ class ManualAssignmentDialog(QDialog):
                 delegacion_id = ref.get("delegacion_id")
                 # Look up mapping from grid_individual rows if not directly present in ref dict
                 if not rfc_id or not delegacion_id:
-                    for row in self.parent().grid_individual.get_all_data():
-                        rfc_id = rfc_id or row.get("rfc_id")
-                        delegacion_id = delegacion_id or row.get("delegacion_id")
+                    if self.parent() and hasattr(self.parent(), "grid_individual"):
+                        for row in self.parent().grid_individual.get_all_data():
+                            rfc_id = rfc_id or row.get("rfc_id")
+                            delegacion_id = delegacion_id or row.get("delegacion_id")
                 if rfc_id and delegacion_id:
                     rfc_delegacion_pairs.add((rfc_id, delegacion_id))
 
@@ -2689,6 +2890,7 @@ class ManualAssignmentDialog(QDialog):
                         valid_desarrollo_ids.add(de.get("desarrollo_id"))
 
             # Populate developments combo with placeholder
+            self.cb_desarrollo.clear()
             self.cb_desarrollo.addItem("-- Seleccione Desarrollo (Opcional) --", None)
             
             # Load only valid filtered developments (or all if no filters resolved)
@@ -2698,20 +2900,49 @@ class ManualAssignmentDialog(QDialog):
             
             self.cb_desarrollo.setCurrentIndex(0)
 
+            # Pre-populate property details if single reference selected (excluding destination type/notary to force explicit choice)
+            if len(self.selected_refs) == 1:
+                r = self.selected_refs[0]
+                if r.get("cliente"):
+                    self.txt_cliente.setText(str(r.get("cliente")))
+                if r.get("desarrollo"):
+                    idx_des = self.cb_desarrollo.findText(str(r.get("desarrollo")))
+                    if idx_des >= 0:
+                        self.cb_desarrollo.setCurrentIndex(idx_des)
+                if r.get("mz"):
+                    self.txt_mz.setText(str(r.get("mz")))
+                if r.get("lote"):
+                    self.txt_lote.setText(str(r.get("lote")))
+                if r.get("edif"):
+                    self.txt_edif.setText(str(r.get("edif")))
+                if r.get("viv"):
+                    self.txt_viv.setText(str(r.get("viv")))
+                if r.get("folio_electronico"):
+                    self.txt_folio.setText(str(r.get("folio_electronico")))
 
         except Exception as e:
             print("Error loading catalog data for ManualAssignmentDialog:", e)
 
     def _on_save(self):
         tipo_destino = self.cb_destino.currentText()
+        if tipo_destino not in ("NOTARIA", "COLABORADOR"):
+            QMessageBox.warning(self, "Tipo Destino Requerido", "Por favor seleccione un Tipo de Destino (NOTARIA o COLABORADOR).")
+            return
+
         notaria_id = None
         colaborador_id = None
         
         if tipo_destino == "NOTARIA":
             not_name = self.cb_notarias.currentText()
+            if not_name == "-- Seleccione Notaría --" or not_name not in self._notarias_map:
+                QMessageBox.warning(self, "Notaría Requerida", "Por favor seleccione una Notaría válida.")
+                return
             notaria_id = self._notarias_map.get(not_name)
-        else:
+        elif tipo_destino == "COLABORADOR":
             col_name = self.cb_colaboradores.currentText()
+            if col_name == "-- Seleccione Colaborador --" or col_name not in self._colaboradores_map:
+                QMessageBox.warning(self, "Colaborador Requerido", "Por favor seleccione un Colaborador válido.")
+                return
             colaborador_id = self._colaboradores_map.get(col_name)
 
         solicitante_externo = self.txt_solicitante.text().strip()
@@ -2749,13 +2980,18 @@ class ManualAssignmentDialog(QDialog):
 
         # Prepare details (same values for all selected references)
         detalles_list = []
-        for r_id in self.ref_ids:
+        for idx, r_id in enumerate(self.ref_ids):
             # Find the actual portal code for references
             portal_code = ""
-            for r in range(self.parent().table.rowCount()):
-                if int(self.parent().table.item(r, 1).text()) == r_id:
-                    portal_code = self.parent().table.item(r, 2).text()
-                    break
+            if self.parent() and hasattr(self.parent(), "table"):
+                for r in range(self.parent().table.rowCount()):
+                    item_id = self.parent().table.item(r, 1)
+                    if item_id and item_id.text().isdigit() and int(item_id.text()) == r_id:
+                        item_portal = self.parent().table.item(r, 2)
+                        portal_code = item_portal.text() if item_portal else ""
+                        break
+            if not portal_code and idx < len(self.ref_portals):
+                portal_code = self.ref_portals[idx]
 
             detalles_list.append({
                 "cliente": cliente,

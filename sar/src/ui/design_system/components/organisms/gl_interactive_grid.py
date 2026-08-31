@@ -393,19 +393,16 @@ class InteractiveGrid(QWidget):
         self.header_layout.addStretch()
         
         # Buttons
-        self.btn_add = QPushButton("+ Agregar Renglón", self)
-        self.btn_add.setObjectName("primaryBtn")
+        self.btn_add = CustomButton("+ Agregar Renglón", parent=self)
         self.btn_add.setMinimumHeight(35)
         self.btn_add.clicked.connect(self.add_row)
         
-        self.btn_cancel = QPushButton("Cancelar Edición", self)
-        self.btn_cancel.setObjectName("secondaryBtn")
+        self.btn_cancel = CustomButton("Cancelar Edición", is_secondary=True, parent=self)
         self.btn_cancel.setMinimumHeight(35)
         self.btn_cancel.setVisible(False)
         self.btn_cancel.clicked.connect(self.cancel_triggered.emit)
         
-        self.btn_save = QPushButton("Guardar Orden", self)
-        self.btn_save.setObjectName("primaryBtn")
+        self.btn_save = CustomButton("Guardar Orden", parent=self)
         self.btn_save.setMinimumHeight(35)
         self.btn_save.clicked.connect(self.save_triggered.emit)
         

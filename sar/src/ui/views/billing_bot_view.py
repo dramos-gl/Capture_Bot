@@ -31,8 +31,8 @@ class BillingBotView(QWidget):
         self.current_bot_context = None
         
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
-        self.main_layout.setSpacing(10)
+        self.main_layout.setContentsMargins(8, 8, 8, 8)
+        self.main_layout.setSpacing(6)
         
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
@@ -153,12 +153,14 @@ class BillingBotView(QWidget):
         
     def _build_top_panels(self):
         top_layout = QHBoxLayout()
-        top_layout.setSpacing(16)
+        top_layout.setSpacing(10)
         
         # 1. Controles Operativos
         controles_frame = QFrame()
         controles_frame.setObjectName("card")
         c_layout = QVBoxLayout(controles_frame)
+        c_layout.setContentsMargins(8, 6, 8, 6)
+        c_layout.setSpacing(4)
         
         lbl_c = CustomLabel("⚙ CONTROLES OPERATIVOS", variant="subheader")
         c_layout.addWidget(lbl_c)
@@ -168,15 +170,19 @@ class BillingBotView(QWidget):
         self.chk_autonomo.setEnabled(False)
         c_layout.addWidget(self.chk_autonomo)
         
+        options_layout = QHBoxLayout()
+        options_layout.setSpacing(6)
+        
         self.chk_incluir_ya_descargadas = CustomSwitch("Incluir 'Ya descargadas'")
         self.chk_incluir_ya_descargadas.setChecked(False)
         self.chk_incluir_ya_descargadas.setToolTip("Activado: Procesa y vuelve a descargar facturas ya descargadas/registradas en base de datos")
-        c_layout.addWidget(self.chk_incluir_ya_descargadas)
+        options_layout.addWidget(self.chk_incluir_ya_descargadas)
         
         self.chk_capturar_delegacion = CustomSwitch("Capturar Delegación")
         self.chk_capturar_delegacion.setChecked(False)
         self.chk_capturar_delegacion.setToolTip("Extraer temporalmente la delegación (Cancun o Playa del Carmen) desde las facturas PDF")
-        c_layout.addWidget(self.chk_capturar_delegacion)
+        options_layout.addWidget(self.chk_capturar_delegacion)
+        c_layout.addLayout(options_layout)
         
         # Custom Download Path selector
         lbl_path_title = CustomLabel("📁 Ruta de Descarga / Facturas:", variant="body")
@@ -186,13 +192,13 @@ class BillingBotView(QWidget):
         path_input_layout = QHBoxLayout()
         display_label_text = f"Por defecto ({self.default_output_dir})"
         self.lbl_download_path_display = CustomLabel(display_label_text, variant="body")
-        self.lbl_download_path_display.setStyleSheet("background-color: #f9fafb; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px;")
+        self.lbl_download_path_display.setStyleSheet("background-color: #f9fafb; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px;")
         self.selected_custom_path = None
         path_input_layout.addWidget(self.lbl_download_path_display, stretch=4)
         
         self.btn_browse = CustomButton("...", is_secondary=True)
         self.btn_browse.setObjectName("secondaryBtn")
-        self.btn_browse.setStyleSheet("padding: 4px 8px; font-weight: bold;")
+        self.btn_browse.setStyleSheet("padding: 2px 6px; font-weight: bold;")
         self.btn_browse.clicked.connect(self._on_browse_path_clicked)
         path_input_layout.addWidget(self.btn_browse, stretch=1)
         c_layout.addLayout(path_input_layout)
@@ -203,15 +209,15 @@ class BillingBotView(QWidget):
         
         self.btn_iniciar = CustomButton("▶ Iniciar Bot", is_secondary=False)
         self.btn_iniciar.setObjectName("primaryBtn")
+        self.btn_iniciar.setFixedHeight(30)
         self.btn_iniciar.clicked.connect(self._on_iniciar_bot)
         c_layout.addWidget(self.btn_iniciar)
         
         self.btn_seleccionar = CustomButton("📥 Cargar Solicitud Seleccionada", is_secondary=True)
         self.btn_seleccionar.setObjectName("secondaryBtn")
+        self.btn_seleccionar.setFixedHeight(30)
         self.btn_seleccionar.clicked.connect(self._on_cargar_solicitud)
         c_layout.addWidget(self.btn_seleccionar)
-        
-        c_layout.addStretch()
         
         top_layout.addWidget(controles_frame, stretch=1)
         
@@ -219,6 +225,8 @@ class BillingBotView(QWidget):
         metricas_frame = QFrame()
         metricas_frame.setObjectName("card")
         m_layout = QVBoxLayout(metricas_frame)
+        m_layout.setContentsMargins(8, 6, 8, 6)
+        m_layout.setSpacing(4)
         
         lbl_m = CustomLabel("📊 MÉTRICAS DE FACTURACIÓN", variant="subheader")
         m_layout.addWidget(lbl_m)
@@ -233,17 +241,18 @@ class BillingBotView(QWidget):
         grid_m.addWidget(self.box_errores, 0, 2)
         
         self.lbl_rfc_info = CustomLabel("RFC: -- | Razón Social: --\nCP: --", variant="muted")
-        self.lbl_rfc_info.setStyleSheet("color: #6b7280; font-size: 11px; background: #f9fafb; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px;")
+        self.lbl_rfc_info.setStyleSheet("color: #6b7280; font-size: 11px; background: #f9fafb; padding: 4px; border: 1px solid #e5e7eb; border-radius: 4px;")
         grid_m.addWidget(self.lbl_rfc_info, 1, 0, 1, 3)
         
         m_layout.addLayout(grid_m)
-        m_layout.addStretch()
         top_layout.addWidget(metricas_frame, stretch=1)
         
         # 3. Monitoreo en Tiempo Real
         monitoreo_frame = QFrame()
         monitoreo_frame.setObjectName("card")
         mon_layout = QVBoxLayout(monitoreo_frame)
+        mon_layout.setContentsMargins(8, 6, 8, 6)
+        mon_layout.setSpacing(4)
         
         lbl_mon = CustomLabel("📡 MONITOREO EN TIEMPO REAL", variant="subheader")
         mon_layout.addWidget(lbl_mon)
@@ -300,6 +309,8 @@ class BillingBotView(QWidget):
         panel = QFrame()
         panel.setObjectName("card")
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
         
         header_layout = QHBoxLayout()
         lbl = CustomLabel("⚙ SOLICITUDES PARA FACTURACIÓN", variant="subheader")
@@ -321,8 +332,8 @@ class BillingBotView(QWidget):
         self.table = StyledDataTable(headers, parent=self)
         self.table.setObjectName("botTable")
         self.table.doubleClicked.connect(lambda index: self._on_cargar_solicitud())
-        self.table.setMinimumHeight(150)
-        self.table.setMaximumHeight(200)
+        self.table.setMinimumHeight(110)
+        self.table.setMaximumHeight(160)
         layout.addWidget(self.table)
         
         self.main_layout.addWidget(panel, stretch=2)
@@ -331,6 +342,8 @@ class BillingBotView(QWidget):
         panel = QFrame()
         panel.setObjectName("card")
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
         
         lbl = CustomLabel("⚙ CONSOLA DE LOGS DE ACTIVIDAD", variant="subheader")
         layout.addWidget(lbl)
@@ -338,8 +351,8 @@ class BillingBotView(QWidget):
         self.console = QTextEdit()
         self.console.setObjectName("console")
         self.console.setReadOnly(True)
-        self.console.setMinimumHeight(100)
-        self.console.setMaximumHeight(140)
+        self.console.setMinimumHeight(65)
+        self.console.setMaximumHeight(100)
         layout.addWidget(self.console)
         
         self.log("Sistema listo. Esperando carga de solicitud...")
@@ -752,7 +765,7 @@ class BillingBotWindow(QMainWindow):
     def __init__(self, db_connector, sesion_id, usuario_id, parent=None):
         super().__init__(parent)
         self.setWindowTitle("SAR - Bot Face C (Facturación y Timbrado)")
-        self.resize(1100, 750)
+        self.resize(1100, 590)
         self.view = BillingBotView(db_connector, sesion_id, usuario_id, self)
         self.setCentralWidget(self.view)
         

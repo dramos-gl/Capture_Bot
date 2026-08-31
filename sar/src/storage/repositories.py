@@ -1981,6 +1981,7 @@ class InventarioRepository(BaseRepository):
                 r.importe,
                 r.fecha_generacion,
                 og.folio AS folio_orden,
+                rfc.rfc_id AS rfc_id,
                 rfc.razon_social AS empresa,
                 c.nombre AS concepto_nombre,
                 c.concepto_id AS concepto_id,
@@ -2013,6 +2014,7 @@ class InventarioRepository(BaseRepository):
                 "importe": str(row.importe) if row.importe else "",
                 "fecha_generacion": row.fecha_generacion.strftime("%Y-%m-%d") if row.fecha_generacion else "",
                 "folio_orden": row.folio_orden,
+                "rfc_id": row.rfc_id,
                 "empresa": row.empresa,
                 "concepto": row.concepto_nombre,
                 "concepto_id": row.concepto_id,
@@ -2184,24 +2186,63 @@ class InventarioRepository(BaseRepository):
             ld_parent.cantidad_solicitada += 1
             ld_parent.cantidad_confirmada += 1
 
-            # Create Ubicacion record (only if not solo_reservar)
+            # Create or Reuse Ubicacion record (only if not solo_reservar)
             ubi_id = None
             if not solo_reservar:
-                ubi = Ubicacion(
-                    cliente=d["cliente"].strip().upper() if d.get("cliente") else "RESERVA MASIVA MANUAL",
-                    desarrollo_id=desarrollo_id,
-                    fecha_solicitud=d.get("fecha_solicitud"),
-                    mz=d.get("mz"),
-                    lote=d.get("lote"),
-                    edif=d.get("edif"),
-                    viv=d.get("viv"),
-                    credito_titular=d.get("credito_titular"),
-                    delegacion=d.get("delegacion"),
-                    comentarios=d.get("pa"),
-                    lote_id_erp=d.get("folio_electronico")
-                )
-                self.session.add(ubi)
-                self.session.flush()
+                mz_val = d.get("mz").strip().upper() if d.get("mz") else None
+                lote_val = d.get("lote").strip().upper() if d.get("lote") else None
+                edif_val = d.get("edif").strip().upper() if d.get("edif") else None
+                viv_val = d.get("viv").strip().upper() if d.get("viv") else None
+                cliente_val = d["cliente"].strip().upper() if d.get("cliente") else "RESERVA MASIVA MANUAL"
+                folio_val = d.get("folio_electronico").strip() if d.get("folio_electronico") else None
+                pa_val = d.get("pa")
+
+                ubi = None
+                if mz_val and lote_val:
+                    from sqlalchemy import func
+                    dup_stmt = select(Ubicacion).filter(
+                        Ubicacion.desarrollo_id == desarrollo_id,
+                        func.upper(func.trim(Ubicacion.mz)) == mz_val,
+                        func.upper(func.trim(Ubicacion.lote)) == lote_val
+                    )
+                    if edif_val:
+                        dup_stmt = dup_stmt.filter(func.upper(func.trim(Ubicacion.edif)) == edif_val)
+                    if viv_val:
+                        dup_stmt = dup_stmt.filter(func.upper(func.trim(Ubicacion.viv)) == viv_val)
+                    
+                    ubi = self.session.execute(dup_stmt).scalars().first()
+
+                if not ubi:
+                    ubi = Ubicacion(
+                        cliente=cliente_val,
+                        desarrollo_id=desarrollo_id,
+                        fecha_solicitud=d.get("fecha_solicitud"),
+                        mz=mz_val,
+                        lote=lote_val,
+                        edif=edif_val,
+                        viv=viv_val,
+                        credito_titular=d.get("credito_titular"),
+                        delegacion=d.get("delegacion"),
+                        comentarios=pa_val,
+                        pa=pa_val,
+                        no_oficial=folio_val,
+                        lote_id_erp=folio_val
+                    )
+                    self.session.add(ubi)
+                    self.session.flush()
+                else:
+                    # Update missing fields in existing ubicacion if new values are provided
+                    if folio_val and not ubi.lote_id_erp:
+                        ubi.lote_id_erp = folio_val
+                        ubi.no_oficial = folio_val
+                    if pa_val and not ubi.pa:
+                        ubi.pa = pa_val
+                    if d.get("fecha_solicitud") and not ubi.fecha_solicitud:
+                        ubi.fecha_solicitud = d.get("fecha_solicitud")
+                    if cliente_val and (ubi.cliente == "RESERVA MASIVA MANUAL" or not ubi.cliente):
+                        ubi.cliente = cliente_val
+                    self.session.flush()
+
                 ubi_id = ubi.ubicacion_id
 
             # Create AsignacionReferencia record
@@ -2974,6 +3015,49 @@ class InventarioRepository(BaseRepository):
                     if ref:
                         ref.estado_id = estado_asignada_id
         self.session.flush()
+
+    def get_ubicacion_by_coordenadas(
+        self, desarrollo_id: int, mz: str, lote: str, edif: Optional[str] = None, viv: Optional[str] = None
+    ) -> Optional[dict]:
+        """Looks up an existing Ubicacion by development and coordinates, returning dict for autocompletion."""
+        from sar.src.storage.models import Ubicacion
+        from sqlalchemy import select, func
+
+        if not desarrollo_id or not mz or not lote:
+            return None
+
+        mz_clean = mz.strip().upper()
+        lote_clean = lote.strip().upper()
+        edif_clean = edif.strip().upper() if edif else None
+        viv_clean = viv.strip().upper() if viv else None
+
+        stmt = select(Ubicacion).filter(
+            Ubicacion.desarrollo_id == desarrollo_id,
+            func.upper(func.trim(Ubicacion.mz)) == mz_clean,
+            func.upper(func.trim(Ubicacion.lote)) == lote_clean
+        )
+        if edif_clean:
+            stmt = stmt.filter(func.upper(func.trim(Ubicacion.edif)) == edif_clean)
+        if viv_clean:
+            stmt = stmt.filter(func.upper(func.trim(Ubicacion.viv)) == viv_clean)
+
+        ubi = self.session.execute(stmt.order_by(Ubicacion.ubicacion_id.desc())).scalars().first()
+        if not ubi:
+            return None
+
+        return {
+            "ubicacion_id": ubi.ubicacion_id,
+            "cliente": ubi.cliente,
+            "desarrollo_id": ubi.desarrollo_id,
+            "mz": ubi.mz,
+            "lote": ubi.lote,
+            "edif": ubi.edif,
+            "viv": ubi.viv,
+            "folio_electronico": ubi.lote_id_erp or ubi.no_oficial or "",
+            "fecha_solicitud": ubi.fecha_solicitud.strftime("%Y-%m-%d") if ubi.fecha_solicitud else "",
+            "credito_titular": ubi.credito_titular or "",
+            "pa": ubi.pa or ubi.comentarios or ""
+        }
 
     def get_referencias_disponibles_filtro(
         self, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int, orden_ids: list = None

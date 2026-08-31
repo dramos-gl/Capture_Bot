@@ -14,7 +14,8 @@ class CustomComboBox(QComboBox):
         
         self.setStyleSheet(f"""
             QComboBox {{ 
-                padding: 8px 16px; 
+                padding: 4px 12px; 
+                min-height: 36px;
                 border: 1px solid #cbd5e1; 
                 border-radius: 8px; 
                 background-color: white; 

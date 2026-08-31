@@ -43,11 +43,11 @@ class StatCard(QFrame):
     def __init__(self, title: str, initial_value: str = "0", icon_name: str = None, color_hex: str = "#2563EB", show_sparkline: bool = True, parent=None):
         super().__init__(parent)
         self.setObjectName("cardFrame")
-        self.setMinimumWidth(160)
+        self.setMinimumWidth(100)
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(16, 16, 16, 12)
-        self.layout.setSpacing(10)
+        self.layout.setContentsMargins(12, 12, 12, 10)
+        self.layout.setSpacing(8)
         
         # 1. Title at the top spanning full width
         self.lbl_title = CustomLabel(title, variant="body")
