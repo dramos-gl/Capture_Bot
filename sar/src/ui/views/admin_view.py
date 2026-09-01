@@ -25,6 +25,9 @@ from sar.src.ui.views.admin.migration_view import MigrationView
 from sar.src.ui.views.admin.bulk_load_view import BulkLoadView
 from sar.src.ui.views.admin.update_facturas_view import UpdateFacturasView
 from sar.src.ui.views.admin.reservas_proceso_view import ReservasProcesoView
+from sar.src.ui.views.admin.help_dialogs import (
+    AboutDialog, ShortcutsDialog, SystemDiagnosticsDialog, SupportDialog, UserManualDialog
+)
 
 
 class AdminWindow(QMainWindow):
@@ -55,6 +58,13 @@ class AdminWindow(QMainWindow):
         self.menu_bar.view_requested.connect(self._change_view)
         self.menu_bar.logout_clicked.connect(self._handle_logout_action)
         self.menu_bar.exit_clicked.connect(self._handle_exit_action)
+        
+        # Connect Help Menu Actions
+        self.menu_bar.help_manual_requested.connect(self._show_help_manual)
+        self.menu_bar.help_shortcuts_requested.connect(self._show_help_shortcuts)
+        self.menu_bar.help_diagnostics_requested.connect(self._show_help_diagnostics)
+        self.menu_bar.help_support_requested.connect(self._show_help_support)
+        self.menu_bar.help_about_requested.connect(self._show_help_about)
         
         # User Info Widget (Set as corner widget in menu bar)
         self.user_info_widget = QWidget()
@@ -209,6 +219,26 @@ class AdminWindow(QMainWindow):
 
     def _handle_exit_action(self):
         self.close()
+
+    def _show_help_manual(self):
+        dialog = UserManualDialog(self)
+        dialog.exec()
+
+    def _show_help_shortcuts(self):
+        dialog = ShortcutsDialog(self)
+        dialog.exec()
+
+    def _show_help_diagnostics(self):
+        dialog = SystemDiagnosticsDialog(self.db_connector, self)
+        dialog.exec()
+
+    def _show_help_support(self):
+        dialog = SupportDialog(self)
+        dialog.exec()
+
+    def _show_help_about(self):
+        dialog = AboutDialog(self)
+        dialog.exec()
 
     def closeEvent(self, event):
         if getattr(self, "_logging_out", False) or getattr(self, "_is_logging_out", False):

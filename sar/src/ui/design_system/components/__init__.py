@@ -24,6 +24,7 @@ from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomCom
 from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
 from sar.src.ui.design_system.components.molecules.gl_labeled_date import LabeledDateEdit
 from sar.src.ui.design_system.components.molecules.gl_menu import KeepOpenMenu
+from sar.src.ui.design_system.components.organisms.gl_admin_menubar import AdminMenuBar
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import (
     GLMessageDialog, GLMessageBox, DialogType
 )
@@ -38,6 +39,7 @@ __all__ = [
     "GLStatusIndicator",
     "CustomCard",
     "NavigationSidebar",
+    "AdminMenuBar",
     "StyledDataTable",
     "InteractiveGrid",
     "FilterBar",
