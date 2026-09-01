@@ -23,16 +23,22 @@ class SolicitudesUIService:
                 repo = OperacionRepository(session)
                 return repo.get_solicitudes(orden_ids=orden_ids)
 
-    def get_ordenes(self) -> List[Dict[str, Any]]:
-        """Fetches all orders."""
+    def get_ordenes(self, include_rejected: bool = False) -> List[Dict[str, Any]]:
+        """Fetches available orders, excluding rejected/cancelled orders by default."""
         if self.api_client.connect_via_api:
-            return self.api_client.request("GET", "/api/ops/ordenes")
+            res = self.api_client.request("GET", "/api/ops/ordenes")
+            if not include_rejected and res:
+                return [
+                    ord for ord in res
+                    if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+                ]
+            return res
         else:
             if not self.db_connector:
                 raise ValueError("db_connector is required when connect_via_api is False")
             with self.db_connector.get_session() as session:
                 repo = ProduccionRepository(session)
-                return repo.get_ordenes()
+                return repo.get_ordenes(include_rejected=include_rejected)
 
     def get_orden_id_by_solicitud(self, sol_id: int) -> int:
         """Fetches parent orden_id for a given solicitud."""

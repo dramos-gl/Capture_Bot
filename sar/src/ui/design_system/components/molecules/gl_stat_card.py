@@ -1,7 +1,7 @@
 """Stat Card Molecule with left icon, status styling, and sparkline wave graph."""
 
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QWidget, QLabel
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPainter, QPen, QColor, QPainterPath
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.utils.icons import Icons
@@ -39,11 +39,15 @@ class SparklineWidget(QWidget):
 
 class StatCard(QFrame):
     """A molecular component representing a KPI stat card styled to match the target mockup design."""
+    clicked = Signal()
+    double_clicked = Signal()
     
     def __init__(self, title: str, initial_value: str = "0", icon_name: str = None, color_hex: str = "#2563EB", show_sparkline: bool = True, parent=None):
         super().__init__(parent)
         self.setObjectName("cardFrame")
         self.setMinimumWidth(100)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Doble clic para ver detalle y exportar a Excel")
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(12, 12, 12, 10)
@@ -119,3 +123,14 @@ class StatCard(QFrame):
         
     def set_value(self, val: str):
         self.lbl_value.setText(val)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.double_clicked.emit()
+        super().mouseDoubleClickEvent(event)
+

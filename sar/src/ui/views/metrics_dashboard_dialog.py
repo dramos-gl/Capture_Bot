@@ -415,7 +415,11 @@ class MetricsDashboardDialog(QWidget):
             self.cb_deleg.blockSignals(False)
 
         try:
-            self.todas_las_ordenes = self.ordenes_service.get_ordenes()
+            raw_ordenes = self.ordenes_service.get_ordenes()
+            self.todas_las_ordenes = [
+                ord for ord in raw_ordenes
+                if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+            ]
             if not self.selected_orden_ids and self.todas_las_ordenes:
                 self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
         except Exception as e:

@@ -36,6 +36,17 @@ class BaseRepository:
     def __init__(self, session: Session):
         self.session = session
 
+    def _get_estado_id(self, entidad: str, codigo: str) -> Optional[int]:
+        from sar.src.storage.models import EstadoSistema
+        stmt = select(EstadoSistema.estado_id).where(EstadoSistema.codigo == codigo)
+        if entidad:
+            stmt = stmt.where(EstadoSistema.entidad == entidad)
+        res = self.session.execute(stmt).scalars().first()
+        if not res and entidad:
+            stmt_fallback = select(EstadoSistema.estado_id).where(EstadoSistema.codigo == codigo)
+            res = self.session.execute(stmt_fallback).scalars().first()
+        return res
+
 
 class UsuarioRepository(BaseRepository):
     """Handles query operations for Usuario and authorization schema."""
@@ -896,9 +907,10 @@ class ProduccionRepository(BaseRepository):
             })
         return res, total_count
         
-    def get_ordenes(self) -> List[dict]:
+    def get_ordenes(self, include_rejected: bool = True) -> List[dict]:
         from sqlalchemy import text
-        stmt = text("""
+        where_filter = "" if include_rejected else "WHERE es.codigo NOT IN ('RECHAZADA', 'CANCELADA', 'RECHAZADO', 'CANCELADO')"
+        stmt = text(f"""
             SELECT 
                 r.*, 
                 es.codigo AS estado_codigo,
@@ -922,6 +934,7 @@ class ProduccionRepository(BaseRepository):
             FROM sar_produccion.vw_ordenes_resumen r
             JOIN sar_produccion.orden_generacion o ON r.orden_id = o.orden_id
             JOIN sar_catalogo.estado_sistema es ON o.estado_id = es.estado_id
+            {where_filter}
             ORDER BY r.fecha_creacion DESC
         """)
         result = self.session.execute(stmt)
@@ -937,7 +950,8 @@ class ProduccionRepository(BaseRepository):
                 "total_generadas": row.total_generadas,
                 "total_disponibles": row.total_disponibles,
                 "total_pendiente_autorizacion": row.total_pendiente_autorizacion,
-                "estado": row.estado_codigo
+                "estado": row.estado_codigo,
+                "estado_codigo": row.estado_codigo
             })
         return res
 
@@ -1989,6 +2003,13 @@ class InventarioRepository(BaseRepository):
                 d.delegacion_id AS delegacion_id,
                 u.nombre AS procesado_por,
                 ar.referencia_id IS NOT NULL AS asignada,
+                ar.asignacion_referencia_id AS asignacion_referencia_id,
+                ar.intento AS intento,
+                ar.credito_titular AS credito_titular,
+                ar.pa AS pa,
+                ar.no_oficial AS no_oficial,
+                ar.fecha_solicitud AS fecha_solicitud,
+                ar.comentarios AS comentarios,
                 COALESCE(n.nombre, col.nombre, '') AS asignado_a,
                 la.tipo_destino AS tipo_asignacion,
                 la.solicitante_externo AS solicitante_externo,
@@ -2026,6 +2047,13 @@ class InventarioRepository(BaseRepository):
                 "delegacion_id": row.delegacion_id,
                 "procesado_por": row.procesado_por or "Sin Asignar",
                 "asignada": row.asignada,
+                "asignacion_referencia_id": row.asignacion_referencia_id,
+                "intento": row.intento if row.intento is not None else "",
+                "credito_titular": row.credito_titular or "",
+                "pa": row.pa or "",
+                "no_oficial": row.no_oficial or "",
+                "fecha_solicitud": row.fecha_solicitud.strftime("%Y-%m-%d") if row.fecha_solicitud else "",
+                "comentarios": row.comentarios or "",
                 "asignado_a": row.asignado_a,
                 "tipo_asignacion": row.tipo_asignacion or "",
                 "solicitante_externo": row.solicitante_externo or "",
@@ -2168,8 +2196,20 @@ class InventarioRepository(BaseRepository):
             
             # Resolve keys
             rfc_id = ref.grupo.rfc_id if (ref and ref.grupo) else 1
-            concepto_id = ref.grupo.concepto_id if (ref and ref.grupo) else concepts_map.get(d["concepto_solicitado"], 3)
-            desarrollo_id = d["desarrollo_id"]
+            concepto_id = ref.grupo.concepto_id if (ref and ref.grupo) else concepts_map.get(d.get("concepto_solicitado"), 3)
+            
+            from sar.src.storage.models import Desarrollo
+            desarrollo_id = d.get("desarrollo_id")
+            if not desarrollo_id and d.get("desarrollo"):
+                des_name = str(d.get("desarrollo")).strip().upper()
+                des_obj = self.session.execute(select(Desarrollo).where(Desarrollo.nombre == des_name)).scalars().first()
+                if not des_obj:
+                    des_obj = Desarrollo(nombre=des_name, activo=True)
+                    self.session.add(des_obj)
+                    self.session.flush()
+                desarrollo_id = des_obj.desarrollo_id
+            if not desarrollo_id and not solo_reservar:
+                desarrollo_id = 1
 
             key = (rfc_id, concepto_id, desarrollo_id)
             if key not in grouped_details:
@@ -2238,12 +2278,44 @@ class InventarioRepository(BaseRepository):
 
                 ubi_id = ubi.ubicacion_id
 
+            # Calculate consecutive attempt number (intento) for this location AND concept
+            intento_val = 1
+            if ubi_id:
+                intento_stmt = (
+                    select(AsignacionReferencia.intento)
+                    .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
+                    .where(
+                        AsignacionReferencia.ubicacion_id == ubi_id,
+                        LoteDetalle.concepto_id == concepto_id
+                    )
+                    .order_by(AsignacionReferencia.intento.desc())
+                )
+                prev_intentos = self.session.execute(intento_stmt).scalars().all()
+                if prev_intentos:
+                    intento_val = max(prev_intentos) + 1
+
+                    # Mark previous attempts for this location and concept as SUSTITUIDO
+                    estado_sustituido_id = self._get_estado_id("asignacion_referencia", "SUSTITUIDO") or 91
+                    from sqlalchemy import update
+                    update_prev_stmt = (
+                        update(AsignacionReferencia)
+                        .where(
+                            AsignacionReferencia.ubicacion_id == ubi_id,
+                            AsignacionReferencia.intento < intento_val,
+                            AsignacionReferencia.lote_detalle_id.in_(
+                                select(LoteDetalle.lote_detalle_id).where(LoteDetalle.concepto_id == concepto_id)
+                            )
+                        )
+                        .values(estado_id=estado_sustituido_id)
+                    )
+                    self.session.execute(update_prev_stmt)
+
             # Create AsignacionReferencia record
             asig = AsignacionReferencia(
                 lote_detalle_id=ld_parent.lote_detalle_id,
                 referencia_id=d["referencia_id"],
                 ubicacion_id=ubi_id,
-                intento=1,
+                intento=intento_val,
                 estado_id=target_estado_id,
                 cliente=cliente_val if not solo_reservar else None,
                 credito_titular=d.get("credito_titular"),
@@ -2259,6 +2331,7 @@ class InventarioRepository(BaseRepository):
                 observaciones=pa_val
             )
             self.session.add(asig)
+            self.session.flush()
             
             if ref:
                 ref.estado_id = target_estado_id
@@ -2765,7 +2838,7 @@ class InventarioRepository(BaseRepository):
             
             expected_aliases = []
             if conc.alias == "CLG": expected_aliases = ["CLG"]
-            elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO"): expected_aliases = ["AVISO PREVENTIVO"]
+            elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO", "AVISO PREVENTIVO"): expected_aliases = ["AVISO", "AVISO PREVENTIVO", "NUEVO_DERECHO_AVISO"]
             elif conc.alias == "ANALISIS": expected_aliases = ["ANALISIS"]
             else: expected_aliases = [conc.alias]
 
@@ -2927,9 +3000,31 @@ class InventarioRepository(BaseRepository):
 
                 # Check if an Ubicacion with this exact address already exists in this transaction/database to avoid duplication
                 from sqlalchemy import select
+                from sar.src.storage.models import Desarrollo
                 cliente_val = d.get("cliente")
                 cliente_upper = cliente_val.strip().upper() if cliente_val else "RESERVA MASIVA MANUAL"
-                desarrollo_id = ar.lote_detalle.desarrollo_id
+                
+                # Resolve development ID with fallback to Excel payload or generic development
+                desarrollo_id = d.get("desarrollo_id")
+                if not desarrollo_id and ar.lote_detalle:
+                    desarrollo_id = ar.lote_detalle.desarrollo_id
+                
+                if not desarrollo_id and d.get("desarrollo"):
+                    des_name = str(d.get("desarrollo")).strip().upper()
+                    des_obj = self.session.execute(select(Desarrollo).where(Desarrollo.nombre == des_name)).scalars().first()
+                    if not des_obj:
+                        des_obj = Desarrollo(nombre=des_name, activo=True)
+                        self.session.add(des_obj)
+                        self.session.flush()
+                    desarrollo_id = des_obj.desarrollo_id
+                
+                if not desarrollo_id:
+                    desarrollo_id = 1 # Generic development fallback
+                
+                # Synchronize lote_detalle desarrollo_id if it was NULL
+                if ar.lote_detalle and not ar.lote_detalle.desarrollo_id:
+                    ar.lote_detalle.desarrollo_id = desarrollo_id
+
                 mz = d.get("mz") or "-"
                 lote = d.get("lote") or "-"
                 edif = d.get("edif") or "-"
@@ -2992,7 +3087,24 @@ class InventarioRepository(BaseRepository):
                 )
                 prev_intentos = self.session.execute(intento_stmt).scalars().all()
                 if prev_intentos:
-                    ar.intento = prev_intentos[0] + 1
+                    ar.intento = max(prev_intentos) + 1
+
+                    # Mark previous attempts for this location and concept as SUSTITUIDO
+                    estado_sustituido_id = self._get_estado_id("asignacion_referencia", "SUSTITUIDO") or 91
+                    from sqlalchemy import update
+                    update_prev_stmt = (
+                        update(AsignacionReferencia)
+                        .where(
+                            AsignacionReferencia.ubicacion_id == ubi.ubicacion_id,
+                            AsignacionReferencia.asignacion_referencia_id != ar.asignacion_referencia_id,
+                            AsignacionReferencia.intento < ar.intento,
+                            AsignacionReferencia.lote_detalle_id.in_(
+                                select(LoteDetalle.lote_detalle_id).where(LoteDetalle.concepto_id == ar.lote_detalle.concepto_id)
+                            )
+                        )
+                        .values(estado_id=estado_sustituido_id)
+                    )
+                    self.session.execute(update_prev_stmt)
                 else:
                     ar.intento = 1
                 
@@ -3080,7 +3192,7 @@ class InventarioRepository(BaseRepository):
 
         expected_aliases = []
         if conc.alias == "CLG": expected_aliases = ["CLG"]
-        elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO", "AVISO PREVENTIVO"): expected_aliases = ["AVISO PREVENTIVO"]
+        elif conc.alias in ("AVISO", "NUEVO_DERECHO_AVISO", "AVISO PREVENTIVO"): expected_aliases = ["AVISO", "AVISO PREVENTIVO", "NUEVO_DERECHO_AVISO"]
         elif conc.alias == "ANALISIS": expected_aliases = ["ANALISIS"]
         else: expected_aliases = [conc.alias]
 

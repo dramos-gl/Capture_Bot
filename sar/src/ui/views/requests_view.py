@@ -549,8 +549,11 @@ class RequestsView(QWidget):
             return
 
         try:
-            self.todas_las_ordenes = self.solicitudes_ui_service.get_ordenes()
-                
+            raw_ordenes = self.solicitudes_ui_service.get_ordenes(include_rejected=False)
+            self.todas_las_ordenes = [
+                ord for ord in raw_ordenes
+                if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+            ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
                 if preserve_selection and self.is_custom_filter and self.selected_orden_ids:

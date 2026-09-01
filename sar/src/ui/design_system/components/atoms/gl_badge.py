@@ -42,10 +42,10 @@ class StatusBadge(QFrame):
             color = Colors.ERROR  # Red
             bg_color = Colors.ERROR_BG
             icon_name = "alert_triangle"
-        elif "BORRADOR" in normalized:
+        elif "SUSTITUIDO" in normalized or "BORRADOR" in normalized:
             color = Colors.SLATE_500  # Gray/Neutral
             bg_color = Colors.NEUTRAL_BG
-            icon_name = "edit"
+            icon_name = "clock"
             
         self.setStyleSheet(f"""
             QFrame {{

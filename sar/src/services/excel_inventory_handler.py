@@ -188,7 +188,40 @@ class ExcelInventoryHandler:
         # Cache concepts mapping
         concepto_stmt = select(Concepto)
         concepts = session.execute(concepto_stmt).scalars().all()
-        concept_alias_map = {c.alias: c for c in concepts if c.alias}
+        concept_alias_map = {}
+        for c in concepts:
+            if c.alias:
+                concept_alias_map[c.alias.strip().upper()] = c
+            if c.nombre:
+                concept_alias_map[c.nombre.strip().upper()] = c
+
+        def resolve_concept(req: str) -> Optional[Concepto]:
+            if not req:
+                return None
+            req_u = req.strip().upper()
+            if req_u in ("AVISO", "AVISO PREVENTIVO", "NUEVO_DERECHO_AVISO", "1ER_AVISO", "1ER _AVISO", "PRIMER AVISO", "AVISO_RPP"):
+                return concept_alias_map.get("AVISO") or concept_alias_map.get("AVISO PREVENTIVO")
+            if req_u in ("CLG", "CERTIFICADO", "CLG_RPP"):
+                return concept_alias_map.get("CLG")
+            if req_u in ("ANALISIS", "ANÁLISIS", "ANALIS"):
+                return concept_alias_map.get("ANALISIS") or concept_alias_map.get("ANÁLISIS")
+            if req_u in ("CANC_1ER _AVISO", "CANC_1ER_AVISO", "CANCELACION PRIMER AVISO", "CANCELACION_1ER_AVISO", "CANCELACIÓN PRIMER AVISO"):
+                return concept_alias_map.get("CANC_1ER _AVISO") or concept_alias_map.get("CANCELACION_1ER_AVISO") or concept_alias_map.get("AVISO")
+            if req_u in ("CANC_2DO_AVISO", "CANCELACION SEGUNDO AVISO", "CANCELACION_2DO_AVISO", "CANCELACIÓN SEGUNDO AVISO"):
+                return concept_alias_map.get("CANC_2DO_AVISO") or concept_alias_map.get("CANCELACION_2DO_AVISO") or concept_alias_map.get("AVISO")
+            return concept_alias_map.get(req_u)
+
+        def get_expected_concept_aliases(req: str) -> List[str]:
+            if not req:
+                return []
+            req_u = req.strip().upper()
+            if req_u in ("AVISO", "AVISO PREVENTIVO", "NUEVO_DERECHO_AVISO", "1ER_AVISO", "1ER _AVISO", "PRIMER AVISO", "AVISO_RPP"):
+                return ["AVISO", "AVISO PREVENTIVO", "NUEVO_DERECHO_AVISO", "1ER_AVISO", "PRIMER AVISO", "AVISO_RPP"]
+            if req_u in ("CLG", "CERTIFICADO", "CLG_RPP"):
+                return ["CLG", "CERTIFICADO", "CLG_RPP"]
+            if req_u in ("ANALISIS", "ANÁLISIS", "ANALIS"):
+                return ["ANALISIS", "ANÁLISIS", "ANALIS"]
+            return [req_u]
 
         # Cache RFCs mapping (razon_social and rfc strings to id)
         rfcs_stmt = select(Rfc).where(Rfc.activo == True)
@@ -219,6 +252,7 @@ class ExcelInventoryHandler:
 
         validated_rows = []
         allocated_ref_ids = set()
+        seen_locations_in_batch = {}
 
         for row in parsed_rows:
             ref_str = row["referencia_asignada"]
@@ -318,60 +352,77 @@ class ExcelInventoryHandler:
                 deleg_name = session.execute(deleg_stmt).scalar()
                 row_result["delegacion_nombre"] = deleg_name
 
-            # Check if this client already has an assignment for the same concept at this exact location
-            has_dup = False
-            dup_ref = None
-            if not solo_reservar:
-                normalized_concept_req = concept_req
-                if normalized_concept_req == "AVISO":
-                    normalized_concept_req = "AVISO PREVENTIVO"
+            # Resolve concept object and expected aliases
+            concept_obj = resolve_concept(concept_req)
+            concept_id_req = concept_obj.concepto_id if concept_obj else None
+            expected_aliases = get_expected_concept_aliases(concept_req)
 
+            # Check for intra-batch duplicate (same Excel file) and DB historical duplicate
+            has_dup = False
+            dup_msg = ""
+            intento_num = 1
+            if not solo_reservar and concept_id_req:
+                loc_key = (desarrollo_name.upper(), mz.strip().upper(), lote.strip().upper(), edif.strip().upper(), viv.strip().upper(), concept_id_req)
+                
+                # Check DB historical attempts first
                 dup_stmt = (
                     select(AsignacionReferencia)
                     .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
                     .join(Ubicacion, AsignacionReferencia.ubicacion_id == Ubicacion.ubicacion_id)
                     .join(Concepto, LoteDetalle.concepto_id == Concepto.concepto_id)
                     .where(
-                        AsignacionReferencia.cliente == cliente,
                         Ubicacion.desarrollo_id == (desarrollo.desarrollo_id if desarrollo else None),
                         Ubicacion.mz == mz,
                         Ubicacion.lote == lote,
                         Ubicacion.edif == edif,
                         Ubicacion.viv == viv,
-                        Concepto.alias == normalized_concept_req
+                        Concepto.concepto_id == concept_id_req
                     )
+                    .order_by(AsignacionReferencia.intento.desc())
                 )
-                dup_check = session.execute(dup_stmt).scalars().first()
-                has_dup = dup_check is not None
-                dup_ref = dup_check.referencia.referencia_portal if dup_check else None
+                db_prevs = session.execute(dup_stmt).scalars().all()
+                base_db_intento = db_prevs[0].intento if db_prevs else 0
+                
+                if loc_key in seen_locations_in_batch:
+                    prev_info = seen_locations_in_batch[loc_key]
+                    current_count = prev_info["count"] + 1
+                    seen_locations_in_batch[loc_key]["count"] = current_count
+                    intento_num = base_db_intento + current_count
+                    has_dup = True
+                    dup_msg = f"Intento {intento_num}: Ubicación duplicada en el archivo (coincide con fila {prev_info['first_row']})."
+                else:
+                    intento_num = base_db_intento + 1
+                    seen_locations_in_batch[loc_key] = {"first_row": row.get("excel_row", 0), "count": 1}
+                    if base_db_intento > 0:
+                        has_dup = True
+                        prev_ref = db_prevs[0].referencia.referencia_portal if db_prevs[0].referencia else "N/A"
+                        dup_msg = f"Intento {intento_num}: Ubicación con {base_db_intento} trámite(s) previo(s) en la base de datos (Última Ref: {prev_ref})."
+
+            row_result["intento"] = intento_num
 
             # Scenario A: We are completing a Notary Reservation
             if completar_notaria_id:
-                # Find matching placeholder by concept
                 placeholder_match = None
                 placeholder_idx = -1
-                
-                concept_obj = concept_alias_map.get(normalized_concept_req)
-                concept_id_req = concept_obj.concepto_id if concept_obj else None
                 
                 if req_autolink or not ref_str:
                     # Find first placeholder matching concept
                     for idx, (ld_p, ref_p) in enumerate(reserved_placeholders):
-                        if ld_p.lote_detalle.concepto_id == concept_id_req:
+                        if concept_id_req is None or ld_p.lote_detalle.concepto_id == concept_id_req:
                             placeholder_match = (ld_p, ref_p)
                             placeholder_idx = idx
                             break
                 else:
-                    # Find specific placeholder matching reference string
+                    # Find specific placeholder matching reference string and concept
                     for idx, (ld_p, ref_p) in enumerate(reserved_placeholders):
-                        if ref_p.referencia_portal == ref_str and ld_p.lote_detalle.concepto_id == concept_id_req:
+                        if ref_p.referencia_portal == ref_str and (concept_id_req is None or ld_p.lote_detalle.concepto_id == concept_id_req):
                             placeholder_match = (ld_p, ref_p)
                             placeholder_idx = idx
                             break
 
                 if not placeholder_match:
                     row_result["status"] = "ERROR"
-                    row_result["error_message"] = f"No hay facturas RESERVADAS disponibles para el concepto '{concept_req}' (DB: '{normalized_concept_req}') de esta Notaría."
+                    row_result["error_message"] = f"No hay facturas RESERVADAS disponibles para el concepto '{concept_req}' de esta Notaría."
                     validated_rows.append(row_result)
                     continue
 
@@ -389,7 +440,7 @@ class ExcelInventoryHandler:
                     row_result["error_message"] = f"El desarrollo no coincide con el desarrollo reservado en el lote original ({ld_p.lote_detalle.lote_asignacion_id})."
                 elif has_dup:
                     row_result["status"] = "WARNING"
-                    row_result["error_message"] = f"El cliente ya tiene una asignación de {concept_req} en esta ubicación (Ref: {dup_ref})."
+                    row_result["error_message"] = dup_msg
                 else:
                     row_result["status"] = "CORRECTO"
 
@@ -404,12 +455,6 @@ class ExcelInventoryHandler:
                     validated_rows.append(row_result)
                     continue
 
-                expected_aliases = []
-                if concept_req == "CLG": expected_aliases = ["CLG"]
-                elif concept_req in ("AVISO", "NUEVO_DERECHO_AVISO"): expected_aliases = ["AVISO PREVENTIVO"]
-                elif concept_req == "ANALISIS": expected_aliases = ["ANALISIS"]
-                else: expected_aliases = [concept_req]
-
                 # Find a reference in FACTURADA state for this concept, delegation, and company
                 available_stmt = (
                     select(Referencia)
@@ -420,8 +465,8 @@ class ExcelInventoryHandler:
                     .where(
                         EstadoSistema.entidad == 'referencia',
                         EstadoSistema.codigo == 'FACTURADA',
-                        Concepto.alias.in_(expected_aliases),
-                        Solicitud.delegacion_id == desarrollo.delegacion_id,
+                        Concepto.alias.in_(expected_aliases) if expected_aliases else True,
+                        Solicitud.delegacion_id == deleg_id,
                         GrupoReferencia.rfc_id == resolved_rfc_id
                     )
                 )
@@ -443,7 +488,7 @@ class ExcelInventoryHandler:
                 allocated_ref_ids.add(ref_obj.referencia_id)
                 if has_dup:
                     row_result["status"] = "WARNING"
-                    row_result["error_message"] = f"El cliente ya tiene una asignación de {concept_req} para esta ubicación en un lote anterior (Ref: {dup_ref})."
+                    row_result["error_message"] = dup_msg
                 else:
                     row_result["status"] = "CORRECTO"
                 validated_rows.append(row_result)
@@ -481,7 +526,6 @@ class ExcelInventoryHandler:
 
             # 3. Check if reference is in FACTURADA state
             if estado_cod != "FACTURADA":
-                # Query AsignacionReferencia and join with Ubicacion to resolve the correct assigned client and format the message
                 from sar.src.storage.models import AsignacionReferencia, Ubicacion
                 ar_check = session.execute(
                     select(AsignacionReferencia)
@@ -498,12 +542,6 @@ class ExcelInventoryHandler:
                 continue
 
             # 4. Check Concept Match
-            # Maps column names to DB concept aliases: e.g. column 'AVISO' matches alias 'AVISO PREVENTIVO'
-            expected_aliases = []
-            if concept_req == "CLG": expected_aliases = ["CLG"]
-            elif concept_req in ("AVISO", "NUEVO_DERECHO_AVISO"): expected_aliases = ["AVISO PREVENTIVO"]
-            elif concept_req == "ANALISIS": expected_aliases = ["ANALISIS"]
-
             if not solo_reservar and expected_aliases and concept_alias not in expected_aliases:
                 row_result["status"] = "ERROR"
                 row_result["error_message"] = f"Concepto incorrecto: Referencia es de tipo '{concept_alias}' pero se solicitó '{concept_req}'."
@@ -520,7 +558,7 @@ class ExcelInventoryHandler:
             # Valid reference!
             if has_dup:
                 row_result["status"] = "WARNING"
-                row_result["error_message"] = f"El cliente ya tiene una asignación de {concept_req} para esta ubicación en un lote anterior (Ref: {dup_ref})."
+                row_result["error_message"] = dup_msg
             else:
                 row_result["status"] = "CORRECTO"
             validated_rows.append(row_result)

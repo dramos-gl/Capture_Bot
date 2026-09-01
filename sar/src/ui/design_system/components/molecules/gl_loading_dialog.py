@@ -55,28 +55,30 @@ class GLLoadingDialog(QDialog):
         
         # Main layout
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(24, 24, 24, 24)
-        self.main_layout.setSpacing(16)
+        self.main_layout.setContentsMargins(20, 20, 20, 20)
+        self.main_layout.setSpacing(12)
         
         # Spinner widget
         self.spinner = CircularSpinner(self)
         self.main_layout.addWidget(self.spinner, alignment=Qt.AlignCenter)
         
-        # Text label
+        # Text label with word wrap and centered alignment
         self.label = CustomLabel(message, variant="body", parent=self)
+        self.label.setWordWrap(True)
         self.label.setAlignment(Qt.AlignCenter)
+        self.label.setStyleSheet("background-color: transparent; font-size: 13px; font-weight: 500; color: #1E293B; line-height: 1.3;")
         self.main_layout.addWidget(self.label)
         
         # Base styling for modern floating card look
         self.setStyleSheet("""
             GLLoadingDialog {
                 background-color: #FFFFFF;
-                border: 2px solid #E2E8F0;
+                border: 1px solid #CBD5E1;
                 border-radius: 12px;
             }
         """)
         
-        self.setFixedSize(220, 150)
+        self.setFixedSize(260, 160)
         
     def set_message(self, message: str):
         """Allows dynamically updating the message on the dialog."""

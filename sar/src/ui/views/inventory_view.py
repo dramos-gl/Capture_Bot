@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
-    LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid
+    LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid, GLLoadingDialog
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.theme_manager import Colors
@@ -258,6 +258,187 @@ class PdfWorker(QThread):
         self.finished.emit({"success": success, "missing": missing, "error": error})
 
 
+class BatchValidationWorker(QThread):
+    """Background worker thread to parse and validate Excel files asynchronously."""
+    result_ready = Signal(list, list) # (parsed_records, validated_records)
+    error_occurred = Signal(str)
+
+    def __init__(self, file_path: str, default_rfc_id, completar_notaria_id, orden_ids, solo_reservar, api_client, db_connector):
+        super().__init__()
+        self.file_path = file_path
+        self.default_rfc_id = default_rfc_id
+        self.completar_notaria_id = completar_notaria_id
+        self.orden_ids = orden_ids
+        self.solo_reservar = solo_reservar
+        self.api_client = api_client
+        self.db_connector = db_connector
+
+    def run(self):
+        try:
+            parsed = ExcelInventoryHandler.parse_excel_inventory(self.file_path)
+            if not parsed:
+                self.error_occurred.emit("No se encontraron filas con clientes o referencias válidas en el Excel.")
+                return
+
+            if self.api_client and self.api_client.connect_via_api:
+                payload = {
+                    "parsed_rows": parsed,
+                    "default_rfc_id": self.default_rfc_id,
+                    "completar_notaria_id": self.completar_notaria_id,
+                    "orden_ids": self.orden_ids,
+                    "solo_reservar": self.solo_reservar
+                }
+                validated = self.api_client.request("POST", "/api/docs/inventario/lotes/validar", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    validated = ExcelInventoryHandler.validate_parsed_rows(
+                        session, parsed, default_rfc_id=self.default_rfc_id, completar_notaria_id=self.completar_notaria_id,
+                        orden_ids=self.orden_ids,
+                        solo_reservar=self.solo_reservar
+                    )
+            self.result_ready.emit(parsed, validated)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+
+class BatchConfirmationWorker(QThread):
+    """Background worker thread to save/confirm batch assignments without freezing UI."""
+    success = Signal(dict)
+    error_occurred = Signal(str)
+
+    def __init__(
+        self, is_completar: bool, api_client, db_connector, valid_details: list,
+        usuario_id: int, tipo_destino: str, notaria_id, colaborador_id,
+        solicitante_externo: str, observaciones: str, solo_reservar: bool
+    ):
+        super().__init__()
+        self.is_completar = is_completar
+        self.api_client = api_client
+        self.db_connector = db_connector
+        self.valid_details = valid_details
+        self.usuario_id = usuario_id
+        self.tipo_destino = tipo_destino
+        self.notaria_id = notaria_id
+        self.colaborador_id = colaborador_id
+        self.solicitante_externo = solicitante_externo
+        self.observaciones = observaciones
+        self.solo_reservar = solo_reservar
+
+    def run(self):
+        try:
+            if self.is_completar:
+                if self.api_client and self.api_client.connect_via_api:
+                    detalles_payload = []
+                    for det in self.valid_details:
+                        def _fmt_d(v):
+                            if not v: return None
+                            if hasattr(v, "strftime"): return v.strftime("%Y-%m-%d")
+                            return str(v).split()[0] if str(v).strip() else None
+
+                        det_dict = {
+                            "lote_detalle_id": det.get("lote_detalle_id"),
+                            "cliente": det.get("cliente"),
+                            "desarrollo": det.get("desarrollo"),
+                            "desarrollo_id": det.get("desarrollo_id"),
+                            "concepto_solicitado": det.get("concepto_solicitado"),
+                            "referencia_asignada": det.get("referencia_asignada"),
+                            "referencia_id": det.get("referencia_id"),
+                            "mz": det.get("mz"),
+                            "lote": det.get("lote"),
+                            "edif": det.get("edif"),
+                            "viv": det.get("viv"),
+                            "folio_electronico": det.get("folio_electronico"),
+                            "estatus_primer_aviso": _fmt_d(det.get("estatus_primer_aviso") or det.get("fecha_ingreso_rpp")),
+                            "ubicacion": det.get("ubicacion"),
+                            "credito_titular": det.get("credito_titular"),
+                            "pa": det.get("pa"),
+                            "delegacion": det.get("delegacion"),
+                            "fecha_solicitud": _fmt_d(det.get("fecha_solicitud")),
+                            "fecha_reporte_notaria": _fmt_d(det.get("fecha_reporte_notaria")),
+                            "fecha_ingreso_rpp": _fmt_d(det.get("fecha_ingreso_rpp") or det.get("estatus_primer_aviso")),
+                            "fecha_escritura": _fmt_d(det.get("fecha_escritura")),
+                            "fecha_titulacion": _fmt_d(det.get("fecha_titulacion")),
+                            "comentarios": det.get("comentarios") or det.get("pa")
+                        }
+                        detalles_payload.append(det_dict)
+                    payload = {
+                        "detalles": detalles_payload,
+                        "usuario_id": self.usuario_id
+                    }
+                    self.api_client.request("POST", "/api/docs/inventario/lotes/completar", data=payload)
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.repositories import InventarioRepository
+                        repo = InventarioRepository(session)
+                        repo.completar_reservaciones(self.valid_details, usuario_id=self.usuario_id)
+                        session.commit()
+                self.success.emit({"mode": "completar", "total": len(self.valid_details)})
+            else:
+                if self.api_client and self.api_client.connect_via_api:
+                    detalles_payload = []
+                    for det in self.valid_details:
+                        def _fmt_d(v):
+                            if not v: return None
+                            if hasattr(v, "strftime"): return v.strftime("%Y-%m-%d")
+                            return str(v).split()[0] if str(v).strip() else None
+
+                        det_dict = {
+                            "cliente": det.get("cliente"),
+                            "desarrollo": det.get("desarrollo"),
+                            "desarrollo_id": det.get("desarrollo_id"),
+                            "concepto_solicitado": det.get("concepto_solicitado"),
+                            "referencia_asignada": det.get("referencia_asignada"),
+                            "referencia_id": det.get("referencia_id"),
+                            "mz": det.get("mz"),
+                            "lote": det.get("lote"),
+                            "edif": det.get("edif"),
+                            "viv": det.get("viv"),
+                            "folio_electronico": det.get("folio_electronico"),
+                            "estatus_primer_aviso": _fmt_d(det.get("estatus_primer_aviso") or det.get("fecha_ingreso_rpp")),
+                            "ubicacion": det.get("ubicacion"),
+                            "credito_titular": det.get("credito_titular"),
+                            "pa": det.get("pa"),
+                            "delegacion": det.get("delegacion"),
+                            "fecha_solicitud": _fmt_d(det.get("fecha_solicitud")),
+                            "fecha_reporte_notaria": _fmt_d(det.get("fecha_reporte_notaria")),
+                            "fecha_ingreso_rpp": _fmt_d(det.get("fecha_ingreso_rpp") or det.get("estatus_primer_aviso")),
+                            "fecha_escritura": _fmt_d(det.get("fecha_escritura")),
+                            "fecha_titulacion": _fmt_d(det.get("fecha_titulacion")),
+                            "comentarios": det.get("comentarios") or det.get("pa")
+                        }
+                        detalles_payload.append(det_dict)
+
+                    payload = {
+                        "tipo_destino": self.tipo_destino,
+                        "notaria_id": self.notaria_id,
+                        "colaborador_id": self.colaborador_id,
+                        "solicitante_externo": self.solicitante_externo,
+                        "observaciones": self.observaciones,
+                        "usuario_creacion": self.usuario_id,
+                        "detalles": detalles_payload
+                    }
+                    res = self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
+                    lote_id = res["lote_id"]
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.storage.repositories import InventarioRepository
+                        repo = InventarioRepository(session)
+                        lote_id = repo.crear_lote_asignacion(
+                            tipo_destino=self.tipo_destino,
+                            notaria_id=self.notaria_id,
+                            colaborador_id=self.colaborador_id,
+                            solicitante_externo=self.solicitante_externo,
+                            observaciones=self.observaciones,
+                            usuario_creacion=self.usuario_id,
+                            detalles_list=self.valid_details,
+                            solo_reservar=self.solo_reservar
+                        )
+                        session.commit()
+                self.success.emit({"mode": "crear", "lote_id": lote_id, "total": len(self.valid_details)})
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+
 class InventoryView(QWidget):
     """View to manage Invoice/Reference Inventory Control (state: FACTURADA)."""
 
@@ -428,6 +609,7 @@ class InventoryView(QWidget):
             parent=kpi_widget
         )
         self.card_total.lbl_sub.setText("Disponibles + Asignados + Reservados")
+        self.card_total.double_clicked.connect(lambda: self._open_kpi_detail("total"))
         self.kpi_layout.addWidget(self.card_total, stretch=1)
         
         self.card_disponibles = StatCard(
@@ -439,6 +621,7 @@ class InventoryView(QWidget):
             parent=kpi_widget
         )
         self.card_disponibles.lbl_sub.setText("Total sin asignar")
+        self.card_disponibles.double_clicked.connect(lambda: self._open_kpi_detail("disponibles"))
         self.kpi_layout.addWidget(self.card_disponibles, stretch=1)
         
         self.card_asignadas = StatCard(
@@ -450,6 +633,7 @@ class InventoryView(QWidget):
             parent=kpi_widget
         )
         self.card_asignadas.lbl_sub.setText("Total asignados")
+        self.card_asignadas.double_clicked.connect(lambda: self._open_kpi_detail("asignadas"))
         self.kpi_layout.addWidget(self.card_asignadas, stretch=1)
 
         self.card_reservadas = StatCard(
@@ -461,6 +645,7 @@ class InventoryView(QWidget):
             parent=kpi_widget
         )
         self.card_reservadas.lbl_sub.setText("Total reservados")
+        self.card_reservadas.double_clicked.connect(lambda: self._open_kpi_detail("reservadas"))
         self.kpi_layout.addWidget(self.card_reservadas, stretch=1)
         self.kpi_layout.addStretch()
         
@@ -709,9 +894,35 @@ class InventoryView(QWidget):
         self.current_page = 1
         self.refresh_visor_data()
 
+    def _open_kpi_detail(self, kpi_type: str):
+        """Opens the full drill-down modal dialog for the selected KPI card."""
+        from sar.src.ui.views.inventory_kpi_detail_dialog import InventoryKPIDetailDialog
+        
+        concepto_nom = self.cb_concept_filter.currentText() if hasattr(self, "cb_concept_filter") else "Todos los conceptos"
+        empresa_nom = self.cb_empresa_filter.currentText() if hasattr(self, "cb_empresa_filter") else "Todas las empresas"
+        
+        dlg = InventoryKPIDetailDialog(
+            db_connector=self.db_connector,
+            kpi_type=kpi_type,
+            concepto_id=getattr(self, "_current_concepto_id", None),
+            concepto_nombre=concepto_nom,
+            rfc_id=getattr(self, "_current_rfc_id", None),
+            rfc_nombre=empresa_nom,
+            orden_ids=getattr(self, "selected_orden_ids", []),
+            ordenes_count=len(getattr(self, "selected_orden_ids", [])),
+            start_date=getattr(self, "_current_start_date", None),
+            end_date=getattr(self, "_current_end_date", None),
+            parent=self
+        )
+        dlg.exec()
+
     def _load_available_orders(self, preserve_selection=False):
         try:
-            self.todas_las_ordenes = self.referencias_service.get_ordenes()
+            raw_ordenes = self.referencias_service.get_ordenes(include_rejected=False)
+            self.todas_las_ordenes = [
+                ord for ord in raw_ordenes
+                if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+            ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
                 if preserve_selection and self.is_custom_filter and self.selected_orden_ids:
@@ -1164,101 +1375,102 @@ class InventoryView(QWidget):
         self.lbl_excel_path.setText(os.path.basename(file_path))
         self._excel_file_path = file_path
 
-        try:
-            # Parse Excel
-            self.parsed_records = ExcelInventoryHandler.parse_excel_inventory(file_path)
-            if not self.parsed_records:
-                QMessageBox.warning(self, "Excel Vacío", "No se encontraron filas con clientes o referencias válidas en el Excel.")
+        # Get selected default RFC/Empresa from dropdown
+        default_rfc_id = None
+        default_empresa_txt = self.cb_empresa_masivo.currentText()
+        if default_empresa_txt != "Seleccione empresa..." and hasattr(self, "_rfcs_map"):
+            default_rfc_id = self._rfcs_map.get(default_empresa_txt)
+
+        completar_notaria_id = None
+        if self.chk_completar_reserva.isChecked():
+            not_name = self.cb_notarias_masivo.currentText()
+            completar_notaria_id = self._notarias_map.get(not_name)
+            if not completar_notaria_id:
+                QMessageBox.warning(self, "Seleccionar Notaría", "Por favor, selecciona una Notaría válida para completar su apartado.")
                 return
 
-            # Get selected default RFC/Empresa from dropdown
-            default_rfc_id = None
-            default_empresa_txt = self.cb_empresa_masivo.currentText()
-            if default_empresa_txt != "Seleccione empresa..." and hasattr(self, "_rfcs_map"):
-                default_rfc_id = self._rfcs_map.get(default_empresa_txt)
+        # Show Design System circular spinner loading dialog
+        self._batch_loading_dialog = GLLoadingDialog("Cargando y validando\nplantilla Excel...", self)
 
-            completar_notaria_id = None
-            if self.chk_completar_reserva.isChecked():
-                not_name = self.cb_notarias_masivo.currentText()
-                completar_notaria_id = self._notarias_map.get(not_name)
-                if not completar_notaria_id:
-                    QMessageBox.warning(self, "Seleccionar Notaría", "Por favor, selecciona una Notaría válida para completar su apartado.")
-                    return
+        # Launch background validation worker
+        self._batch_worker = BatchValidationWorker(
+            file_path=file_path,
+            default_rfc_id=default_rfc_id,
+            completar_notaria_id=completar_notaria_id,
+            orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None,
+            solo_reservar=self.chk_solo_reservar.isChecked(),
+            api_client=self.api_client,
+            db_connector=self.db_connector
+        )
+        self._batch_worker.result_ready.connect(self._on_batch_validation_success)
+        self._batch_worker.error_occurred.connect(self._on_batch_validation_error)
+        self._batch_worker.start()
+        self._batch_loading_dialog.exec()
 
-            # Validate rows against database
-            if self.api_client.connect_via_api:
-                payload = {
-                    "parsed_rows": self.parsed_records,
-                    "default_rfc_id": default_rfc_id,
-                    "completar_notaria_id": completar_notaria_id,
-                    "orden_ids": list(self.selected_orden_ids) if self.selected_orden_ids else None,
-                    "solo_reservar": self.chk_solo_reservar.isChecked()
-                }
-                self.validated_records = self.api_client.request("POST", "/api/docs/inventario/lotes/validar", data=payload)
+    def _on_batch_validation_success(self, parsed_records, validated_records):
+        if hasattr(self, "_batch_loading_dialog") and self._batch_loading_dialog:
+            self._batch_loading_dialog.accept()
+
+        self.parsed_records = parsed_records
+        self.validated_records = validated_records
+
+        # Populate preview table
+        preview_rows = []
+        has_errors = False
+        for r in self.validated_records:
+            intento = r.get("intento", 1)
+            status_txt = r["status"]
+            if r["status"] == "ERROR":
+                has_errors = True
+                status_txt = f"🔴 ERROR: {r['error_message']}"
+            elif r["status"] == "WARNING":
+                status_txt = f"🟡 WARNING: {r['error_message']}"
             else:
-                with self.db_connector.get_session() as session:
-                    self.validated_records = ExcelInventoryHandler.validate_parsed_rows(
-                        session, self.parsed_records, default_rfc_id=default_rfc_id, completar_notaria_id=completar_notaria_id,
-                        orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None,
-                        solo_reservar=self.chk_solo_reservar.isChecked()
-                    )
+                status_txt = f"🟢 CORRECTO (Intento {intento})" if intento > 1 else "🟢 CORRECTO"
 
-            # Populate preview table
-            preview_rows = []
-            has_errors = False
+            loc_str = f"Mz {r['mz']} Lt {r['lote']}"
+            if r["edif"]: loc_str += f" Edif {r['edif']}"
+            if r["viv"]: loc_str += f" Viv {r['viv']}"
+            if intento > 1: loc_str += f" [Intento {intento}]"
+
+            preview_rows.append([
+                str(r["excel_row"]),
+                r["cliente"],
+                r["desarrollo"],
+                r["delegacion_nombre"],
+                r["concepto_solicitado"],
+                r["referencia_asignada"],
+                loc_str,
+                status_txt
+            ])
+
+        self.preview_table.populate_rows(preview_rows)
+        self.btn_confirmar_masivo.setEnabled(len(self.validated_records) > 0)
+
+        if has_errors:
+            # Group error types to show a clear diagnostic report to the QA Auditor
+            error_types = set()
             for r in self.validated_records:
-                status_txt = r["status"]
                 if r["status"] == "ERROR":
-                    has_errors = True
-                    status_txt = f"🔴 ERROR: {r['error_message']}"
-                elif r["status"] == "WARNING":
-                    status_txt = f"🟡 WARNING: {r['error_message']}"
-                else:
-                    status_txt = "🟢 CORRECTO"
-
-                loc_str = f"Mz {r['mz']} Lt {r['lote']}"
-                if r["edif"]: loc_str += f" Edif {r['edif']}"
-                if r["viv"]: loc_str += f" Viv {r['viv']}"
-
-                preview_rows.append([
-                    str(r["excel_row"]),
-                    r["cliente"],
-                    r["desarrollo"],
-                    r["delegacion_nombre"],
-                    r["concepto_solicitado"],
-                    r["referencia_asignada"],
-                    loc_str,
-                    status_txt
-                ])
-
-            self.preview_table.populate_rows(preview_rows)
+                    if "no existe" in r["error_message"].lower():
+                        error_types.add("Referencias inexistentes en la base de datos")
+                    elif "ya está asignada" in r["error_message"].lower():
+                        error_types.add("Referencias ya asignadas/confirmadas previamente")
+                    else:
+                        error_types.add(r["error_message"])
             
-            self.btn_confirmar_masivo.setEnabled(len(self.validated_records) > 0)
-            
-            if has_errors:
-                # Group error types to show a clear diagnostic report to the QA Auditor
-                error_types = set()
-                for r in self.validated_records:
-                    if r["status"] == "ERROR":
-                        if "no existe" in r["error_message"].lower():
-                            error_types.add("Referencias inexistentes en la base de datos")
-                        elif "ya está asignada" in r["error_message"].lower():
-                            error_types.add("Referencias ya asignadas/confirmadas previamente")
-                        else:
-                            error_types.add(r["error_message"])
-                
-                err_summary = "\n- ".join(error_types)
-                QMessageBox.warning(
-                    self, 
-                    "Inconsistencias y Errores Detectados", 
-                    f"Se identificaron los siguientes problemas en el archivo Excel:\n\n- {err_summary}\n\n"
-                    "Por seguridad, estos registros marcados en ROJO se omitirán durante la importación. Puede corregirlos en el Excel y volver a validar."
-                )
+            err_summary = "\n- ".join(error_types)
+            QMessageBox.warning(
+                self, 
+                "Inconsistencias y Errores Detectados", 
+                f"Se identificaron los siguientes problemas en el archivo Excel:\n\n- {err_summary}\n\n"
+                "Por seguridad, estos registros marcados en ROJO se omitirán durante la importación. Puede corregirlos en el Excel y volver a validar."
+            )
 
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "Error de Lectura", f"Fallo al abrir o leer el Excel:\n{str(e)}")
+    def _on_batch_validation_error(self, error_msg):
+        if hasattr(self, "_batch_loading_dialog") and self._batch_loading_dialog:
+            self._batch_loading_dialog.accept()
+        QMessageBox.critical(self, "Error al Cargar Excel", f"Ocurrió un error al procesar el archivo:\n{error_msg}")
 
     def _on_confirmar_masivo(self):
         tipo_destino = self.cb_destino_masivo.currentText()
@@ -1333,126 +1545,60 @@ class InventoryView(QWidget):
             parent_window = self.window()
             usuario_id = getattr(parent_window, "current_usuario_id", 1) # Default admin
 
-            if self.chk_completar_reserva.isChecked():
-                if self.api_client.connect_via_api:
-                    detalles_payload = []
-                    for det in valid_details:
-                        def _fmt_d(v):
-                            if not v: return None
-                            if hasattr(v, "strftime"): return v.strftime("%Y-%m-%d")
-                            return str(v).split()[0] if str(v).strip() else None
+            # Show GLLoadingDialog with multiline centered message
+            msg = "Completando asignaciones\nreservadas..." if self.chk_completar_reserva.isChecked() else "Guardando y confirmando\nlote de asignación..."
+            self._confirm_loading_dialog = GLLoadingDialog(msg, self)
 
-                        det_dict = {
-                            "lote_detalle_id": det["lote_detalle_id"],
-                            "cliente": det["cliente"],
-                            "desarrollo_id": det["desarrollo_id"],
-                            "concepto_solicitado": det["concepto_solicitado"],
-                            "referencia_asignada": det["referencia_asignada"],
-                            "referencia_id": det.get("referencia_id"),
-                            "mz": det.get("mz"),
-                            "lote": det.get("lote"),
-                            "edif": det.get("edif"),
-                            "viv": det.get("viv"),
-                            "folio_electronico": det.get("folio_electronico"),
-                            "estatus_primer_aviso": _fmt_d(det.get("estatus_primer_aviso") or det.get("fecha_ingreso_rpp")),
-                            "ubicacion": det.get("ubicacion"),
-                            "credito_titular": det.get("credito_titular"),
-                            "pa": det.get("pa"),
-                            "delegacion": det.get("delegacion"),
-                            "fecha_solicitud": _fmt_d(det.get("fecha_solicitud")),
-                            "fecha_reporte_notaria": _fmt_d(det.get("fecha_reporte_notaria")),
-                            "fecha_ingreso_rpp": _fmt_d(det.get("fecha_ingreso_rpp") or det.get("estatus_primer_aviso")),
-                            "fecha_escritura": _fmt_d(det.get("fecha_escritura")),
-                            "fecha_titulacion": _fmt_d(det.get("fecha_titulacion")),
-                            "comentarios": det.get("comentarios") or det.get("pa")
-                        }
-                        detalles_payload.append(det_dict)
-                    payload = {
-                        "detalles": detalles_payload,
-                        "usuario_id": usuario_id
-                    }
-                    self.api_client.request("POST", "/api/docs/inventario/lotes/completar", data=payload)
-                else:
-                    with self.db_connector.get_session() as session:
-                        from sar.src.storage.repositories import InventarioRepository
-                        repo = InventarioRepository(session)
-                        repo.completar_reservaciones(valid_details, usuario_id=usuario_id)
-                        session.commit()
-                QMessageBox.information(self, "Lote Completado", f"Se han completado exitosamente {len(valid_details)} asignaciones reservadas.")
-            else:
-                if self.api_client.connect_via_api:
-                    detalles_payload = []
-                    for det in valid_details:
-                        def _fmt_d(v):
-                            if not v: return None
-                            if hasattr(v, "strftime"): return v.strftime("%Y-%m-%d")
-                            return str(v).split()[0] if str(v).strip() else None
-
-                        det_dict = {
-                            "cliente": det["cliente"],
-                            "desarrollo_id": det["desarrollo_id"],
-                            "concepto_solicitado": det["concepto_solicitado"],
-                            "referencia_asignada": det["referencia_asignada"],
-                            "referencia_id": det.get("referencia_id"),
-                            "mz": det.get("mz"),
-                            "lote": det.get("lote"),
-                            "edif": det.get("edif"),
-                            "viv": det.get("viv"),
-                            "folio_electronico": det.get("folio_electronico"),
-                            "estatus_primer_aviso": _fmt_d(det.get("estatus_primer_aviso") or det.get("fecha_ingreso_rpp")),
-                            "ubicacion": det.get("ubicacion"),
-                            "credito_titular": det.get("credito_titular"),
-                            "pa": det.get("pa"),
-                            "delegacion": det.get("delegacion"),
-                            "fecha_solicitud": _fmt_d(det.get("fecha_solicitud")),
-                            "fecha_reporte_notaria": _fmt_d(det.get("fecha_reporte_notaria")),
-                            "fecha_ingreso_rpp": _fmt_d(det.get("fecha_ingreso_rpp") or det.get("estatus_primer_aviso")),
-                            "fecha_escritura": _fmt_d(det.get("fecha_escritura")),
-                            "fecha_titulacion": _fmt_d(det.get("fecha_titulacion")),
-                            "comentarios": det.get("comentarios") or det.get("pa")
-                        }
-                        detalles_payload.append(det_dict)
-
-                    payload = {
-                        "tipo_destino": tipo_destino,
-                        "notaria_id": notaria_id,
-                        "colaborador_id": colaborador_id,
-                        "solicitante_externo": solicitante_externo,
-                        "observaciones": observaciones,
-                        "usuario_creacion": usuario_id,
-                        "detalles": detalles_payload
-                    }
-                    res = self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
-                    lote_id = res["lote_id"]
-                else:
-                    with self.db_connector.get_session() as session:
-                        from sar.src.storage.repositories import InventarioRepository
-                        repo = InventarioRepository(session)
-                        lote_id = repo.crear_lote_asignacion(
-                            tipo_destino=tipo_destino,
-                            notaria_id=notaria_id,
-                            colaborador_id=colaborador_id,
-                            solicitante_externo=solicitante_externo,
-                            observaciones=observaciones,
-                            usuario_creacion=usuario_id,
-                            detalles_list=valid_details,
-                            solo_reservar=self.chk_solo_reservar.isChecked()
-                        )
-                        session.commit()
-                QMessageBox.information(self, "Lote Guardado", f"Se ha registrado exitosamente el lote ID {lote_id} con {len(valid_details)} asignaciones.")
-            
-            # Reset values
-            self.lbl_excel_path.setText("Ningún archivo seleccionado")
-            self.txt_obs_masivo.clear()
-            self.txt_solicitante_masivo.clear()
-            self.preview_table.clearContents()
-            self.preview_table.setRowCount(0)
-            self.btn_confirmar_masivo.setEnabled(False)
-            
-            self.refresh_all()
+            # Launch background confirmation worker
+            self._confirm_worker = BatchConfirmationWorker(
+                is_completar=self.chk_completar_reserva.isChecked(),
+                api_client=self.api_client,
+                db_connector=self.db_connector,
+                valid_details=valid_details,
+                usuario_id=usuario_id,
+                tipo_destino=tipo_destino,
+                notaria_id=notaria_id,
+                colaborador_id=colaborador_id,
+                solicitante_externo=solicitante_externo,
+                observaciones=observaciones,
+                solo_reservar=self.chk_solo_reservar.isChecked()
+            )
+            self._confirm_worker.success.connect(self._on_confirm_batch_success)
+            self._confirm_worker.error_occurred.connect(self._on_confirm_batch_error)
+            self._confirm_worker.start()
+            self._confirm_loading_dialog.exec()
 
         except Exception as e:
-            QMessageBox.critical(self, "Error de Escritura", f"Fallo al guardar en la base de datos:\n{str(e)}")
+            QMessageBox.critical(self, "Error de Inicio", f"No se pudo iniciar el proceso de guardado:\n{str(e)}")
+
+    def _on_confirm_batch_success(self, res_data):
+        if hasattr(self, "_confirm_loading_dialog") and self._confirm_loading_dialog:
+            self._confirm_loading_dialog.accept()
+
+        mode = res_data.get("mode")
+        total = res_data.get("total", 0)
+        if mode == "completar":
+            QMessageBox.information(self, "Lote Completado", f"Se han completado exitosamente {total} asignaciones reservadas.")
+        else:
+            lote_id = res_data.get("lote_id")
+            QMessageBox.information(self, "Lote Guardado", f"Se ha registrado exitosamente el lote ID {lote_id} con {total} asignaciones.")
+
+        # Reset values
+        self.lbl_excel_path.setText("Ningún archivo seleccionado")
+        self.txt_obs_masivo.clear()
+        self.txt_solicitante_masivo.clear()
+        self.preview_table.clearContents()
+        self.preview_table.setRowCount(0)
+        self.btn_confirmar_masivo.setEnabled(False)
+        self.parsed_records = []
+        self.validated_records = []
+
+        self.refresh_all()
+
+    def _on_confirm_batch_error(self, error_msg):
+        if hasattr(self, "_confirm_loading_dialog") and self._confirm_loading_dialog:
+            self._confirm_loading_dialog.accept()
+        QMessageBox.critical(self, "Error de Escritura", f"Fallo al guardar en la base de datos:\n{error_msg}")
 
     # =========================================================================
     # TAB 3: GESTIÓN DE CATALOGOS
