@@ -45,21 +45,21 @@ class ExcelInventoryHandler:
         idx_cliente = get_idx("CLIENTE", "NOMBRE CLIENTE", "NOMBRE")
         idx_estatus_aviso = get_idx("FECHA INGRESO A RPP", "FECHA_INGRESO_A_RPP", "ESTATUS_PRIMER_AVISO", "ESTATUS RPP")
         idx_credito_titular = get_idx("CREDITO_TITULAR", "CREDITO TITULAR", "CREDITO", "TITULAR", "CREDITO_O_TITULAR")
-        idx_pa = get_idx("P.A.", "PA", "PADRON", "PADRÓN")
+        idx_pa = get_idx("P.A", "P.A.", "PA", "PADRON", "PADRÓN")
         idx_comentarios = get_idx("COMENTARIOS", "OBSERVACIONES", "OBS")
         idx_fecha_sol = get_idx("FECHA_SOLICITUD", "FECHA SOLICITUD", "FECHA")
         idx_ubicacion = get_idx("UBICACION", "UBICACIÓN")
         idx_fecha_reporte_notaria = get_idx("FECHA REPORTA LA NOTARIA", "FECHA_REPORTA_LA_NOTARIA", "FECHA REPORTA NOTARIA")
         idx_fecha_escritura = get_idx("FECHA ESCRITURA", "FECHA_ESCRITURA")
-        idx_fecha_titulacion = get_idx("FECHA TITULACION", "FECHA_TITULACION", "FECHA DE TITULACION", "FECHA DE TITULACIÓN")
+        idx_fecha_titulacion = get_idx("FECHA DE TITULACION", "FECHA DE TITULACIÓN", "FECHA TITULACION", "FECHA_TITULACION")
         
         # Concept reference columns (resilient to accents, spaces, and abbreviations)
         concept_cols = {
             "ANALISIS": get_idx("ANALISIS", "ANÁLISIS", "ANALIS"),
             "AVISO": get_idx("AVISO", "1ER_AVISO", "1ER _AVISO", "AVISO_RPP", "PRIMER AVISO", "AVISO PREVENTIVO"),
             "CLG": get_idx("CLG", "CERTIFICADO", "CLG_RPP"),
-            "CANC_1ER _AVISO": get_idx("CANC_1ER _AVISO", "CANC_1ER_AVISO", "CANCELACION_1ER_AVISO", "CANCELACIÓN 1ER AVISO", "CANCELACION 1ER AVISO"),
-            "CANC_2DO_AVISO": get_idx("CANC_2DO_AVISO", "CANCELACION_2DO_AVISO", "CANCELACIÓN 2DO AVISO", "CANCELACION 2DO AVISO"),
+            "CANC_1ER _AVISO": get_idx("CANCELACION PRIMER AVISO", "CANCELACIÓN PRIMER AVISO", "CANC_1ER _AVISO", "CANC_1ER_AVISO", "CANCELACION_1ER_AVISO", "CANCELACIÓN 1ER AVISO", "CANCELACION 1ER AVISO"),
+            "CANC_2DO_AVISO": get_idx("CANCELACION SEGUNDO AVISO", "CANCELACIÓN SEGUNDO AVISO", "CANC_2DO_AVISO", "CANCELACION_2DO_AVISO", "CANCELACIÓN 2DO AVISO", "CANCELACION 2DO AVISO"),
             "NUEVO_DERECHO_AVISO": get_idx("NUEVO_DERECHO_AVISO", "NUEVO_AVISO", "NUEVO DERECHO AVISO"),
         }
 
@@ -332,7 +332,7 @@ class ExcelInventoryHandler:
                     .join(Ubicacion, AsignacionReferencia.ubicacion_id == Ubicacion.ubicacion_id)
                     .join(Concepto, LoteDetalle.concepto_id == Concepto.concepto_id)
                     .where(
-                        Ubicacion.cliente == cliente,
+                        AsignacionReferencia.cliente == cliente,
                         Ubicacion.desarrollo_id == (desarrollo.desarrollo_id if desarrollo else None),
                         Ubicacion.mz == mz,
                         Ubicacion.lote == lote,
@@ -888,10 +888,25 @@ class ExcelInventoryHandler:
         border_thin = Side(border_style="thin", color="D3D3D3")
 
         headers = [
-            "RAZON SOCIAL", "DESARROLLO", "DELEGACION", "MZA", "LOTE", "EXT", "INT", "No.OFICIAL",
-            "FECHA REPORTA LA NOTARIA", "FECHA INGRESO A RPP", "FECHA ESCRITURA", "FECHA TITULACION",
-            "CLIENTE", "ANALISIS", "AVISO", "CLG", "CANC_1ER _AVISO",
-            "CANC_2DO_AVISO", "COMENTARIOS", "FECHA_SOLICITUD"
+            "RAZON SOCIAL",
+            "DESARROLLO",
+            "P.A",
+            "CLIENTE",
+            "MZA",
+            "LOTE",
+            "EXT",
+            "INT",
+            "No.OFICIAL",
+            "FECHA REPORTA LA NOTARIA",
+            "FECHA INGRESO A RPP",
+            "FECHA ESCRITURA",
+            "FECHA DE TITULACION",
+            "ANALISIS",
+            "AVISO",
+            "CLG",
+            "CANCELACION PRIMER AVISO",
+            "CANCELACION SEGUNDO AVISO",
+            "COMENTARIOS"
         ]
         
         ws.row_dimensions[1].height = 25
@@ -905,9 +920,9 @@ class ExcelInventoryHandler:
         # Add a mock row as a reference example for users
         ws.row_dimensions[2].height = 18
         mock_data = [
-            "PROMOTORA RESIDENCIAL", "ALDEA TULUM", "TULUM", "10", "5", "", "3", "123456",
+            "PROMOTORA RESIDENCIAL", "ALDEA TULUM", "1234", "JUAN PEREZ", "10", "5", "A", "3", "123456",
             "2026-07-20", "2026-07-21", "2026-07-22", "2026-07-25",
-            "JUAN PEREZ", "", "70028350819888101", "", "", "", "Sin observaciones", "2026-07-20"
+            "", "70028350819888101", "", "", "", "Sin observaciones"
         ]
         for col_idx, val in enumerate(mock_data, start=1):
             cell = ws.cell(row=2, column=col_idx, value=val)

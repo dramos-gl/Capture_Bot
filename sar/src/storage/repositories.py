@@ -1961,7 +1961,7 @@ class InventarioRepository(BaseRepository):
                 "c.nombre ILIKE :search",
                 "d.nombre ILIKE :search",
                 "u.nombre ILIKE :search",
-                "ubi.cliente ILIKE :search",
+                "ar.cliente ILIKE :search",
                 "la.lote_asignacion_id::text ILIKE :search",
                 "n.nombre ILIKE :search",
                 "col.nombre ILIKE :search"
@@ -1994,9 +1994,13 @@ class InventarioRepository(BaseRepository):
                 la.solicitante_externo AS solicitante_externo,
                 la.fecha AS fecha_asignacion,
                 des.nombre AS desarrollo_nombre,
-                ubi.cliente AS cliente_nombre,
-                ubi.mz, ubi.lote, ubi.edif, ubi.viv, ubi.lote_id_erp AS folio_electronico,
-                ubi.fecha_ingreso_rpp, ubi.fecha_reporte_notaria, ubi.fecha_escritura, ubi.fecha_titulacion,
+                ar.cliente AS cliente_nombre,
+                ubi.mz, ubi.lote, ubi.edif, ubi.viv, 
+                COALESCE(ar.no_oficial, ubi.lote_id_erp) AS folio_electronico,
+                ar.fecha_ingreso_rpp AS fecha_ingreso_rpp,
+                ar.fecha_reporte_notaria AS fecha_reporte_notaria,
+                ar.fecha_escritura AS fecha_escritura,
+                ar.fecha_titulacion AS fecha_titulacion,
                 la.lote_asignacion_id AS lote_asignacion_id,
                 es.codigo AS estado_codigo
             {sql_base}
@@ -2096,7 +2100,7 @@ class InventarioRepository(BaseRepository):
                 "c.nombre ILIKE :search",
                 "d.nombre ILIKE :search",
                 "u.nombre ILIKE :search",
-                "ubi.cliente ILIKE :search"
+                "ar.cliente ILIKE :search"
             ]
             base_conditions.append(f"({' OR '.join(search_conds)})")
             
@@ -2188,6 +2192,9 @@ class InventarioRepository(BaseRepository):
 
             # Create or Reuse Ubicacion record (only if not solo_reservar)
             ubi_id = None
+            cliente_val = None
+            folio_val = None
+            pa_val = None
             if not solo_reservar:
                 mz_val = d.get("mz").strip().upper() if d.get("mz") else None
                 lote_val = d.get("lote").strip().upper() if d.get("lote") else None
@@ -2214,33 +2221,19 @@ class InventarioRepository(BaseRepository):
 
                 if not ubi:
                     ubi = Ubicacion(
-                        cliente=cliente_val,
                         desarrollo_id=desarrollo_id,
-                        fecha_solicitud=d.get("fecha_solicitud"),
+                        sm=d.get("sm"),
                         mz=mz_val,
                         lote=lote_val,
                         edif=edif_val,
                         viv=viv_val,
-                        credito_titular=d.get("credito_titular"),
-                        delegacion=d.get("delegacion"),
-                        comentarios=pa_val,
-                        pa=pa_val,
-                        no_oficial=folio_val,
                         lote_id_erp=folio_val
                     )
                     self.session.add(ubi)
                     self.session.flush()
                 else:
-                    # Update missing fields in existing ubicacion if new values are provided
                     if folio_val and not ubi.lote_id_erp:
                         ubi.lote_id_erp = folio_val
-                        ubi.no_oficial = folio_val
-                    if pa_val and not ubi.pa:
-                        ubi.pa = pa_val
-                    if d.get("fecha_solicitud") and not ubi.fecha_solicitud:
-                        ubi.fecha_solicitud = d.get("fecha_solicitud")
-                    if cliente_val and (ubi.cliente == "RESERVA MASIVA MANUAL" or not ubi.cliente):
-                        ubi.cliente = cliente_val
                     self.session.flush()
 
                 ubi_id = ubi.ubicacion_id
@@ -2252,8 +2245,18 @@ class InventarioRepository(BaseRepository):
                 ubicacion_id=ubi_id,
                 intento=1,
                 estado_id=target_estado_id,
+                cliente=cliente_val if not solo_reservar else None,
+                credito_titular=d.get("credito_titular"),
+                pa=pa_val,
+                no_oficial=folio_val,
+                fecha_solicitud=d.get("fecha_solicitud"),
+                fecha_reporte_notaria=d.get("fecha_reporte_notaria"),
+                fecha_ingreso_rpp=d.get("fecha_ingreso_rpp"),
+                fecha_escritura=d.get("fecha_escritura"),
+                fecha_titulacion=d.get("fecha_titulacion"),
+                comentarios=d.get("comentarios") or pa_val,
                 usuario_asignacion=usuario_creacion,
-                observaciones=d.get("pa")
+                observaciones=pa_val
             )
             self.session.add(asig)
             
@@ -2467,18 +2470,18 @@ class InventarioRepository(BaseRepository):
             SELECT
                 ar.asignacion_referencia_id AS lote_detalle_id,
                 ar.referencia_id,
-                COALESCE(ubi.cliente, 'RESERVA PENDIENTE DE COMPLETAR') AS cliente,
+                COALESCE(ar.cliente, 'RESERVA PENDIENTE DE COMPLETAR') AS cliente,
                 des.nombre AS desarrollo_nombre,
-                ubi.fecha_solicitud,
+                ar.fecha_solicitud AS fecha_solicitud,
                 COALESCE(ubi.mz, '') || ' ' || COALESCE(ubi.lote, '') AS ubicacion,
                 ubi.mz,
                 ubi.lote,
                 ubi.edif,
                 ubi.viv,
-                ubi.lote_id_erp AS folio_electronico,
-                ubi.credito_titular,
-                ubi.comentarios AS pa,
-                ubi.delegacion,
+                COALESCE(ar.no_oficial, ubi.lote_id_erp) AS folio_electronico,
+                ar.credito_titular AS credito_titular,
+                COALESCE(ar.pa, ar.comentarios) AS pa,
+                d.nombre AS delegacion,
                 c.alias AS concepto_solicitado,
                 ref.referencia_portal AS referencia_asignada,
                 d.nombre AS delegacion_nombre,
@@ -2861,11 +2864,15 @@ class InventarioRepository(BaseRepository):
         estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
         
         for d in detalles_completados:
-            ar_id = d.get("lote_detalle_id") # Note: mapped in get_lote_detalles as lote_detalle_id
-            if not ar_id:
-                continue
+            ar_id = d.get("asignacion_referencia_id") or d.get("lote_detalle_id")
+            ar = None
+            if ar_id:
+                ar = self.session.get(AsignacionReferencia, ar_id)
+            if not ar and d.get("referencia_id"):
+                ar = self.session.query(AsignacionReferencia).filter(
+                    AsignacionReferencia.referencia_id == d.get("referencia_id")
+                ).first()
             
-            ar = self.session.get(AsignacionReferencia, ar_id)
             if ar:
                 # Convert string date to datetime.date object for fecha_solicitud
                 f_sol = d.get("fecha_solicitud")
@@ -2883,7 +2890,7 @@ class InventarioRepository(BaseRepository):
                         fecha_sol = f_sol
 
                 # Convert string date for fecha_ingreso_rpp
-                f_rpp = d.get("estatus_primer_aviso")
+                f_rpp = d.get("fecha_ingreso_rpp") or d.get("estatus_primer_aviso")
                 fecha_rpp = None
                 if f_rpp:
                     if isinstance(f_rpp, str):
@@ -2918,7 +2925,7 @@ class InventarioRepository(BaseRepository):
                 fecha_escr = _parse_date(d.get("fecha_escritura"))
                 fecha_titul = _parse_date(d.get("fecha_titulacion"))
 
-                # Check if an Ubicacion with this exact address/client already exists in this transaction/database to avoid duplication
+                # Check if an Ubicacion with this exact address already exists in this transaction/database to avoid duplication
                 from sqlalchemy import select
                 cliente_val = d.get("cliente")
                 cliente_upper = cliente_val.strip().upper() if cliente_val else "RESERVA MASIVA MANUAL"
@@ -2929,7 +2936,6 @@ class InventarioRepository(BaseRepository):
                 viv = d.get("viv") or "-"
                 
                 dup_ubi_stmt = select(Ubicacion).where(
-                    Ubicacion.cliente == cliente_upper,
                     Ubicacion.desarrollo_id == desarrollo_id,
                     Ubicacion.mz == mz,
                     Ubicacion.lote == lote,
@@ -2942,46 +2948,35 @@ class InventarioRepository(BaseRepository):
                 pa_val = d.get("pa")
 
                 if not ubi:
-                    # Create new Ubicacion mapping to the new database columns if not exists
+                    # Create new Ubicacion with physical fields
                     ubi = Ubicacion(
-                        cliente=cliente_upper,
                         desarrollo_id=desarrollo_id,
-                        fecha_solicitud=fecha_sol,
                         mz=mz,
                         lote=lote,
-                        edif=edif, # ext
-                        viv=viv,   # int
-                        credito_titular=d.get("credito_titular"),
-                        delegacion=d.get("delegacion"),
-                        comentarios=d.get("comentarios"), # default comments
-                        pa=pa_val, # new column pa
-                        no_oficial=d.get("folio_electronico"), # new column no_oficial
-                        fecha_ingreso_rpp=fecha_rpp, # new column fecha_ingreso_rpp
-                        fecha_reporte_notaria=fecha_rep_not,
-                        fecha_escritura=fecha_escr,
-                        fecha_titulacion=fecha_titul
+                        edif=edif,
+                        viv=viv,
+                        lote_id_erp=d.get("folio_electronico")
                     )
                     self.session.add(ubi)
                     self.session.flush()
                 else:
-                    # If it exists, update the missing fields (pa, no_oficial, fecha_ingreso_rpp, new dates) if they are provided in Excel
-                    if pa_val and not ubi.pa:
-                        ubi.pa = pa_val
-                    if d.get("folio_electronico") and not ubi.no_oficial:
-                        ubi.no_oficial = d.get("folio_electronico")
-                    if fecha_rpp and not ubi.fecha_ingreso_rpp:
-                        ubi.fecha_ingreso_rpp = fecha_rpp
-                    if fecha_rep_not and not ubi.fecha_reporte_notaria:
-                        ubi.fecha_reporte_notaria = fecha_rep_not
-                    if fecha_escr and not ubi.fecha_escritura:
-                        ubi.fecha_escritura = fecha_escr
-                    if fecha_titul and not ubi.fecha_titulacion:
-                        ubi.fecha_titulacion = fecha_titul
+                    if d.get("folio_electronico") and not ubi.lote_id_erp:
+                        ubi.lote_id_erp = d.get("folio_electronico")
                     self.session.flush()
 
-                # Link to AsignacionReferencia and set status to ASIGNADA
+                # Link to AsignacionReferencia and set status to ASIGNADA along with all transactional fields
                 ar.ubicacion_id = ubi.ubicacion_id
                 ar.estado_id = estado_asignada_id
+                ar.cliente = cliente_upper
+                ar.credito_titular = d.get("credito_titular")
+                ar.pa = pa_val
+                ar.no_oficial = d.get("folio_electronico")
+                ar.fecha_solicitud = fecha_sol
+                ar.fecha_reporte_notaria = fecha_rep_not
+                ar.fecha_ingreso_rpp = fecha_rpp
+                ar.fecha_escritura = fecha_escr
+                ar.fecha_titulacion = fecha_titul
+                ar.comentarios = d.get("comentarios") or pa_val
                 
                 # Calculate consecutive attempt number (intento) for this location AND concept
                 from sar.src.storage.models import LoteDetalle
@@ -3019,8 +3014,8 @@ class InventarioRepository(BaseRepository):
     def get_ubicacion_by_coordenadas(
         self, desarrollo_id: int, mz: str, lote: str, edif: Optional[str] = None, viv: Optional[str] = None
     ) -> Optional[dict]:
-        """Looks up an existing Ubicacion by development and coordinates, returning dict for autocompletion."""
-        from sar.src.storage.models import Ubicacion
+        """Looks up an existing Ubicacion by development and coordinates, returning dict with most recent assignment info for autocompletion."""
+        from sar.src.storage.models import Ubicacion, AsignacionReferencia
         from sqlalchemy import select, func
 
         if not desarrollo_id or not mz or not lote:
@@ -3045,18 +3040,31 @@ class InventarioRepository(BaseRepository):
         if not ubi:
             return None
 
+        # Fetch most recent assignment for this location to offer predictive autocompletion
+        asig_stmt = select(AsignacionReferencia).filter(
+            AsignacionReferencia.ubicacion_id == ubi.ubicacion_id
+        ).order_by(AsignacionReferencia.asignacion_referencia_id.desc())
+        last_asig = self.session.execute(asig_stmt).scalars().first()
+
+        cliente_res = last_asig.cliente if last_asig and last_asig.cliente else ""
+        credito_res = last_asig.credito_titular if last_asig and last_asig.credito_titular else ""
+        pa_res = last_asig.pa or last_asig.comentarios if last_asig else ""
+        no_oficial_res = last_asig.no_oficial if last_asig and last_asig.no_oficial else ubi.lote_id_erp or ""
+        fecha_sol_res = last_asig.fecha_solicitud.strftime("%Y-%m-%d") if last_asig and last_asig.fecha_solicitud else ""
+
         return {
             "ubicacion_id": ubi.ubicacion_id,
-            "cliente": ubi.cliente,
+            "cliente": cliente_res,
             "desarrollo_id": ubi.desarrollo_id,
-            "mz": ubi.mz,
-            "lote": ubi.lote,
-            "edif": ubi.edif,
-            "viv": ubi.viv,
-            "folio_electronico": ubi.lote_id_erp or ubi.no_oficial or "",
-            "fecha_solicitud": ubi.fecha_solicitud.strftime("%Y-%m-%d") if ubi.fecha_solicitud else "",
-            "credito_titular": ubi.credito_titular or "",
-            "pa": ubi.pa or ubi.comentarios or ""
+            "sm": ubi.sm or "",
+            "mz": ubi.mz or "",
+            "lote": ubi.lote or "",
+            "edif": ubi.edif or "",
+            "viv": ubi.viv or "",
+            "folio_electronico": no_oficial_res,
+            "fecha_solicitud": fecha_sol_res,
+            "credito_titular": credito_res,
+            "pa": pa_res
         }
 
     def get_referencias_disponibles_filtro(

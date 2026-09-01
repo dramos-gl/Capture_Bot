@@ -31,8 +31,8 @@ class BillingBotView(QWidget):
         self.current_bot_context = None
         
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(8, 8, 8, 8)
-        self.main_layout.setSpacing(6)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setSpacing(8)
         
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
@@ -228,7 +228,7 @@ class BillingBotView(QWidget):
         m_layout.setContentsMargins(8, 6, 8, 6)
         m_layout.setSpacing(4)
         
-        lbl_m = CustomLabel("📊 MÉTRICAS DE FACTURACIÓN", variant="subheader")
+        lbl_m = CustomLabel("📊 MÉTRICAS DE FACTURACIÓN DE BOLETAS DE DERECHOS", variant="subheader")
         m_layout.addWidget(lbl_m)
         
         grid_m = QGridLayout()
@@ -282,10 +282,9 @@ class BillingBotView(QWidget):
         self.lbl_mon_status.setStyleSheet("color: #6b7280; font-size: 11px;")
         mon_layout.addWidget(self.lbl_mon_status)
         
-        mon_layout.addStretch()
         top_layout.addWidget(monitoreo_frame, stretch=1)
         
-        self.main_layout.addLayout(top_layout, stretch=1)
+        self.main_layout.addLayout(top_layout, stretch=0)
 
     def _on_browse_path_clicked(self):
         reply = QMessageBox.question(
@@ -332,11 +331,10 @@ class BillingBotView(QWidget):
         self.table = StyledDataTable(headers, parent=self)
         self.table.setObjectName("botTable")
         self.table.doubleClicked.connect(lambda index: self._on_cargar_solicitud())
-        self.table.setMinimumHeight(110)
-        self.table.setMaximumHeight(160)
-        layout.addWidget(self.table)
+        self.table.setMinimumHeight(130)
+        layout.addWidget(self.table, stretch=1)
         
-        self.main_layout.addWidget(panel, stretch=2)
+        self.main_layout.addWidget(panel, stretch=3)
 
     def _build_console_panel(self):
         panel = QFrame()
@@ -351,13 +349,12 @@ class BillingBotView(QWidget):
         self.console = QTextEdit()
         self.console.setObjectName("console")
         self.console.setReadOnly(True)
-        self.console.setMinimumHeight(65)
-        self.console.setMaximumHeight(100)
-        layout.addWidget(self.console)
+        self.console.setMinimumHeight(80)
+        layout.addWidget(self.console, stretch=1)
         
         self.log("Sistema listo. Esperando carga de solicitud...")
         
-        self.main_layout.addWidget(panel, stretch=1)
+        self.main_layout.addWidget(panel, stretch=2)
 
     def log(self, message: str):
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
@@ -765,7 +762,7 @@ class BillingBotWindow(QMainWindow):
     def __init__(self, db_connector, sesion_id, usuario_id, parent=None):
         super().__init__(parent)
         self.setWindowTitle("SAR - Bot Face C (Facturación y Timbrado)")
-        self.resize(1100, 590)
+        self.resize(1100, 700)
         self.view = BillingBotView(db_connector, sesion_id, usuario_id, self)
         self.setCentralWidget(self.view)
         

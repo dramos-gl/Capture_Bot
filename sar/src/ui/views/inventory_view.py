@@ -3,21 +3,13 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QPushButton, QTabWidget,
     QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
-    QDateEdit, QFrame, QMenu, QScrollArea
+    QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox
 )
 
-class KeepOpenMenu(QMenu):
-    def mouseReleaseEvent(self, event):
-        action = self.actionAt(event.position().toPoint())
-        if action and action.isCheckable():
-            action.trigger()
-            event.accept()
-        else:
-            super().mouseReleaseEvent(event)
-from PySide6.QtCore import Qt, QThread, Signal, QDate
+from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
-    LabeledComboBox, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid
+    LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.theme_manager import Colors
@@ -747,27 +739,17 @@ class InventoryView(QWidget):
             self._load_available_orders()
             
         menu = KeepOpenMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 24px 6px 32px;
-                border-radius: 4px;
-                color: #1E293B;
-            }
-            QMenu::item:selected {
-                background-color: #F1F5F9;
-                color: #0F172A;
-            }
-        """)
+        order_actions = {}
         
         action_all = QAction("Todas las órdenes", menu, checkable=True)
         is_all_selected = len(self.selected_orden_ids) == len(self.todas_las_ordenes) and len(self.todas_las_ordenes) > 0
         action_all.setChecked(is_all_selected)
+        
+        def update_all_action_state():
+            is_all = len(self.selected_orden_ids) == len(self.todas_las_ordenes) and len(self.todas_las_ordenes) > 0
+            action_all.blockSignals(True)
+            action_all.setChecked(is_all)
+            action_all.blockSignals(False)
         
         def toggle_all(checked):
             self.is_custom_filter = True
@@ -775,6 +757,13 @@ class InventoryView(QWidget):
                 self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
             else:
                 self.selected_orden_ids = []
+            
+            # Synchronize visual state of all order check items in menu
+            for oid, act in order_actions.items():
+                act.blockSignals(True)
+                act.setChecked(checked)
+                act.blockSignals(False)
+                
             self.current_page = 1
             self.current_page_lotes = 1
             self._refresh_active_tab_data()
@@ -783,26 +772,30 @@ class InventoryView(QWidget):
         menu.addAction(action_all)
         menu.addSeparator()
         
+        from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
         for ord in self.todas_las_ordenes:
-            label = f"{ord['folio']} ({ord['fecha_creacion'].split()[0] if isinstance(ord['fecha_creacion'], str) else ord['fecha_creacion'].strftime('%Y-%m-%d')})"
+            oid = ord["orden_id"]
+            label = format_orden_filter_label(ord.get("folio", ""), ord.get("descripcion", ""))
             action = QAction(label, menu, checkable=True)
-            action.setChecked(ord["orden_id"] in self.selected_orden_ids)
+            action.setChecked(oid in self.selected_orden_ids)
+            order_actions[oid] = action
             
-            def make_toggle_handler(oid):
+            def make_toggle_handler(target_oid):
                 def handler(checked):
                     self.is_custom_filter = True
                     if checked:
-                        if oid not in self.selected_orden_ids:
-                            self.selected_orden_ids.append(oid)
+                        if target_oid not in self.selected_orden_ids:
+                            self.selected_orden_ids.append(target_oid)
                     else:
-                        if oid in self.selected_orden_ids:
-                            self.selected_orden_ids.remove(oid)
+                        if target_oid in self.selected_orden_ids:
+                            self.selected_orden_ids.remove(target_oid)
+                    update_all_action_state()
                     self.current_page = 1
                     self.current_page_lotes = 1
                     self._refresh_active_tab_data()
                 return handler
                 
-            action.triggered.connect(make_toggle_handler(ord["orden_id"]))
+            action.triggered.connect(make_toggle_handler(oid))
             menu.addAction(action)
             
         menu.exec(sender_btn.mapToGlobal(sender_btn.rect().bottomLeft()))
@@ -971,6 +964,7 @@ class InventoryView(QWidget):
         chk2_box = QVBoxLayout()
         chk2_box.setSpacing(2)
         self.chk_solo_reservar = CustomCheckBox("Reservar Derechos", self)
+        self.chk_solo_reservar.stateChanged.connect(self._on_solo_reservar_changed)
         chk2_box.addWidget(self.chk_solo_reservar)
         lbl_desc2 = QLabel("Reserva derechos ya usados de forma manual sin validación de clientes/dirección.")
         lbl_desc2.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 24px;")
@@ -1073,6 +1067,11 @@ class InventoryView(QWidget):
     def _on_completar_reserva_changed(self, state):
         is_checked = (state == 2 or state == Qt.CheckState.Checked)
         if is_checked:
+            # Uncheck and disable mutual conflict
+            self.chk_solo_reservar.blockSignals(True)
+            self.chk_solo_reservar.setChecked(False)
+            self.chk_solo_reservar.blockSignals(False)
+
             self.cb_destino_masivo.setCurrentText("NOTARIA")
             self.cb_destino_masivo.setEnabled(False)
             self._on_destino_masivo_changed("NOTARIA")
@@ -1080,6 +1079,19 @@ class InventoryView(QWidget):
             self.txt_solicitante_masivo.setEnabled(False)
             self.txt_obs_masivo.setEnabled(False)
         else:
+            self.cb_destino_masivo.setEnabled(True)
+            self.cb_empresa_masivo.setEnabled(True)
+            self.txt_solicitante_masivo.setEnabled(True)
+            self.txt_obs_masivo.setEnabled(True)
+
+    def _on_solo_reservar_changed(self, state):
+        is_checked = (state == 2 or state == Qt.CheckState.Checked)
+        if is_checked:
+            # Uncheck and disable mutual conflict
+            self.chk_completar_reserva.blockSignals(True)
+            self.chk_completar_reserva.setChecked(False)
+            self.chk_completar_reserva.blockSignals(False)
+            
             self.cb_destino_masivo.setEnabled(True)
             self.cb_empresa_masivo.setEnabled(True)
             self.txt_solicitante_masivo.setEnabled(True)
@@ -1325,6 +1337,11 @@ class InventoryView(QWidget):
                 if self.api_client.connect_via_api:
                     detalles_payload = []
                     for det in valid_details:
+                        def _fmt_d(v):
+                            if not v: return None
+                            if hasattr(v, "strftime"): return v.strftime("%Y-%m-%d")
+                            return str(v).split()[0] if str(v).strip() else None
+
                         det_dict = {
                             "lote_detalle_id": det["lote_detalle_id"],
                             "cliente": det["cliente"],
@@ -1337,12 +1354,17 @@ class InventoryView(QWidget):
                             "edif": det.get("edif"),
                             "viv": det.get("viv"),
                             "folio_electronico": det.get("folio_electronico"),
-                            "estatus_primer_aviso": det.get("estatus_primer_aviso"),
+                            "estatus_primer_aviso": _fmt_d(det.get("estatus_primer_aviso") or det.get("fecha_ingreso_rpp")),
                             "ubicacion": det.get("ubicacion"),
                             "credito_titular": det.get("credito_titular"),
                             "pa": det.get("pa"),
                             "delegacion": det.get("delegacion"),
-                            "fecha_solicitud": det["fecha_solicitud"].strftime("%Y-%m-%d") if det.get("fecha_solicitud") and not isinstance(det.get("fecha_solicitud"), str) else det.get("fecha_solicitud")
+                            "fecha_solicitud": _fmt_d(det.get("fecha_solicitud")),
+                            "fecha_reporte_notaria": _fmt_d(det.get("fecha_reporte_notaria")),
+                            "fecha_ingreso_rpp": _fmt_d(det.get("fecha_ingreso_rpp") or det.get("estatus_primer_aviso")),
+                            "fecha_escritura": _fmt_d(det.get("fecha_escritura")),
+                            "fecha_titulacion": _fmt_d(det.get("fecha_titulacion")),
+                            "comentarios": det.get("comentarios") or det.get("pa")
                         }
                         detalles_payload.append(det_dict)
                     payload = {
@@ -1361,6 +1383,11 @@ class InventoryView(QWidget):
                 if self.api_client.connect_via_api:
                     detalles_payload = []
                     for det in valid_details:
+                        def _fmt_d(v):
+                            if not v: return None
+                            if hasattr(v, "strftime"): return v.strftime("%Y-%m-%d")
+                            return str(v).split()[0] if str(v).strip() else None
+
                         det_dict = {
                             "cliente": det["cliente"],
                             "desarrollo_id": det["desarrollo_id"],
@@ -1372,12 +1399,17 @@ class InventoryView(QWidget):
                             "edif": det.get("edif"),
                             "viv": det.get("viv"),
                             "folio_electronico": det.get("folio_electronico"),
-                            "estatus_primer_aviso": det.get("estatus_primer_aviso"),
+                            "estatus_primer_aviso": _fmt_d(det.get("estatus_primer_aviso") or det.get("fecha_ingreso_rpp")),
                             "ubicacion": det.get("ubicacion"),
                             "credito_titular": det.get("credito_titular"),
                             "pa": det.get("pa"),
                             "delegacion": det.get("delegacion"),
-                            "fecha_solicitud": det["fecha_solicitud"].strftime("%Y-%m-%d") if det.get("fecha_solicitud") and not isinstance(det.get("fecha_solicitud"), str) else det.get("fecha_solicitud")
+                            "fecha_solicitud": _fmt_d(det.get("fecha_solicitud")),
+                            "fecha_reporte_notaria": _fmt_d(det.get("fecha_reporte_notaria")),
+                            "fecha_ingreso_rpp": _fmt_d(det.get("fecha_ingreso_rpp") or det.get("estatus_primer_aviso")),
+                            "fecha_escritura": _fmt_d(det.get("fecha_escritura")),
+                            "fecha_titulacion": _fmt_d(det.get("fecha_titulacion")),
+                            "comentarios": det.get("comentarios") or det.get("pa")
                         }
                         detalles_payload.append(det_dict)
 
@@ -2321,121 +2353,59 @@ class InventoryView(QWidget):
         layout.addLayout(header_layout)
 
         # --- Filter bar ---
-        from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
-        from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
-        from PySide6.QtWidgets import QGroupBox
+        filter_bar_frame = QFrame(self)
+        filter_bar_frame.setObjectName("filterBarFrame")
+        filter_row = QHBoxLayout(filter_bar_frame)
+        filter_row.setContentsMargins(16, 12, 16, 12)
+        filter_row.setSpacing(12)
 
-        filter_row = QHBoxLayout()
-        filter_row.setSpacing(10)
-
-        # Search using QLineEdit matching the design/style of filterBarSearch in FilterBar
+        # 1. Search Input
         self.search_lotes = QLineEdit()
         self.search_lotes.setObjectName("filterBarSearch")
-        self.search_lotes.setPlaceholderText("🔍 Buscar por ID, notaria, colaborador, solicitante...")
-        self.search_lotes.setStyleSheet("""
-            QLineEdit#filterBarSearch {
-                background-color: white;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                padding: 10px 12px;
-                font-size: 13px;
-                color: #1e293b;
-            }
-            QLineEdit#filterBarSearch:focus {
-                border: 1px solid #2563eb;
-            }
-        """)
+        self.search_lotes.setPlaceholderText("🔍 Buscar por ID, notaría, colaborador, solicitante...")
+        self.search_lotes.setFixedHeight(35)
         self.search_lotes.textChanged.connect(self._on_search_lotes)
-        
-        # Wrap in layout with margin-top: 14px to align perfectly with groupboxes
-        search_wrap = QWidget()
-        search_wrap.setStyleSheet("background: transparent;")
-        search_wrap_layout = QVBoxLayout(search_wrap)
-        search_wrap_layout.setContentsMargins(0, 14, 0, 0)
-        search_wrap_layout.addWidget(self.search_lotes)
-        filter_row.addWidget(search_wrap, stretch=3)
+        filter_row.addWidget(self.search_lotes, stretch=1, alignment=Qt.AlignmentFlag.AlignBottom)
 
-        # Tipo Destino
+        # 2. Tipo Destino
         self.labeled_destino_lotes = LabeledComboBox("Tipo Destino", ["Todos", "NOTARIA", "COLABORADOR"])
         self.cb_destino_filter_lotes = self.labeled_destino_lotes.combo
         self.cb_destino_filter_lotes.currentTextChanged.connect(self._on_destino_filter_lotes)
-        filter_row.addWidget(self.labeled_destino_lotes)
+        filter_row.addWidget(self.labeled_destino_lotes, alignment=Qt.AlignmentFlag.AlignBottom)
 
-        # Date Filters wrapped in matching style groupbox to homologate height
-        self.group_start_date = QGroupBox("Desde", self)
-        self.group_start_date.setStyleSheet("""
-            QGroupBox {
-                background-color: white;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                margin-top: 14px;
-                font-weight: bold;
-                color: #2563EB;
-                font-size: 11px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                left: 10px;
-                padding: 0 4px;
-            }
-        """)
-        start_date_layout = QVBoxLayout(self.group_start_date)
-        start_date_layout.setContentsMargins(4, 4, 4, 4)
-        self.start_date_filter = QDateEdit()
-        self.start_date_filter.setCalendarPopup(True)
-        self.start_date_filter.setDate(QDate.currentDate().addMonths(-3))
-        self.start_date_filter.setStyleSheet("border: none; background-color: white; min-width: 110px;")
+        # 3. Date Filters (Atomic Design Molecules)
+        self.group_start_date = LabeledDateEdit("Desde", parent=self)
+        self.start_date_filter = self.group_start_date.date_edit
+        self.group_start_date.setDate(QDate.currentDate().addMonths(-3))
         self.start_date_filter.dateChanged.connect(self._on_date_changed_lotes)
-        start_date_layout.addWidget(self.start_date_filter)
-        filter_row.addWidget(self.group_start_date)
+        filter_row.addWidget(self.group_start_date, alignment=Qt.AlignmentFlag.AlignBottom)
 
-        self.group_end_date = QGroupBox("Hasta", self)
-        self.group_end_date.setStyleSheet("""
-            QGroupBox {
-                background-color: white;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                margin-top: 14px;
-                font-weight: bold;
-                color: #2563EB;
-                font-size: 11px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                left: 10px;
-                padding: 0 4px;
-            }
-        """)
-        end_date_layout = QVBoxLayout(self.group_end_date)
-        end_date_layout.setContentsMargins(4, 4, 4, 4)
-        self.end_date_filter = QDateEdit()
-        self.end_date_filter.setCalendarPopup(True)
-        self.end_date_filter.setDate(QDate.currentDate())
-        self.end_date_filter.setStyleSheet("border: none; background-color: white; min-width: 110px;")
+        self.group_end_date = LabeledDateEdit("Hasta", parent=self)
+        self.end_date_filter = self.group_end_date.date_edit
+        self.group_end_date.setDate(QDate.currentDate())
         self.end_date_filter.dateChanged.connect(self._on_date_changed_lotes)
-        end_date_layout.addWidget(self.end_date_filter)
-        filter_row.addWidget(self.group_end_date)
+        filter_row.addWidget(self.group_end_date, alignment=Qt.AlignmentFlag.AlignBottom)
 
-        # Refresh button
-        btn_refresh = CustomButton("↻ Actualizar", is_secondary=True)
-        # Shift layout margin slightly to align with the margin-top offset of inputs
-        btn_refresh.setStyleSheet("margin-top: 14px;")
-        btn_refresh.clicked.connect(self.refresh_lotes_data)
-        filter_row.addWidget(btn_refresh)
+        # 4. Refresh button
+        self.btn_refresh_lotes = QPushButton(self)
+        self.btn_refresh_lotes.setObjectName("filterBarActionBtn")
+        self.btn_refresh_lotes.setIcon(Icons.actualizar("#FFFFFF"))
+        self.btn_refresh_lotes.setIconSize(QSize(20, 20))
+        self.btn_refresh_lotes.setFixedSize(35, 35)
+        self.btn_refresh_lotes.setToolTip("Actualizar Asignaciones")
+        self.btn_refresh_lotes.clicked.connect(self.refresh_lotes_data)
+        filter_row.addWidget(self.btn_refresh_lotes, alignment=Qt.AlignmentFlag.AlignBottom)
 
-        # Filter Button (Funnel) for Lotes
+        # 5. Filter Button (Funnel) for Lotes
         self.btn_filter_orden_lotes = QPushButton()
         self.btn_filter_orden_lotes.setObjectName("secondaryBtn")
         self.btn_filter_orden_lotes.setIcon(Icons.filter_icon("#475569"))
-        self.btn_filter_orden_lotes.setFixedSize(36, 36)
+        self.btn_filter_orden_lotes.setFixedSize(35, 35)
         self.btn_filter_orden_lotes.setToolTip("Filtrar por Órdenes")
-        self.btn_filter_orden_lotes.setStyleSheet("margin-top: 14px;")
         self.btn_filter_orden_lotes.clicked.connect(self._show_order_filter_menu)
-        filter_row.addWidget(self.btn_filter_orden_lotes)
+        filter_row.addWidget(self.btn_filter_orden_lotes, alignment=Qt.AlignmentFlag.AlignBottom)
 
-        layout.addLayout(filter_row)
+        layout.addWidget(filter_bar_frame)
 
         # --- Main Card & Table ---
         self.card_lotes = CustomCard(title="Registro de Asignaciones", parent=self)
@@ -2670,7 +2640,7 @@ class ManualAssignmentDialog(QDialog):
         self.selected_refs = selected_refs or []
         self.inventario_ui_service = InventarioUIService(self.db_connector)
 
-        self.setWindowTitle("Asignar Facturas Manualmente")
+        self.setWindowTitle("Asignar Derechos")
         self.setMinimumWidth(440)
         self.layout = QVBoxLayout(self)
         
@@ -3022,7 +2992,7 @@ class ManualAssignmentDialog(QDialog):
                 detalles_list=detalles_list
             )
 
-            QMessageBox.information(self, "Éxito", f"Se asignaron exitosamente {len(self.ref_ids)} facturas.")
+            QMessageBox.information(self, "Éxito", f"Se asignaron exitosamente {len(self.ref_ids)} derechos.")
             self.accept()
         except Exception as e:
             QMessageBox.critical(self, "Error al Guardar", f"No se pudo registrar la asignación en la base de datos:\n{str(e)}")

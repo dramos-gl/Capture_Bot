@@ -15,6 +15,7 @@ from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.components.organisms.gl_data_table import StyledDataTable
+from sar.src.ui.design_system.components.molecules.gl_menu import KeepOpenMenu
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.theme_manager import Colors
 from sar.src.services.referencias_service import ReferenciasService
@@ -428,11 +429,12 @@ class MetricsDashboardDialog(QWidget):
         if not self.selected_orden_ids or not self.todas_las_ordenes:
             self.btn_orden_filter.setText("  Todas las Órdenes")
             return
+        from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
         if len(self.selected_orden_ids) == 1:
             orden = next((o for o in self.todas_las_ordenes
                           if o["orden_id"] == self.selected_orden_ids[0]), None)
             if orden:
-                self.btn_orden_filter.setText(f"  {orden['folio']}")
+                self.btn_orden_filter.setText(f"  {format_orden_filter_label(orden.get('folio', ''), orden.get('descripcion', ''), max_desc_len=25)}")
                 return
         self.btn_orden_filter.setText(f"  {len(self.selected_orden_ids)} órdenes")
 
@@ -440,13 +442,8 @@ class MetricsDashboardDialog(QWidget):
     # Orden filter menu
     # =========================================================================
     def _show_orden_filter_menu(self):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background-color:#FFFFFF; border:1px solid #E2E8F0;
-                    border-radius:6px; padding:4px; }
-            QMenu::item { padding:6px 24px 6px 8px; border-radius:4px; color:#1E293B; }
-            QMenu::item:selected { background-color:#F1F5F9; color:#0F172A; }
-        """)
+        menu = KeepOpenMenu(self)
+        order_actions = {}
 
         action_all = QAction("Todas las órdenes", menu, checkable=True)
         action_all.setChecked(
@@ -454,10 +451,23 @@ class MetricsDashboardDialog(QWidget):
             and len(self.todas_las_ordenes) > 0
         )
 
+        def update_all_action_state():
+            is_all = len(self.selected_orden_ids) == len(self.todas_las_ordenes) and len(self.todas_las_ordenes) > 0
+            action_all.blockSignals(True)
+            action_all.setChecked(is_all)
+            action_all.blockSignals(False)
+
         def toggle_all(checked):
             self.selected_orden_ids = (
                 [o["orden_id"] for o in self.todas_las_ordenes] if checked else []
             )
+            
+            # Synchronize visual state of all order check items in menu
+            for oid, act in order_actions.items():
+                act.blockSignals(True)
+                act.setChecked(checked)
+                act.blockSignals(False)
+
             self._update_orden_filter_label()
             self.refresh_metrics()
 
@@ -465,29 +475,27 @@ class MetricsDashboardDialog(QWidget):
         menu.addAction(action_all)
         menu.addSeparator()
 
+        from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
         for orden in self.todas_las_ordenes:
-            try:
-                fecha = (orden["fecha_creacion"].split()[0]
-                         if isinstance(orden["fecha_creacion"], str)
-                         else orden["fecha_creacion"].strftime("%Y-%m-%d"))
-            except Exception:
-                fecha = ""
-            action = QAction(f"{orden['folio']}  ({fecha})", menu, checkable=True)
-            action.setChecked(orden["orden_id"] in self.selected_orden_ids)
+            oid = orden["orden_id"]
+            action = QAction(format_orden_filter_label(orden.get("folio", ""), orden.get("descripcion", "")), menu, checkable=True)
+            action.setChecked(oid in self.selected_orden_ids)
+            order_actions[oid] = action
 
-            def make_handler(oid):
+            def make_handler(target_oid):
                 def handler(checked):
                     if checked:
-                        if oid not in self.selected_orden_ids:
-                            self.selected_orden_ids.append(oid)
+                        if target_oid not in self.selected_orden_ids:
+                            self.selected_orden_ids.append(target_oid)
                     else:
-                        if oid in self.selected_orden_ids:
-                            self.selected_orden_ids.remove(oid)
+                        if target_oid in self.selected_orden_ids:
+                            self.selected_orden_ids.remove(target_oid)
+                    update_all_action_state()
                     self._update_orden_filter_label()
                     self.refresh_metrics()
                 return handler
 
-            action.triggered.connect(make_handler(orden["orden_id"]))
+            action.triggered.connect(make_handler(oid))
             menu.addAction(action)
 
         menu.exec(self.btn_orden_filter.mapToGlobal(self.btn_orden_filter.rect().bottomLeft()))

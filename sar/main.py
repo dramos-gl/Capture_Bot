@@ -182,11 +182,11 @@ class MainWindow(QMainWindow):
                 avail_geom = screen.availableGeometry() if screen else None
                 
                 target_w = 1100
-                target_h = 590
+                target_h = 700
                 
                 if avail_geom:
                     # Cap height to available space minus taskbar and window decorations buffer
-                    max_h = max(450, avail_geom.height() - 35)
+                    max_h = max(500, avail_geom.height() - 25)
                     target_h = min(target_h, max_h)
                     target_w = min(target_w, avail_geom.width() - 20)
                 

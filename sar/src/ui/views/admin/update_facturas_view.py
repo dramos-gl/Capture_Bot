@@ -267,10 +267,10 @@ class UpdateFacturasView(QWidget):
                     ORDER BY orden_id DESC
                 """)).mappings().all()
                 
+                from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
                 for r in res:
-                    desc_part = f" - {r['descripcion'][:30]}" if r['descripcion'] else ""
-                    label = f"{r['folio']}{desc_part} ({r['fecha_creacion'].strftime('%Y-%m-%d')})"
-                    self.combo_orden.addItem(label, r['orden_id'])
+                    label = format_orden_filter_label(r["folio"], r.get("descripcion"))
+                    self.combo_orden.addItem(label, r["orden_id"])
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudieron cargar las órdenes: {e}")
             

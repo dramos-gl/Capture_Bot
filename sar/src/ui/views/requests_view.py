@@ -1,19 +1,9 @@
 """Requests (Bandeja de Trabajo) View."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QDialog, QLineEdit, QMenu
-from PySide6.QtCore import Qt
-from sar.src.ui.design_system.components import CustomCard, CustomLabel, CustomButton, StyledDataTable
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QDialog, QLineEdit
+from PySide6.QtCore import Qt, QThread, Signal
+from sar.src.ui.design_system.components import CustomCard, CustomLabel, CustomButton, StyledDataTable, KeepOpenMenu
 from sar.src.ui.design_system.tokens.colors import Colors
-
-class KeepOpenMenu(QMenu):
-    def mouseReleaseEvent(self, event):
-        action = self.actionAt(event.position().toPoint())
-        if action and action.isCheckable():
-            action.trigger()
-            event.accept()
-        else:
-            super().mouseReleaseEvent(event)
-from PySide6.QtCore import QThread, Signal
 from sar.src.services.solicitudes_ui_service import SolicitudesUIService
 from sar.src.services.fase_b_service import FaseBService, FaseBWorker
 
@@ -583,28 +573,18 @@ class RequestsView(QWidget):
             self._load_available_orders()
             
         menu = KeepOpenMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 24px 6px 32px;
-                border-radius: 4px;
-                color: #1E293B;
-            }
-            QMenu::item:selected {
-                background-color: #F1F5F9;
-                color: #0F172A;
-            }
-        """)
+        order_actions = {}
         
         # "Todas" action
         action_all = QAction("Todas las órdenes", menu, checkable=True)
         is_all_selected = len(self.selected_orden_ids) == len(self.todas_las_ordenes) and len(self.todas_las_ordenes) > 0
         action_all.setChecked(is_all_selected)
+        
+        def update_all_action_state():
+            is_all = len(self.selected_orden_ids) == len(self.todas_las_ordenes) and len(self.todas_las_ordenes) > 0
+            action_all.blockSignals(True)
+            action_all.setChecked(is_all)
+            action_all.blockSignals(False)
         
         def toggle_all(checked):
             self.is_custom_filter = True
@@ -612,6 +592,13 @@ class RequestsView(QWidget):
                 self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
             else:
                 self.selected_orden_ids = []
+                
+            # Synchronize visual state of all order check items in menu
+            for oid, act in order_actions.items():
+                act.blockSignals(True)
+                act.setChecked(checked)
+                act.blockSignals(False)
+                
             self.refresh_data()
             
         action_all.triggered.connect(toggle_all)
@@ -619,24 +606,28 @@ class RequestsView(QWidget):
         menu.addSeparator()
         
         # Actions for individual orders
+        from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
         for ord in self.todas_las_ordenes:
-            label = f"{ord['folio']} ({ord['fecha_creacion'].split()[0] if isinstance(ord['fecha_creacion'], str) else ord['fecha_creacion'].strftime('%Y-%m-%d')})"
+            oid = ord["orden_id"]
+            label = format_orden_filter_label(ord.get("folio", ""), ord.get("descripcion", ""))
             action = QAction(label, menu, checkable=True)
-            action.setChecked(ord["orden_id"] in self.selected_orden_ids)
+            action.setChecked(oid in self.selected_orden_ids)
+            order_actions[oid] = action
             
-            def make_toggle_handler(oid):
+            def make_toggle_handler(target_oid):
                 def handler(checked):
                     self.is_custom_filter = True
                     if checked:
-                        if oid not in self.selected_orden_ids:
-                            self.selected_orden_ids.append(oid)
+                        if target_oid not in self.selected_orden_ids:
+                            self.selected_orden_ids.append(target_oid)
                     else:
-                        if oid in self.selected_orden_ids:
-                            self.selected_orden_ids.remove(oid)
+                        if target_oid in self.selected_orden_ids:
+                            self.selected_orden_ids.remove(target_oid)
+                    update_all_action_state()
                     self.refresh_data()
                 return handler
                 
-            action.triggered.connect(make_toggle_handler(ord["orden_id"]))
+            action.triggered.connect(make_toggle_handler(oid))
             menu.addAction(action)
             
         # Display the menu directly under the filter button

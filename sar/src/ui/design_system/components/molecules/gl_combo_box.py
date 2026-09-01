@@ -14,14 +14,16 @@ class CustomComboBox(QComboBox):
         
         self.setStyleSheet(f"""
             QComboBox {{ 
-                padding: 4px 12px; 
-                min-height: 36px;
+                padding: 2px 10px; 
+                height: 35px;
+                min-height: 35px;
+                max-height: 35px;
                 border: 1px solid #cbd5e1; 
                 border-radius: 8px; 
                 background-color: white; 
                 min-width: 150px;
                 color: #1e293b;
-                font-size: 14px;
+                font-size: 13px;
             }}
             QComboBox:focus {{
                 border: 2px solid #3b82f6;

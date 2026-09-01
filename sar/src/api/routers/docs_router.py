@@ -905,6 +905,11 @@ class LoteDetalleItem(BaseModel):
     credito_titular: Optional[str] = None
     pa: Optional[str] = None
     delegacion: Optional[str] = None
+    fecha_reporte_notaria: Optional[str] = None
+    fecha_ingreso_rpp: Optional[str] = None
+    fecha_escritura: Optional[str] = None
+    fecha_titulacion: Optional[str] = None
+    comentarios: Optional[str] = None
     concepto_solicitado: str
     referencia_id: Optional[int] = None
     referencia_asignada: str
@@ -1090,15 +1095,16 @@ def create_lote_asignacion(request: LoteAsignacionCreateRequest, db: Session = D
     from sar.src.storage.repositories import InventarioRepository
     import datetime
     try:
-        # Convert string date to datetime.date object
+        # Convert string dates to datetime.date objects
         detalles_converted = []
         for det in request.detalles:
             d_dict = det.model_dump()
-            if d_dict.get("fecha_solicitud"):
-                try:
-                    d_dict["fecha_solicitud"] = datetime.datetime.strptime(d_dict["fecha_solicitud"].split()[0], "%Y-%m-%d").date()
-                except:
-                    d_dict["fecha_solicitud"] = None
+            for date_key in ["fecha_solicitud", "fecha_reporte_notaria", "fecha_ingreso_rpp", "fecha_escritura", "fecha_titulacion"]:
+                if d_dict.get(date_key):
+                    try:
+                        d_dict[date_key] = datetime.datetime.strptime(str(d_dict[date_key]).split()[0], "%Y-%m-%d").date()
+                    except Exception:
+                        d_dict[date_key] = None
             detalles_converted.append(d_dict)
             
         repo = InventarioRepository(db)

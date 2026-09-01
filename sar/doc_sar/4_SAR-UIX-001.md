@@ -665,3 +665,23 @@ UX-006
 
 Trazabilidad completa desde Orden → Solicitud → Referencia.
 
+---
+
+## 26. Control de Inventario y Asignación de Derechos (Fase B)
+
+### 26.1 Visor de Inventario
+* Cuadrícula paginada con filtros rápidos por Estado (`Disponible`, `Asignada`, `Reservada`), Concepto, Empresa y búsqueda por texto.
+* Proyección de coordenadas físicas (`Mz`, `Lt`, `Edif`, `Viv`) y fotografía del trámite (`Cliente`, `Folio Electrónico / No. Oficial`, `Fecha Asignación`).
+
+### 26.2 Formulario "Asignar Derechos" (Manual / Individual)
+* Selector obligatorio de Tipo Destino (`NOTARIA` / `COLABORADOR`) con placeholders limpios sin predefinición.
+* Búsqueda predictiva y autocompletado en tiempo real (<250 ms) al teclear coordenadas físicas, reutilizando la vivienda física en base de datos.
+
+### 26.3 Asignación Masiva por Lotes
+* Plantilla estándar descargable de **19 columnas** (`Plantilla_Control_Inventario.xlsx`) sin delegación redundante.
+* Modos de Operación con exclusión mutua:
+  1. **Asignación Directa** (Por defecto, obligatoriedad de ubicación física y cliente).
+  2. **Reservar Derechos** (Apartado temporal de referencias, omite ubicación física).
+  3. **Completar Lote Reservado** (Consolida apartados previos en `RESERVADA` hacia `ASIGNADA` con cliente y vivienda).
+
+

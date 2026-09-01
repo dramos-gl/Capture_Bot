@@ -30,8 +30,8 @@ class BotView(QWidget):
         self.current_bot_context = None
         
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(8, 8, 8, 8)
-        self.main_layout.setSpacing(6)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setSpacing(8)
         
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
@@ -266,7 +266,7 @@ class BotView(QWidget):
         mon_layout.addWidget(self.lbl_mon_status)
         
         top_layout.addWidget(monitoreo_frame, stretch=1)
-        self.main_layout.addLayout(top_layout, stretch=1)
+        self.main_layout.addLayout(top_layout, stretch=0)
 
     def _on_browse_path_clicked(self):
         reply = QMessageBox.question(
@@ -314,11 +314,10 @@ class BotView(QWidget):
         self.table = StyledDataTable(headers, parent=self)
         self.table.setObjectName("botTable")
         self.table.doubleClicked.connect(lambda index: self._on_cargar_solicitud())
-        self.table.setMinimumHeight(110)
-        self.table.setMaximumHeight(160)
-        layout.addWidget(self.table)
+        self.table.setMinimumHeight(130)
+        layout.addWidget(self.table, stretch=1)
         
-        self.main_layout.addWidget(panel, stretch=2)
+        self.main_layout.addWidget(panel, stretch=3)
 
     def _build_console_panel(self):
         panel = QFrame()
@@ -333,13 +332,12 @@ class BotView(QWidget):
         self.console = QTextEdit()
         self.console.setObjectName("console")
         self.console.setReadOnly(True)
-        self.console.setMinimumHeight(65)
-        self.console.setMaximumHeight(100)
-        layout.addWidget(self.console)
+        self.console.setMinimumHeight(80)
+        layout.addWidget(self.console, stretch=1)
         
         self.log("Sistema listo. Esperando carga de solicitud...")
         
-        self.main_layout.addWidget(panel, stretch=1)
+        self.main_layout.addWidget(panel, stretch=2)
 
     def log(self, message: str):
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")

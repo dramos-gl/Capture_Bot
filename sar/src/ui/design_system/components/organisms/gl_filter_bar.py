@@ -28,6 +28,7 @@ class FilterBar(QFrame):
         self.inp_search = QLineEdit()
         self.inp_search.setObjectName("filterBarSearch")
         self.inp_search.setPlaceholderText(f"🔍 {search_placeholder}")
+        self.inp_search.setFixedHeight(35)
         self.inp_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         if on_search:
             self.inp_search.textChanged.connect(on_search)
@@ -51,7 +52,7 @@ class FilterBar(QFrame):
         if on_action:
             self.btn_add = QPushButton()
             self.btn_add.setObjectName("filterBarActionBtn")
-            self.btn_add.setFixedSize(40, 40)
+            self.btn_add.setFixedSize(35, 35)
             
             from sar.src.ui.design_system.utils.icons import Icons
             if action_icon_name and hasattr(Icons, action_icon_name):

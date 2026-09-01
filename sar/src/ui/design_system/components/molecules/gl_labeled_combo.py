@@ -15,7 +15,7 @@ class LabeledComboBox(QGroupBox):
                 background-color: white;
                 border: 1px solid #cbd5e1;
                 border-radius: 8px;
-                margin-top: 14px;
+                margin-top: 8px;
                 font-weight: bold;
                 color: #2563EB;
                 font-size: 11px;
@@ -23,17 +23,19 @@ class LabeledComboBox(QGroupBox):
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                left: 10px;
+                left: 8px;
                 padding: 0 4px;
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
         self.combo = CustomComboBox()
+        self.combo.setFixedHeight(35)
         # Override combo box border so the groupbox acts as the only border
-        self.combo.setStyleSheet(self.combo.styleSheet() + "\nQComboBox { border: none; background-color: white; min-width: 130px; }")
+        self.combo.setStyleSheet(self.combo.styleSheet() + "\nQComboBox { border: none; background-color: transparent; min-width: 130px; height: 35px; min-height: 35px; max-height: 35px; padding: 2px 10px; font-size: 13px; }")
         
         if options:
             self.combo.addItems(options)

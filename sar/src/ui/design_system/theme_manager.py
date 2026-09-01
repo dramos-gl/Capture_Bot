@@ -285,7 +285,7 @@ class ThemeManager:
         QPushButton#filterBarActionBtn {{
             background-color: {Colors.ACCENT};
             color: #FFFFFF;
-            border-radius: 20px;
+            border-radius: 8px;
             font-size: 24px;
             font-weight: {Typography.WEIGHT_BOLD};
             border: none;
@@ -810,21 +810,21 @@ class ThemeManager:
         QFrame#botHeaderFaceA {{
             background-color: #1e293b;
             border-radius: 8px;
-            padding: 8px 16px;
+            padding: 10px 20px;
         }}
         QFrame#botHeaderFaceA QLabel {{
             color: white;
-            font-size: 15px;
+            font-size: 16px;
             font-weight: bold;
         }}
         QFrame#botHeaderFaceC {{
             background-color: #1e293b;
             border-radius: 8px;
-            padding: 8px 16px;
+            padding: 10px 20px;
         }}
         QFrame#botHeaderFaceC QLabel {{
             color: white;
-            font-size: 15px;
+            font-size: 16px;
             font-weight: bold;
         }}
         
