@@ -6,12 +6,15 @@ from sqlalchemy import text
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
     QFrame, QLabel, QPushButton, QCheckBox, QTextEdit, 
-    QMessageBox, QProgressBar, QMenu, QFileDialog
+    QProgressBar, QMenu, QFileDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QCursor
 
-from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, CustomSwitch, MetricBox
+from sar.src.ui.design_system.components import (
+    CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, CustomSwitch, MetricBox,
+    GLMessageBox as QMessageBox
+)
 from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import ConfigRepository, OperacionRepository
@@ -144,9 +147,30 @@ class BotView(QWidget):
         menu.addSeparator()
         
         action_logout = menu.addAction("🚪 Cerrar Sesión")
-        action_logout.triggered.connect(self.logout_requested.emit)
+        action_logout.triggered.connect(self._on_logout_clicked)
         
         menu.exec_(QCursor.pos())
+
+    def _on_logout_clicked(self):
+        """Displays confirmation dialog before emitting logout signal."""
+        if hasattr(self, 'worker') and self.worker and hasattr(self.worker, 'isRunning') and self.worker.isRunning():
+            QMessageBox.warning(
+                self,
+                "Operación en Curso",
+                "No se puede cerrar sesión mientras el bot esté en proceso activo.\n"
+                "Por favor, detenga o pause la ejecución antes de salir."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Cerrar Sesión",
+            "¿Estás seguro de que deseas cerrar sesión?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.logout_requested.emit()
         
     def _build_top_panels(self):
         top_layout = QHBoxLayout()
@@ -534,6 +558,8 @@ class BotView(QWidget):
         self.chk_autonomo.setEnabled(False)
         self.chk_ver_todas.setEnabled(False)
         self.btn_browse.setEnabled(False)
+        self.btn_gear.setEnabled(False)
+        self.btn_user.setEnabled(False)
         
         self.lbl_portal_status.setText("Portal: ACTIVO")
         self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.ACCENT_EMERALD}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
@@ -616,6 +642,8 @@ class BotView(QWidget):
         self.chk_autonomo.setEnabled(True)
         self.chk_ver_todas.setEnabled(True)
         self.btn_browse.setEnabled(True)
+        self.btn_gear.setEnabled(True)
+        self.btn_user.setEnabled(True)
         
         self.lbl_portal_status.setText("Portal: INACTIVO")
         self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.BORDER_DARK}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")

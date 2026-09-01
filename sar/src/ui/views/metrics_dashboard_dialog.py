@@ -652,7 +652,8 @@ class MetricsDashboardDialog(QWidget):
     # =========================================================================
     def _export_to_pdf(self):
         """Generates a professional PDF report containing active filters, KPIs, charts, and data table."""
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from PySide6.QtWidgets import QFileDialog
+        from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
         from PySide6.QtGui import QPixmap, QImage
         import tempfile
         import os

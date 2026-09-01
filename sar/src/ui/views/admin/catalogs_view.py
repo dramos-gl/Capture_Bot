@@ -1,6 +1,7 @@
 """Catalogs Administration Sub-view."""
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QMessageBox, QCheckBox, QTabWidget
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QCheckBox, QTabWidget
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
 from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox

@@ -7,12 +7,15 @@ from sqlalchemy import text
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
     QFrame, QLabel, QPushButton, QCheckBox, QTextEdit, 
-    QMessageBox, QProgressBar, QMenu, QFileDialog
+    QProgressBar, QMenu, QFileDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QCursor
 
-from sar.src.ui.design_system.components import CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, CustomSwitch, MetricBox
+from sar.src.ui.design_system.components import (
+    CustomCard, StyledDataTable, CustomButton, CustomLabel, CustomCheckBox, CustomSwitch, MetricBox,
+    GLMessageBox as QMessageBox
+)
 from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import ConfigRepository, OperacionRepository
@@ -147,9 +150,30 @@ class BillingBotView(QWidget):
         menu.addSeparator()
         
         action_logout = menu.addAction("🚪 Cerrar Sesión")
-        action_logout.triggered.connect(self.logout_requested.emit)
+        action_logout.triggered.connect(self._on_logout_clicked)
         
         menu.exec_(QCursor.pos())
+
+    def _on_logout_clicked(self):
+        """Displays confirmation dialog before emitting logout signal."""
+        if hasattr(self, 'worker') and self.worker and hasattr(self.worker, 'isRunning') and self.worker.isRunning():
+            QMessageBox.warning(
+                self,
+                "Operación en Curso",
+                "No se puede cerrar sesión mientras el bot esté en proceso activo.\n"
+                "Por favor, detenga o pause la ejecución antes de salir."
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Cerrar Sesión",
+            "¿Estás seguro de que deseas cerrar sesión?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.logout_requested.emit()
         
     def _build_top_panels(self):
         top_layout = QHBoxLayout()
@@ -759,17 +783,54 @@ from PySide6.QtCore import Signal
 class BillingBotWindow(QMainWindow):
     logout_requested = Signal()
 
-    def __init__(self, db_connector, sesion_id, usuario_id, parent=None):
+    def __init__(self, db_connector, sesion_id, usuario_id, parent=None, on_logout=None):
         super().__init__(parent)
         self.setWindowTitle("SAR - Bot Face C (Facturación y Timbrado)")
         self.resize(1100, 700)
+        self._is_logging_out = False
+        self._logging_out = False
+        self._on_logout = on_logout
         self.view = BillingBotView(db_connector, sesion_id, usuario_id, self)
         self.setCentralWidget(self.view)
         
         # Propagate logout signal
-        self.view.logout_requested.connect(self.logout_requested.emit)
+        self.view.logout_requested.connect(self._handle_logout_signal)
+
+    def _handle_logout_signal(self):
+        self._is_logging_out = True
+        self._logging_out = True
+        self.logout_requested.emit()
 
     def closeEvent(self, event):
-        # Delegate close event validation directly to the child view
-        self.view.closeEvent(event)
+        if getattr(self, "_is_logging_out", False) or getattr(self, "_logging_out", False):
+            event.accept()
+            return
+
+        if hasattr(self.view, 'worker') and self.view.worker and self.view.worker.isRunning():
+            from sar.src.ui.design_system.components import GLMessageBox
+            GLMessageBox.warning(
+                self, 
+                "Operación en Curso", 
+                "No se puede cerrar la aplicación mientras el bot esté en proceso activo.\n"
+                "Por favor, detenga o pause la ejecución antes de salir."
+            )
+            event.ignore()
+            return
+
+        from sar.src.ui.design_system.components import GLMessageBox
+        reply = GLMessageBox.question(
+            self,
+            "Confirmar Salida",
+            "¿Está seguro de que desea salir del sistema?",
+            GLMessageBox.Yes | GLMessageBox.No,
+            GLMessageBox.No
+        )
+        if reply == GLMessageBox.Yes:
+            self._is_logging_out = True
+            if self._on_logout and callable(self._on_logout):
+                self._on_logout(exit_app=True)
+            event.accept()
+            QApplication.quit()
+        else:
+            event.ignore()
 

@@ -11,7 +11,7 @@ from typing import Optional
 
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QGridLayout, 
-    QFrame, QLabel, QPushButton, QTextEdit, QMessageBox, 
+    QFrame, QLabel, QPushButton, QTextEdit, 
     QProgressBar, QMenu, QFileDialog, QTabWidget, QDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -20,7 +20,8 @@ from PySide6.QtGui import QFont, QCursor
 # Reutilizar componentes del Design System del SAR
 from sar.src.ui.design_system.components import (
     CustomCard, StyledDataTable, CustomButton, CustomLabel, 
-    CustomCheckBox, CustomSwitch, MetricBox
+    CustomCheckBox, CustomSwitch, MetricBox,
+    GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
 from sar.src.ui.design_system.tokens.colors import Colors
@@ -765,6 +766,14 @@ class R2FCancunView(QWidget):
                 except Exception:
                     pass
             self._open_dialogs = []
+        else:
+            reply = QMessageBox.question(
+                self, "Cerrar Sesión",
+                "¿Estás seguro de que deseas cerrar sesión?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
 
         self.logout_requested.emit()
 

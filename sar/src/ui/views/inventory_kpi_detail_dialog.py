@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QFrame,
-    QLabel, QLineEdit, QPushButton, QMessageBox, QFileDialog
+    QLabel, QLineEdit, QPushButton, QFileDialog
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize
 from PySide6.QtGui import QColor
@@ -15,6 +15,7 @@ from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
 from sar.src.ui.design_system.components.organisms.gl_data_table import StyledDataTable
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.ui.design_system.utils.icons import Icons
 

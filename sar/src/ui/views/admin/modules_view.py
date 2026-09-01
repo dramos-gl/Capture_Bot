@@ -1,6 +1,7 @@
 """Modules Administration Sub-view (AppModulo and Modulo)."""
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QMessageBox, QCheckBox
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QCheckBox
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
 from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
 from sar.src.ui.design_system.components.organisms.gl_dialog import CustomDialog

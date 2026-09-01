@@ -1,11 +1,12 @@
 """Orders Management View."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QMessageBox
+    QWidget, QVBoxLayout, QHBoxLayout
 )
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components import (
-    CustomCard, CustomLabel, CustomButton, InteractiveGrid, CustomInput, CustomComboBox, FilterBar
+    CustomCard, CustomLabel, CustomButton, InteractiveGrid, CustomInput, CustomComboBox, FilterBar,
+    GLMessageBox as QMessageBox
 )
 from PySide6.QtCore import QThread, Signal
 from sar.src.services.ordenes_ui_service import OrdenesUIService

@@ -2,12 +2,15 @@
 
 import os
 import subprocess
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QPushButton, QFrame, QButtonGroup
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFrame, QButtonGroup
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
 
-from sar.src.ui.design_system.components import CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomLabel
+from sar.src.ui.design_system.components import (
+    CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomLabel,
+    GLMessageBox as QMessageBox
+)
 from sar.src.ui.design_system.utils.icons import Icons
 from cancunbot.src.storage.cancunbot_repos import ReciboCancunRepository
 

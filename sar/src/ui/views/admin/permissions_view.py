@@ -1,9 +1,10 @@
 """Permissions Administration Sub-view."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QComboBox, 
+    QWidget, QVBoxLayout, QHBoxLayout, QComboBox, 
     QTableWidget, QHeaderView, QAbstractItemView, QLabel
 )
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton

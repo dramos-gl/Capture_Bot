@@ -1,8 +1,11 @@
 """Requests (Bandeja de Trabajo) View."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QDialog, QLineEdit
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QDialog, QLineEdit
 from PySide6.QtCore import Qt, QThread, Signal
-from sar.src.ui.design_system.components import CustomCard, CustomLabel, CustomButton, StyledDataTable, KeepOpenMenu
+from sar.src.ui.design_system.components import (
+    CustomCard, CustomLabel, CustomButton, StyledDataTable, KeepOpenMenu,
+    GLMessageBox as QMessageBox
+)
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.services.solicitudes_ui_service import SolicitudesUIService
 from sar.src.services.fase_b_service import FaseBService, FaseBWorker

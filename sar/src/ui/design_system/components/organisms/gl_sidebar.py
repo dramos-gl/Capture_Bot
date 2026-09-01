@@ -1,11 +1,12 @@
 """Sidebar Navigation Organism matching the target design mockup."""
 
 from PySide6.QtWidgets import (
-    QFrame, QVBoxLayout, QHBoxLayout, QPushButton, QButtonGroup, QSpacerItem, QSizePolicy, QWidget, QLabel, QMessageBox, QScrollArea
+    QFrame, QVBoxLayout, QHBoxLayout, QPushButton, QButtonGroup, QSpacerItem, QSizePolicy, QWidget, QLabel, QScrollArea
 )
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QIcon
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.utils.icons import Icons
 
 class NavigationSidebar(QFrame):
@@ -484,7 +485,7 @@ class NavigationSidebar(QFrame):
     def _on_logout_clicked(self):
         """Displays a confirmation dialog before emitting logout signal."""
         reply = QMessageBox.question(
-            self, "Confirmar Salida",
+            self, "Cerrar Sesión",
             "¿Estás seguro de que deseas cerrar sesión?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )

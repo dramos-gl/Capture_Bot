@@ -2,10 +2,13 @@
 
 from typing import List
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QMessageBox, QFrame, QLineEdit, QComboBox, QCheckBox, QTableWidgetItem, QLabel, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QFrame, QLineEdit, QComboBox, QCheckBox, QTableWidgetItem, QLabel, QWidget
 )
 from PySide6.QtCore import Qt
-from sar.src.ui.design_system.components import CustomLabel, CustomButton, StyledDataTable, CustomComboBox
+from sar.src.ui.design_system.components import (
+    CustomLabel, CustomButton, StyledDataTable, CustomComboBox,
+    GLMessageBox as QMessageBox
+)
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import ProduccionRepository

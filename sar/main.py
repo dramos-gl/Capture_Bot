@@ -20,6 +20,51 @@ from sar.src.storage.db_connector import DatabaseConnector
 from sar.src.services.security_service import SecurityService
 from sqlalchemy.exc import OperationalError
 
+class SARModuleWindow(QMainWindow):
+    """Standardized top-level application window with exit confirmation and session cleanup."""
+    
+    def __init__(self, title="SAR", width=1000, height=680, parent=None, on_logout=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(width, height)
+        self._is_logging_out = False
+        self._on_logout = on_logout
+        
+    def closeEvent(self, event):
+        if getattr(self, "_is_logging_out", False) or getattr(self, "_logging_out", False):
+            event.accept()
+            return
+
+        cw = self.centralWidget()
+        if cw and hasattr(cw, 'worker') and cw.worker and hasattr(cw.worker, 'isRunning') and cw.worker.isRunning():
+            from sar.src.ui.design_system.components import GLMessageBox
+            GLMessageBox.warning(
+                self,
+                "Operación en Curso",
+                "No se puede cerrar la aplicación mientras el proceso esté activo.\n"
+                "Por favor, detenga o pause la ejecución antes de salir."
+            )
+            event.ignore()
+            return
+            
+        from sar.src.ui.design_system.components import GLMessageBox
+        reply = GLMessageBox.question(
+            self,
+            "Confirmar Salida",
+            "¿Está seguro de que desea salir del sistema?",
+            GLMessageBox.Yes | GLMessageBox.No,
+            GLMessageBox.No
+        )
+        if reply == GLMessageBox.Yes:
+            self._is_logging_out = True
+            if self._on_logout and callable(self._on_logout):
+                self._on_logout(exit_app=True)
+            event.accept()
+            QApplication.quit()
+        else:
+            event.ignore()
+
+
 class MainWindow(QMainWindow):
     """Standalone Login Window acting as the main entry point and router."""
     
@@ -42,7 +87,6 @@ class MainWindow(QMainWindow):
         
         # Connect login signal
         self.login_view.login_requested.connect(self._handle_login)
-
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -121,15 +165,19 @@ class MainWindow(QMainWindow):
                     current_usuario_id=self.current_usuario_id,
                     current_sesion_id=self.current_sesion_id
                 )
+                self.active_module._on_logout = self._handle_logout
                 self.active_module.logout_requested.connect(self._handle_logout)
             elif selected_mod_code == "CTRL_REF":
                 from sar.src.ui.views.main_view import MainView
-                self.active_module = QMainWindow()
+                self.active_module = SARModuleWindow(
+                    title="SAR - Control de Referencias",
+                    width=1000,
+                    height=680,
+                    on_logout=self._handle_logout
+                )
                 self.active_module.current_sesion_id = self.current_sesion_id
                 self.active_module.current_usuario_id = self.current_usuario_id
                 self.active_module.current_username = getattr(self, 'current_username', None)
-                self.active_module.setWindowTitle("SAR - Control de Referencias")
-                self.active_module.resize(1000, 680)
                 
                 # Use the existing MainView (which has the sidebar and dashboard)
                 main_view_widget = MainView(ThemeManager, self.db_connector, self.active_module)
@@ -140,10 +188,13 @@ class MainWindow(QMainWindow):
                 main_view_widget.logout_requested.connect(self._handle_logout)
             elif selected_mod_code == "BOT_FACE_A":
                 from sar.src.ui.views.bot_view import BotView
-                self.active_module = QMainWindow()
+                self.active_module = SARModuleWindow(
+                    title="SAR - Bot Face A (Automático)",
+                    width=1100,
+                    height=660,
+                    on_logout=self._handle_logout
+                )
                 self.active_module.current_sesion_id = self.current_sesion_id
-                self.active_module.setWindowTitle("SAR - Bot Face A (Automático)")
-                self.active_module.resize(1100, 660)
                 
                 bot_view_widget = BotView(self.db_connector, self.current_sesion_id, self.current_usuario_id, self.active_module)
                 self.active_module.setCentralWidget(bot_view_widget)
@@ -152,7 +203,12 @@ class MainWindow(QMainWindow):
                 bot_view_widget.logout_requested.connect(self._handle_logout)
             elif selected_mod_code == "BOT_C":
                 from sar.src.ui.views.billing_bot_view import BillingBotWindow
-                self.active_module = BillingBotWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
+                self.active_module = BillingBotWindow(
+                    self.db_connector,
+                    self.current_sesion_id,
+                    self.current_usuario_id,
+                    on_logout=self._handle_logout
+                )
                 self.active_module.current_sesion_id = self.current_sesion_id
                 self.active_module.resize(1100, 660)
                 
@@ -162,6 +218,7 @@ class MainWindow(QMainWindow):
                 from cancunbot.src.ui.views.r2f_cancun_view import R2FCancunWindow
                 self.active_module = R2FCancunWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
                 self.active_module.current_sesion_id = self.current_sesion_id
+                self.active_module._on_logout = self._handle_logout
                 
                 # Hook up logout for R2FCancunWindow
                 self.active_module.logout_requested.connect(self._handle_logout)
@@ -169,9 +226,12 @@ class MainWindow(QMainWindow):
             else:
                 # Placeholder for other modules
                 from PySide6.QtWidgets import QLabel
-                self.active_module = QMainWindow()
-                self.active_module.setWindowTitle(f"Módulo: {selected_mod_code}")
-                self.active_module.resize(800, 600)
+                self.active_module = SARModuleWindow(
+                    title=f"Módulo: {selected_mod_code}",
+                    width=800,
+                    height=600,
+                    on_logout=self._handle_logout
+                )
                 lbl = QLabel(f"Bienvenido al módulo {selected_mod_code}", self.active_module)
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.active_module.setCentralWidget(lbl)
@@ -209,8 +269,8 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.login_view.set_login_error(f"Error inesperado: {str(e)}")
 
-    def _handle_logout(self):
-        """Logs out the user, closes the session and returns to the login screen."""
+    def _handle_logout(self, exit_app=False):
+        """Logs out the user, closes the session and returns to the login screen (or exits if exit_app is True)."""
         if self.current_sesion_id is not None:
             try:
                 if self.api_client.connect_via_api:
@@ -230,10 +290,15 @@ class MainWindow(QMainWindow):
             finally:
                 self.current_sesion_id = None
                 
-        # Close the active module and show login
-        if hasattr(self, 'active_module'):
+        # Close the active module cleanly without triggering exit confirmation
+        if hasattr(self, 'active_module') and self.active_module:
+            self.active_module._is_logging_out = True
+            self.active_module._logging_out = True
             self.active_module.close()
-        self.show()
+            
+        # Only show login if this was a normal logout, NOT a complete application exit
+        if not exit_app:
+            self.show()
 
 
 def main():

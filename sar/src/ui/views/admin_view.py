@@ -1,10 +1,11 @@
 """System Administration View."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLabel, QMainWindow, QMessageBox, QApplication
+    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLabel, QMainWindow, QApplication
 )
 from PySide6.QtCore import Qt, Signal
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.storage.repositories import UsuarioRepository
 from sar.src.ui.design_system.components.organisms.gl_admin_menubar import AdminMenuBar
 from sar.src.ui.design_system.utils.icons import Icons
@@ -194,14 +195,23 @@ class AdminWindow(QMainWindow):
             self.stacked_widget.setCurrentWidget(view)
 
     def _handle_logout_action(self):
-        self._logging_out = True
-        self.logout_requested.emit()
+        reply = QMessageBox.question(
+            self,
+            "Cerrar Sesión",
+            "¿Estás seguro de que deseas cerrar sesión?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self._logging_out = True
+            self._is_logging_out = True
+            self.logout_requested.emit()
 
     def _handle_exit_action(self):
         self.close()
 
     def closeEvent(self, event):
-        if getattr(self, "_logging_out", False):
+        if getattr(self, "_logging_out", False) or getattr(self, "_is_logging_out", False):
             event.accept()
             return
             
@@ -213,6 +223,10 @@ class AdminWindow(QMainWindow):
             QMessageBox.No
         )
         if reply == QMessageBox.Yes:
+            self._logging_out = True
+            self._is_logging_out = True
+            if hasattr(self, '_on_logout') and callable(self._on_logout):
+                self._on_logout(exit_app=True)
             event.accept()
             QApplication.quit()
         else:

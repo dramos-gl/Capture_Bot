@@ -7,7 +7,7 @@ import socket
 import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLabel, QMainWindow, 
-    QMessageBox, QApplication, QTextEdit, QPushButton, QFontDialog, QTableWidget, 
+    QApplication, QTextEdit, QPushButton, QFontDialog, QTableWidget, 
     QTableWidgetItem, QHeaderView, QLineEdit, QFormLayout, QDialog
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QThread
@@ -17,6 +17,7 @@ from sar.src.ui.design_system.theme_manager import ThemeManager
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.organisms.gl_data_table import StyledDataTable
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.utils.icons import Icons
 

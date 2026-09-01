@@ -735,7 +735,8 @@ class ErrorDetailDialog(QDialog):
         self._populate_table(filtered)
 
     def _export_to_excel(self):
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
+        from PySide6.QtWidgets import QFileDialog
+        from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
         import openpyxl
 
         file_path, _ = QFileDialog.getSaveFileName(

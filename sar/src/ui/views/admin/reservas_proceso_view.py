@@ -3,9 +3,10 @@
 import os
 import openpyxl
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QFileDialog, QFrame,
+    QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QFrame,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QComboBox, QTextEdit, QLabel
 )
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QBrush
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton

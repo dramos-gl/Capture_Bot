@@ -4,9 +4,10 @@ import os
 import csv
 from datetime import datetime
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QFileDialog,
+    QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QComboBox
 )
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel

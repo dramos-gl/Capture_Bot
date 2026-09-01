@@ -1,9 +1,12 @@
 """Referencias View."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QPushButton
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from sar.src.services.referencias_service import ReferenciasService
-from sar.src.ui.design_system.components import CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomLabel, KeepOpenMenu
+from sar.src.ui.design_system.components import (
+    CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
+    CustomLabel, KeepOpenMenu, GLMessageBox as QMessageBox
+)
 
 class ReferencesLoadWorker(QThread):
     """Background worker thread to load references from the DB dynamically with pagination."""

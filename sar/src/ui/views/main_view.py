@@ -161,7 +161,7 @@ class MainView(QWidget):
                         has_permission = sec_service.has_permission(usuario_id, req_mod, "LEER")
                 
                 if not has_permission:
-                    from PySide6.QtWidgets import QMessageBox
+                    from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
                     QMessageBox.warning(self, "Acceso Denegado", f"No tiene permisos para acceder al módulo {req_mod}.")
                     return
         except Exception as e:

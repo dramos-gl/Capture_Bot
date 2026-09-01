@@ -1,7 +1,7 @@
 """Login Screen View."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QApplication
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QApplication, QPushButton
+from PySide6.QtCore import Signal, Qt, QSize
 from sar.src.ui.design_system.components import CustomLabel, LabeledInput, CustomButton, CustomComboBox
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.storage.repositories import UsuarioRepository
@@ -43,7 +43,7 @@ class LoginView(QWidget):
         mod_lbl.setAlignment(Qt.AlignCenter)
         self.center_layout.addWidget(mod_lbl)
         
-        self.center_layout.addSpacing(8)
+        self.center_layout.addSpacing(6)
         
         # Module Selection
         self.cb_modulo = CustomComboBox(self)
@@ -81,7 +81,7 @@ class LoginView(QWidget):
         # Cancel button
         self.cancel_btn = CustomButton("Cancelar", is_secondary=False, parent=self)
         self.cancel_btn.setObjectName("dangerBtn") # Override to use danger color
-        self.cancel_btn.clicked.connect(QApplication.quit)
+        self.cancel_btn.clicked.connect(self._on_cancel_clicked)
         self.btn_layout.addWidget(self.cancel_btn)
         
         self.center_layout.addLayout(self.btn_layout)
@@ -179,6 +179,10 @@ class LoginView(QWidget):
         if not has_error:
             self.login_requested.emit(username, password, selected_mod_code)
             
+    def _on_cancel_clicked(self):
+        """Exits application directly on cancel without prompt."""
+        QApplication.quit()
+
     def set_login_error(self, message: str):
         """Shows login general error on password field."""
         self.pass_input.show_error(message)
