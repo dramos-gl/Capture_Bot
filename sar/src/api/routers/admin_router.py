@@ -10,7 +10,7 @@ from sar.src.services.admin_service import AdminService
 from sar.src.storage.models import (
     Usuario, Rol, Permiso, AppModulo, Modulo, Accion,
     Concepto, Municipio, Delegacion, Rfc, EstadoSistema, ParametroSistema, LocalizadorPortal,
-    DesarrolloEmpresa
+    DesarrolloEmpresa, OrdenGeneracion
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -149,6 +149,14 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: 
                 }
                 for l in items
             ]
+        elif entity == "ordenes":
+            res = db.execute(select(
+                OrdenGeneracion.orden_id,
+                OrdenGeneracion.folio,
+                OrdenGeneracion.descripcion,
+                OrdenGeneracion.fecha_creacion
+            ).order_by(OrdenGeneracion.orden_id.desc())).mappings().all()
+            return [dict(r) for r in res]
         else:
             raise HTTPException(status_code=400, detail=f"Entidad desconocida: {entity}")
     except Exception as e:

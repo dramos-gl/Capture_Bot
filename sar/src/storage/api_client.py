@@ -66,22 +66,36 @@ class APIClient:
                 headers["Authorization"] = f"Bearer {token}"
         return headers
 
-    def request(self, method: str, endpoint: str, data: dict = None, username: str = None, timeout: int = 15) -> dict:
+    def request(
+        self,
+        method: str,
+        endpoint: str,
+        data: dict = None,
+        json: dict = None,
+        params: dict = None,
+        username: str = None,
+        timeout: int = 15,
+        **kwargs
+    ) -> dict:
         """Realiza peticiones HTTP genéricas con manejo de errores centralizado."""
         url = f"{self.api_url.rstrip('/')}/{endpoint.lstrip('/')}"
         headers = self._get_headers(username)
         
+        # Resolver payloads de forma flexible y retrocompatible
+        method_upper = method.upper()
+        payload_json = json if json is not None else (data if method_upper in ("POST", "PUT", "DELETE", "PATCH") else None)
+        query_params = params if params is not None else (data if method_upper == "GET" else None)
+        
         try:
-            if method.upper() == "GET":
-                response = requests.get(url, headers=headers, params=data, timeout=timeout)
-            elif method.upper() == "POST":
-                response = requests.post(url, headers=headers, json=data, timeout=timeout)
-            elif method.upper() == "PUT":
-                response = requests.put(url, headers=headers, json=data, timeout=timeout)
-            elif method.upper() == "DELETE":
-                response = requests.delete(url, headers=headers, json=data, timeout=timeout)
-            else:
-                raise ValueError(f"Método HTTP no soportado: {method}")
+            response = requests.request(
+                method=method_upper,
+                url=url,
+                headers=headers,
+                json=payload_json,
+                params=query_params,
+                timeout=timeout,
+                **kwargs
+            )
 
             # Lanzar excepción si hay código de error HTTP
             if response.status_code >= 400:
@@ -99,3 +113,4 @@ class APIClient:
             raise Exception("La petición al servidor API excedió el tiempo límite de espera.")
         except Exception as e:
             raise e
+

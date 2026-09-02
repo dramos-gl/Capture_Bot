@@ -192,12 +192,15 @@ class UpdateFacturasView(QWidget):
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
         
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+        
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(16)
         
         self._build_ui()
-        
+
     def _build_ui(self):
         # Label de descripción completa de la funcionalidad
         self.lbl_desc = CustomLabel(
@@ -261,17 +264,20 @@ class UpdateFacturasView(QWidget):
         self.combo_orden.addItem("Todas las Órdenes", None)
         
         try:
-            with self.db_connector.get_session() as session:
-                res = session.execute(text("""
-                    SELECT orden_id, folio, descripcion, fecha_creacion 
-                    FROM sar_produccion.orden_generacion 
-                    ORDER BY orden_id DESC
-                """)).mappings().all()
+            if self.api_client.connect_via_api:
+                res = self.api_client.request("GET", "/api/admin/data/ordenes")
+            else:
+                with self.db_connector.get_session() as session:
+                    res = session.execute(text("""
+                        SELECT orden_id, folio, descripcion, fecha_creacion 
+                        FROM sar_produccion.orden_generacion 
+                        ORDER BY orden_id DESC
+                    """)).mappings().all()
                 
-                from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
-                for r in res:
-                    label = format_orden_filter_label(r["folio"], r.get("descripcion"))
-                    self.combo_orden.addItem(label, r["orden_id"])
+            from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
+            for r in res:
+                label = format_orden_filter_label(r["folio"], r.get("descripcion"))
+                self.combo_orden.addItem(label, r["orden_id"])
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudieron cargar las órdenes: {e}")
             

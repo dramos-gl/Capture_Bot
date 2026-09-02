@@ -129,6 +129,10 @@ class AdminWindow(QMainWindow):
         
     def _get_username_string(self):
         uid = self._get_current_user()
+        main_win = self.window()
+        username = getattr(main_win, 'current_username', None) or getattr(self, 'current_username', None)
+        if username:
+            return f"Usuario: {username}"
         try:
             if self.api_client.connect_via_api:
                 users = self.api_client.request("GET", "/api/auth/users")
@@ -143,7 +147,7 @@ class AdminWindow(QMainWindow):
                         return f"Usuario: {user_obj.username}"
         except Exception:
             pass
-        return "Usuario: admin"
+        return "Usuario: Admin"
 
     def _load_permissions(self):
         uid = self._get_current_user()

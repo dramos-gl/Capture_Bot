@@ -27,7 +27,6 @@ class LocalizersView(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         
         self._build_ui()
-        self.refresh_data()
         
     def _build_ui(self):
         self.tbl_locs = CrudTablePanel("Localizadores UI (Bot)")

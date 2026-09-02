@@ -36,7 +36,6 @@ class CatalogsView(QWidget):
         self.current_desarrollo_empresa_id = None
         
         self._build_ui()
-        self.refresh_data()
         
     def _build_ui(self):
         self.tabs = QTabWidget(self)

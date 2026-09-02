@@ -29,7 +29,6 @@ class UsersView(QWidget):
         self.all_roles = []
         
         self._build_ui()
-        self.refresh_data()
         
     def _build_ui(self):
         self.tbl_usuarios = CrudTablePanel("Usuarios del Sistema")

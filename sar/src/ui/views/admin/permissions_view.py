@@ -33,7 +33,6 @@ class PermissionsView(QWidget):
         self.layout.setSpacing(16)
         
         self._build_ui()
-        self.refresh_data()
         
     def _build_ui(self):
         # Top Bar

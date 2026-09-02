@@ -26,13 +26,15 @@ class ReservasProcesoView(QWidget):
         self.can_edit = can_edit
         self.payload_validado = [] # Loaded references ready to be saved
 
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+
         # Main view layout
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(24, 24, 24, 24)
         self.layout.setSpacing(20)
 
         self._build_ui()
-        self.refresh_data()
 
     def _build_ui(self):
         # 1. Main Header (Remove redundant "Administración del Sistema" title, show only sublabel)
@@ -308,16 +310,22 @@ class ReservasProcesoView(QWidget):
         self.lbl_char_counter.setText(f"{len(txt)} / 500")
 
     def refresh_data(self):
-        """Fetches active collaborators from database and populates the dropdown."""
+        """Fetches active collaborators from database or API and populates the dropdown."""
         self.cb_colaborador.clear()
         self.cb_colaborador.addItem("-- Seleccione un Colaborador --", None)
 
         try:
-            with self.db_connector.get_session() as session:
-                stmt = select(Colaborador).where(Colaborador.activo == True).order_by(Colaborador.nombre)
-                colabs = session.execute(stmt).scalars().all()
+            if self.api_client.connect_via_api:
+                colabs = self.api_client.request("GET", "/api/admin/data/colaboradores")
                 for c in colabs:
-                    self.cb_colaborador.addItem(c.nombre, c.colaborador_id)
+                    if c.get("activo", True):
+                        self.cb_colaborador.addItem(c["nombre"], c["colaborador_id"])
+            else:
+                with self.db_connector.get_session() as session:
+                    stmt = select(Colaborador).where(Colaborador.activo == True).order_by(Colaborador.nombre)
+                    colabs = session.execute(stmt).scalars().all()
+                    for c in colabs:
+                        self.cb_colaborador.addItem(c.nombre, c.colaborador_id)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al cargar colaboradores: {e}")
 

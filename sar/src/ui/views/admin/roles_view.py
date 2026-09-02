@@ -33,7 +33,6 @@ class RolesView(QWidget):
         self.app_modulos = []
         
         self._build_ui()
-        self.refresh_data()
         
     def _build_ui(self):
         self.tbl_roles = CrudTablePanel("Roles del Sistema")
