@@ -102,7 +102,7 @@ class OrdersView(QWidget):
         # Filter Bar
         self.filter_bar_historial = FilterBar(
             search_placeholder="Buscar por folio, descripción, estado...",
-            state_options=["Todas", "BORRADOR", "PENDIENTE", "EN_PROCESO", "COMPLETADA", "AUTORIZADA", "RECHAZADA", "CANCELADA"],
+            state_options=["Todas", "BORRADOR", "PENDIENTE", "EN_PROCESO", "PENDIENTE_AUTORIZACION", "COMPLETADA", "AUTORIZADA", "RECHAZADA", "CANCELADA"],
             on_search=self._on_historial_search,
             on_state_change=self._on_historial_state_change,
             on_action=self.refresh_historial,

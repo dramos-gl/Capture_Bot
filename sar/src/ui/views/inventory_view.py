@@ -462,30 +462,6 @@ class InventoryView(QWidget):
 
         # Tab Widget
         self.tabs = QTabWidget(self)
-        self.tabs.setStyleSheet("""
-            QTabWidget::panel {
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-                background-color: #FFFFFF;
-                padding: 16px;
-            }
-            QTabBar::tab {
-                background-color: #F1F5F9;
-                color: #475569;
-                padding: 8px 16px;
-                border: 1px solid #E2E8F0;
-                border-bottom: none;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                margin-right: 2px;
-                font-weight: bold;
-            }
-            QTabBar::tab:selected {
-                background-color: #FFFFFF;
-                color: #2C3E50;
-                border-bottom: 2px solid #2563EB;
-            }
-        """)
 
         # 1. Tab: Visor de Inventario
         self.tab_visor = QWidget()
@@ -850,15 +826,21 @@ class InventoryView(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        def add_page_btn(text, target, enabled):
+        def add_page_btn(text, target, enabled, is_active=False):
             btn = QPushButton(text)
             btn.setEnabled(enabled)
+            if is_active:
+                btn.setObjectName("paginationActivePageBtn")
+            elif text in ("<<", "<", ">", ">>"):
+                btn.setObjectName("paginationNavBtn")
+            else:
+                btn.setObjectName("paginationPageBtn")
             btn.clicked.connect(lambda: self._set_page(target))
             self.pag_btn_layout.addWidget(btn)
 
         add_page_btn("<<", 1, self.current_page > 1)
         add_page_btn("<", self.current_page - 1, self.current_page > 1)
-        add_page_btn(str(self.current_page), self.current_page, False)
+        add_page_btn(str(self.current_page), self.current_page, True, is_active=True)
         add_page_btn(">", self.current_page + 1, self.current_page < total_pages)
         add_page_btn(">>", total_pages, self.current_page < total_pages)
 
@@ -2677,15 +2659,21 @@ class InventoryView(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        def add_page_btn(text, target, enabled):
+        def add_page_btn(text, target, enabled, is_active=False):
             btn = QPushButton(text)
             btn.setEnabled(enabled)
+            if is_active:
+                btn.setObjectName("paginationActivePageBtn")
+            elif text in ("<<", "<", ">", ">>"):
+                btn.setObjectName("paginationNavBtn")
+            else:
+                btn.setObjectName("paginationPageBtn")
             btn.clicked.connect(lambda: self._set_page_lotes(target))
             self.pag_btn_layout_lotes.addWidget(btn)
 
         add_page_btn("<<", 1, self.current_page_lotes > 1)
         add_page_btn("<", self.current_page_lotes - 1, self.current_page_lotes > 1)
-        add_page_btn(str(self.current_page_lotes), self.current_page_lotes, False)
+        add_page_btn(str(self.current_page_lotes), self.current_page_lotes, True, is_active=True)
         add_page_btn(">", self.current_page_lotes + 1, self.current_page_lotes < total_pages)
         add_page_btn(">>", total_pages, self.current_page_lotes < total_pages)
 
@@ -3534,15 +3522,6 @@ class ReservaGridRow(QFrame):
         self.sb_cantidad = QSpinBox(self)
         self.sb_cantidad.setRange(1, 1000)
         self.sb_cantidad.setValue(10)
-        self.sb_cantidad.setStyleSheet("""
-            QSpinBox {
-                padding: 6px;
-                border: 1px solid #CBD5E1;
-                border-radius: 4px;
-                min-width: 80px;
-                background-color: white;
-            }
-        """)
         
         from sar.src.ui.design_system.utils.icons import Icons
         self.btn_delete = CustomButton("", is_secondary=True)

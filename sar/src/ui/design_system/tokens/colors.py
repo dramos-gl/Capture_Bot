@@ -35,6 +35,8 @@ class Colors:
     WARNING = "#D97706"
     ERROR = "#EF4444"
     INFO = "#3B82F6"
+    ASSIGNED = "#6366F1"
+    RESERVED = "#0D9488"
     
     # --- Status Background Colors (Light Theme Badges) ---
     SUCCESS_BG = "#DCFCE7"
@@ -42,6 +44,24 @@ class Colors:
     ERROR_BG = "#FEE2E2"
     ACCENT_BG = "#DBEAFE"
     NEUTRAL_BG = "#F1F5F9"
+    ASSIGNED_BG = "#EEF2FF"
+    RESERVED_BG = "#CCFBF1"
+
+    # --- Status Colors (Dark Theme Badges) ---
+    SUCCESS_DARK_BG = "rgba(22, 163, 74, 0.20)"
+    SUCCESS_DARK_TEXT = "#4ADE80"
+    WARNING_DARK_BG = "rgba(217, 119, 6, 0.22)"
+    WARNING_DARK_TEXT = "#FBBF24"
+    ERROR_DARK_BG = "rgba(239, 68, 68, 0.20)"
+    ERROR_DARK_TEXT = "#F87171"
+    ACCENT_DARK_BG = "rgba(37, 99, 235, 0.22)"
+    ACCENT_DARK_TEXT = "#60A5FA"
+    NEUTRAL_DARK_BG = "rgba(100, 116, 139, 0.20)"
+    NEUTRAL_DARK_TEXT = "#94A3B8"
+    ASSIGNED_DARK_BG = "rgba(99, 102, 241, 0.22)"
+    ASSIGNED_DARK_TEXT = "#818CF8"
+    RESERVED_DARK_BG = "rgba(13, 148, 136, 0.22)"
+    RESERVED_DARK_TEXT = "#2DD4BF"
 
     # --- Modern Neutrals (Slate from Flet System) ---
     SLATE_50        = "#F8FAFC"

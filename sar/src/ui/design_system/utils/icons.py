@@ -277,12 +277,12 @@ class Icons:
         return cls._create_icon(cls._SHIELD_LOCK_SVG, color)
         
     @classmethod
-    def trash(cls) -> QIcon:
-        return cls.get_icon("eliminar")
+    def trash(cls, color: str = None) -> QIcon:
+        return cls.get_icon("eliminar", color=color)
 
     @classmethod
-    def edit(cls) -> QIcon:
-        return cls.get_icon("editar")
+    def edit(cls, color: str = None) -> QIcon:
+        return cls.get_icon("editar", color=color)
 
     @classmethod
     def calendar(cls, color: str = None) -> QIcon:

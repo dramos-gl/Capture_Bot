@@ -109,89 +109,70 @@ PC-02
 
 Laptop
 6. Roles Oficiales
-Administrador
 
-Control total.
+### Administrador (`ADMINISTRADOR`)
+Control total del sistema (Super Admin).
+- **Alcance**: Gestión completa de usuarios, roles, permisos, catálogos, configuración, parámetros, procesos especiales y auditoría.
+- **Acceso a Macro Apps**: `ADMIN`, `CTRL_REF`, `BOT_C`, `BOT_FASE_A`, `R2F_CANCUN`.
 
-Permisos:
+### Operador (`OPERADOR`)
+Control de producción, captura de órdenes, gestión de inventario y ejecución interactiva de scrapers.
+- **Alcance**: Creación y seguimiento de órdenes, asignaciones de inventario a notarías/colaboradores, consulta de referencias y facturas.
+- **Acceso a Macro Apps**: `CTRL_REF`, `BOT_C`, `BOT_FASE_A`, `R2F_CANCUN`.
 
-Usuarios
+### Bot de Automatización (`BOT`)
+Cuenta de servicio no humana (*Service Account*) para procesamiento desatendido de solicitudes en cola.
+- **Alcance (Principio de Mínimo Privilegio - PoLP)**:
+  - `CATALOGOS:LEER`: Consulta de RFCs, conceptos y delegaciones requeridos para el portal Tributanet.
+  - `CONFIGURACION:LEER`: Consulta de localizadores CSS/XPath y parámetros de timeout/reintentos.
+  - `SOLICITUDES:LEER`: Detección y bloqueo transaccional de solicitudes en estado `PENDIENTE`.
+  - `SOLICITUDES:EDITAR`: Transición de estados (`EN_PROCESO`, `COMPLETADA`, `ERROR`) y registro de métricas.
+  - `SOLICITUDES:EJECUTAR`: Reclamo con bloqueo de fila (`SELECT ... FOR UPDATE`) y ciclo de scraping.
+  - `REFERENCIAS:CREAR`: Inserción física de la referencia emitida y registro de archivo PDF generado.
+  - `REFERENCIAS:LEER`: Verificación de idempotencia previa a inserción (`exists_by_portal_ref`).
+- **Restricciones Estrictas**: Denegado acceso a `SEGURIDAD`, denegada eliminación (`ELIMINAR`) en todos los módulos, y denegada edición en `CATALOGOS` y `CONFIGURACION`.
+- **Acceso a Macro Apps**: `BOT_C`, `BOT_FASE_A`.
 
-Roles
-
-Configuración
-
-Órdenes
-
-Solicitudes
-
-Reportes
-
-Auditoría
-Supervisor
-
-Control operativo.
-
-Permisos:
-
-Órdenes
-
-Asignaciones
-
-Monitoreo
-
-Reportes
-Operador
-
-Producción.
-
-Permisos:
-
-Tomar solicitudes
-
-Procesar solicitudes
-
-Consultar historial propio
-Consulta
-
-Solo lectura.
-
-Permisos:
-
-Dashboards
-
-Reportes
 7. Arquitectura de Control de Acceso en Dos Niveles
 
 El sistema SAR implementa una estrategia de control de acceso basada en roles (RBAC) estructurada en dos niveles independientes y complementarios:
 
-### Nivel 1: Validación de Acceso al Módulo (Macronivel)
-Antes de instanciar cualquier vista o cargar datos del servidor, el sistema intercepta el login y valida si el rol del usuario tiene asignado el módulo de la aplicación (`app_modulo`) al que intenta entrar (`ADMIN`, `CTRL_REF`, `BOT_FACE_A`, `BOT_C`). Las relaciones se definen en la tabla asociativa `sar_seguridad.rol_app_modulo` administrada desde el panel de Roles.
+### Nivel 1: Validación de Acceso al Módulo (Macronivel - `app_modulo`)
+Antes de instanciar cualquier vista o cargar datos del servidor, el sistema intercepta el login y valida si el rol del usuario tiene asignado el módulo de la aplicación (`app_modulo`) al que intenta entrar:
+- `ADMIN`: Módulo de Administración del Sistema SAR.
+- `CTRL_REF`: Sistema Principal de Control de Derechos y Referencias SAR.
+- `BOT_C`: Bot-C AutoFacturación Tributanet.
+- `BOT_FASE_A`: Bot-A Pago de Derechos y Generación de Referencias.
+- `R2F_CANCUN`: Aplicación Satélite Independiente de Recibos y Facturas Cancún.
 
-### Nivel 2: Validación de Permisos de Operación (Micronivel)
-Una vez dentro del módulo, las acciones específicas del usuario (Crear, Leer, Editar, Eliminar, Ejecutar, etc.) se validan contra los permisos granulares asociados a sus roles en la matriz de permisos (`rol_permiso` -> `permiso` -> `modulo` x `accion`).
+Las relaciones se definen en la tabla asociativa `sar_seguridad.rol_app_modulo` administrada desde el panel de Roles.
+
+### Nivel 2: Validación de Permisos de Operación (Micronivel - `permiso`)
+Una vez dentro del módulo, las acciones específicas del usuario (`CREAR`, `LEER`, `EDITAR`, `ELIMINAR`, `ASIGNAR`, `EJECUTAR`) se validan contra los permisos granulares asociados a sus roles en la matriz de permisos (`rol_permiso` -> `permiso` -> `modulo` x `accion`).
 
 ### Diagrama de Relación y Mapeo de Seguridad (RBAC)
 ```mermaid
 graph TD
-    Usuario[Usuario] -->|pertenece a| Rol[Rol]
-    Rol -->|Nivel 1: Acceso Módulo| AppModulo[Módulo de Aplicación<br>ADMIN, CTRL_REF, BOT_A, BOT_C]
+    Usuario[Usuario / Cuenta de Servicio] -->|pertenece a| Rol[Rol: ADMINISTRADOR, OPERADOR, BOT]
+    Rol -->|Nivel 1: Acceso Módulo| AppModulo[Macro App: ADMIN, CTRL_REF, BOT_C, BOT_FASE_A, R2F_CANCUN]
     Rol -->|Nivel 2: Asigna| Permiso[Permiso Granular]
-    Permiso -->|se compone de| Modulo[Módulo Funcional<br>SEGURIDAD, CATALOGOS, ORDENES...]
-    Permiso -->|se compone de| Accion[Acción<br>CREAR, LEER, EDITAR, EJECUTAR...]
+    Permiso -->|se compone de| Modulo[Módulo Funcional: DASHBOARD, ORDENES, SOLICITUDES, REFERENCIAS, CATALOGOS, SEGURIDAD, CONFIGURACION, FOLIOS_CANCUN...]
+    Permiso -->|se compone de| Accion[Acción: CREAR, LEER, EDITAR, ELIMINAR, ASIGNAR, EJECUTAR]
 ```
 
-8. Matriz RBAC
-Recurso	Admin	Supervisor	Operador	Consulta
-Usuarios	Sí	No	No	No
-Roles	Sí	No	No	No
-Configuración	Sí	No	No	No
-RFC	Sí	Sí	Lectura	Lectura
-Órdenes	Sí	Sí	Lectura	Lectura
-Solicitudes	Sí	Sí	Sí	Lectura
-Referencias	Sí	Sí	Sí	Lectura
-Dashboard	Sí	Sí	Sí	Sí
-Auditoría	Sí	Sí	No	No
+8. Matriz RBAC Canónica
+
+| Módulo / Recurso | Administrador | Operador | Bot (Service Account) |
+| :--- | :---: | :---: | :---: |
+| **Seguridad (Usuarios/Roles/Permisos)** | Control Total | Denegado | Denegado |
+| **Configuración y Localizadores** | Control Total | Lectura | Lectura (`LEER`) |
+| **Catálogos Maestros (RFC/Conceptos/Geo)** | Control Total | Lectura / Edición | Lectura (`LEER`) |
+| **Órdenes de Generación** | Control Total | Crear / Leer / Editar | Denegado |
+| **Solicitudes del Bot** | Control Total | Control Total | Reclamar / Procesar (`LEER`, `EDITAR`, `EJECUTAR`) |
+| **Referencias y Facturas** | Control Total | Control Total | Emitir / Verificar (`CREAR`, `LEER`) |
+| **Tablero y KPIs (Dashboard)** | Visualizar / Gestionar | Visualizar | Denegado |
+| **CancúnBot Satélite (`FOLIOS/RECIBOS`)** | Control Total | Asignado por Perfil | Denegado |
+| **Auditoría y Bitácoras** | Lectura Completa | Lectura Propia | Auditoría Automática por Sesión |
 9. Seguridad de Contraseñas
 Hash
 Argon2

@@ -14,7 +14,7 @@ class MainView(QWidget):
         super().__init__(parent)
         self.theme_manager = theme_manager
         self.db_connector = db_connector
-        self.is_dark_theme = True
+        self.is_dark_theme = self.theme_manager.is_dark_active()
         self.admin_window = None
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
@@ -71,6 +71,11 @@ class MainView(QWidget):
                 has_solicitudes = perms.get("SOLICITUDES", {}).get("LEER", False)
                 has_referencias = perms.get("REFERENCIAS", {}).get("LEER", False)
                 has_seguridad = perms.get("SEGURIDAD", {}).get("LEER", False)
+                has_cancun = (
+                    perms.get("FOLIOS_CANCUN", {}).get("LEER", False) or
+                    perms.get("RECIBOS_CANCUN", {}).get("LEER", False) or
+                    perms.get("FACTURAS_CANCUN", {}).get("LEER", False)
+                )
             else:
                 with self.db_connector.get_session() as session:
                     from sar.src.services.security_service import SecurityService
@@ -80,6 +85,11 @@ class MainView(QWidget):
                     has_solicitudes = sec_service.has_permission(usuario_id, "SOLICITUDES", "LEER")
                     has_referencias = sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
                     has_seguridad = sec_service.has_permission(usuario_id, "SEGURIDAD", "LEER")
+                    has_cancun = (
+                        sec_service.has_permission(usuario_id, "FOLIOS_CANCUN", "LEER") or
+                        sec_service.has_permission(usuario_id, "RECIBOS_CANCUN", "LEER") or
+                        sec_service.has_permission(usuario_id, "FACTURAS_CANCUN", "LEER")
+                    )
                 
             default_item = None
 
@@ -102,8 +112,11 @@ class MainView(QWidget):
                 self.sidebar.show_item("inventario_apartar")
                 self.sidebar.show_item("inventario_catalogos")
                 self.sidebar.show_item("inventario_lotes")
-                self.sidebar.show_item("r2f_control")
                 if not default_item: default_item = "referencias"
+
+            if has_cancun:
+                self.sidebar.show_item("r2f_control")
+                if not default_item: default_item = "r2f_control"
 
             if has_seguridad:
                 self.sidebar.show_item("configuracion")
@@ -132,38 +145,59 @@ class MainView(QWidget):
             if not usuario_id:
                 return
 
-            mod_mapping = {
-                "dashboard": "DASHBOARD",
-                "ordenes": "ORDENES",
-                "ordenes_capturadas": "ORDENES",
-                "capturar_orden": "ORDENES",
-                "solicitudes": "SOLICITUDES",
-                "referencias": "REFERENCIAS",
-                "inventario": "REFERENCIAS",
-                "inventario_facturas": "REFERENCIAS",
-                "inventario_masivo": "REFERENCIAS",
-                "inventario_apartar": "REFERENCIAS",
-                "inventario_catalogos": "REFERENCIAS",
-                "inventario_lotes": "REFERENCIAS",
-                "r2f_control": "REFERENCIAS",
-                "configuracion": "SEGURIDAD"
-            }
-            
-            req_mod = mod_mapping.get(view_key)
-            if req_mod:
+            if view_key == "r2f_control":
                 if self.api_client.connect_via_api:
                     perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
-                    has_permission = perms.get(req_mod, {}).get("LEER", False)
+                    has_permission = (
+                        perms.get("FOLIOS_CANCUN", {}).get("LEER", False) or
+                        perms.get("RECIBOS_CANCUN", {}).get("LEER", False) or
+                        perms.get("FACTURAS_CANCUN", {}).get("LEER", False)
+                    )
                 else:
                     with self.db_connector.get_session() as session:
                         from sar.src.services.security_service import SecurityService
                         sec_service = SecurityService(session)
-                        has_permission = sec_service.has_permission(usuario_id, req_mod, "LEER")
-                
+                        has_permission = (
+                            sec_service.has_permission(usuario_id, "FOLIOS_CANCUN", "LEER") or
+                            sec_service.has_permission(usuario_id, "RECIBOS_CANCUN", "LEER") or
+                            sec_service.has_permission(usuario_id, "FACTURAS_CANCUN", "LEER")
+                        )
                 if not has_permission:
                     from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
-                    QMessageBox.warning(self, "Acceso Denegado", f"No tiene permisos para acceder al módulo {req_mod}.")
+                    QMessageBox.warning(self, "Acceso Denegado", "No tiene permisos para acceder al módulo Cancún (R2F).")
                     return
+            else:
+                mod_mapping = {
+                    "dashboard": "DASHBOARD",
+                    "ordenes": "ORDENES",
+                    "ordenes_capturadas": "ORDENES",
+                    "capturar_orden": "ORDENES",
+                    "solicitudes": "SOLICITUDES",
+                    "referencias": "REFERENCIAS",
+                    "inventario": "REFERENCIAS",
+                    "inventario_facturas": "REFERENCIAS",
+                    "inventario_masivo": "REFERENCIAS",
+                    "inventario_apartar": "REFERENCIAS",
+                    "inventario_catalogos": "REFERENCIAS",
+                    "inventario_lotes": "REFERENCIAS",
+                    "configuracion": "SEGURIDAD"
+                }
+                
+                req_mod = mod_mapping.get(view_key)
+                if req_mod:
+                    if self.api_client.connect_via_api:
+                        perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                        has_permission = perms.get(req_mod, {}).get("LEER", False)
+                    else:
+                        with self.db_connector.get_session() as session:
+                            from sar.src.services.security_service import SecurityService
+                            sec_service = SecurityService(session)
+                            has_permission = sec_service.has_permission(usuario_id, req_mod, "LEER")
+                    
+                    if not has_permission:
+                        from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
+                        QMessageBox.warning(self, "Acceso Denegado", f"No tiene permisos para acceder al módulo {req_mod}.")
+                        return
         except Exception as e:
             print(f"Routing security error in MainView: {e}")
             return

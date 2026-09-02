@@ -76,16 +76,13 @@ class InteractiveGridRow(QFrame):
         self.lbl_disponibles.setAlignment(Qt.AlignCenter)
         self.lbl_disponibles.setMinimumWidth(80)
         self.lbl_disponibles.setMaximumWidth(100)
-        self.lbl_disponibles.setStyleSheet(
-            "background: #F1F5F9; color: #94A3B8; border: 1px solid #E2E8F0; "
-            "border-radius: 4px; padding: 4px 6px; font-size: 11px; font-weight: 600;"
-        )
+        self._update_disponibles_style("neutral", "—")
 
         # Delete button
         self.btn_delete = CustomButton("", is_secondary=True)
-        self.btn_delete.setIcon(Icons.trash())
+        self.btn_delete.setIcon(Icons.trash("#EF4444"))
         self.btn_delete.setFixedSize(30, 30)
-        self.btn_delete.setStyleSheet("border: none;")
+        self.btn_delete.setStyleSheet("border: none; background: transparent;")
         self.btn_delete.clicked.connect(lambda: self.deleted.emit(self))
 
         # ── Layout (order: Desarrollo → RFC → Delegación → Concepto → Cant → Disp → Del) ─
@@ -261,6 +258,34 @@ class InteractiveGridRow(QFrame):
     def _on_concepto_changed(self):
         self._on_combo_changed_generic()
 
+    def _update_disponibles_style(self, status: str = "neutral", text: str = "—"):
+        """Applies dynamic theme-sensitive styling to the availability capsule."""
+        from sar.src.ui.design_system.theme_manager import ThemeManager
+        is_dark = ThemeManager.is_dark_active()
+
+        if status == "danger":
+            bg = "rgba(239, 68, 68, 0.20)" if is_dark else "#FEF2F2"
+            fg = "#F87171" if is_dark else "#DC2626"
+            border = "rgba(239, 68, 68, 0.40)" if is_dark else "#FECACA"
+        elif status == "warning":
+            bg = "rgba(245, 158, 11, 0.20)" if is_dark else "#FFFBEB"
+            fg = "#FBBF24" if is_dark else "#D97706"
+            border = "rgba(245, 158, 11, 0.40)" if is_dark else "#FDE68A"
+        elif status == "success":
+            bg = "rgba(34, 197, 94, 0.20)" if is_dark else "#F0FDF4"
+            fg = "#4ADE80" if is_dark else "#16A34A"
+            border = "rgba(34, 197, 94, 0.40)" if is_dark else "#BBF7D0"
+        else: # "neutral"
+            bg = "#1E293B" if is_dark else "#F1F5F9"
+            fg = "#94A3B8" if is_dark else "#64748B"
+            border = "#334155" if is_dark else "#CBD5E1"
+
+        self.lbl_disponibles.setText(text)
+        self.lbl_disponibles.setStyleSheet(
+            f"background-color: {bg}; color: {fg}; border: 1px solid {border}; "
+            f"border-radius: 6px; padding: 4px 6px; font-size: 11px; font-weight: 600;"
+        )
+
     def _on_combo_changed_generic(self):
         """Common final step: emit changed and request availability if all fields are set."""
         self.changed.emit()
@@ -268,11 +293,7 @@ class InteractiveGridRow(QFrame):
         concepto_id = self.combo_concepto.currentData()
         delegacion_id = self.combo_delegacion.currentData()
         if rfc_id and concepto_id and delegacion_id:
-            self.lbl_disponibles.setText("...")
-            self.lbl_disponibles.setStyleSheet(
-                "background: #F1F5F9; color: #94A3B8; border: 1px solid #E2E8F0; "
-                "border-radius: 4px; padding: 4px 6px; font-size: 11px; font-weight: 600;"
-            )
+            self._update_disponibles_style("neutral", "...")
             self.availability_requested.emit(self)
         else:
             self.set_disponibles(None)
@@ -282,24 +303,15 @@ class InteractiveGridRow(QFrame):
     def set_disponibles(self, count):
         """Update the read-only availability label with semaphoric color."""
         if count is None:
-            self.lbl_disponibles.setText("—")
-            self.lbl_disponibles.setStyleSheet(
-                "background: #F1F5F9; color: #94A3B8; border: 1px solid #E2E8F0; "
-                "border-radius: 4px; padding: 4px 6px; font-size: 11px; font-weight: 600;"
-            )
+            self._update_disponibles_style("neutral", "—")
             return
         requested = self.spin_cantidad.value()
         if count == 0:
-            icon, bg, fg, border = "✗", "#FEF2F2", "#DC2626", "#FECACA"
+            self._update_disponibles_style("danger", f"✗ {count}")
         elif count < requested:
-            icon, bg, fg, border = "⚠", "#FFFBEB", "#D97706", "#FDE68A"
+            self._update_disponibles_style("warning", f"⚠ {count}")
         else:
-            icon, bg, fg, border = "✓", "#F0FDF4", "#16A34A", "#BBF7D0"
-        self.lbl_disponibles.setText(f"{icon} {count}")
-        self.lbl_disponibles.setStyleSheet(
-            f"background: {bg}; color: {fg}; border: 1px solid {border}; "
-            f"border-radius: 4px; padding: 4px 6px; font-size: 11px; font-weight: 600;"
-        )
+            self._update_disponibles_style("success", f"✓ {count}")
 
     # ── Data access ───────────────────────────────────────────────────────────
 
@@ -430,31 +442,23 @@ class InteractiveGrid(QWidget):
         self.table_header_layout.setContentsMargins(8, 4, 8, 4)
         self.table_header_layout.setSpacing(12)
 
-        self.lbl_h_desarrollo = CustomLabel("Desarrollo", variant="body")
-        self.lbl_h_desarrollo.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
+        self.lbl_h_desarrollo = CustomLabel("Desarrollo", variant="muted")
         self.lbl_h_desarrollo.setVisible(False)
 
-        self.lbl_h_rfc = CustomLabel("Empresa (RFC)", variant="body")
-        self.lbl_h_rfc.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
+        self.lbl_h_rfc = CustomLabel("Empresa (RFC)", variant="muted")
+        self.lbl_h_del = CustomLabel("Delegación", variant="muted")
+        self.lbl_h_concepto = CustomLabel("Concepto", variant="muted")
 
-        self.lbl_h_del = CustomLabel("Delegación", variant="body")
-        self.lbl_h_del.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
-
-        self.lbl_h_concepto = CustomLabel("Concepto", variant="body")
-        self.lbl_h_concepto.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
-
-        self.lbl_h_cant = CustomLabel("Cantidad", variant="body")
-        self.lbl_h_cant.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
+        self.lbl_h_cant = CustomLabel("Cantidad", variant="muted")
         self.lbl_h_cant.setMinimumWidth(100)
         self.lbl_h_cant.setMaximumWidth(120)
 
-        self.lbl_h_disp = CustomLabel("Disponibles", variant="body")
-        self.lbl_h_disp.setStyleSheet("color: #64748B; font-size: 12px; font-weight: 600;")
+        self.lbl_h_disp = CustomLabel("Disponibles", variant="muted")
         self.lbl_h_disp.setMinimumWidth(80)
         self.lbl_h_disp.setMaximumWidth(100)
         self.lbl_h_disp.setAlignment(Qt.AlignCenter)
 
-        self.lbl_h_empty = CustomLabel("", variant="body")
+        self.lbl_h_empty = CustomLabel("", variant="muted")
         self.lbl_h_empty.setFixedSize(30, 20)
 
         # Build header layout — order matches the row widget layout:

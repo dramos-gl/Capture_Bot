@@ -23,50 +23,7 @@ class AdminMenuBar(QMenuBar):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setStyleSheet(f"""
-            QMenuBar {{
-                background-color: {Colors.SLATE_50};
-                color: {Colors.TEXT_LIGHT_PRIMARY};
-                border-bottom: 1px solid {Colors.SLATE_200};
-                font-size: 13px;
-                font-weight: 500;
-                padding: 2px 6px;
-            }}
-            QMenuBar::item {{
-                background: transparent;
-                padding: 6px 12px;
-                border-radius: 6px;
-                margin: 2px;
-            }}
-            QMenuBar::item:selected {{
-                background-color: {Colors.SLATE_200};
-                color: {Colors.SLATE_900};
-            }}
-            QMenuBar::item:pressed {{
-                background-color: #CBD5E1;
-            }}
-            QMenu {{
-                background-color: {Colors.SURFACE_LIGHT};
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
-                padding: 6px;
-            }}
-            QMenu::item {{
-                padding: 6px 28px 6px 10px;
-                border-radius: 4px;
-                color: {Colors.TEXT_LIGHT_PRIMARY};
-                font-size: 12px;
-            }}
-            QMenu::item:selected {{
-                background-color: {Colors.ACCENT_BG};
-                color: {Colors.ACCENT};
-            }}
-            QMenu::separator {{
-                height: 1px;
-                background-color: {Colors.SLATE_200};
-                margin: 4px 6px;
-            }}
-        """)
+        self.setObjectName("adminMenuBar")
         self._build_menus()
 
     def _add_action(self, menu: QMenu, text: str, icon_name: str, shortcut: str = None, color: str = None) -> QAction:

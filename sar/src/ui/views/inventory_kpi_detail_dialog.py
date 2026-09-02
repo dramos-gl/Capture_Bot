@@ -396,19 +396,6 @@ class InventoryKPIDetailDialog(QDialog):
         self.search_input.setPlaceholderText("Buscar por referencia, cliente, crédito, folio, desarrollo, P.A., comentarios...")
         self.search_input.setMinimumWidth(350)
         self.search_input.setFixedHeight(36)
-        self.search_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
-                padding: 0 12px;
-                font-size: 13px;
-                color: #1E293B;
-            }
-            QLineEdit:focus {
-                border: 1.5px solid #2563EB;
-            }
-        """)
         self.search_input.textChanged.connect(self._on_search_text_changed)
         table_bar.addWidget(self.search_input)
 

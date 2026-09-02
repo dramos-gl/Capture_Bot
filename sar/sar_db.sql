@@ -1073,6 +1073,7 @@ INSERT INTO sar_catalogo.evento_sistema (codigo, descripcion) VALUES
 -- Estados del Sistema Estandarizados
 INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion) VALUES
 ('orden_generacion', 'ABIERTA',               'Orden abierta para edición'),
+('orden_generacion', 'PENDIENTE_AUTORIZACION', 'Orden con todas las referencias generadas en espera de validación/autorización'),
 ('orden_generacion', 'COMPLETADA',             'Orden con todas las referencias generadas'),
 ('orden_generacion', 'AUTORIZADA',             'Orden con todas las referencias autorizadas'),
 ('orden_generacion', 'RECHAZADA',              'Orden con todas las referencias rechazadas'),

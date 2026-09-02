@@ -632,15 +632,6 @@ class ErrorDetailDialog(QDialog):
         header_layout = QHBoxLayout()
         self.txt_search = QLineEdit(self)
         self.txt_search.setPlaceholderText("🔍 Buscar referencia, RFC o empresa...")
-        self.txt_search.setStyleSheet("""
-            QLineEdit {
-                padding: 6px 12px;
-                border: 1px solid #CBD5E1;
-                border-radius: 4px;
-                background-color: #FFFFFF;
-                color: #1E293B;
-            }
-        """)
         self.txt_search.textChanged.connect(self._on_search_changed)
         header_layout.addWidget(self.txt_search)
 

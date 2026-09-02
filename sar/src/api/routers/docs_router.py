@@ -552,7 +552,7 @@ def finalize_solicitud(solicitud_id: int, request: EstadoSolicitudRequest, db: S
                 tot_req, tot_gen = db.execute(total_req_stm, {"orden_id": orden.orden_id}).fetchone()
                 
                 if pending_grupos == 0 or (tot_gen and tot_req and tot_gen >= tot_req):
-                    orden_status_id = get_or_create_status(db, "orden_generacion", "COMPLETADO")
+                    orden_status_id = get_or_create_status(db, "orden_generacion", "PENDIENTE_AUTORIZACION")
                     orden.estado_id = orden_status_id
                     db.flush()
         

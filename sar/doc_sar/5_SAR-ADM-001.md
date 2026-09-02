@@ -75,27 +75,46 @@ Siguiendo el principio de **Atomic Design**, la interfaz será reutilizable y co
 2.  Una **Vista de Grid (Master)** con paginación, filtros de columna y botón `+ Nuevo`. Se soporta doble-clic para edición de registros, y clic simple para selección maestro-detalle. Los elementos seleccionados destacan usando color de Acento para contraste óptimo.
 3.  Un **Panel Lateral / Formulario Modal (Detail)** para Creación y Edición, para no perder el contexto de la lista. Formularios extensos (como RFC) utilizan grillas de 2 columnas para optimizar espacio vertical.
 
-### 4.1 Diseño de Navegación
+### 4.1 Diseño de Navegación y Barra de Menús (`AdminMenuBar`)
+
+La navegación del módulo se organiza mediante una barra de menús jerárquica con iconografía vectorial cromática (tokens de `Colors`), atajos nativos de teclado y un subsistema de ayuda integrado:
 
 ```mermaid
 graph TD
-    A[Sidebar Principal] --> B[Menú Administración]
-    B --> C[Seguridad]
-    B --> D[Catálogos]
-    B --> E[Configuración]
+    M[AdminMenuBar] --> S[1. Sistema]
+    M --> SEC[2. Seguridad y Accesos]
+    M --> CAT[3. Catálogos Base]
+    M --> CFG[4. Configuración Core]
+    M --> PRC[5. Procesos Especiales]
+    M --> HLP[6. Ayuda]
     
-    C --> C1[Usuarios]
-    C --> C2[Roles y Permisos]
+    S --> S1[Cerrar Sesión Ctrl+L]
+    S --> S2[Salir del Sistema Ctrl+Q]
     
-    D --> D1[RFCs]
-    D --> D2[Conceptos]
-    D --> D3[Geografía]
+    SEC --> SEC1[Gestión de Usuarios Ctrl+1]
+    SEC --> SEC2[Gestión de Roles Ctrl+2]
+    SEC --> SEC3[Matriz de Permisos Ctrl+3]
+    SEC --> SEC4[Módulos de la Aplicación]
+    SEC --> SEC5[Catálogo de Acciones]
     
-    E --> E1[Parámetros Globales]
-    E --> E2[Localizadores UI]
+    CAT --> CAT1[Catálogos de Negocio]
+    CAT --> CAT2[Geografía Operativa]
+    CAT --> CAT3[Contribuyentes RFC]
+    CAT --> CAT4[Estados y Transiciones]
     
-    C1 --> F[Grid Maestro]
-    F --> |Clic fila / + Nuevo| G[Panel Lateral de Formulario]
+    CFG --> CFG1[Parámetros Globales]
+    CFG --> CFG2[Localizadores Motor Bot]
+    
+    PRC --> PRC1[Carga Masiva de Referencias]
+    PRC --> PRC2[Migración y Sincronización]
+    PRC --> PRC3[Reserva Masiva de Referencias]
+    PRC --> PRC4[Escanear Delegaciones Facturas PDF]
+    
+    HLP --> HLP1[Manual de Administración F1]
+    HLP --> HLP2[Atajos de Teclado Ctrl+H]
+    HLP --> HLP3[Diagnóstico del Servidor]
+    HLP --> HLP4[Mesa de Ayuda y Soporte]
+    HLP --> HLP5[Acerca de SAR...]
 ```
 
 ### 4.2 Wireframe Conceptual (Vista de Grid + Formulario)

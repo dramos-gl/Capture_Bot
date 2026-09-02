@@ -5,6 +5,12 @@ from sar.src.ui.design_system.tokens.spacing import Spacing
 
 class ThemeManager:
     """Manages global application theme state and QSS loading."""
+    _is_dark: bool = False
+
+    @classmethod
+    def is_dark_active(cls) -> bool:
+        """Returns whether the active application theme is dark."""
+        return cls._is_dark
 
     @staticmethod
     def get_qss(is_dark: bool = False) -> str:
@@ -23,6 +29,7 @@ class ThemeManager:
         icons_dir = os.path.abspath(os.path.join(base_dir, "..", "assets", "icons"))
         check_path = os.path.join(icons_dir, "check.svg").replace("\\", "/")
         chevron_down_path = os.path.join(icons_dir, "chevron_down.svg").replace("\\", "/")
+        calendar_path = os.path.join(icons_dir, "calendar.svg").replace("\\", "/")
 
         qss = f"""
         /* Global Defaults */
@@ -100,7 +107,7 @@ class ThemeManager:
             color: {txt_primary};
         }}
         QLineEdit:focus {{
-            border: {Spacing.BORDER_WIDTH_SM} solid {Colors.PRIMARY};
+            border: {Spacing.BORDER_WIDTH_SM} solid {Colors.ACCENT};
         }}
         
         /* ComboBoxes */
@@ -108,11 +115,13 @@ class ThemeManager:
             background-color: {surf};
             border: {Spacing.BORDER_WIDTH_SM} solid {border};
             border-radius: {Spacing.RADIUS_MD};
-            padding: 4px 8px;
+            padding: 4px 10px;
+            min-height: 35px;
             color: {txt_primary};
+            font-size: 13px;
         }}
-        QComboBox:on {{
-            border-color: {Colors.PRIMARY};
+        QComboBox:focus, QComboBox:on {{
+            border: 1.5px solid {Colors.ACCENT};
         }}
         QComboBox::drop-down {{
             border: none;
@@ -124,6 +133,165 @@ class ThemeManager:
             image: url({chevron_down_path});
             width: 16px;
             height: 16px;
+            margin-right: 8px;
+        }}
+        QComboBox QAbstractItemView {{
+            border: 1px solid {border};
+            border-radius: 6px;
+            background-color: {surf};
+            color: {txt_primary};
+            selection-background-color: {"#EFF6FF" if not is_dark else "#2563EB"};
+            selection-color: {"#1E293B" if not is_dark else "#FFFFFF"};
+            padding: 4px;
+            outline: 0px;
+        }}
+        QComboBox QAbstractItemView::item {{
+            min-height: 28px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: {txt_primary};
+        }}
+        QComboBox QAbstractItemView::item:selected {{
+            background-color: {"#EFF6FF" if not is_dark else "#2563EB"};
+            color: {"#1E293B" if not is_dark else "#FFFFFF"};
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            background-color: {"#F1F5F9" if not is_dark else "#334155"};
+            color: {txt_primary};
+        }}
+
+        /* Labeled Groupbox Molecule (Fieldset style for Combos & Dates) */
+        QGroupBox#labeledGroup {{
+            background-color: {surf};
+            border: 1px solid {border};
+            border-radius: 8px;
+            margin-top: 8px;
+            font-weight: bold;
+            color: {"#2563EB" if not is_dark else "#60A5FA"};
+            font-size: 11px;
+        }}
+        QGroupBox#labeledGroup::title {{
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            left: 8px;
+            padding: 0 4px;
+            background-color: transparent;
+        }}
+        QGroupBox#labeledGroup QComboBox {{
+            border: none;
+            background-color: transparent;
+            min-width: 130px;
+            height: 35px;
+            min-height: 35px;
+            max-height: 35px;
+            padding: 2px 10px;
+            font-size: 13px;
+        }}
+        QGroupBox#labeledGroup QDateEdit {{
+            border: none;
+            background-color: transparent;
+            min-width: 120px;
+            height: 35px;
+            min-height: 35px;
+            max-height: 35px;
+            padding: 2px 6px 2px 10px;
+            font-size: 13px;
+            color: {txt_primary};
+        }}
+
+        /* Date Editors */
+        QDateEdit {{
+            background-color: {surf};
+            border: {Spacing.BORDER_WIDTH_SM} solid {border};
+            border-radius: {Spacing.RADIUS_MD};
+            padding: 2px 10px;
+            min-height: 35px;
+            color: {txt_primary};
+            font-size: 13px;
+        }}
+        QDateEdit:focus {{
+            border: 1.5px solid {Colors.ACCENT};
+        }}
+        QDateEdit::drop-down {{
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 28px;
+            border: none;
+        }}
+        QDateEdit::down-arrow {{
+            image: url({calendar_path});
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+        }}
+        
+        /* Calendar Widget */
+        QCalendarWidget {{
+            background-color: {surf};
+            color: {txt_primary};
+        }}
+        QCalendarWidget QWidget#qt_datetimedit_calendar {{
+            background-color: {surf};
+        }}
+        QCalendarWidget QAbstractItemView:enabled {{
+            background-color: {surf};
+            color: {txt_primary};
+            selection-background-color: {Colors.ACCENT};
+            selection-color: #FFFFFF;
+            alternate-background-color: {bg};
+            outline: 0px;
+        }}
+        QCalendarWidget QToolButton {{
+            color: {txt_primary};
+            background-color: {surf};
+            font-weight: bold;
+            border-radius: 4px;
+            padding: 4px;
+        }}
+        QCalendarWidget QToolButton:hover {{
+            background-color: {border};
+        }}
+        QCalendarWidget QMenu {{
+            background-color: {surf};
+            color: {txt_primary};
+            border: 1px solid {border};
+        }}
+        QCalendarWidget QSpinBox {{
+            background-color: {surf};
+            color: {txt_primary};
+            border: 1px solid {border};
+        }}
+        QCalendarWidget QWidget#qt_calendar_navigationbar {{
+            background-color: {surf};
+            border-bottom: 1px solid {border};
+        }}
+
+        /* SpinBoxes */
+        QSpinBox, QDoubleSpinBox {{
+            background-color: {surf};
+            border: {Spacing.BORDER_WIDTH_SM} solid {border};
+            border-radius: {Spacing.RADIUS_MD};
+            padding: 4px 8px;
+            color: {txt_primary};
+            font-size: 13px;
+            min-height: 28px;
+        }}
+        QSpinBox:focus, QDoubleSpinBox:focus {{
+            border: 1.5px solid {Colors.ACCENT};
+        }}
+        QSpinBox::up-button, QDoubleSpinBox::up-button {{
+            subcontrol-origin: border;
+            subcontrol-position: top right;
+            width: 16px;
+            border-left: 1px solid {border};
+            background-color: transparent;
+        }}
+        QSpinBox::down-button, QDoubleSpinBox::down-button {{
+            subcontrol-origin: border;
+            subcontrol-position: bottom right;
+            width: 16px;
+            border-left: 1px solid {border};
+            background-color: transparent;
         }}
         
         /* Buttons */
@@ -240,6 +408,82 @@ class ThemeManager:
             color: {Colors.ACCENT};
         }}
         
+        /* Status Badges */
+        QFrame#statusBadge, QFrame[badge_variant] {{
+            border-radius: 10px;
+            border: none;
+        }}
+        QFrame[badge_variant="success"] {{
+            background-color: {Colors.SUCCESS_DARK_BG if is_dark else Colors.SUCCESS_BG};
+        }}
+        QFrame[badge_variant="success"] QLabel {{
+            color: {Colors.SUCCESS_DARK_TEXT if is_dark else Colors.SUCCESS};
+            font-weight: bold;
+            font-size: 10px;
+            background: transparent;
+            border: none;
+        }}
+        QFrame[badge_variant="accent"] {{
+            background-color: {Colors.ACCENT_DARK_BG if is_dark else Colors.ACCENT_BG};
+        }}
+        QFrame[badge_variant="accent"] QLabel {{
+            color: {Colors.ACCENT_DARK_TEXT if is_dark else Colors.ACCENT};
+            font-weight: bold;
+            font-size: 10px;
+            background: transparent;
+            border: none;
+        }}
+        QFrame[badge_variant="warning"] {{
+            background-color: {Colors.WARNING_DARK_BG if is_dark else Colors.WARNING_BG};
+        }}
+        QFrame[badge_variant="warning"] QLabel {{
+            color: {Colors.WARNING_DARK_TEXT if is_dark else Colors.WARNING};
+            font-weight: bold;
+            font-size: 10px;
+            background: transparent;
+            border: none;
+        }}
+        QFrame[badge_variant="error"] {{
+            background-color: {Colors.ERROR_DARK_BG if is_dark else Colors.ERROR_BG};
+        }}
+        QFrame[badge_variant="error"] QLabel {{
+            color: {Colors.ERROR_DARK_TEXT if is_dark else Colors.ERROR};
+            font-weight: bold;
+            font-size: 10px;
+            background: transparent;
+            border: none;
+        }}
+        QFrame[badge_variant="assigned"] {{
+            background-color: {Colors.ASSIGNED_DARK_BG if is_dark else Colors.ASSIGNED_BG};
+        }}
+        QFrame[badge_variant="assigned"] QLabel {{
+            color: {Colors.ASSIGNED_DARK_TEXT if is_dark else Colors.ASSIGNED};
+            font-weight: bold;
+            font-size: 10px;
+            background: transparent;
+            border: none;
+        }}
+        QFrame[badge_variant="reserved"] {{
+            background-color: {Colors.RESERVED_DARK_BG if is_dark else Colors.RESERVED_BG};
+        }}
+        QFrame[badge_variant="reserved"] QLabel {{
+            color: {Colors.RESERVED_DARK_TEXT if is_dark else Colors.RESERVED};
+            font-weight: bold;
+            font-size: 10px;
+            background: transparent;
+            border: none;
+        }}
+        QFrame[badge_variant="neutral"] {{
+            background-color: {Colors.NEUTRAL_DARK_BG if is_dark else Colors.NEUTRAL_BG};
+        }}
+        QFrame[badge_variant="neutral"] QLabel {{
+            color: {Colors.NEUTRAL_DARK_TEXT if is_dark else Colors.SLATE_500};
+            font-weight: bold;
+            font-size: 10px;
+            background: transparent;
+            border: none;
+        }}
+
         /* Interactive Grid elements */
         QLabel#gridBadge {{
             background-color: {"#EFF6FF" if not is_dark else Colors.PRIMARY_HOVER};
@@ -586,27 +830,28 @@ class ThemeManager:
         /* Tabs */
         QTabWidget::pane {{
             border: 1px solid {border};
-            background: {surf};
+            background-color: {surf};
             border-radius: {Spacing.RADIUS_MD};
+            padding: 16px;
         }}
         QTabBar::tab {{
-            background: {bg};
+            background-color: {bg};
             color: {txt_secondary};
             padding: 8px 16px;
             border: 1px solid {border};
-            border-bottom-color: {border};
-            border-top-left-radius: 4px;
-            border-top-right-radius: 4px;
+            border-bottom: none;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
             margin-right: 2px;
-        }}
-        QTabBar::tab:selected {{
-            background: {surf};
-            color: {Colors.PRIMARY};
-            border-bottom-color: {surf};
             font-weight: bold;
         }}
+        QTabBar::tab:selected {{
+            background-color: {surf};
+            color: {"#2563EB" if not is_dark else "#60A5FA"};
+            border-bottom: 2px solid {"#2563EB" if not is_dark else "#60A5FA"};
+        }}
         QTabBar::tab:hover:!selected {{
-            background: {border};
+            background-color: {border};
             color: {txt_primary};
         }}
         
@@ -639,37 +884,104 @@ class ThemeManager:
         /* Menu Bar and Menus Dropdowns */
         QMenuBar {{
             background-color: {surf};
+            color: {txt_primary};
             border-bottom: 1px solid {border};
+            font-size: 13px;
+            font-weight: 500;
+            padding: 2px 6px;
         }}
         QMenuBar::item {{
             background-color: transparent;
-            padding: 6px 10px;
+            color: {txt_primary};
+            padding: 6px 12px;
             margin: 2px;
-            border-radius: 0px;
+            border-radius: 6px;
         }}
         QMenuBar::item:selected {{
             background-color: {border};
-            color: {Colors.PRIMARY};
+            color: {Colors.ACCENT};
+        }}
+        QMenuBar::item:pressed {{
+            background-color: {"#CBD5E1" if not is_dark else "#475569"};
         }}
         QMenu {{
             background-color: {surf};
             border: 1px solid {border};
-            border-radius: 0px;
-            padding: 4px 0px;
+            border-radius: 8px;
+            padding: 6px 4px;
         }}
         QMenu::item {{
-            padding: 6px 24px;
+            padding: 6px 24px 6px 12px;
             background-color: transparent;
-            border-radius: 0px;
+            color: {txt_primary};
+            border-radius: 4px;
+            font-size: 12px;
         }}
         QMenu::item:selected {{
-            background-color: {Colors.PRIMARY if not is_dark else Colors.PRIMARY_HOVER};
-            color: #FFFFFF;
+            background-color: {"#EFF6FF" if not is_dark else Colors.PRIMARY_HOVER};
+            color: {"#2563EB" if not is_dark else "#FFFFFF"};
         }}
         QMenu::separator {{
             height: 1px;
             background-color: {border};
-            margin: 4px 0px;
+            margin: 4px 6px;
+        }}
+        
+        /* ScrollBars */
+        QScrollBar:vertical {{
+            border: none;
+            background-color: transparent;
+            width: 8px;
+            margin: 0px;
+        }}
+        QScrollBar::handle:vertical {{
+            background-color: {"#CBD5E1" if not is_dark else "#475569"};
+            min-height: 24px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background-color: {"#94A3B8" if not is_dark else "#64748B"};
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            border: none;
+            background: transparent;
+            height: 0px;
+        }}
+        QScrollBar:horizontal {{
+            border: none;
+            background-color: transparent;
+            height: 8px;
+            margin: 0px;
+        }}
+        QScrollBar::handle:horizontal {{
+            background-color: {"#CBD5E1" if not is_dark else "#475569"};
+            min-width: 24px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background-color: {"#94A3B8" if not is_dark else "#64748B"};
+        }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            border: none;
+            background: transparent;
+            width: 0px;
+        }}
+
+        /* ToolTips */
+        QToolTip {{
+            background-color: {"#1E293B" if not is_dark else "#0F172A"};
+            color: #FFFFFF;
+            border: 1px solid {"#334155" if not is_dark else "#475569"};
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }}
+
+        /* Message and Loading Dialog Floating Cards */
+        QWidget#messageDialogCard, GLLoadingDialog {{
+            background-color: {surf};
+            border: 1px solid {border};
+            border-radius: 12px;
         }}
         
         /* Logged In User Widget on Menu Bar */
@@ -863,7 +1175,15 @@ class ThemeManager:
         return qss
 
     @classmethod
-    def apply_theme(cls, widget, is_dark: bool = False):
-        """Applies the computed QSS theme stylesheet to the given widget/app."""
+    def apply_theme(cls, widget=None, is_dark: bool = False):
+        """Applies the computed QSS theme stylesheet globally and to the given widget."""
+        cls._is_dark = is_dark
         qss = cls.get_qss(is_dark)
-        widget.setStyleSheet(qss)
+        
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(qss)
+            
+        if widget and widget is not app:
+            widget.setStyleSheet(qss)

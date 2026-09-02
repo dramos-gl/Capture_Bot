@@ -145,13 +145,16 @@ def get_all_users(db: Session = Depends(get_db)):
 
 @router.get("/permissions/{usuario_id}")
 def get_user_permissions(usuario_id: int, db: Session = Depends(get_db)):
-    """Retorna la matriz de permisos para todos los módulos clave del usuario."""
+    """Retorna la matriz de permisos para todos los módulos activos del usuario."""
     from sar.src.services.security_service import SecurityService
+    from sar.src.storage.repositories import UsuarioRepository
     try:
         sec_service = SecurityService(db)
-        modules = ["DASHBOARD", "ORDENES", "SOLICITUDES", "REFERENCIAS", "SEGURIDAD"]
+        repo = UsuarioRepository(db)
+        all_mods = repo.get_all_modulos()
         perms = {}
-        for mod in modules:
+        for m in all_mods:
+            mod = m.codigo
             perms[mod] = {
                 "LEER": bool(sec_service.has_permission(usuario_id, mod, "LEER")),
                 "CREAR": bool(sec_service.has_permission(usuario_id, mod, "CREAR")),
