@@ -1,10 +1,12 @@
-"""Users Administration Sub-view."""
-
-from PySide6.QtWidgets import QWidget, QHBoxLayout
-from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
+import re
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
+from PySide6.QtCore import Qt
+from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
-from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
-from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
+from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
 from sar.src.ui.design_system.components.organisms.gl_dialog import CustomDialog
 from sar.src.storage.repositories import UsuarioRepository
@@ -30,69 +32,156 @@ class UsersView(QWidget):
         self.refresh_data()
         
     def _build_ui(self):
-        # Full width Grid
         self.tbl_usuarios = CrudTablePanel("Usuarios del Sistema")
         self.tbl_usuarios.setup_table(["ID", "Usuario", "Nombre", "Estado"], ["usuario_id", "username", "nombre", "activo"])
         self.tbl_usuarios.add_requested.connect(self._on_new_usuario)
         self.tbl_usuarios.edit_requested.connect(self._on_edit_usuario)
         self.layout.addWidget(self.tbl_usuarios)
         
-        # Enforce RBAC
         self.tbl_usuarios.btn_add.setVisible(self.can_edit)
-        
-        # Setup form dialog properties (not visible by default)
         self.current_usuario_id = None
         
     def _create_dialog(self, title: str) -> CustomDialog:
         dialog = CustomDialog(title, self)
+        dialog.setMinimumWidth(640)
         
-        self.inp_u_username = LabeledInput("Username")
-        self.inp_u_username.set_validator(r"^[a-zA-Z0-9_]{3,20}$", "Debe tener 3-20 caracteres (letras, números, _).")
-        self.inp_u_nombre = LabeledInput("Nombre Completo")
-        self.inp_u_correo = LabeledInput("Correo (Opcional)")
-        self.inp_u_correo.set_validator(r"^(?:[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)?$", "Formato de correo inválido.")
-        self.inp_u_pass = LabeledInput("Contraseña", "Dejar en blanco si no se cambia", is_password=True)
-        self.chk_u_activo = CustomCheckBox("Usuario Activo")
-        self.chk_u_activo.setChecked(True)
+        # -------------------------------------------------------------
+        # 1. TARJETA: DATOS DE USUARIO Y CREDENCIALES
+        # -------------------------------------------------------------
+        card_user = QFrame(dialog)
+        card_user.setObjectName("card_user")
+        card_user.setStyleSheet(f"""
+            QFrame#card_user {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_user = QVBoxLayout(card_user)
+        lay_user.setContentsMargins(0, 0, 0, 0)
+        lay_user.setSpacing(8)
         
-        dialog.add_widget(self.inp_u_username)
-        dialog.add_widget(self.inp_u_pass)
-        dialog.add_widget(self.inp_u_nombre)
-        dialog.add_widget(self.inp_u_correo)
-        dialog.add_widget(self.chk_u_activo)
+        lbl_user = CustomLabel("👤 DATOS DE USUARIO Y CREDENCIALES", variant="subheader")
+        lbl_user.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_user.addWidget(lbl_user)
         
-        from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
+        form_user = QFormLayout()
+        form_user.setSpacing(8)
+        form_user.setContentsMargins(0, 0, 0, 0)
         
-        self.labeled_roles = LabeledComboBox("Rol Asignado")
-        self.cmb_roles = self.labeled_roles.combo
+        self.inp_u_username = CustomInput("Nombre de usuario único (ej. jgomez)", parent=card_user)
+        self.inp_u_username.setMaxLength(20)
+        
+        # Wrapper object for validation compatibility
+        self.inp_u_username.text = self.inp_u_username.text
+        self.inp_u_username.set_text = self.inp_u_username.setText
+        self.inp_u_username.set_focus = self.inp_u_username.setFocus
+        self.inp_u_username.show_error = lambda msg: self.lbl_user_err.setText(msg) or self.lbl_user_err.setVisible(True)
+        self.inp_u_username.clear_error = lambda: self.lbl_user_err.setVisible(False)
+        
+        form_user.addRow("Username *:", self.inp_u_username)
+        
+        self.lbl_user_err = QLabel("", card_user)
+        self.lbl_user_err.setStyleSheet(f"color: {Colors.ERROR}; font-size: 11px; font-weight: bold;")
+        self.lbl_user_err.setVisible(False)
+        form_user.addRow("", self.lbl_user_err)
+        
+        self.inp_u_pass = CustomInput("Dejar en blanco si no se cambia", is_password=True, parent=card_user)
+        self.inp_u_pass.text = self.inp_u_pass.text
+        self.inp_u_pass.set_text = self.inp_u_pass.setText
+        form_user.addRow("Contraseña:", self.inp_u_pass)
+        
+        self.inp_u_nombre = CustomInput("Nombre y apellidos del usuario", parent=card_user)
+        self.inp_u_nombre.text = self.inp_u_nombre.text
+        self.inp_u_nombre.set_text = self.inp_u_nombre.setText
+        form_user.addRow("Nombre Completo *:", self.inp_u_nombre)
+        
+        self.inp_u_correo = CustomInput("usuario@dominio.com (Opcional)", parent=card_user)
+        self.inp_u_correo.text = self.inp_u_correo.text
+        self.inp_u_correo.set_text = self.inp_u_correo.setText
+        form_user.addRow("Correo Electrónico:", self.inp_u_correo)
+        
+        lay_user.addLayout(form_user)
+        dialog.add_widget(card_user)
+        
+        # -------------------------------------------------------------
+        # 2. TARJETA: ROL Y PERMISOS DE ACCESO
+        # -------------------------------------------------------------
+        card_roles = QFrame(dialog)
+        card_roles.setObjectName("card_roles")
+        card_roles.setStyleSheet(f"""
+            QFrame#card_roles {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_roles = QVBoxLayout(card_roles)
+        lay_roles.setContentsMargins(0, 0, 0, 0)
+        lay_roles.setSpacing(8)
+        
+        lbl_roles = CustomLabel("🔐 ROL Y PERMISOS DE ACCESO", variant="subheader")
+        lbl_roles.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_roles.addWidget(lbl_roles)
+        
+        form_roles = QFormLayout()
+        form_roles.setSpacing(8)
+        form_roles.setContentsMargins(0, 0, 0, 0)
+        
+        self.cmb_roles = CustomComboBox(card_roles)
         self.cmb_roles.addItem("-- Selecciona un Rol --", None)
         for role in self.all_roles:
             self.cmb_roles.addItem(role["nombre"], role["id"])
             
-        dialog.add_widget(self.labeled_roles)
+        form_roles.addRow("Rol Asignado *:", self.cmb_roles)
+        lay_roles.addLayout(form_roles)
+        dialog.add_widget(card_roles)
+        
+        # -------------------------------------------------------------
+        # 3. ESTADO OPERATIVO (CustomCheckBox)
+        # -------------------------------------------------------------
+        self.chk_u_activo = CustomCheckBox("Usuario activo para iniciar sesión en el sistema", dialog)
+        self.chk_u_activo.setChecked(True)
+        self.chk_u_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
+        dialog.add_widget(self.chk_u_activo)
+        
+        # Validación en tiempo real
+        def _validate_user():
+            u_val = self.inp_u_username.text().strip()
+            n_val = self.inp_u_nombre.text().strip()
+            c_val = self.inp_u_correo.text().strip()
             
+            is_valid = True
+            if u_val and not re.match(r"^[a-zA-Z0-9_]{3,20}$", u_val):
+                self.inp_u_username.show_error("Username debe tener 3-20 caracteres (letras, números, _).")
+                is_valid = False
+            elif c_val and not re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", c_val):
+                self.inp_u_username.show_error("Formato de correo electrónico inválido.")
+                is_valid = False
+            else:
+                self.inp_u_username.clear_error()
+                
+            can_save = bool(u_val and n_val and is_valid)
+            dialog.btn_save.setEnabled(can_save)
+            
+        self.inp_u_username.textChanged.connect(_validate_user)
+        self.inp_u_nombre.textChanged.connect(_validate_user)
+        self.inp_u_correo.textChanged.connect(_validate_user)
+        _validate_user()
+        
         if not self.can_edit:
             self.cmb_roles.setEnabled(False)
             dialog.btn_save.setVisible(False)
-            self.inp_u_username.input.setReadOnly(True)
-            self.inp_u_nombre.input.setReadOnly(True)
-            self.inp_u_correo.input.setReadOnly(True)
-            self.inp_u_pass.input.setReadOnly(True)
+            self.inp_u_username.setReadOnly(True)
+            self.inp_u_nombre.setReadOnly(True)
+            self.inp_u_correo.setReadOnly(True)
+            self.inp_u_pass.setReadOnly(True)
             self.chk_u_activo.setEnabled(False)
-            
-        # Bind validation states to the save button
-        self._valid_states = {"username": True, "correo": True}
-        
-        def _on_validity_changed(field: str, is_valid: bool):
-            self._valid_states[field] = is_valid
-            dialog.btn_save.setEnabled(all(self._valid_states.values()))
-            
-        self.inp_u_username.validity_changed.connect(lambda v: _on_validity_changed("username", v))
-        self.inp_u_correo.validity_changed.connect(lambda v: _on_validity_changed("correo", v))
             
         dialog.btn_save.clicked.disconnect()
         dialog.btn_save.clicked.connect(lambda: self._save_usuario(dialog))
-        
         return dialog
 
     def _on_new_usuario(self):
@@ -150,7 +239,6 @@ class UsersView(QWidget):
             
         try:
             if self.api_client.connect_via_api:
-                # Check Uniqueness
                 existing_users = self.api_client.request("GET", "/api/admin/data/usuarios")
                 for u in existing_users:
                     if u["username"] == data["username"] and u["usuario_id"] != self.current_usuario_id:
@@ -202,3 +290,4 @@ class UsersView(QWidget):
                     self.tbl_usuarios.populate(data)
         except Exception as e:
             print("Error refreshing users:", e)
+

@@ -36,6 +36,7 @@ class InteractiveGridRow(QFrame):
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(8, 8, 8, 8)
         self.layout.setSpacing(12)
+        self.layout.setAlignment(Qt.AlignVCenter)
 
         self._has_desarrollo = False
         self._all_desarrollos = []  # Legacy: Tuplas (desarrollo_id, nombre, delegacion_id, es_default)
@@ -47,41 +48,48 @@ class InteractiveGridRow(QFrame):
         self.combo_desarrollo = CustomComboBox()
         self.combo_desarrollo.setPlaceholderText("Seleccionar Desarrollo")
         self.combo_desarrollo.setMinimumWidth(160)
+        self.combo_desarrollo.setFixedHeight(36)
         self.combo_desarrollo.setVisible(False)
 
         # RFC / Empresa
         self.combo_rfc = CustomComboBox()
         self.combo_rfc.setPlaceholderText("Seleccionar RFC")
         self.combo_rfc.setMinimumWidth(150)
+        self.combo_rfc.setFixedHeight(36)
 
         # Delegación
         self.combo_delegacion = CustomComboBox()
         self.combo_delegacion.setPlaceholderText("Delegación")
         self.combo_delegacion.setMinimumWidth(120)
+        self.combo_delegacion.setFixedHeight(36)
 
         # Concepto
         self.combo_concepto = CustomComboBox()
         self.combo_concepto.setPlaceholderText("Seleccionar Concepto")
         self.combo_concepto.setMinimumWidth(150)
+        self.combo_concepto.setFixedHeight(36)
 
         # Cantidad
-        self.spin_cantidad = QSpinBox()
+        self.spin_cantidad = QSpinBox(self)
         self.spin_cantidad.setMinimum(1)
         self.spin_cantidad.setMaximum(100000)
         self.spin_cantidad.setValue(1)
         self.spin_cantidad.setMinimumWidth(100)
+        self.spin_cantidad.setMaximumWidth(120)
+        self.spin_cantidad.setFixedHeight(36)
 
         # Disponibles (semáforo read-only)
-        self.lbl_disponibles = QLabel("—")
+        self.lbl_disponibles = QLabel("—", self)
         self.lbl_disponibles.setAlignment(Qt.AlignCenter)
         self.lbl_disponibles.setMinimumWidth(80)
         self.lbl_disponibles.setMaximumWidth(100)
+        self.lbl_disponibles.setFixedHeight(36)
         self._update_disponibles_style("neutral", "—")
 
         # Delete button
         self.btn_delete = CustomButton("", is_secondary=True)
         self.btn_delete.setIcon(Icons.trash("#EF4444"))
-        self.btn_delete.setFixedSize(30, 30)
+        self.btn_delete.setFixedSize(36, 36)
         self.btn_delete.setStyleSheet("border: none; background: transparent;")
         self.btn_delete.clicked.connect(lambda: self.deleted.emit(self))
 
@@ -459,7 +467,7 @@ class InteractiveGrid(QWidget):
         self.lbl_h_disp.setAlignment(Qt.AlignCenter)
 
         self.lbl_h_empty = CustomLabel("", variant="muted")
-        self.lbl_h_empty.setFixedSize(30, 20)
+        self.lbl_h_empty.setFixedSize(36, 20)
 
         # Build header layout — order matches the row widget layout:
         # Desarrollo | RFC | Delegación | Concepto | Cantidad | Disponibles | (del)

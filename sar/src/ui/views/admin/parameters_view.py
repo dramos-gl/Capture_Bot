@@ -1,9 +1,11 @@
-"""Parameters Administration Sub-view."""
-
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QCheckBox
+import re
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
+from PySide6.QtCore import Qt
+from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
+from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
-from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
-from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
 from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
 from sar.src.ui.design_system.components.organisms.gl_dialog import CustomDialog
 from sar.src.storage.repositories import ConfigRepository
@@ -38,27 +40,71 @@ class ParametersView(QWidget):
         
     def _create_dialog(self, title: str) -> CustomDialog:
         dialog = CustomDialog(title, self)
+        dialog.setMinimumWidth(540)
         
-        self.inp_p_codigo = LabeledInput("Código del Parámetro", "Ej. TAMANO_LOTE")
-        self.inp_p_valor = LabeledInput("Valor")
-        self.chk_p_activo = QCheckBox("Parámetro Activo")
+        card_p = QFrame(dialog)
+        card_p.setObjectName("card_p")
+        card_p.setStyleSheet(f"""
+            QFrame#card_p {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_p = QVBoxLayout(card_p)
+        lay_p.setContentsMargins(0, 0, 0, 0)
+        lay_p.setSpacing(8)
+        
+        lbl_p = CustomLabel("⚙️ CONFIGURACIÓN DE PARÁMETRO CORE", variant="subheader")
+        lbl_p.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_p.addWidget(lbl_p)
+        
+        form_p = QFormLayout()
+        form_p.setSpacing(8)
+        form_p.setContentsMargins(0, 0, 0, 0)
+        
+        self.inp_p_codigo = CustomInput("Ej. TAMANO_LOTE_WS", parent=card_p)
+        self.inp_p_codigo.setMaxLength(50)
+        self.inp_p_codigo.textEdited.connect(lambda t: self.inp_p_codigo.setText(t.upper()))
+        self.inp_p_codigo.text = self.inp_p_codigo.text
+        self.inp_p_codigo.set_text = self.inp_p_codigo.setText
+        self.inp_p_codigo.set_focus = self.inp_p_codigo.setFocus
+        
+        self.inp_p_valor = CustomInput("Valor del parámetro (ej. 100)", parent=card_p)
+        self.inp_p_valor.setMaxLength(255)
+        self.inp_p_valor.text = self.inp_p_valor.text
+        self.inp_p_valor.set_text = self.inp_p_valor.setText
+        
+        form_p.addRow("Código *:", self.inp_p_codigo)
+        form_p.addRow("Valor *:", self.inp_p_valor)
+        lay_p.addLayout(form_p)
+        dialog.add_widget(card_p)
+        
+        self.chk_p_activo = CustomCheckBox("Parámetro activo en motor de configuración", dialog)
         self.chk_p_activo.setChecked(True)
-        
-        dialog.add_widget(self.inp_p_codigo)
-        dialog.add_widget(self.inp_p_valor)
+        self.chk_p_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_p_activo)
+        
+        def _validate_p():
+            c_val = self.inp_p_codigo.text().strip()
+            v_val = self.inp_p_valor.text().strip()
+            dialog.btn_save.setEnabled(bool(c_val and v_val))
+            
+        self.inp_p_codigo.textChanged.connect(_validate_p)
+        self.inp_p_valor.textChanged.connect(_validate_p)
+        _validate_p()
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
-            self.inp_p_codigo.input.setReadOnly(True)
-            self.inp_p_valor.input.setReadOnly(True)
+            self.inp_p_codigo.setReadOnly(True)
+            self.inp_p_valor.setReadOnly(True)
             self.chk_p_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
         dialog.btn_save.clicked.connect(lambda: self._save_param(dialog))
-        
         return dialog
- 
+
     def _on_new_param(self):
         self.current_param_id = None
         dialog = self._create_dialog("Nuevo Parámetro")
@@ -68,18 +114,16 @@ class ParametersView(QWidget):
     def _on_edit_param(self, data: dict):
         self.current_param_id = data.get("parametro_id")
         dialog = self._create_dialog(f"Editar Parámetro: {data.get('codigo')}")
-        
         self.inp_p_codigo.set_text(data.get("codigo", ""))
         self.inp_p_valor.set_text(data.get("valor", ""))
         self.chk_p_activo.setChecked(bool(data.get("activo", False)))
-        
         self.inp_p_codigo.set_focus()
         dialog.exec()
- 
+
     def _save_param(self, dialog: CustomDialog):
         data = {
             "parametro_id": self.current_param_id,
-            "codigo": self.inp_p_codigo.text().strip(),
+            "codigo": self.inp_p_codigo.text().strip().upper(),
             "valor": self.inp_p_valor.text().strip(),
             "activo": self.chk_p_activo.isChecked()
         }

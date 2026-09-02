@@ -28,7 +28,8 @@ class ThemeManager:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         icons_dir = os.path.abspath(os.path.join(base_dir, "..", "assets", "icons"))
         check_path = os.path.join(icons_dir, "check.svg").replace("\\", "/")
-        chevron_down_path = os.path.join(icons_dir, "chevron_down.svg").replace("\\", "/")
+        chevron_down_path = os.path.join(icons_dir, "chevron_down_dark.svg" if is_dark else "chevron_down.svg").replace("\\", "/")
+        chevron_up_path = os.path.join(icons_dir, "chevron_up_dark.svg" if is_dark else "chevron_up.svg").replace("\\", "/")
         calendar_path = os.path.join(icons_dir, "calendar.svg").replace("\\", "/")
 
         qss = f"""
@@ -101,22 +102,26 @@ class ThemeManager:
         /* Atoms: Inputs */
         QLineEdit {{
             background-color: {surf};
-            border: {Spacing.BORDER_WIDTH_SM} solid {border};
+            border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
-            padding: 4px 8px;
+            padding: 3px 8px;
+            min-height: 28px;
+            max-height: 28px;
             color: {txt_primary};
+            font-size: 13px;
         }}
         QLineEdit:focus {{
-            border: {Spacing.BORDER_WIDTH_SM} solid {Colors.ACCENT};
+            border: 1.5px solid {Colors.ACCENT};
         }}
         
         /* ComboBoxes */
         QComboBox {{
             background-color: {surf};
-            border: {Spacing.BORDER_WIDTH_SM} solid {border};
+            border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
-            padding: 4px 10px;
-            min-height: 35px;
+            padding: 3px 10px;
+            min-height: 28px;
+            max-height: 28px;
             color: {txt_primary};
             font-size: 13px;
         }}
@@ -202,10 +207,11 @@ class ThemeManager:
         /* Date Editors */
         QDateEdit {{
             background-color: {surf};
-            border: {Spacing.BORDER_WIDTH_SM} solid {border};
+            border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
-            padding: 2px 10px;
-            min-height: 35px;
+            padding: 3px 10px;
+            min-height: 28px;
+            max-height: 28px;
             color: {txt_primary};
             font-size: 13px;
         }}
@@ -269,29 +275,50 @@ class ThemeManager:
         /* SpinBoxes */
         QSpinBox, QDoubleSpinBox {{
             background-color: {surf};
-            border: {Spacing.BORDER_WIDTH_SM} solid {border};
+            border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
-            padding: 4px 8px;
+            padding: 3px 26px 3px 10px;
+            min-height: 28px;
+            max-height: 28px;
             color: {txt_primary};
             font-size: 13px;
-            min-height: 28px;
         }}
         QSpinBox:focus, QDoubleSpinBox:focus {{
             border: 1.5px solid {Colors.ACCENT};
         }}
         QSpinBox::up-button, QDoubleSpinBox::up-button {{
-            subcontrol-origin: border;
+            subcontrol-origin: padding;
             subcontrol-position: top right;
-            width: 16px;
+            width: 22px;
             border-left: 1px solid {border};
+            border-bottom: 0.5px solid {border};
             background-color: transparent;
+            margin: 1px 1px 0px 0px;
+        }}
+        QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover {{
+            background-color: {"rgba(255, 255, 255, 0.08)" if is_dark else "#F1F5F9"};
+        }}
+        QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+            image: url("{chevron_up_path}");
+            width: 10px;
+            height: 10px;
         }}
         QSpinBox::down-button, QDoubleSpinBox::down-button {{
-            subcontrol-origin: border;
+            subcontrol-origin: padding;
             subcontrol-position: bottom right;
-            width: 16px;
+            width: 22px;
             border-left: 1px solid {border};
+            border-top: 0.5px solid {border};
             background-color: transparent;
+            margin: 0px 1px 1px 0px;
+        }}
+        QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
+            background-color: {"rgba(255, 255, 255, 0.08)" if is_dark else "#F1F5F9"};
+        }}
+        QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+            image: url("{chevron_down_path}");
+            width: 10px;
+            height: 10px;
         }}
         
         /* Buttons */

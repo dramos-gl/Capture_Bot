@@ -139,10 +139,11 @@ class AdminService:
         if data.get("rfc_id"):
             rfc = self.session.get(Rfc, data["rfc_id"])
             action = "ACTUALIZAR_REGISTRO"
-            old_val = {"rfc": rfc.rfc, "razon_social": rfc.razon_social, "activo": rfc.activo}
+            old_val = {"rfc": rfc.rfc, "razon_social": rfc.razon_social, "alias": rfc.alias, "activo": rfc.activo}
             
             rfc.rfc = data.get("rfc", rfc.rfc)
             rfc.razon_social = data.get("razon_social", rfc.razon_social)
+            rfc.alias = data.get("alias", rfc.alias)
             rfc.calle = data.get("calle", rfc.calle)
             rfc.no_exterior = data.get("no_exterior", rfc.no_exterior)
             rfc.no_interior = data.get("no_interior", rfc.no_interior)
@@ -157,6 +158,7 @@ class AdminService:
             rfc = Rfc(
                 rfc=data["rfc"],
                 razon_social=data["razon_social"],
+                alias=data.get("alias"),
                 calle=data.get("calle"),
                 no_exterior=data.get("no_exterior"),
                 no_interior=data.get("no_interior"),
@@ -169,7 +171,7 @@ class AdminService:
             )
 
         self.cat_repo.save_rfc(rfc)
-        new_val = {"rfc_id": rfc.rfc_id, "rfc": rfc.rfc, "razon_social": rfc.razon_social, "activo": rfc.activo}
+        new_val = {"rfc_id": rfc.rfc_id, "rfc": rfc.rfc, "razon_social": rfc.razon_social, "alias": rfc.alias, "activo": rfc.activo}
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"rfc": rfc.rfc})
         return rfc
 

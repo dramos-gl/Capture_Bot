@@ -892,10 +892,11 @@ class DesarrolloCreateRequest(BaseModel):
     delegacion_id: int
 
 class LoteDetalleItem(BaseModel):
-    cliente: str
-    desarrollo_id: int
+    cliente: Optional[str] = None
+    desarrollo_id: Optional[int] = None
     fecha_solicitud: Optional[str] = None
     ubicacion: Optional[str] = None
+    sm: Optional[str] = None
     mz: Optional[str] = None
     lote: Optional[str] = None
     edif: Optional[str] = None
@@ -910,6 +911,7 @@ class LoteDetalleItem(BaseModel):
     fecha_escritura: Optional[str] = None
     fecha_titulacion: Optional[str] = None
     comentarios: Optional[str] = None
+    observaciones: Optional[str] = None
     concepto_solicitado: str
     referencia_id: Optional[int] = None
     referencia_asignada: str
@@ -1051,6 +1053,33 @@ def api_buscar_ubicacion(
     try:
         return InventarioRepository(db).get_ubicacion_by_coordenadas(
             desarrollo_id=desarrollo_id, mz=mz, lote=lote, edif=edif, viv=viv
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/buscar-identificador")
+def api_buscar_identificador(
+    credito_titular: Optional[str] = None,
+    pa: Optional[str] = None,
+    folio_electronico: Optional[str] = None,
+    desarrollo_id: Optional[int] = None,
+    mz: Optional[str] = None,
+    lote: Optional[str] = None,
+    edif: Optional[str] = None,
+    viv: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_asignacion_by_identificador(
+            credito_titular=credito_titular,
+            pa=pa,
+            folio_electronico=folio_electronico,
+            desarrollo_id=desarrollo_id,
+            mz=mz,
+            lote=lote,
+            edif=edif,
+            viv=viv
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

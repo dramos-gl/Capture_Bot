@@ -36,8 +36,21 @@ class LabeledInput(QWidget):
         
         self.input = CustomInput("", is_password, self.frame)
         self.input.setObjectName("floatingInput")
+        self._raw_placeholder = placeholder
+        
+        # Intercept setPlaceholderText on self.input to prevent visual collision with inactive floating label
+        original_set_placeholder = self.input.setPlaceholderText
+        def _wrapped_set_placeholder(text_val: str):
+            self._raw_placeholder = text_val
+            has_txt = bool(self.input.text())
+            if self._is_active or has_txt:
+                original_set_placeholder(text_val)
+            else:
+                original_set_placeholder("")
+        self.input.setPlaceholderText = _wrapped_set_placeholder
         
         # Icons
+        self._has_leading_icon = (icon_name is not None)
         if icon_name == "user":
             self.input.addAction(Icons.user(), QLineEdit.LeadingPosition)
         elif icon_name == "lock":
@@ -52,7 +65,7 @@ class LabeledInput(QWidget):
         
         # Floating Label
         self.label = CustomLabel(label_text, variant="body", parent=self)
-        self.label.setStyleSheet("background-color: transparent; color: #64748B; padding: 0 4px;")
+        self.label.setStyleSheet(f"background-color: transparent; color: {Colors.TEXT_LIGHT_MUTED}; padding: 0 4px;")
         
         # Error Label
         self.error_label = CustomLabel("", variant="muted")
@@ -70,6 +83,10 @@ class LabeledInput(QWidget):
         self.input.textChanged.connect(self._on_text_changed)
         
         self._is_active = False
+
+    def set_placeholder_text(self, placeholder: str):
+        """Sets the placeholder text cleanly without overlapping the floating label."""
+        self.input.setPlaceholderText(placeholder)
 
     def set_validator(self, pattern: str, error_msg: str):
         """Sets a regex validation pattern and error message for real-time validation."""
@@ -130,10 +147,15 @@ class LabeledInput(QWidget):
         # Apply styles BEFORE calculating geometry so adjustSize() uses the correct font
         if is_active:
             bg_color = self._get_background_color()
-            text_color = "#F8FAFC" if bg_color in [Colors.BG_DARK, Colors.SURFACE_DARK] else "#2C3E50"
+            text_color = Colors.TEXT_DARK_PRIMARY if bg_color in [Colors.BG_DARK, Colors.SURFACE_DARK] else Colors.TEXT_LIGHT_PRIMARY
             self.label.setStyleSheet(f"background-color: {bg_color}; color: {text_color}; font-size: 11px; padding: 0 4px;")
+            # Show placeholder when active/focused
+            if hasattr(self, '_raw_placeholder') and self._raw_placeholder:
+                QLineEdit.setPlaceholderText(self.input, self._raw_placeholder)
         else:
-            self.label.setStyleSheet("background-color: transparent; color: #64748B; font-size: 13px; padding: 0 4px;")
+            self.label.setStyleSheet(f"background-color: transparent; color: {Colors.TEXT_LIGHT_MUTED}; font-size: 13px; padding: 0 4px;")
+            # Hide placeholder when inactive to avoid text superposition with the centered label
+            QLineEdit.setPlaceholderText(self.input, "")
             
         # Adjust label width to exactly fit content
         self.label.adjustSize()
@@ -141,9 +163,9 @@ class LabeledInput(QWidget):
         lbl_h = self.label.height()
         
         start_y = frame_rect.y() + (frame_rect.height() - lbl_h) // 2
-        start_x = frame_rect.x() + 32 # Offset for leading icon
+        start_x = frame_rect.x() + (36 if getattr(self, '_has_leading_icon', False) else 12)
         
-        end_y = frame_rect.y() - lbl_h + 3 # Rests perfectly on the top line, minimizing intrusion inside the input box
+        end_y = frame_rect.y() - lbl_h + 3 # Rests on the top line
         end_x = frame_rect.x() + 12
         
         target_rect = QRect(end_x, end_y, lbl_w, lbl_h) if is_active else QRect(start_x, start_y, lbl_w, lbl_h)
@@ -157,7 +179,7 @@ class LabeledInput(QWidget):
         # Manage Frame Focus Style unless there's an error
         if not self.error_label.isVisible():
             if self.input.hasFocus():
-                self.frame.setStyleSheet("QFrame#floatingInputFrame { border: 1px solid #2C3E50; }")
+                self.frame.setStyleSheet(f"QFrame#floatingInputFrame {{ border: 1px solid {Colors.PRIMARY}; }}")
             else:
                 self.frame.setStyleSheet("")
 
@@ -185,7 +207,7 @@ class LabeledInput(QWidget):
             self.error_label.setText(message)
             self.error_label.set_error_style(True)
             self.error_label.setVisible(True)
-            self.frame.setStyleSheet("QFrame#floatingInputFrame { border: 1px solid #DC2626; }")
+            self.frame.setStyleSheet(f"QFrame#floatingInputFrame {{ border: 1px solid {Colors.ERROR}; }}")
         else:
             self.clear_error()
             
@@ -199,12 +221,11 @@ class LabeledInput(QWidget):
             return self._bg_color
         
         # Check parents for an objectName indicating a card or a custom background
-        in_card = False
         p = self.parent()
         while p:
-            if p.objectName() == "cardFrame":
-                in_card = True
-                break
+            obj_name = p.objectName() or ""
+            if obj_name in ["cardFrame", "card_fiscal", "card_domicilio", "card_notaria", "card_colab"] or "card" in obj_name.lower():
+                return Colors.SLATE_50
             p = p.parent()
             
         # Determine if we are in dark theme by checking window/parent hierarchy attributes
@@ -217,9 +238,9 @@ class LabeledInput(QWidget):
             p = p.parent()
             
         if is_dark:
-            return Colors.SURFACE_DARK if in_card else Colors.BG_DARK
+            return Colors.SURFACE_DARK
         else:
-            return Colors.SURFACE_LIGHT if in_card else Colors.BG_LIGHT
+            return Colors.SLATE_50
 
     def changeEvent(self, event):
         if event.type() == QEvent.StyleChange:

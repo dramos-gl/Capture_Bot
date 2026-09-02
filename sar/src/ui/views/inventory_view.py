@@ -3,17 +3,18 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget,
     QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
-    QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox
+    QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox, QCheckBox
 )
 
 from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize
+from PySide6.QtGui import QColor
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
     LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid, GLLoadingDialog,
     GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
-from sar.src.ui.design_system.theme_manager import Colors
+from sar.src.ui.design_system.theme_manager import Colors, ThemeManager
 from sar.src.services.inventario_ui_service import InventarioUIService
 from sar.src.services.excel_inventory_handler import ExcelInventoryHandler
 from sar.src.ui.design_system.utils.icons import Icons
@@ -231,9 +232,9 @@ class PdfWorker(QThread):
                     notaria_alias = self.header_data.get("notaria_alias")
                     if not notaria_alias:
                         notaria_raw = self.header_data.get("asignado_a", "Notaria")
-                        nums = re.findall(r'\\d+', notaria_raw)
+                        nums = re.findall(r'\d+', notaria_raw)
                         notaria_alias = f"Not{nums[0]}" if nums else sanitize(notaria_raw)
-                    out_name = f"{referencia}_{notaria_alias}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
+                    out_name = f"{consec}_{referencia}_{notaria_alias}_{concepto_pretty}_{deleg_abbr}.pdf"
                 else:
                     # Flat destination folder
                     folder_path = self.dest_dir
@@ -242,9 +243,9 @@ class PdfWorker(QThread):
                     consec = f"{consec_num:03d}"
 
                     if estado_ref == "ASIGNADA":
-                        out_name = f"{cliente}_{concepto_pretty}_{consec}.pdf"
+                        out_name = f"{consec}_{cliente}_{concepto_pretty}.pdf"
                     else:  # COLABORADOR
-                        out_name = f"{referencia}_{concepto_pretty}_{deleg_abbr}_{consec}.pdf"
+                        out_name = f"{consec}_{referencia}_{concepto_pretty}_{deleg_abbr}.pdf"
 
                 out_path = os.path.join(folder_path, out_name)
                 if merge_or_copy_pdfs(pdf_paths, out_path):
@@ -699,20 +700,36 @@ class InventoryView(QWidget):
 
         # Action Buttons
         actions_layout = QHBoxLayout()
-        self.btn_marcar_visibles = CustomButton("Marcar Visibles", is_secondary=True)
-        self.btn_marcar_visibles.clicked.connect(self._on_marcar_visibles)
+        actions_layout.setSpacing(10)
 
-        actions_layout.addWidget(self.btn_marcar_visibles)
+        self.btn_limpiar_seleccion = CustomButton("Limpiar Selección", is_secondary=True)
+        self.btn_limpiar_seleccion.clicked.connect(self._on_limpiar_seleccion)
+        self.btn_limpiar_seleccion.setVisible(False)
+        actions_layout.addWidget(self.btn_limpiar_seleccion)
+
+        self.lbl_selected_badge = QLabel("", self)
+        self.lbl_selected_badge.setStyleSheet("font-weight: bold; color: #1D4ED8; font-size: 12px; padding: 4px 8px; background-color: #EFF6FF; border-radius: 6px; border: 1px solid #BFDBFE;")
+        self.lbl_selected_badge.setVisible(False)
+        actions_layout.addWidget(self.lbl_selected_badge)
+
         actions_layout.addStretch()
+
+        self.btn_asignar_seleccionados = CustomButton("Asignar Seleccionados")
+        self.btn_asignar_seleccionados.setIcon(Icons.aceptar("#FFFFFF"))
+        self.btn_asignar_seleccionados.setEnabled(False)
+        self.btn_asignar_seleccionados.clicked.connect(self._on_asignar_seleccionados)
+        actions_layout.addWidget(self.btn_asignar_seleccionados)
         
         self.card.layout.addLayout(actions_layout)
         layout.addWidget(self.card)
 
-        # Pagination state
+        # Pagination & selection state
         self.current_page = 1
         self.page_size = 200
         self.all_data = []
+        self.visible_table_data = []
         self.total_items = 0
+        self.selected_ref_map = {}
         self.active_worker = None
         self._current_search_text = ""
         self._current_estado_filter = "Todos"
@@ -782,36 +799,72 @@ class InventoryView(QWidget):
         QMessageBox.critical(self, "Error de Datos", f"Fallo al conectar con el servidor:\n{err}")
 
     def _populate_visor_table(self):
+        # 1. Separate selected (pinned) vs unselected data to ensure selected rights remain visible
+        selected_refs_list = list(self.selected_ref_map.values())
+        selected_ids = set(self.selected_ref_map.keys())
+        unselected_data = [r for r in self.all_data if r.get("referencia_id") not in selected_ids]
+        
+        # Pinned selected items always appear at the top
+        self.visible_table_data = selected_refs_list + unselected_data
+
         rows_data = []
-        for r in self.all_data:
+        for r in self.visible_table_data:
             if r.get("estado_codigo") == "RESERVADA":
                 state_desc = "Reservada"
             else:
-                state_desc = "Asignada" if r["asignada"] else "Disponible"
+                state_desc = "Asignada" if r.get("asignada") else "Disponible"
             rows_data.append([
                 "",
-                str(r["referencia_id"]),
-                r["referencia_portal"],
-                r["concepto"],
-                r["empresa"],
-                r["importe"],
+                str(r.get("referencia_id", "")),
+                r.get("referencia_portal", ""),
+                r.get("concepto", ""),
+                r.get("empresa", ""),
+                r.get("importe", ""),
                 state_desc,
-                r["asignado_a"],
-                r["tipo_asignacion"],
-                r["solicitante_externo"],
-                r["desarrollo"],
-                r["cliente"],
-                r["mz"],
-                r["lote"],
-                r["edif"],
-                r["viv"],
-                r["folio_electronico"],
-                r["fecha_asignacion"]
+                r.get("asignado_a", ""),
+                r.get("tipo_asignacion", ""),
+                r.get("solicitante_externo", ""),
+                r.get("desarrollo", ""),
+                r.get("cliente", ""),
+                r.get("mz", ""),
+                r.get("lote", ""),
+                r.get("edif", ""),
+                r.get("viv", ""),
+                r.get("folio_electronico", ""),
+                r.get("fecha_asignacion", "")
             ])
 
         self.table.blockSignals(True)
         self.table.populate_rows(rows_data, checkable_first_col=True)
+        
+        # Configure checkboxes, highlight pinned rows, and disable assigned references
+        pinned_bg_color = QColor("#EFF6FF") # Soft blue/primary tint for selected pinned rows
+        
+        for row_idx, r in enumerate(self.visible_table_data):
+            check_item = self.table.item(row_idx, 0)
+            if not check_item:
+                continue
+                
+            r_id = r.get("referencia_id")
+            is_asignada = r.get("asignada", False) or r.get("estado_codigo") == "ASIGNADA"
+            
+            if is_asignada:
+                check_item.setFlags(check_item.flags() & ~Qt.ItemFlag.ItemIsEnabled & ~Qt.ItemFlag.ItemIsUserCheckable)
+                check_item.setCheckState(Qt.CheckState.Unchecked)
+                check_item.setToolTip("Los derechos en estado asignado no se pueden volver a asignar.")
+            else:
+                if r_id in self.selected_ref_map:
+                    check_item.setCheckState(Qt.CheckState.Checked)
+                    check_item.setToolTip("✓ Derecho seleccionado y fijado en la parte superior.")
+                    for c_idx in range(self.table.columnCount()):
+                        cell_item = self.table.item(row_idx, c_idx)
+                        if cell_item:
+                            cell_item.setBackground(pinned_bg_color)
+                else:
+                    check_item.setCheckState(Qt.CheckState.Unchecked)
+                    
         self.table.blockSignals(False)
+        self._update_selection_controls()
 
         # Update labels & paging buttons
         total_pages = max(1, (self.total_items + self.page_size - 1) // self.page_size)
@@ -1023,68 +1076,96 @@ class InventoryView(QWidget):
         self.current_page = 1
         self.refresh_visor_data()
 
+    def _update_selection_controls(self):
+        count = len(self.selected_ref_map)
+            
+        if count > 0:
+            self.btn_asignar_seleccionados.setEnabled(True)
+            self.btn_asignar_seleccionados.setText(f"Asignar Seleccionados ({count})")
+            self.btn_limpiar_seleccion.setVisible(True)
+            self.lbl_selected_badge.setText(f"{count} derecho(s) seleccionado(s)")
+            self.lbl_selected_badge.setVisible(True)
+        else:
+            self.btn_asignar_seleccionados.setEnabled(False)
+            self.btn_asignar_seleccionados.setText("Asignar Seleccionados")
+            self.btn_limpiar_seleccion.setVisible(False)
+            self.lbl_selected_badge.setVisible(False)
+
     def _on_table_item_changed(self, item):
         if item.column() == 0:
-            checked = any(self.table.item(r, 0).checkState() == Qt.CheckState.Checked for r in range(self.table.rowCount()))
-            self.btn_marcar_visibles.setText("Desmarcar Visibles" if checked else "Marcar Visibles")
+            row = item.row()
+            if 0 <= row < len(self.visible_table_data):
+                ref_dict = self.visible_table_data[row]
+                r_id = ref_dict.get("referencia_id")
+                is_asignada = ref_dict.get("asignada", False) or ref_dict.get("estado_codigo") == "ASIGNADA"
+                
+                if is_asignada:
+                    if item.checkState() == Qt.CheckState.Checked:
+                        item.setCheckState(Qt.CheckState.Unchecked)
+                    if r_id in self.selected_ref_map:
+                        del self.selected_ref_map[r_id]
+                else:
+                    if item.checkState() == Qt.CheckState.Checked:
+                        self.selected_ref_map[r_id] = ref_dict
+                    else:
+                        if r_id in self.selected_ref_map:
+                            del self.selected_ref_map[r_id]
+                            
+            self._update_selection_controls()
 
     def _on_table_cell_double_clicked(self, row, column):
-        ref_id_item = self.table.item(row, 1)
-        if not ref_id_item or not ref_id_item.text():
+        if row < 0 or row >= len(self.visible_table_data):
+            return
+            
+        ref_dict = self.visible_table_data[row]
+        is_asignada = ref_dict.get("asignada", False) or ref_dict.get("estado_codigo") == "ASIGNADA"
+        if is_asignada:
+            QMessageBox.information(self, "Derecho Asignado", "Este derecho ya se encuentra en estado ASIGNADO y no puede volver a asignarse.")
             return
 
-        try:
-            ref_id = int(ref_id_item.text())
-        except ValueError:
-            return
-
-        ref_portal = self.table.item(row, 2).text() if self.table.item(row, 2) else ""
-        
-        # Match dictionary from self.all_data
-        selected_ref = None
-        for r in self.all_data:
-            if r.get("referencia_id") == ref_id:
-                selected_ref = r
-                break
-
-        selected_refs = [selected_ref] if selected_ref else []
+        ref_id = ref_dict.get("referencia_id")
+        ref_portal = ref_dict.get("referencia_portal", "")
 
         dialog = ManualAssignmentDialog(
             self.db_connector,
             [ref_id],
             [ref_portal],
             parent=self,
+            selected_refs=[ref_dict]
+        )
+        if dialog.exec() == QDialog.Accepted:
+            if ref_id in self.selected_ref_map:
+                del self.selected_ref_map[ref_id]
+            self._update_selection_controls()
+            self.refresh_visor_data()
+
+    def _on_limpiar_seleccion(self):
+        self.selected_ref_map.clear()
+        self._populate_visor_table()
+
+    def _on_asignar_seleccionados(self):
+        if not self.selected_ref_map:
+            QMessageBox.warning(self, "Selección Vacía", "Por favor, selecciona al menos un derecho disponible en la tabla para asignarlo.")
+            return
+
+        selected_refs = list(self.selected_ref_map.values())
+        ref_ids = [r["referencia_id"] for r in selected_refs]
+        ref_portals = [r.get("referencia_portal", "") for r in selected_refs]
+
+        dialog = ManualAssignmentDialog(
+            self.db_connector,
+            ref_ids,
+            ref_portals,
+            parent=self,
             selected_refs=selected_refs
         )
         if dialog.exec() == QDialog.Accepted:
+            self.selected_ref_map.clear()
+            self._update_selection_controls()
             self.refresh_visor_data()
-
-    def _on_marcar_visibles(self):
-        any_checked = any(self.table.item(r, 0).checkState() == Qt.CheckState.Checked for r in range(self.table.rowCount()))
-        target = Qt.CheckState.Unchecked if any_checked else Qt.CheckState.Checked
-        self.table.blockSignals(True)
-        for r in range(self.table.rowCount()):
-            self.table.item(r, 0).setCheckState(target)
-        self.table.blockSignals(False)
-        self.btn_marcar_visibles.setText("Marcar Visibles" if any_checked else "Desmarcar Visibles")
 
     def _on_asignar_manual(self):
-        # Gather selected references
-        ref_ids = []
-        ref_portals = []
-        for r in range(self.table.rowCount()):
-            if self.table.item(r, 0).checkState() == Qt.CheckState.Checked:
-                ref_ids.append(int(self.table.item(r, 1).text()))
-                ref_portals.append(self.table.item(r, 2).text())
-                
-        if not ref_ids:
-            QMessageBox.warning(self, "Selección Vacía", "Por favor, selecciona al menos una factura en la tabla para asignarla.")
-            return
-
-        # Open Custom Manual Assignment Dialog
-        dialog = ManualAssignmentDialog(self.db_connector, ref_ids, ref_portals, self)
-        if dialog.exec() == QDialog.Accepted:
-            self.refresh_visor_data()
+        self._on_asignar_seleccionados()
 
     def _on_exportar_reporte(self):
         lotes_dialog = ExportLotesDialog(self.db_connector, self)
@@ -2765,7 +2846,7 @@ class InventoryView(QWidget):
 # DIALOGS
 # =============================================================================
 class ManualAssignmentDialog(QDialog):
-    """Dialog to perform individual or bulk manual reference assignments."""
+    """Dialog to perform individual or bulk manual reference assignments with a sequential wizard/paginator, per-reference drafting, and dynamic layout."""
     
     def __init__(self, db_connector, ref_ids, ref_portals, parent=None, selected_refs=None):
         super().__init__(parent)
@@ -2775,87 +2856,304 @@ class ManualAssignmentDialog(QDialog):
         self.selected_refs = selected_refs or []
         self.inventario_ui_service = InventarioUIService(self.db_connector)
 
+        self.total_refs = len(self.ref_ids)
+        self.current_idx = 0
+        self._is_autocompleting = False
+
+        self._notarias_map = {}
+        self._colaboradores_map = {}
+        self._desarrollos_map = {}
+        self._desarrollos_list = []
+
+        # Initialize per-reference drafts
+        self._derechos_data = []
+        for i in range(self.total_refs):
+            r = self.selected_refs[i] if i < len(self.selected_refs) else {}
+            self._derechos_data.append({
+                "referencia_id": self.ref_ids[i],
+                "referencia_portal": self.ref_portals[i] if i < len(self.ref_portals) else (r.get("referencia_portal", "") or ""),
+                "ref_meta": r,
+                "tipo_destino": None,
+                "notaria_id": None,
+                "notaria_name": "",
+                "colaborador_id": None,
+                "colaborador_name": "",
+                "solicitante_externo": "",
+                "cliente": str(r.get("cliente", "") or ""),
+                "desarrollo_id": r.get("desarrollo_id"),
+                "desarrollo_name": str(r.get("desarrollo", "") or ""),
+                "sm": str(r.get("sm", "") or ""),
+                "mz": str(r.get("mz", "") or ""),
+                "lote": str(r.get("lote", "") or ""),
+                "edif": str(r.get("edif", "") or ""),
+                "viv": str(r.get("viv", "") or ""),
+                "folio_electronico": str(r.get("folio_electronico", "") or ""),
+                "credito_titular": str(r.get("credito_titular", "") or ""),
+                "pa": str(r.get("pa", "") or ""),
+                "fecha_sol": datetime.now().strftime("%Y-%m-%d"),
+                "fecha_ingreso_rpp": "",
+                "fecha_reporte_notaria": "",
+                "fecha_escritura": "",
+                "fecha_titulacion": "",
+                "estatus_aviso": "NUEVO INGRESO",
+                "observaciones": "",
+                "comentarios": ""
+            })
+
+        # Obtenemos tokens dinámicos del Design System según el tema activo
+        is_dark = ThemeManager.is_dark_active()
+        bg_card = Colors.SURFACE_DARK if is_dark else Colors.SURFACE_LIGHT
+        bg_sub = Colors.BG_DARK if is_dark else "#F8FAFC"
+        nav_bg = Colors.SURFACE_DARK if is_dark else "#F1F5F9"
+        nav_border = Colors.BORDER_DARK if is_dark else "#CBD5E1"
+        border_color = Colors.BORDER_DARK if is_dark else "#E2E8F0"
+        text_primary = Colors.TEXT_DARK_PRIMARY if is_dark else Colors.TEXT_LIGHT_PRIMARY
+        text_secondary = Colors.TEXT_DARK_SECONDARY if is_dark else Colors.TEXT_LIGHT_SECONDARY
+        text_muted = Colors.TEXT_DARK_MUTED if is_dark else Colors.TEXT_LIGHT_MUTED
+        accent_color = "#60A5FA" if is_dark else "#1D4ED8"
+        success_color = Colors.SUCCESS_DARK_TEXT if is_dark else Colors.SUCCESS
+
         self.setWindowTitle("Asignar Derechos")
-        self.setMinimumWidth(440)
-        self.layout = QVBoxLayout(self)
+        self.setMinimumWidth(540)
         
-        form = QFormLayout()
+        main_vlayout = QVBoxLayout(self)
+        main_vlayout.setContentsMargins(16, 14, 16, 14)
+        main_vlayout.setSpacing(10)
+
+        # Header Info Banner con formato dinámico según el tema
+        self.lbl_info = QLabel("", self)
+        self.lbl_info.setStyleSheet("padding: 4px 0px;")
+        main_vlayout.addWidget(self.lbl_info)
+
+        # -------------------------------------------------------------
+        # Barra de Navegación Secuencial (Wizard / Paginador)
+        # -------------------------------------------------------------
+        self.nav_container = QFrame(self)
+        self.nav_container.setObjectName("nav_bar")
+        self.nav_container.setStyleSheet(f"QFrame#nav_bar {{ background-color: {nav_bg}; border: 1px solid {nav_border}; border-radius: 6px; padding: 4px 8px; }}")
+        nav_lay = QHBoxLayout(self.nav_container)
+        nav_lay.setContentsMargins(4, 2, 4, 2)
+        nav_lay.setSpacing(10)
         
-        if len(ref_ids) == 1 and self.ref_portals:
-            info_text = f"Asignando derecho: {self.ref_portals[0]}"
-        else:
-            info_text = f"Asignando {len(ref_ids)} derechos seleccionados."
+        self.btn_prev = CustomButton("◀ Anterior", is_secondary=True)
+        self.btn_prev.setMaximumWidth(110)
+        self.btn_prev.clicked.connect(self._on_prev)
+        
+        self.lbl_step = QLabel(f"Derecho 1 de {self.total_refs}", self.nav_container)
+        self.lbl_step.setAlignment(Qt.AlignCenter)
+        self.lbl_step.setStyleSheet(f"font-weight: bold; font-size: 12px; color: {text_primary};")
+        
+        self.btn_next = CustomButton("Siguiente ▶", is_secondary=False)
+        self.btn_next.setMaximumWidth(110)
+        self.btn_next.clicked.connect(self._on_next)
+        
+        nav_lay.addWidget(self.btn_prev)
+        nav_lay.addStretch()
+        nav_lay.addWidget(self.lbl_step)
+        nav_lay.addStretch()
+        nav_lay.addWidget(self.btn_next)
+        
+        main_vlayout.addWidget(self.nav_container)
 
-        self.lbl_info = QLabel(info_text, self)
-        self.lbl_info.setStyleSheet("font-weight: bold; color: #2563EB;")
-        form.addRow("Info:", self.lbl_info)
+        # Replicate checkbox con componente atómico CustomCheckBox
+        self.chk_replicar = CustomCheckBox("Aplicar mismos datos / observaciones a los siguientes derechos", self)
+        self.chk_replicar.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_secondary}; margin-bottom: 2px;")
+        main_vlayout.addWidget(self.chk_replicar)
+        
+        if self.total_refs <= 1:
+            self.nav_container.hide()
+            self.chk_replicar.hide()
 
+        # -------------------------------------------------------------
+        # 1. Selector de Tipo de Destino
+        # -------------------------------------------------------------
+        dest_form = QFormLayout()
+        dest_form.setContentsMargins(0, 0, 0, 4)
+        dest_form.setSpacing(8)
+        
         self.cb_destino = CustomComboBox(self)
         self.cb_destino.addItems(["-- Seleccione Tipo Destino --", "NOTARIA", "COLABORADOR"])
         self.cb_destino.setCurrentIndex(0)
         self.cb_destino.currentTextChanged.connect(self._on_destino_changed)
-        form.addRow("Tipo Destino:", self.cb_destino)
+        dest_form.addRow("Tipo Destino:", self.cb_destino)
+        main_vlayout.addLayout(dest_form)
 
-        self.cb_notarias = CustomComboBox(self)
-        form.addRow("Notaría:", self.cb_notarias)
+        # -------------------------------------------------------------
+        # 2. CONTENEDOR: MODO COLABORADOR
+        # -------------------------------------------------------------
+        self.container_colaborador = QFrame(self)
+        self.container_colaborador.setObjectName("card_colab")
+        self.container_colaborador.setStyleSheet(f"QFrame#card_colab {{ background-color: {bg_sub}; border: 1px solid {border_color}; border-radius: 8px; padding: 8px; }}")
+        colab_vlayout = QVBoxLayout(self.container_colaborador)
+        colab_vlayout.setContentsMargins(8, 8, 8, 8)
+        colab_vlayout.setSpacing(8)
 
-        self.cb_colaboradores = CustomComboBox(self)
-        form.addRow("Colaborador:", self.cb_colaboradores)
+        lbl_colab_title = CustomLabel("👤 ASIGNACIÓN A COLABORADOR (TRÁMITES EXTERNOS)", variant="subheader")
+        lbl_colab_title.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_secondary};")
+        colab_vlayout.addWidget(lbl_colab_title)
 
-        self.txt_solicitante = QLineEdit(self)
-        self.txt_solicitante.setPlaceholderText("Nombre de la persona")
-        form.addRow("Solicitante Externo:", self.txt_solicitante)
+        form_colab = QFormLayout()
+        form_colab.setSpacing(8)
 
-        # Fields from spreadsheet coordinates
-        self.txt_cliente = QLineEdit(self)
-        form.addRow("Nombre del Cliente:", self.txt_cliente)
+        self.cb_colaboradores = CustomComboBox(self.container_colaborador)
+        form_colab.addRow("Colaborador:", self.cb_colaboradores)
 
-        self.cb_desarrollo = CustomComboBox(self)
-        form.addRow("Desarrollo:", self.cb_desarrollo)
+        self.txt_fecha_sol_colab = CustomInput("AAAA-MM-DD", parent=self.container_colaborador)
+        self.txt_fecha_sol_colab.setText(datetime.now().strftime("%Y-%m-%d"))
+        form_colab.addRow("Fecha Asignación:", self.txt_fecha_sol_colab)
 
-        self.txt_fecha_sol = QLineEdit(self)
-        self.txt_fecha_sol.setPlaceholderText("AAAA-MM-DD")
-        self.txt_fecha_sol.setText(datetime.now().strftime("%Y-%m-%d"))
-        form.addRow("Fecha Solicitud:", self.txt_fecha_sol)
+        self.txt_obs_colab = QTextEdit(self.container_colaborador)
+        self.txt_obs_colab.setMaximumHeight(90)
+        self.txt_obs_colab.setPlaceholderText("Describa el uso exclusivo para trámites externos...")
+        self.txt_obs_colab.setStyleSheet(f"background-color: {bg_card}; color: {text_primary}; border: 1px solid {border_color}; border-radius: 4px; padding: 4px;")
+        form_colab.addRow("Observaciones *:", self.txt_obs_colab)
 
-        self.txt_mz = QLineEdit(self)
-        self.txt_lote = QLineEdit(self)
-        self.txt_edif = QLineEdit(self)
-        self.txt_viv = QLineEdit(self)
+        colab_vlayout.addLayout(form_colab)
+        main_vlayout.addWidget(self.container_colaborador)
+
+        # -------------------------------------------------------------
+        # 3. CONTENEDOR: MODO NOTARIA
+        # -------------------------------------------------------------
+        self.container_notaria = QFrame(self)
+        self.container_notaria.setObjectName("card_notaria")
+        self.container_notaria.setStyleSheet(f"QFrame#card_notaria {{ background-color: {bg_card}; border: 1px solid {border_color}; border-radius: 8px; padding: 6px; }}")
+        notaria_vlayout = QVBoxLayout(self.container_notaria)
+        notaria_vlayout.setContentsMargins(6, 6, 6, 6)
+        notaria_vlayout.setSpacing(8)
+
+        # Subsección A: Notaría y Solicitante
+        form_notaria_top = QFormLayout()
+        form_notaria_top.setSpacing(6)
         
-        loc_lay = QHBoxLayout()
-        loc_lay.addWidget(QLabel("Mz:"))
-        loc_lay.addWidget(self.txt_mz)
-        loc_lay.addWidget(QLabel("Lt:"))
-        loc_lay.addWidget(self.txt_lote)
-        form.addRow("Ubicación 1:", loc_lay)
+        self.cb_notarias = CustomComboBox(self.container_notaria)
+        form_notaria_top.addRow("Notaría *:", self.cb_notarias)
 
-        loc_lay2 = QHBoxLayout()
-        loc_lay2.addWidget(QLabel("Edif:"))
-        loc_lay2.addWidget(self.txt_edif)
-        loc_lay2.addWidget(QLabel("Viv:"))
-        loc_lay2.addWidget(self.txt_viv)
-        form.addRow("Ubicación 2:", loc_lay2)
+        self.txt_solicitante = CustomInput("Nombre de la persona que solicita", parent=self.container_notaria)
+        form_notaria_top.addRow("Solicitante Externo:", self.txt_solicitante)
+        notaria_vlayout.addLayout(form_notaria_top)
+
+        # Subsección B: Ubicación del Inmueble
+        lbl_sec_ubi = CustomLabel("🏠 UBICACIÓN DEL INMUEBLE", variant="subheader")
+        lbl_sec_ubi.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_primary}; margin-top: 4px;")
+        notaria_vlayout.addWidget(lbl_sec_ubi)
+
+        form_ubi = QFormLayout()
+        form_ubi.setSpacing(6)
+
+        self.cb_desarrollo = CustomComboBox(self.container_notaria)
+        form_ubi.addRow("Desarrollo:", self.cb_desarrollo)
+
+        # Coordenadas: SM, Mz, Lt, Edif, Viv con CustomInput
+        self.txt_sm = CustomInput("SM", parent=self.container_notaria)
+        self.txt_mz = CustomInput("Mz", parent=self.container_notaria)
+        self.txt_lote = CustomInput("Lt", parent=self.container_notaria)
+        self.txt_edif = CustomInput("Edif", parent=self.container_notaria)
+        self.txt_viv = CustomInput("Viv", parent=self.container_notaria)
+
+        coords_lay = QHBoxLayout()
+        coords_lay.setSpacing(4)
+        coords_lay.addWidget(QLabel("SM:"))
+        coords_lay.addWidget(self.txt_sm)
+        coords_lay.addWidget(QLabel("Mz:"))
+        coords_lay.addWidget(self.txt_mz)
+        coords_lay.addWidget(QLabel("Lt:"))
+        coords_lay.addWidget(self.txt_lote)
+        coords_lay.addWidget(QLabel("Edif:"))
+        coords_lay.addWidget(self.txt_edif)
+        coords_lay.addWidget(QLabel("Viv:"))
+        coords_lay.addWidget(self.txt_viv)
+        form_ubi.addRow("Coordenadas:", coords_lay)
 
         # Ubicación existing match indicator
-        self.lbl_ubi_match = QLabel("", self)
-        self.lbl_ubi_match.setStyleSheet("color: #16A34A; font-size: 11px; font-weight: bold;")
-        form.addRow("", self.lbl_ubi_match)
+        self.lbl_ubi_match = QLabel("", self.container_notaria)
+        self.lbl_ubi_match.setStyleSheet(f"color: {success_color}; font-size: 11px; font-weight: bold;")
+        form_ubi.addRow("", self.lbl_ubi_match)
 
-        self.txt_folio = QLineEdit(self)
-        form.addRow("Folio Electrónico:", self.txt_folio)
+        self.txt_folio = CustomInput("Folio electrónico o número oficial", parent=self.container_notaria)
+        form_ubi.addRow("Folio Electrónico:", self.txt_folio)
+        notaria_vlayout.addLayout(form_ubi)
 
-        self.txt_estatus_aviso = QLineEdit(self)
+        # Subsección C: Datos del Cliente y Crédito
+        lbl_sec_cli = CustomLabel("👤 CLIENTE Y CRÉDITO", variant="subheader")
+        lbl_sec_cli.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_primary}; margin-top: 4px;")
+        notaria_vlayout.addWidget(lbl_sec_cli)
+
+        form_cli = QFormLayout()
+        form_cli.setSpacing(6)
+
+        self.txt_cliente = CustomInput("Nombre completo del cliente", parent=self.container_notaria)
+        form_cli.addRow("Cliente *:", self.txt_cliente)
+
+        fin_lay = QHBoxLayout()
+        fin_lay.setSpacing(6)
+        self.txt_credito = CustomInput("No. de crédito titular", parent=self.container_notaria)
+        self.txt_pa = CustomInput("PA / Paquete", parent=self.container_notaria)
+        fin_lay.addWidget(self.txt_credito, 2)
+        fin_lay.addWidget(QLabel("PA:"))
+        fin_lay.addWidget(self.txt_pa, 1)
+        form_cli.addRow("Crédito / PA:", fin_lay)
+        notaria_vlayout.addLayout(form_cli)
+
+        # Subsección D: Seguimiento y Fechas Notariales / RPP
+        lbl_sec_fechas = CustomLabel("📅 SEGUIMIENTO Y FECHAS NOTARIALES / RPP", variant="subheader")
+        lbl_sec_fechas.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_primary}; margin-top: 4px;")
+        notaria_vlayout.addWidget(lbl_sec_fechas)
+
+        form_fechas = QFormLayout()
+        form_fechas.setSpacing(6)
+
+        # Fila 1 Fechas: Solicitud e Ingreso RPP
+        f1_lay = QHBoxLayout()
+        f1_lay.setSpacing(6)
+        self.txt_fecha_sol = CustomInput("AAAA-MM-DD", parent=self.container_notaria)
+        self.txt_fecha_sol.setText(datetime.now().strftime("%Y-%m-%d"))
+        self.txt_fecha_ingreso_rpp = CustomInput("AAAA-MM-DD", parent=self.container_notaria)
+        f1_lay.addWidget(self.txt_fecha_sol)
+        f1_lay.addWidget(QLabel("F. Ingreso RPP:"))
+        f1_lay.addWidget(self.txt_fecha_ingreso_rpp)
+        form_fechas.addRow("F. Solicitud:", f1_lay)
+
+        # Fila 2 Fechas: Reporte Notaría y Escritura
+        f2_lay = QHBoxLayout()
+        f2_lay.setSpacing(6)
+        self.txt_fecha_reporte_notaria = CustomInput("AAAA-MM-DD", parent=self.container_notaria)
+        self.txt_fecha_escritura = CustomInput("AAAA-MM-DD", parent=self.container_notaria)
+        f2_lay.addWidget(self.txt_fecha_reporte_notaria)
+        f2_lay.addWidget(QLabel("F. Escritura:"))
+        f2_lay.addWidget(self.txt_fecha_escritura)
+        form_fechas.addRow("F. Rep. Notaría:", f2_lay)
+
+        # Fila 3 Fechas: Titulación y Estatus RPP
+        f3_lay = QHBoxLayout()
+        f3_lay.setSpacing(6)
+        self.txt_fecha_titulacion = CustomInput("AAAA-MM-DD", parent=self.container_notaria)
+        self.txt_estatus_aviso = CustomInput(parent=self.container_notaria)
         self.txt_estatus_aviso.setText("NUEVO INGRESO")
-        form.addRow("Estatus RPP / Aviso:", self.txt_estatus_aviso)
+        f3_lay.addWidget(self.txt_fecha_titulacion)
+        f3_lay.addWidget(QLabel("Estatus RPP:"))
+        f3_lay.addWidget(self.txt_estatus_aviso)
+        form_fechas.addRow("F. Titulación:", f3_lay)
+        notaria_vlayout.addLayout(form_fechas)
 
-        self.txt_obs = QTextEdit(self)
-        self.txt_obs.setMaximumHeight(80)
-        form.addRow("Observaciones:", self.txt_obs)
+        # Subsección E: Observaciones y Comentarios
+        form_obs = QFormLayout()
+        form_obs.setSpacing(6)
 
-        self.layout.addLayout(form)
+        self.txt_comentarios = CustomInput("Comentarios notariales...", parent=self.container_notaria)
+        form_obs.addRow("Comentarios:", self.txt_comentarios)
 
-        # Debounce timer for predictive location lookup
+        self.txt_obs_notaria = QTextEdit(self.container_notaria)
+        self.txt_obs_notaria.setMaximumHeight(55)
+        self.txt_obs_notaria.setPlaceholderText("Observaciones generales...")
+        self.txt_obs_notaria.setStyleSheet(f"background-color: {bg_card}; color: {text_primary}; border: 1px solid {border_color}; border-radius: 4px; padding: 4px;")
+        form_obs.addRow("Observaciones:", self.txt_obs_notaria)
+        notaria_vlayout.addLayout(form_obs)
+
+        main_vlayout.addWidget(self.container_notaria)
+
+        # -------------------------------------------------------------
+        # Timers y Búsqueda Predictiva de Ubicación
+        # -------------------------------------------------------------
         from PySide6.QtCore import QTimer
         self._ubi_timer = QTimer(self)
         self._ubi_timer.setSingleShot(True)
@@ -2863,96 +3161,348 @@ class ManualAssignmentDialog(QDialog):
         self._ubi_timer.timeout.connect(self._lookup_existing_ubicacion)
 
         self.cb_desarrollo.currentIndexChanged.connect(lambda: self._ubi_timer.start())
+        self.txt_sm.textChanged.connect(lambda: self._ubi_timer.start())
         self.txt_mz.textChanged.connect(lambda: self._ubi_timer.start())
         self.txt_lote.textChanged.connect(lambda: self._ubi_timer.start())
         self.txt_edif.textChanged.connect(lambda: self._ubi_timer.start())
         self.txt_viv.textChanged.connect(lambda: self._ubi_timer.start())
+        self.txt_credito.textChanged.connect(lambda: self._ubi_timer.start())
+        self.txt_pa.textChanged.connect(lambda: self._ubi_timer.start())
+        self.txt_folio.textChanged.connect(lambda: self._ubi_timer.start())
 
-        # Buttons
+        # -------------------------------------------------------------
+        # Botones de Acción
+        # -------------------------------------------------------------
         btns = QHBoxLayout()
+        btns.setContentsMargins(0, 8, 0, 0)
         btn_cancel = CustomButton("Cancelar", is_secondary=True)
         btn_cancel.clicked.connect(self.reject)
         
-        btn_save = CustomButton("Guardar Asignación")
-        btn_save.clicked.connect(self._on_save)
+        self.btn_save = CustomButton("Guardar")
+        self.btn_save.clicked.connect(self._on_save)
         
         btns.addStretch()
         btns.addWidget(btn_cancel)
-        btns.addWidget(btn_save)
-        self.layout.addLayout(btns)
+        btns.addWidget(self.btn_save)
+        main_vlayout.addLayout(btns)
 
-        # Hide internal widgets initially until a destination type is chosen
-        self.cb_notarias.hide()
-        self.cb_colaboradores.hide()
+        # Ocultar contenedores inicialmente hasta elegir destino
+        self.container_colaborador.hide()
+        self.container_notaria.hide()
+        
         self._load_catalogs()
+        self._load_current_draft()
+
+    def _update_header_info(self):
+        if self.current_idx < 0 or self.current_idx >= len(self._derechos_data):
+            return
+        d = self._derechos_data[self.current_idx]
+        r_meta = d.get("ref_meta", {})
+        portal = d.get("referencia_portal", "") or (self.ref_portals[self.current_idx] if self.current_idx < len(self.ref_portals) else "")
+        
+        # Format Concept Alias
+        raw_conc = r_meta.get("concepto") or r_meta.get("concepto_nombre") or "CONCEPTO"
+        alias_conc = r_meta.get("concepto_alias")
+        if not alias_conc:
+            raw_upper = str(raw_conc).upper()
+            if "CLG" in raw_upper: alias_conc = "CLG"
+            elif "AVISO" in raw_upper: alias_conc = "AVISO"
+            elif "ANALISIS" in raw_upper: alias_conc = "ANALISIS"
+            else: alias_conc = str(raw_conc)[:10].upper()
+
+        # Format Delegation Alias
+        raw_del = r_meta.get("delegacion") or r_meta.get("delegacion_nombre") or "DELEGACIÓN"
+        alias_del = r_meta.get("delegacion_alias")
+        if not alias_del:
+            raw_del_upper = str(raw_del).upper()
+            if "CANCUN" in raw_del_upper or "BENITO" in raw_del_upper: alias_del = "CAN"
+            elif "PLAYA" in raw_del_upper or "SOLIDARIDAD" in raw_del_upper: alias_del = "PLA"
+            elif "COZUMEL" in raw_del_upper: alias_del = "COZ"
+            elif "CHETUMAL" in raw_del_upper or "OTHON" in raw_del_upper: alias_del = "CHE"
+            elif "TULUM" in raw_del_upper: alias_del = "TUL"
+            else: alias_del = str(raw_del)[:5].upper()
+
+        # Format Empresa
+        empresa = r_meta.get("empresa") or r_meta.get("rfc_razon_social") or r_meta.get("rfc") or "EMPRESA"
+
+        is_dark = ThemeManager.is_dark_active()
+        text_primary = Colors.TEXT_DARK_PRIMARY if is_dark else "#1E293B"
+        text_muted = Colors.TEXT_DARK_MUTED if is_dark else "#64748B"
+        accent_color = "#60A5FA" if is_dark else "#1D4ED8"
+
+        if self.total_refs > 1:
+            self.setWindowTitle(f"Asignar Derechos ({self.current_idx + 1} de {self.total_refs})")
+            header_html = (
+                f"<div style='margin-bottom: 2px;'>"
+                f"<b style='color: {text_primary}; font-size: 13px;'>Asignando Derecho {self.current_idx + 1} de {self.total_refs}:</b> "
+                f"<span style='color: {accent_color}; font-weight: bold; font-size: 13px;'>{alias_conc} | {alias_del} | {empresa}</span>"
+                f"</div>"
+                f"<div style='font-size: 11px; color: {text_muted}; font-weight: bold;'>Referencia Portal: {portal}</div>"
+            )
+        else:
+            self.setWindowTitle("Asignar Derecho")
+            header_html = (
+                f"<div style='margin-bottom: 2px;'>"
+                f"<b style='color: {text_primary}; font-size: 13px;'>Asignando Derecho:</b> "
+                f"<span style='color: {accent_color}; font-weight: bold; font-size: 13px;'>{alias_conc} | {alias_del} | {empresa}</span>"
+                f"</div>"
+                f"<div style='font-size: 11px; color: {text_muted}; font-weight: bold;'>Referencia Portal: {portal}</div>"
+            )
+        self.lbl_info.setText(header_html)
+
+    def _save_current_draft(self):
+        if self.current_idx < 0 or self.current_idx >= len(self._derechos_data):
+            return
+        d = self._derechos_data[self.current_idx]
+        
+        tipo_dest = self.cb_destino.currentText()
+        d["tipo_destino"] = tipo_dest if tipo_dest in ("NOTARIA", "COLABORADOR") else None
+        
+        if tipo_dest == "NOTARIA":
+            not_name = self.cb_notarias.currentText()
+            d["notaria_id"] = self._notarias_map.get(not_name)
+            d["notaria_name"] = not_name
+            d["solicitante_externo"] = self.txt_solicitante.text().strip()
+            d["cliente"] = self.txt_cliente.text().strip()
+            des_name = self.cb_desarrollo.currentText()
+            if des_name and des_name != "-- Seleccione Desarrollo (Opcional) --":
+                d["desarrollo_id"] = self._desarrollos_map.get(des_name)
+                d["desarrollo_name"] = des_name
+            else:
+                d["desarrollo_id"] = None
+                d["desarrollo_name"] = ""
+            d["sm"] = self.txt_sm.text().strip()
+            d["mz"] = self.txt_mz.text().strip()
+            d["lote"] = self.txt_lote.text().strip()
+            d["edif"] = self.txt_edif.text().strip()
+            d["viv"] = self.txt_viv.text().strip()
+            d["folio_electronico"] = self.txt_folio.text().strip()
+            d["credito_titular"] = self.txt_credito.text().strip()
+            d["pa"] = self.txt_pa.text().strip()
+            d["fecha_sol"] = self.txt_fecha_sol.text().strip()
+            d["fecha_ingreso_rpp"] = self.txt_fecha_ingreso_rpp.text().strip()
+            d["fecha_reporte_notaria"] = self.txt_fecha_reporte_notaria.text().strip()
+            d["fecha_escritura"] = self.txt_fecha_escritura.text().strip()
+            d["fecha_titulacion"] = self.txt_fecha_titulacion.text().strip()
+            d["estatus_aviso"] = self.txt_estatus_aviso.text().strip()
+            d["observaciones"] = self.txt_obs_notaria.toPlainText().strip()
+            d["comentarios"] = self.txt_comentarios.text().strip()
+        elif tipo_dest == "COLABORADOR":
+            col_name = self.cb_colaboradores.currentText()
+            d["colaborador_id"] = self._colaboradores_map.get(col_name)
+            d["colaborador_name"] = col_name
+            d["fecha_sol"] = self.txt_fecha_sol_colab.text().strip()
+            d["observaciones"] = self.txt_obs_colab.toPlainText().strip()
+            d["cliente"] = "ASIGNACIÓN A COLABORADOR"
+
+        # If replicate is checked, copy observations/general data to subsequent drafts
+        if hasattr(self, "chk_replicar") and self.chk_replicar.isChecked():
+            for future_idx in range(self.current_idx + 1, self.total_refs):
+                target = self._derechos_data[future_idx]
+                target["tipo_destino"] = d["tipo_destino"]
+                target["notaria_id"] = d.get("notaria_id")
+                target["notaria_name"] = d.get("notaria_name")
+                target["colaborador_id"] = d.get("colaborador_id")
+                target["colaborador_name"] = d.get("colaborador_name")
+                target["solicitante_externo"] = d.get("solicitante_externo", "")
+                target["fecha_sol"] = d.get("fecha_sol", "")
+                target["observaciones"] = d.get("observaciones", "")
+                target["comentarios"] = d.get("comentarios", "")
+
+    def _load_current_draft(self):
+        if self.current_idx < 0 or self.current_idx >= len(self._derechos_data):
+            return
+        
+        self._is_autocompleting = True
+        try:
+            d = self._derechos_data[self.current_idx]
+            
+            # 1. Update header banner
+            self._update_header_info()
+            
+            # 2. Update navigation controls
+            if self.total_refs > 1:
+                self.lbl_step.setText(f"Derecho {self.current_idx + 1} de {self.total_refs}")
+                self.btn_prev.setEnabled(self.current_idx > 0)
+                self.btn_next.setEnabled(self.current_idx < self.total_refs - 1)
+            
+            # 3. Reload filtered developments for this specific reference
+            self._load_desarrollos_for_current_ref()
+
+            # 4. Populate widgets
+            tipo_dest = d.get("tipo_destino")
+            if tipo_dest:
+                idx_dest = self.cb_destino.findText(tipo_dest)
+                if idx_dest >= 0:
+                    self.cb_destino.setCurrentIndex(idx_dest)
+                self._on_destino_changed(tipo_dest)
+            else:
+                if self.cb_destino.currentIndex() > 0:
+                    tipo_dest = self.cb_destino.currentText()
+                    self._on_destino_changed(tipo_dest)
+
+            # Destino specifics
+            if tipo_dest == "NOTARIA":
+                if d.get("notaria_name"):
+                    idx_not = self.cb_notarias.findText(d["notaria_name"])
+                    if idx_not >= 0: self.cb_notarias.setCurrentIndex(idx_not)
+                self.txt_solicitante.setText(d.get("solicitante_externo", ""))
+                self.txt_cliente.setText(d.get("cliente", ""))
+                if d.get("desarrollo_name"):
+                    idx_des = self.cb_desarrollo.findText(d["desarrollo_name"])
+                    if idx_des >= 0: self.cb_desarrollo.setCurrentIndex(idx_des)
+                else:
+                    self.cb_desarrollo.setCurrentIndex(0)
+                self.txt_sm.setText(d.get("sm", ""))
+                self.txt_mz.setText(d.get("mz", ""))
+                self.txt_lote.setText(d.get("lote", ""))
+                self.txt_edif.setText(d.get("edif", ""))
+                self.txt_viv.setText(d.get("viv", ""))
+                self.txt_folio.setText(d.get("folio_electronico", ""))
+                self.txt_credito.setText(d.get("credito_titular", ""))
+                self.txt_pa.setText(d.get("pa", ""))
+                self.txt_fecha_sol.setText(d.get("fecha_sol", datetime.now().strftime("%Y-%m-%d")))
+                self.txt_fecha_ingreso_rpp.setText(d.get("fecha_ingreso_rpp", ""))
+                self.txt_fecha_reporte_notaria.setText(d.get("fecha_reporte_notaria", ""))
+                self.txt_fecha_escritura.setText(d.get("fecha_escritura", ""))
+                self.txt_fecha_titulacion.setText(d.get("fecha_titulacion", ""))
+                self.txt_estatus_aviso.setText(d.get("estatus_aviso", "NUEVO INGRESO"))
+                self.txt_obs_notaria.setPlainText(d.get("observaciones", ""))
+                self.txt_comentarios.setText(d.get("comentarios", ""))
+            elif tipo_dest == "COLABORADOR":
+                if d.get("colaborador_name"):
+                    idx_col = self.cb_colaboradores.findText(d["colaborador_name"])
+                    if idx_col >= 0: self.cb_colaboradores.setCurrentIndex(idx_col)
+                self.txt_fecha_sol_colab.setText(d.get("fecha_sol", datetime.now().strftime("%Y-%m-%d")))
+                self.txt_obs_colab.setPlainText(d.get("observaciones", ""))
+
+            self.lbl_ubi_match.setText("")
+        finally:
+            self._is_autocompleting = False
+
+    def _on_prev(self):
+        if self.current_idx > 0:
+            self._save_current_draft()
+            self.current_idx -= 1
+            self._load_current_draft()
+
+    def _on_next(self):
+        if self.current_idx < self.total_refs - 1:
+            self._save_current_draft()
+            self.current_idx += 1
+            self._load_current_draft()
 
     def _lookup_existing_ubicacion(self):
-        des_name = self.cb_desarrollo.currentText()
-        if not des_name or des_name == "-- Seleccione Desarrollo (Opcional) --":
-            self.lbl_ubi_match.setText("")
+        if getattr(self, "_is_autocompleting", False):
             return
-        des_id = self._desarrollos_map.get(des_name)
-        mz = self.txt_mz.text().strip()
-        lote = self.txt_lote.text().strip()
+
+        credito = self.txt_credito.text().strip()
+        pa = self.txt_pa.text().strip()
+        folio = self.txt_folio.text().strip()
+
+        des_name = self.cb_desarrollo.currentText()
+        des_id = self._desarrollos_map.get(des_name) if des_name and des_name != "-- Seleccione Desarrollo (Opcional) --" else None
+        sm = self.txt_sm.text().strip() or None
+        mz = self.txt_mz.text().strip() or None
+        lote = self.txt_lote.text().strip() or None
         edif = self.txt_edif.text().strip() or None
         viv = self.txt_viv.text().strip() or None
 
-        if not des_id or not mz or not lote:
+        has_cred = len(credito) >= 3
+        has_pa = len(pa) >= 2
+        has_folio = len(folio) >= 3
+        has_coords = bool(des_id and mz and lote)
+
+        if not (has_cred or has_pa or has_folio or has_coords):
             self.lbl_ubi_match.setText("")
             return
 
         try:
-            ubi_data = self.inventario_ui_service.get_ubicacion_by_coordenadas(
-                desarrollo_id=des_id, mz=mz, lote=lote, edif=edif, viv=viv
+            match_data = self.inventario_ui_service.get_asignacion_by_identificador(
+                credito_titular=credito if has_cred else None,
+                pa=pa if has_pa else None,
+                folio_electronico=folio if has_folio else None,
+                desarrollo_id=des_id if has_coords else None,
+                mz=mz,
+                lote=lote,
+                edif=edif,
+                viv=viv
             )
-            if ubi_data:
-                self.lbl_ubi_match.setText(f"✓ Ubicación existente encontrada (ID #{ubi_data['ubicacion_id']})")
-                # Autocomplete empty fields
-                if not self.txt_cliente.text().strip() and ubi_data.get("cliente") and ubi_data.get("cliente") != "RESERVA MASIVA MANUAL":
-                    self.txt_cliente.setText(ubi_data["cliente"])
-                if not self.txt_edif.text().strip() and ubi_data.get("edif"):
-                    self.txt_edif.setText(ubi_data["edif"])
-                if not self.txt_viv.text().strip() and ubi_data.get("viv"):
-                    self.txt_viv.setText(ubi_data["viv"])
-                if not self.txt_folio.text().strip() and ubi_data.get("folio_electronico"):
-                    self.txt_folio.setText(ubi_data["folio_electronico"])
+            if match_data:
+                src = match_data.get("match_source", "coordenadas")
+                if src == "credito":
+                    msg = f"✓ Coincidencia encontrada por No. de Crédito ({match_data['credito_titular']})"
+                elif src == "pa":
+                    msg = f"✓ Coincidencia encontrada por PA ({match_data['pa']})"
+                elif src == "folio":
+                    msg = f"✓ Coincidencia encontrada por Folio Electrónico ({match_data['folio_electronico']})"
+                else:
+                    msg = f"✓ Ubicación existente encontrada (ID #{match_data.get('ubicacion_id', '')})"
+                self.lbl_ubi_match.setText(msg)
+
+                # Autocomplete empty fields safely
+                self._is_autocompleting = True
+                try:
+                    # 1. Cliente
+                    if not self.txt_cliente.text().strip() and match_data.get("cliente") and match_data.get("cliente") not in ("RESERVA MASIVA MANUAL", "ASIGNACIÓN A COLABORADOR"):
+                        self.txt_cliente.setText(match_data["cliente"])
+
+                    # 2. Desarrollo (if combo is at default and match has desarrollo)
+                    if self.cb_desarrollo.currentIndex() <= 0 and match_data.get("desarrollo_nombre"):
+                        idx = self.cb_desarrollo.findText(match_data["desarrollo_nombre"])
+                        if idx >= 0:
+                            self.cb_desarrollo.setCurrentIndex(idx)
+
+                    # 3. Coordenadas
+                    if not self.txt_sm.text().strip() and match_data.get("sm"):
+                        self.txt_sm.setText(match_data["sm"])
+                    if not self.txt_mz.text().strip() and match_data.get("mz"):
+                        self.txt_mz.setText(match_data["mz"])
+                    if not self.txt_lote.text().strip() and match_data.get("lote"):
+                        self.txt_lote.setText(match_data["lote"])
+                    if not self.txt_edif.text().strip() and match_data.get("edif"):
+                        self.txt_edif.setText(match_data["edif"])
+                    if not self.txt_viv.text().strip() and match_data.get("viv"):
+                        self.txt_viv.setText(match_data["viv"])
+
+                    # 4. Folio, Crédito, PA
+                    if not self.txt_folio.text().strip() and match_data.get("folio_electronico"):
+                        self.txt_folio.setText(str(match_data["folio_electronico"]))
+                    if not self.txt_credito.text().strip() and match_data.get("credito_titular"):
+                        self.txt_credito.setText(match_data["credito_titular"])
+                    if not self.txt_pa.text().strip() and match_data.get("pa"):
+                        self.txt_pa.setText(match_data["pa"])
+                    if not self.txt_comentarios.text().strip() and match_data.get("comentarios"):
+                        self.txt_comentarios.setText(match_data["comentarios"])
+                finally:
+                    self._is_autocompleting = False
             else:
                 self.lbl_ubi_match.setText("")
         except Exception as e:
-            print("[ManualAssignmentDialog] Error checking ubicacion:", e)
+            print("[ManualAssignmentDialog] Error checking identificador:", e)
             self.lbl_ubi_match.setText("")
 
     def _on_destino_changed(self, text):
         if text == "NOTARIA":
-            self.cb_notarias.show()
-            self.cb_colaboradores.hide()
-            self.txt_solicitante.setEnabled(True)
-            self.txt_cliente.setEnabled(True)
-            self.cb_desarrollo.setEnabled(True)
-            self.txt_mz.setEnabled(True)
-            self.txt_lote.setEnabled(True)
-            self.txt_edif.setEnabled(True)
-            self.txt_viv.setEnabled(True)
-            self.txt_folio.setEnabled(True)
-            self.txt_estatus_aviso.setEnabled(True)
+            self.container_notaria.show()
+            self.container_colaborador.hide()
         elif text == "COLABORADOR":
-            self.cb_notarias.hide()
-            self.cb_colaboradores.show()
-            self.txt_solicitante.setEnabled(False)
-            self.txt_solicitante.clear()
+            self.container_colaborador.show()
+            self.container_notaria.hide()
         else:
-            self.cb_notarias.hide()
-            self.cb_colaboradores.hide()
+            self.container_notaria.hide()
+            self.container_colaborador.hide()
+        self.adjustSize()
 
     def _load_catalogs(self):
         try:
             notarias = self.inventario_ui_service.get_notarias()
             colaboradores = self.inventario_ui_service.get_colaboradores()
-            desarrollos = self.inventario_ui_service.get_desarrollos()
+            self._desarrollos_list = self.inventario_ui_service.get_desarrollos()
 
             self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
             self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
-            self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
+            self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in self._desarrollos_list}
 
             self.cb_notarias.clear()
             self.cb_notarias.addItem("-- Seleccione Notaría --", None)
@@ -2965,164 +3515,205 @@ class ManualAssignmentDialog(QDialog):
             for c in colaboradores:
                 self.cb_colaboradores.addItem(c["nombre"], c["colaborador_id"])
             self.cb_colaboradores.setCurrentIndex(0)
-            
-            # Filter developments to ensure referential integrity
-            # Extract unique (rfc_id, delegacion_id) pairs from the references being assigned
-            rfc_delegacion_pairs = set()
-            for ref in self.selected_refs:
-                rfc_id = ref.get("rfc_id")
-                delegacion_id = ref.get("delegacion_id")
-                # Look up mapping from grid_individual rows if not directly present in ref dict
-                if not rfc_id or not delegacion_id:
-                    if self.parent() and hasattr(self.parent(), "grid_individual"):
-                        for row in self.parent().grid_individual.get_all_data():
-                            rfc_id = rfc_id or row.get("rfc_id")
-                            delegacion_id = delegacion_id or row.get("delegacion_id")
-                if rfc_id and delegacion_id:
-                    rfc_delegacion_pairs.add((rfc_id, delegacion_id))
 
-            # Fetch active triadic relationships from the catalog
+        except Exception as e:
+            print("Error loading catalog data for ManualAssignmentDialog:", e)
+
+    def _load_desarrollos_for_current_ref(self):
+        try:
+            if not self._desarrollos_list:
+                return
+
+            # Extract pair for current reference
+            r_meta = self._derechos_data[self.current_idx].get("ref_meta", {}) if self.current_idx < len(self._derechos_data) else {}
+            rfc_id = r_meta.get("rfc_id")
+            delegacion_id = r_meta.get("delegacion_id")
+            
+            if not rfc_id or not delegacion_id:
+                if self.parent() and hasattr(self.parent(), "grid_individual"):
+                    for row in self.parent().grid_individual.get_all_data():
+                        rfc_id = rfc_id or row.get("rfc_id")
+                        delegacion_id = delegacion_id or row.get("delegacion_id")
+
             try:
                 desarrollo_empresas = self.inventario_ui_service.get_desarrollos_activos_para_apartar()
             except Exception:
                 desarrollo_empresas = []
 
-            # Determine valid developments matching referential integrity filters
             valid_desarrollo_ids = set()
             for de in desarrollo_empresas:
-                for rfc_id, del_id in rfc_delegacion_pairs:
-                    if de.get("rfc_id") == rfc_id and de.get("delegacion_id") == del_id:
-                        valid_desarrollo_ids.add(de.get("desarrollo_id"))
+                if rfc_id and delegacion_id and de.get("rfc_id") == rfc_id and de.get("delegacion_id") == delegacion_id:
+                    valid_desarrollo_ids.add(de.get("desarrollo_id"))
 
-            # Populate developments combo with placeholder
             self.cb_desarrollo.clear()
             self.cb_desarrollo.addItem("-- Seleccione Desarrollo (Opcional) --", None)
             
-            # Load only valid filtered developments (or all if no filters resolved)
-            for d in desarrollos:
-                if not rfc_delegacion_pairs or d["desarrollo_id"] in valid_desarrollo_ids:
+            for d in self._desarrollos_list:
+                if not (rfc_id and delegacion_id) or d["desarrollo_id"] in valid_desarrollo_ids:
                     self.cb_desarrollo.addItem(d["nombre"], d["desarrollo_id"])
             
             self.cb_desarrollo.setCurrentIndex(0)
-
-            # Pre-populate property details if single reference selected (excluding destination type/notary to force explicit choice)
-            if len(self.selected_refs) == 1:
-                r = self.selected_refs[0]
-                if r.get("cliente"):
-                    self.txt_cliente.setText(str(r.get("cliente")))
-                if r.get("desarrollo"):
-                    idx_des = self.cb_desarrollo.findText(str(r.get("desarrollo")))
-                    if idx_des >= 0:
-                        self.cb_desarrollo.setCurrentIndex(idx_des)
-                if r.get("mz"):
-                    self.txt_mz.setText(str(r.get("mz")))
-                if r.get("lote"):
-                    self.txt_lote.setText(str(r.get("lote")))
-                if r.get("edif"):
-                    self.txt_edif.setText(str(r.get("edif")))
-                if r.get("viv"):
-                    self.txt_viv.setText(str(r.get("viv")))
-                if r.get("folio_electronico"):
-                    self.txt_folio.setText(str(r.get("folio_electronico")))
-
         except Exception as e:
-            print("Error loading catalog data for ManualAssignmentDialog:", e)
+            print("Error filtering developments for current reference:", e)
 
     def _on_save(self):
-        tipo_destino = self.cb_destino.currentText()
-        if tipo_destino not in ("NOTARIA", "COLABORADOR"):
+        # 1. Save current active screen draft
+        self._save_current_draft()
+
+        # 2. Check destination type from active combo
+        common_tipo_destino = self.cb_destino.currentText()
+        if common_tipo_destino not in ("NOTARIA", "COLABORADOR"):
             QMessageBox.warning(self, "Tipo Destino Requerido", "Por favor seleccione un Tipo de Destino (NOTARIA o COLABORADOR).")
             return
 
-        notaria_id = None
-        colaborador_id = None
-        
-        if tipo_destino == "NOTARIA":
-            not_name = self.cb_notarias.currentText()
-            if not_name == "-- Seleccione Notaría --" or not_name not in self._notarias_map:
-                QMessageBox.warning(self, "Notaría Requerida", "Por favor seleccione una Notaría válida.")
-                return
-            notaria_id = self._notarias_map.get(not_name)
-        elif tipo_destino == "COLABORADOR":
-            col_name = self.cb_colaboradores.currentText()
-            if col_name == "-- Seleccione Colaborador --" or col_name not in self._colaboradores_map:
-                QMessageBox.warning(self, "Colaborador Requerido", "Por favor seleccione un Colaborador válido.")
-                return
-            colaborador_id = self._colaboradores_map.get(col_name)
-
-        solicitante_externo = self.txt_solicitante.text().strip()
-        cliente = self.txt_cliente.text().strip()
-        des_name = self.cb_desarrollo.currentText()
-        if des_name == "-- Seleccione Desarrollo (Opcional) --":
-            des_name = None
-        des_id = self._desarrollos_map.get(des_name) if des_name else None
-
-        
-        # Validation checks
-        if tipo_destino == "NOTARIA":
-            if not cliente:
-                QMessageBox.warning(self, "Falta Información", "Por favor ingresa el nombre del cliente.")
-                return
-            if not des_id:
-                QMessageBox.warning(self, "Falta Información", "Selecciona un desarrollo válido.")
-                return
-        else:
-            # For COLABORADOR, observations field is mandatory if no client data is provided.
-            if not self.txt_obs.toPlainText().strip():
-                QMessageBox.warning(self, "Falta Información", "Debe capturar observaciones en la asignación del colaborador.")
-                return
-            if not cliente:
-                cliente = "ASIGNACIÓN INTERNA"  # Default fallback if empty
-
-        fecha_sol = None
-        if self.txt_fecha_sol.text().strip():
-            try:
-                fecha_sol = datetime.strptime(self.txt_fecha_sol.text().strip(), "%Y-%m-%d").date()
-            except ValueError:
-                QMessageBox.warning(self, "Formato Incorrecto", "La fecha de solicitud debe tener formato AAAA-MM-DD")
-                return
-
-
-        # Prepare details (same values for all selected references)
         detalles_list = []
-        for idx, r_id in enumerate(self.ref_ids):
-            # Find the actual portal code for references
-            portal_code = ""
-            if self.parent() and hasattr(self.parent(), "table"):
-                for r in range(self.parent().table.rowCount()):
-                    item_id = self.parent().table.item(r, 1)
-                    if item_id and item_id.text().isdigit() and int(item_id.text()) == r_id:
-                        item_portal = self.parent().table.item(r, 2)
-                        portal_code = item_portal.text() if item_portal else ""
-                        break
-            if not portal_code and idx < len(self.ref_portals):
-                portal_code = self.ref_portals[idx]
+        
+        # 3. Validate each draft in sequence
+        for idx, d in enumerate(self._derechos_data):
+            tipo_dest = d.get("tipo_destino") or common_tipo_destino
+            d["tipo_destino"] = tipo_dest
+            
+            r_id = d["referencia_id"]
+            portal_code = d.get("referencia_portal", "")
+            
+            if tipo_dest == "COLABORADOR":
+                col_id = d.get("colaborador_id")
+                if not col_id:
+                    col_name = self.cb_colaboradores.currentText()
+                    col_id = self._colaboradores_map.get(col_name)
+                    d["colaborador_id"] = col_id
+                if not col_id:
+                    self.current_idx = idx
+                    self._load_current_draft()
+                    QMessageBox.warning(self, "Colaborador Requerido", f"En el Derecho {idx+1} de {self.total_refs}: Por favor seleccione un Colaborador válido.")
+                    return
 
-            detalles_list.append({
-                "cliente": cliente,
-                "desarrollo_id": des_id,
-                "fecha_solicitud": fecha_sol,
-                "mz": self.txt_mz.text().strip(),
-                "lote": self.txt_lote.text().strip(),
-                "edif": self.txt_edif.text().strip(),
-                "viv": self.txt_viv.text().strip(),
-                "folio_electronico": self.txt_folio.text().strip(),
-                "estatus_primer_aviso": self.txt_estatus_aviso.text().strip(),
-                "concepto_solicitado": "MANUAL",
-                "referencia_id": r_id,
-                "referencia_asignada": portal_code
-            })
+                obs = d.get("observaciones", "").strip()
+                if not obs:
+                    self.current_idx = idx
+                    self._load_current_draft()
+                    QMessageBox.warning(self, "Observaciones Requeridas", f"En el Derecho {idx+1} de {self.total_refs}: Debe capturar observaciones describiendo el uso del derecho.")
+                    return
+
+                fecha_sol_raw = d.get("fecha_sol", "").strip()
+                fecha_sol = None
+                if fecha_sol_raw:
+                    try:
+                        fecha_sol = datetime.strptime(fecha_sol_raw, "%Y-%m-%d").date()
+                    except ValueError:
+                        self.current_idx = idx
+                        self._load_current_draft()
+                        QMessageBox.warning(self, "Fecha Inválida", f"En el Derecho {idx+1} de {self.total_refs}: La Fecha de Asignación debe tener formato AAAA-MM-DD.")
+                        return
+
+                detalles_list.append({
+                    "cliente": "ASIGNACIÓN A COLABORADOR",
+                    "desarrollo_id": None,
+                    "fecha_solicitud": fecha_sol,
+                    "sm": None, "mz": None, "lote": None, "edif": None, "viv": None,
+                    "folio_electronico": None,
+                    "estatus_primer_aviso": "NUEVO INGRESO",
+                    "credito_titular": None, "pa": None,
+                    "fecha_reporte_notaria": None, "fecha_ingreso_rpp": None,
+                    "fecha_escritura": None, "fecha_titulacion": None,
+                    "comentarios": None,
+                    "observaciones": obs,
+                    "concepto_solicitado": "MANUAL",
+                    "referencia_id": r_id,
+                    "referencia_asignada": portal_code
+                })
+
+            elif tipo_dest == "NOTARIA":
+                not_id = d.get("notaria_id")
+                if not not_id:
+                    not_name = self.cb_notarias.currentText()
+                    not_id = self._notarias_map.get(not_name)
+                    d["notaria_id"] = not_id
+                if not not_id:
+                    self.current_idx = idx
+                    self._load_current_draft()
+                    QMessageBox.warning(self, "Notaría Requerida", f"En el Derecho {idx+1} de {self.total_refs}: Por favor seleccione una Notaría válida.")
+                    return
+
+                cliente = d.get("cliente", "").strip()
+                if not cliente:
+                    self.current_idx = idx
+                    self._load_current_draft()
+                    QMessageBox.warning(self, "Cliente Requerido", f"En el Derecho {idx+1} de {self.total_refs}: Por favor ingrese el nombre del cliente.")
+                    return
+
+                def _parse_d(date_str, field_name):
+                    if not date_str: return None
+                    try: return datetime.strptime(date_str, "%Y-%m-%d").date()
+                    except ValueError: raise ValueError(f"En el Derecho {idx+1} de {self.total_refs}: El campo '{field_name}' debe tener formato AAAA-MM-DD.")
+
+                try:
+                    fecha_sol = _parse_d(d.get("fecha_sol"), "Fecha Solicitud")
+                    fecha_ingreso_rpp = _parse_d(d.get("fecha_ingreso_rpp"), "Fecha Ingreso RPP")
+                    fecha_reporte_notaria = _parse_d(d.get("fecha_reporte_notaria"), "Fecha Reporte Notaría")
+                    fecha_escritura = _parse_d(d.get("fecha_escritura"), "Fecha Escritura")
+                    fecha_titulacion = _parse_d(d.get("fecha_titulacion"), "Fecha Titulación")
+                except ValueError as ve:
+                    self.current_idx = idx
+                    self._load_current_draft()
+                    QMessageBox.warning(self, "Fecha Inválida", str(ve))
+                    return
+
+                detalles_list.append({
+                    "cliente": cliente,
+                    "desarrollo_id": d.get("desarrollo_id"),
+                    "fecha_solicitud": fecha_sol,
+                    "sm": d.get("sm") or None,
+                    "mz": d.get("mz") or None,
+                    "lote": d.get("lote") or None,
+                    "edif": d.get("edif") or None,
+                    "viv": d.get("viv") or None,
+                    "folio_electronico": d.get("folio_electronico") or None,
+                    "estatus_primer_aviso": d.get("estatus_aviso") or "NUEVO INGRESO",
+                    "credito_titular": d.get("credito_titular") or None,
+                    "pa": d.get("pa") or None,
+                    "fecha_reporte_notaria": fecha_reporte_notaria,
+                    "fecha_ingreso_rpp": fecha_ingreso_rpp,
+                    "fecha_escritura": fecha_escritura,
+                    "fecha_titulacion": fecha_titulacion,
+                    "comentarios": d.get("comentarios") or None,
+                    "observaciones": d.get("observaciones") or "",
+                    "concepto_solicitado": "MANUAL",
+                    "referencia_id": r_id,
+                    "referencia_asignada": portal_code
+                })
+
+        # Confirm action with the user
+        if self.total_refs == 1:
+            confirm_msg = "¿Está seguro de guardar la asignación del derecho seleccionado?"
+        else:
+            confirm_msg = f"¿Está seguro de guardar la asignación de los {self.total_refs} derechos seleccionados?"
+            
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Asignación",
+            confirm_msg,
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
 
         try:
             parent_window = self.parent().window()
             usuario_id = getattr(parent_window, "current_usuario_id", 1)
 
+            first_d = self._derechos_data[0]
+            notaria_id = first_d.get("notaria_id") if common_tipo_destino == "NOTARIA" else None
+            colaborador_id = first_d.get("colaborador_id") if common_tipo_destino == "COLABORADOR" else None
+            solicitante_externo = first_d.get("solicitante_externo") or None
+            observaciones_global = first_d.get("observaciones") or ""
+
             self.inventario_ui_service.crear_lote_asignacion(
-                tipo_destino=tipo_destino,
+                tipo_destino=common_tipo_destino,
                 notaria_id=notaria_id,
                 colaborador_id=colaborador_id,
                 solicitante_externo=solicitante_externo,
-                observaciones=self.txt_obs.toPlainText().strip(),
+                observaciones=observaciones_global,
                 usuario_creacion=usuario_id,
                 detalles_list=detalles_list
             )

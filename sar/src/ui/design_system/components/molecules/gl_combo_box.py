@@ -9,4 +9,4 @@ class CustomComboBox(QComboBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumWidth(130)
-        self.setFixedHeight(35)
+        self.setFixedHeight(36)

@@ -669,13 +669,20 @@ Trazabilidad completa desde Orden → Solicitud → Referencia.
 
 ## 26. Control de Inventario y Asignación de Derechos (Fase B)
 
-### 26.1 Visor de Inventario
-* Cuadrícula paginada con filtros rápidos por Estado (`Disponible`, `Asignada`, `Reservada`), Concepto, Empresa y búsqueda por texto.
-* Proyección de coordenadas físicas (`Mz`, `Lt`, `Edif`, `Viv`) y fotografía del trámite (`Cliente`, `Folio Electrónico / No. Oficial`, `Fecha Asignación`).
+### 26.1 Visor de Inventario con Filas Ancladas (Pinned Selected Rows)
+* **Cuadrícula Paginada Asíncrona**: Carga eficiente mediante `InventoryLoadWorker` en segundo plano con límites seleccionables (50, 100, 200 por página) y filtros dinámicos por Estado (`Disponible`, `Asignada`, `Reservada`), Concepto, Empresa y búsqueda por texto.
+* **Selección Múltiple Persistente**: La selección de derechos en memoria (`selected_ref_map`) se conserva intacta a través de cambios de filtros, páginas o búsquedas.
+* **Anclaje Superior de Filas Seleccionadas**: Todas las referencias marcadas por el usuario se posicionan y fijan automáticamente en las filas superiores de la tabla (`visible_table_data`), resaltadas con un fondo suave distintivo (`#EFF6FF`). Esto garantiza que el usuario nunca pierda de vista su carrito/cola de asignación al navegar o cambiar filtros.
+* **Bloqueo de Derechos Asignados**: Los derechos en estado `ASIGNADA` tienen su checkbox permanentemente deshabilitado y bloqueado con tooltip explicativo. El doble clic en derechos asignados está restringido.
+* **Barra de Acciones Dinámica**:
+  - **`Asignar Seleccionados ({N})`**: Botón principal que se activa con $\ge 1$ derechos seleccionados y abre el asistente secuencial de asignación.
+  - **`Limpiar Selección`**: Botón auxiliar para desmarcar y desanclar todas las filas acumuladas en un solo clic.
+  - **Badge de Conteo**: Indicador visual dinámico con el total de derechos seleccionados.
 
 ### 26.2 Formulario "Asignar Derechos" (Manual / Individual)
-* Selector obligatorio de Tipo Destino (`NOTARIA` / `COLABORADOR`) con placeholders limpios sin predefinición.
-* Búsqueda predictiva y autocompletado en tiempo real (<250 ms) al teclear coordenadas físicas, reutilizando la vivienda física en base de datos.
+* **Diferenciación de Destino**:
+  - **`COLABORADOR`**: Muestra exclusivamente los campos de selección de colaborador y observaciones (para trámites y gestiones externas sin desarrollo ni cliente).
+  - **`NOTARIA`**: Habilita la captura completa de Notaría, Cliente, Desarrollo, Coordenadas físicas, Folio/Crédito/PA y fechas notariales/RPP.
 
 ### 26.3 Asignación Masiva por Lotes
 * Plantilla estándar descargable de **19 columnas** (`Plantilla_Control_Inventario.xlsx`) sin delegación redundante.
@@ -683,5 +690,61 @@ Trazabilidad completa desde Orden → Solicitud → Referencia.
   1. **Asignación Directa** (Por defecto, obligatoriedad de ubicación física y cliente).
   2. **Reservar Derechos** (Apartado temporal de referencias, omite ubicación física).
   3. **Completar Lote Reservado** (Consolida apartados previos en `RESERVADA` hacia `ASIGNADA` con cliente y vivienda).
+
+### 26.4 Asignación con Wizard Secuencial y Guardado Seguro
+* **Paginador / Wizard Secuencial**: Navegación interactiva por derecho (`Derecho X de N`) con controles `◀ Anterior` / `Siguiente ▶` y banner informativo enriquecido con alias de concepto (`CLG`, `AVISO`, etc.), delegación (`CAN`, `PLA`, etc.) y empresa.
+* **Borradores Independientes**: Cada partida seleccionada mantiene su propio borrador en memoria (`_derechos_data`) con validación secuencial previa a la persistencia.
+* **Opción de Replicación**: Checkbox opcional (`chk_replicar`) para replicar datos notariales, fechas u observaciones capturadas a las siguientes partidas del lote.
+* **Búsqueda Predictiva Multi-criterio**: Detección inteligente con debounce de 350 ms capaz de resolver inmuebles e información previa por:
+  - Número de Crédito Titular
+  - P.A. (Paquete)
+  - Folio Electrónico / No. Oficial
+  - Coordenadas tradicionales (Desarrollo + Mz + Lote + Edif + Viv)
+* **Guardado y Confirmación**: Botón de acción **`Guardar`** con cuadro de diálogo de confirmación de seguridad antes de procesar el lote en base de datos.
+
+### 26.5 Detalle de Asignación y Generación de Documentos (PDF y Excel)
+* **Exportación Excel**: Generación de reportes tabulares consolidados con métricas de asignación.
+* **Exportación de PDFs Unificados (`PdfWorker`)**: Estándar de nomenclatura con **prefijo consecutivo de 3 dígitos** (`{consec}_{...}.pdf`) para ordenamiento cronológico natural:
+  - **`ASIGNADA`**: `{consec}_{cliente}_{concepto}.pdf` (Ej: `001_JUAN_PEREZ_Aviso.pdf`)
+  - **`RESERVADA` (Notaría)**: `{consec}_{referencia}_{notaria}_{concepto}_{deleg}.pdf` (Ej: `001_1020304050_Not4_Aviso_CUN.pdf`)
+  - **`COLABORADOR`**: `{consec}_{referencia}_{concepto}_{deleg}.pdf` (Ej: `001_1020304050_Aviso_CUN.pdf`)
+
+---
+
+## 27. Sistema de Diseño Atómico, Temas y Badges de Estado
+
+### 27.1 Normalización del Box Model (Simetría 36px)
+* Todos los controles de entrada (`QLineEdit`, `CustomComboBox`, `QDateEdit`, `QSpinBox`) y botones de acción en grillas interactivas están normalizados a una altura exterior uniforme de **36px** (`min-height: 28px; max-height: 28px; padding: 3px; border: 1px solid;`).
+* En grillas y formularios, se aplica alineación vertical centrada (`Qt.AlignVCenter`) para garantizar que todos los controles compartan la misma línea de base y cotas visuales (`y`, `h`).
+
+### 27.2 Variantes de Badges de Estado (`StatusBadge`)
+Los estados operativos del sistema se diferencian semántica y cromáticamente mediante propiedades dinámicas declarativas (`badge_variant`):
+
+| Estado del Sistema | Variante | Ícono | Modo Claro (Fondo / Texto) | Modo Oscuro (Fondo / Texto) |
+| :--- | :--- | :---: | :---: | :---: |
+| **`ASIGNADA`** | `assigned` | 🕒 Reloj | `#EEF2FF` / `#6366F1` (Índigo) | `rgba(99, 102, 241, 0.22)` / `#818CF8` |
+| **`PENDIENTE_AUTORIZACION`** | `warning` | 🕒 Reloj | `#FEF3C7` / `#D97706` (Ámbar) | `rgba(217, 119, 6, 0.22)` / `#FBBF24` |
+| **`RESERVADA`** | `reserved` | 🕒 Reloj | `#CCFBF1` / `#0D9488` (Teal) | `rgba(13, 148, 136, 0.22)` / `#2DD4BF` |
+| **`AUTORIZADA` / `DISPONIBLE`** | `success` | ✔️ Check | `#DCFCE7` / `#16A34A` (Verde) | `rgba(22, 163, 74, 0.20)` / `#4ADE80` |
+| **`GENERADA` / `ABIERTA`** | `accent` | 🕒 Reloj | `#DBEAFE` / `#2563EB` (Azul) | `rgba(37, 99, 235, 0.22)` / `#60A5FA` |
+| **`RECHAZADA` / `ERROR`** | `error` | ⚠️ Alerta | `#FEE2E2` / `#EF4444` (Rojo) | `rgba(239, 68, 68, 0.20)` / `#F87171` |
+| **`SUSTITUIDO` / `BORRADOR`** | `neutral` | 🕒 Reloj | `#F1F5F9` / `#64748B` (Gris) | `rgba(100, 116, 139, 0.20)` / `#94A3B8` |
+
+### 27.3 Controles de Entrada Interactivos (`QSpinBox`)
+* Botones de incremento y decremento configurados con `subcontrol-origin: padding` para preservar intacto el contorno exterior perimetral.
+* Vectores SVG dedicados (`chevron_up.svg`, `chevron_down.svg`, `chevron_up_dark.svg`, `chevron_down_dark.svg`) con retroalimentación en `:hover` para temas Claro y Oscuro.
+
+---
+
+## 28. Módulos Adicionales y Servicios Centralizados
+
+### 28.1 Módulo R2F-Cancún (`r2f_control_view.py`)
+* Control de carga masiva de lotes de folios electrónicos y pases a caja para la Tesorería de Cancún.
+* Visualización en tiempo real del ciclo de procesamiento: Folio → Recibo Oficial → Factura SATQ Timbrada.
+* Integración con bot scraper autónomo para consulta y descarga de recibos PDF y extracción de metadatos catastrales (`SM`, `MZ`, `Lote`).
+
+### 28.2 Módulo de Control de Servidor API REST (`api_server_view.py`)
+* Panel de administración para el servidor LAN FastAPI.
+* Monitoreo en vivo de estado (`Activo` / `Detenido`), puerto de red (8000), consumo de endpoints, métricas de latencia y visor de logs en tiempo real.
 
 

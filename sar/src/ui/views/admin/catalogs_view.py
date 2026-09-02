@@ -1,10 +1,14 @@
 """Catalogs Administration Sub-view."""
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QCheckBox, QTabWidget
+import re
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel, QTabWidget
+from PySide6.QtCore import Qt
+from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
+from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
+from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
-from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
-from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
-from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
 from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
 from sar.src.ui.design_system.components.organisms.gl_dialog import CustomDialog
 from sar.src.storage.repositories import CatalogoRepository
@@ -108,24 +112,67 @@ class CatalogsView(QWidget):
     # --- CONCEPTOS ---
     def _create_concepto_dialog(self, title: str) -> CustomDialog:
         dialog = CustomDialog(title, self)
+        dialog.setMinimumWidth(560)
         
-        self.inp_c_codigo_portal = LabeledInput("Código Portal (Opcional)")
-        self.inp_c_nombre = LabeledInput("Nombre del Concepto")
-        self.inp_c_alias = LabeledInput("Alias (Opcional)")
-        self.inp_c_alias.input.setMaxLength(20)
-        self.chk_c_activo = QCheckBox("Concepto Activo")
+        card_c = QFrame(dialog)
+        card_c.setObjectName("card_c")
+        card_c.setStyleSheet(f"""
+            QFrame#card_c {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_c = QVBoxLayout(card_c)
+        lay_c.setContentsMargins(0, 0, 0, 0)
+        lay_c.setSpacing(8)
+        
+        lbl_c = CustomLabel("📋 CONFIGURACIÓN DE CONCEPTO", variant="subheader")
+        lbl_c.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_c.addWidget(lbl_c)
+        
+        form_c = QFormLayout()
+        form_c.setSpacing(8)
+        form_c.setContentsMargins(0, 0, 0, 0)
+        
+        self.inp_c_codigo_portal = CustomInput("Ej. CONC_001 (Opcional)", parent=card_c)
+        self.inp_c_codigo_portal.setMaxLength(30)
+        self.inp_c_codigo_portal.text = self.inp_c_codigo_portal.text
+        self.inp_c_codigo_portal.set_text = self.inp_c_codigo_portal.setText
+        
+        self.inp_c_nombre = CustomInput("Nombre descriptivo del concepto", parent=card_c)
+        self.inp_c_nombre.setMaxLength(100)
+        self.inp_c_nombre.text = self.inp_c_nombre.text
+        self.inp_c_nombre.set_text = self.inp_c_nombre.setText
+        self.inp_c_nombre.set_focus = self.inp_c_nombre.setFocus
+        
+        self.inp_c_alias = CustomInput("Alias para búsquedas (Opcional)", parent=card_c)
+        self.inp_c_alias.setMaxLength(20)
+        self.inp_c_alias.text = self.inp_c_alias.text
+        self.inp_c_alias.set_text = self.inp_c_alias.setText
+        
+        form_c.addRow("Código Portal:", self.inp_c_codigo_portal)
+        form_c.addRow("Nombre Concepto *:", self.inp_c_nombre)
+        form_c.addRow("Alias / Corto:", self.inp_c_alias)
+        lay_c.addLayout(form_c)
+        dialog.add_widget(card_c)
+        
+        self.chk_c_activo = CustomCheckBox("Concepto activo para solicitudes", dialog)
         self.chk_c_activo.setChecked(True)
-        
-        dialog.add_widget(self.inp_c_codigo_portal)
-        dialog.add_widget(self.inp_c_nombre)
-        dialog.add_widget(self.inp_c_alias)
+        self.chk_c_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_c_activo)
+        
+        def _validate_c():
+            dialog.btn_save.setEnabled(bool(self.inp_c_nombre.text().strip()))
+        self.inp_c_nombre.textChanged.connect(_validate_c)
+        _validate_c()
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
-            self.inp_c_codigo_portal.input.setReadOnly(True)
-            self.inp_c_nombre.input.setReadOnly(True)
-            self.inp_c_alias.input.setReadOnly(True)
+            self.inp_c_codigo_portal.setReadOnly(True)
+            self.inp_c_nombre.setReadOnly(True)
+            self.inp_c_alias.setReadOnly(True)
             self.chk_c_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
@@ -177,20 +224,61 @@ class CatalogsView(QWidget):
     # --- NOTARIAS ---
     def _create_notaria_dialog(self, title: str) -> CustomDialog:
         dialog = CustomDialog(title, self)
+        dialog.setMinimumWidth(560)
         
-        self.inp_n_nombre = LabeledInput("Nombre de la Notaría")
-        self.inp_n_alias = LabeledInput("Alias (Opcional)")
-        self.chk_n_activo = QCheckBox("Notaría Activa")
+        card_n = QFrame(dialog)
+        card_n.setObjectName("card_n")
+        card_n.setStyleSheet(f"""
+            QFrame#card_n {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_n = QVBoxLayout(card_n)
+        lay_n.setContentsMargins(0, 0, 0, 0)
+        lay_n.setSpacing(8)
+        
+        lbl_n = CustomLabel("🏛️ DATOS DE LA NOTARÍA", variant="subheader")
+        lbl_n.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_n.addWidget(lbl_n)
+        
+        form_n = QFormLayout()
+        form_n.setSpacing(8)
+        form_n.setContentsMargins(0, 0, 0, 0)
+        
+        self.inp_n_nombre = CustomInput("Nombre de la notaría (ej. NOTARÍA 12 CANCÚN)", parent=card_n)
+        self.inp_n_nombre.setMaxLength(100)
+        self.inp_n_nombre.textEdited.connect(lambda t: self.inp_n_nombre.setText(t.upper()))
+        self.inp_n_nombre.text = self.inp_n_nombre.text
+        self.inp_n_nombre.set_text = self.inp_n_nombre.setText
+        self.inp_n_nombre.set_focus = self.inp_n_nombre.setFocus
+        
+        self.inp_n_alias = CustomInput("Alias corto para reportes (Opcional)", parent=card_n)
+        self.inp_n_alias.setMaxLength(50)
+        self.inp_n_alias.text = self.inp_n_alias.text
+        self.inp_n_alias.set_text = self.inp_n_alias.setText
+        
+        form_n.addRow("Nombre Notaría *:", self.inp_n_nombre)
+        form_n.addRow("Alias / Notario:", self.inp_n_alias)
+        lay_n.addLayout(form_n)
+        dialog.add_widget(card_n)
+        
+        self.chk_n_activo = CustomCheckBox("Notaría activa para asignación de referencias", dialog)
         self.chk_n_activo.setChecked(True)
-        
-        dialog.add_widget(self.inp_n_nombre)
-        dialog.add_widget(self.inp_n_alias)
+        self.chk_n_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_n_activo)
+        
+        def _validate_n():
+            dialog.btn_save.setEnabled(bool(self.inp_n_nombre.text().strip()))
+        self.inp_n_nombre.textChanged.connect(_validate_n)
+        _validate_n()
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
-            self.inp_n_nombre.input.setReadOnly(True)
-            self.inp_n_alias.input.setReadOnly(True)
+            self.inp_n_nombre.setReadOnly(True)
+            self.inp_n_alias.setReadOnly(True)
             self.chk_n_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
@@ -242,17 +330,54 @@ class CatalogsView(QWidget):
     # --- COLABORADORES ---
     def _create_colaborador_dialog(self, title: str) -> CustomDialog:
         dialog = CustomDialog(title, self)
+        dialog.setMinimumWidth(540)
         
-        self.inp_col_nombre = LabeledInput("Nombre del Colaborador")
-        self.chk_col_activo = QCheckBox("Colaborador Activa")
+        card_col = QFrame(dialog)
+        card_col.setObjectName("card_col")
+        card_col.setStyleSheet(f"""
+            QFrame#card_col {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_col = QVBoxLayout(card_col)
+        lay_col.setContentsMargins(0, 0, 0, 0)
+        lay_col.setSpacing(8)
+        
+        lbl_col = CustomLabel("👥 DATOS DE COLABORADOR / SOLICITANTE", variant="subheader")
+        lbl_col.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_col.addWidget(lbl_col)
+        
+        form_col = QFormLayout()
+        form_col.setSpacing(8)
+        form_col.setContentsMargins(0, 0, 0, 0)
+        
+        self.inp_col_nombre = CustomInput("Nombre completo del colaborador", parent=card_col)
+        self.inp_col_nombre.setMaxLength(100)
+        self.inp_col_nombre.textEdited.connect(lambda t: self.inp_col_nombre.setText(t.upper()))
+        self.inp_col_nombre.text = self.inp_col_nombre.text
+        self.inp_col_nombre.set_text = self.inp_col_nombre.setText
+        self.inp_col_nombre.set_focus = self.inp_col_nombre.setFocus
+        
+        form_col.addRow("Nombre Completo *:", self.inp_col_nombre)
+        lay_col.addLayout(form_col)
+        dialog.add_widget(card_col)
+        
+        self.chk_col_activo = CustomCheckBox("Colaborador activo para asignaciones", dialog)
         self.chk_col_activo.setChecked(True)
-        
-        dialog.add_widget(self.inp_col_nombre)
+        self.chk_col_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_col_activo)
+        
+        def _validate_col():
+            dialog.btn_save.setEnabled(bool(self.inp_col_nombre.text().strip()))
+        self.inp_col_nombre.textChanged.connect(_validate_col)
+        _validate_col()
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
-            self.inp_col_nombre.input.setReadOnly(True)
+            self.inp_col_nombre.setReadOnly(True)
             self.chk_col_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
@@ -300,18 +425,54 @@ class CatalogsView(QWidget):
     # --- DESARROLLOS ---
     def _create_desarrollo_dialog(self, title: str) -> CustomDialog:
         dialog = CustomDialog(title, self)
+        dialog.setMinimumWidth(540)
         
-        self.inp_d_nombre = LabeledInput("Nombre del Desarrollo")
+        card_d = QFrame(dialog)
+        card_d.setObjectName("card_d")
+        card_d.setStyleSheet(f"""
+            QFrame#card_d {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_d = QVBoxLayout(card_d)
+        lay_d.setContentsMargins(0, 0, 0, 0)
+        lay_d.setSpacing(8)
         
-        self.chk_d_activo = QCheckBox("Desarrollo Activo")
+        lbl_d = CustomLabel("🏗️ DATOS DEL DESARROLLO / PROYECTO", variant="subheader")
+        lbl_d.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_d.addWidget(lbl_d)
+        
+        form_d = QFormLayout()
+        form_d.setSpacing(8)
+        form_d.setContentsMargins(0, 0, 0, 0)
+        
+        self.inp_d_nombre = CustomInput("Nombre del desarrollo o proyecto inmobiliario", parent=card_d)
+        self.inp_d_nombre.setMaxLength(100)
+        self.inp_d_nombre.textEdited.connect(lambda t: self.inp_d_nombre.setText(t.upper()))
+        self.inp_d_nombre.text = self.inp_d_nombre.text
+        self.inp_d_nombre.set_text = self.inp_d_nombre.setText
+        self.inp_d_nombre.set_focus = self.inp_d_nombre.setFocus
+        
+        form_d.addRow("Nombre Desarrollo *:", self.inp_d_nombre)
+        lay_d.addLayout(form_d)
+        dialog.add_widget(card_d)
+        
+        self.chk_d_activo = CustomCheckBox("Desarrollo activo en inventario", dialog)
         self.chk_d_activo.setChecked(True)
-        
-        dialog.add_widget(self.inp_d_nombre)
+        self.chk_d_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_d_activo)
+        
+        def _validate_d():
+            dialog.btn_save.setEnabled(bool(self.inp_d_nombre.text().strip()))
+        self.inp_d_nombre.textChanged.connect(_validate_d)
+        _validate_d()
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
-            self.inp_d_nombre.input.setReadOnly(True)
+            self.inp_d_nombre.setReadOnly(True)
             self.chk_d_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
@@ -365,26 +526,58 @@ class CatalogsView(QWidget):
     # --- DESARROLLO EMPRESAS ---
     def _create_desarrollo_empresa_dialog(self, title: str) -> CustomDialog:
         dialog = CustomDialog(title, self)
+        dialog.setMinimumWidth(580)
+        
+        card_de = QFrame(dialog)
+        card_de.setObjectName("card_de")
+        card_de.setStyleSheet(f"""
+            QFrame#card_de {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_de = QVBoxLayout(card_de)
+        lay_de.setContentsMargins(0, 0, 0, 0)
+        lay_de.setSpacing(8)
+        
+        lbl_de = CustomLabel("🏢 ASOCIACIÓN EMPRESA (RFC) Y DELEGACIÓN", variant="subheader")
+        lbl_de.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_de.addWidget(lbl_de)
+        
+        form_de = QFormLayout()
+        form_de.setSpacing(8)
+        form_de.setContentsMargins(0, 0, 0, 0)
         
         rfc_names = [f"{r['rfc']} - {r['razon_social']}" for r in self.rfcs_list]
-        self.cmb_de_rfc = LabeledComboBox("Empresa", rfc_names)
+        self.cmb_de_rfc = CustomComboBox(card_de)
+        self.cmb_de_rfc.addItems(rfc_names)
         
-        del_names = [d["nombre"] for d in self.delegaciones_activas_list]
-        self.cmb_de_delegacion = LabeledComboBox("Delegación", del_names)
+        del_names = [d["nombre"] for d in getattr(self, 'delegaciones_activas_list', self.delegaciones_list)]
+        self.cmb_de_delegacion = CustomComboBox(card_de)
+        self.cmb_de_delegacion.addItems(del_names)
         
-        self.chk_de_default = QCheckBox("Empresa Predeterminada (es_default)")
-        self.chk_de_activo = QCheckBox("Asociación Activa")
+        # Compatibility wrappers
+        self.cmb_de_rfc.combo = self.cmb_de_rfc
+        self.cmb_de_delegacion.combo = self.cmb_de_delegacion
+        
+        form_de.addRow("Empresa (RFC) *:", self.cmb_de_rfc)
+        form_de.addRow("Delegación *:", self.cmb_de_delegacion)
+        lay_de.addLayout(form_de)
+        dialog.add_widget(card_de)
+        
+        self.chk_de_default = CustomCheckBox("Empresa predeterminada para este desarrollo (es_default)", dialog)
+        self.chk_de_activo = CustomCheckBox("Asociación empresa-desarrollo activa", dialog)
         self.chk_de_activo.setChecked(True)
         
-        dialog.add_widget(self.cmb_de_rfc)
-        dialog.add_widget(self.cmb_de_delegacion)
         dialog.add_widget(self.chk_de_default)
         dialog.add_widget(self.chk_de_activo)
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
-            self.cmb_de_rfc.combo.setEnabled(False)
-            self.cmb_de_delegacion.combo.setEnabled(False)
+            self.cmb_de_rfc.setEnabled(False)
+            self.cmb_de_delegacion.setEnabled(False)
             self.chk_de_default.setEnabled(False)
             self.chk_de_activo.setEnabled(False)
             
@@ -401,27 +594,25 @@ class CatalogsView(QWidget):
         self.current_desarrollo_empresa_id = data.get("desarrollo_empresa_id")
         dialog = self._create_desarrollo_empresa_dialog("Editar Asociación")
         
-        # Set current RFC
         rfc_display = f"{data.get('rfc_nombre', '')} - {data.get('rfc_razon_social', '')}"
-        idx = self.cmb_de_rfc.combo.findText(rfc_display)
+        idx = self.cmb_de_rfc.findText(rfc_display)
         if idx >= 0:
-            self.cmb_de_rfc.combo.setCurrentIndex(idx)
+            self.cmb_de_rfc.setCurrentIndex(idx)
             
-        # Set current Delegación
         del_name = data.get("delegacion_nombre")
-        idx2 = self.cmb_de_delegacion.combo.findText(del_name)
+        idx2 = self.cmb_de_delegacion.findText(del_name)
         if idx2 < 0 and del_name:
-            self.cmb_de_delegacion.combo.addItem(del_name)
-            idx2 = self.cmb_de_delegacion.combo.findText(del_name)
+            self.cmb_de_delegacion.addItem(del_name)
+            idx2 = self.cmb_de_delegacion.findText(del_name)
         if idx2 >= 0:
-            self.cmb_de_delegacion.combo.setCurrentIndex(idx2)
+            self.cmb_de_delegacion.setCurrentIndex(idx2)
             
         self.chk_de_default.setChecked(bool(data.get("es_default", False)))
         self.chk_de_activo.setChecked(bool(data.get("activo", False)))
         dialog.exec()
 
     def _save_desarrollo_empresa(self, dialog: CustomDialog):
-        rfc_text = self.cmb_de_rfc.combo.currentText()
+        rfc_text = self.cmb_de_rfc.currentText()
         rfc_id = None
         for r in self.rfcs_list:
             display = f"{r['rfc']} - {r['razon_social']}"
@@ -429,7 +620,7 @@ class CatalogsView(QWidget):
                 rfc_id = r["rfc_id"]
                 break
                 
-        del_name = self.cmb_de_delegacion.combo.currentText()
+        del_name = self.cmb_de_delegacion.currentText()
         del_id = None
         for d in self.delegaciones_list:
             if d["nombre"] == del_name:
@@ -487,20 +678,18 @@ class CatalogsView(QWidget):
                             "delegacion_nombre": de.delegacion.nombre if de.delegacion else "",
                             "es_default": de.es_default,
                             "activo": de.activo
-                        }
-                        for de in items
+                        } for de in items
                     ]
             self.tbl_desarrollo_empresas.populate(data)
         except Exception as e:
-            print("Error refreshing desarrollo empresas:", e)
+            print("Error refreshing desarrollo_empresas:", e)
 
-    # --- GENERAL ---
     def refresh_data(self):
         try:
             if self.api_client.connect_via_api:
                 self.delegaciones_list = self.api_client.request("GET", "/api/admin/data/delegaciones")
-                self.delegaciones_activas_list = [d for d in self.delegaciones_list if d.get("activo", True)]
                 self.rfcs_list = self.api_client.request("GET", "/api/admin/data/rfcs")
+                
                 concepts_data = self.api_client.request("GET", "/api/admin/data/conceptos")
                 notarias_data = self.api_client.request("GET", "/api/admin/data/notarias")
                 colaboradores_data = self.api_client.request("GET", "/api/admin/data/colaboradores")
@@ -508,39 +697,32 @@ class CatalogsView(QWidget):
             else:
                 with self.db_connector.get_session() as session:
                     repo = CatalogoRepository(session)
+                    items_del = repo.get_all_delegaciones_list()
+                    self.delegaciones_list = [{"delegacion_id": d.delegacion_id, "nombre": d.nombre, "activo": d.activo} for d in items_del]
                     
-                    dels = repo.get_all_delegaciones_list()
-                    self.delegaciones_list = [{"delegacion_id": d.delegacion_id, "nombre": d.nombre, "activo": d.activo} for d in dels]
-                    self.delegaciones_activas_list = [d for d in self.delegaciones_list if d.get("activo", True)]
+                    items_rfc = repo.get_all_rfcs()
+                    self.rfcs_list = [{"rfc_id": r.rfc_id, "rfc": r.rfc, "razon_social": r.razon_social, "activo": r.activo} for r in items_rfc]
                     
-                    rfcs = repo.get_all_rfcs()
-                    self.rfcs_list = [{"rfc_id": r.rfc_id, "rfc": r.rfc, "razon_social": r.razon_social} for r in rfcs]
+                    items_c = repo.get_all_conceptos()
+                    concepts_data = [{"concepto_id": i.concepto_id, "codigo_portal": i.codigo_portal, "nombre": i.nombre, "alias": i.alias, "activo": i.activo} for i in items_c]
                     
-                    concepts = repo.get_all_conceptos()
-                    concepts_data = [{"concepto_id": c.concepto_id, "codigo_portal": c.codigo_portal, "nombre": c.nombre, "alias": c.alias, "activo": c.activo} for c in concepts]
+                    items_n = repo.get_all_notarias()
+                    notarias_data = [{"notaria_id": i.notaria_id, "nombre": i.nombre, "alias": i.alias, "activo": i.activo} for i in items_n]
                     
-                    notarias = repo.get_all_notarias()
-                    notarias_data = [{"notaria_id": n.notaria_id, "nombre": n.nombre, "alias": n.alias, "activo": n.activo} for n in notarias]
+                    items_col = repo.get_all_colaboradores()
+                    colaboradores_data = [{"colaborador_id": i.colaborador_id, "nombre": i.nombre, "activo": i.activo} for i in items_col]
                     
-                    colabs = repo.get_all_colaboradores()
-                    colaboradores_data = [{"colaborador_id": c.colaborador_id, "nombre": c.nombre, "activo": c.activo} for c in colabs]
+                    items_d = repo.get_all_desarrollos()
+                    desarrollos_data = [{"desarrollo_id": i.desarrollo_id, "nombre": i.nombre, "activo": i.activo} for i in items_d]
                     
-                    desas = repo.get_all_desarrollos()
-                    desarrollos_data = [
-                        {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "activo": d.activo}
-                        for d in desas
-                    ]
-            
+            self.delegaciones_activas_list = [d for d in self.delegaciones_list if d.get("activo", True)]
             self.delegaciones_map = {d["delegacion_id"]: d["nombre"] for d in self.delegaciones_list}
             
-            # Populate tables
             self.tbl_conceptos.populate(concepts_data)
             self.tbl_notarias.populate(notarias_data)
             self.tbl_colaboradores.populate(colaboradores_data)
             self.tbl_desarrollos.populate(desarrollos_data)
             
-            # Refresh details table if there's any active development selected
             self.refresh_desarrollo_empresas()
-            
         except Exception as e:
             print("Error refreshing catalogos:", e)

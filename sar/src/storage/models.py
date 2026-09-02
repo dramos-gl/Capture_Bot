@@ -217,6 +217,7 @@ class Rfc(Base):
     rfc_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     rfc: Mapped[str] = mapped_column(String(13), unique=True, nullable=False)
     razon_social: Mapped[str] = mapped_column(String(500), nullable=False)
+    alias: Mapped[Optional[str]] = mapped_column(String(100))
     calle: Mapped[Optional[str]] = mapped_column(String(500))
     no_exterior: Mapped[Optional[str]] = mapped_column(String(50))
     no_interior: Mapped[Optional[str]] = mapped_column(String(50))

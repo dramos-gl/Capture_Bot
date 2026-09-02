@@ -116,20 +116,19 @@ Responsable de:
 •	Indicadores
 •	Exportaciones
 ________________________________________
-6. Frontend
-Tecnología Recomendada
-Opción Oficial
-React
+6. Frontend / Cliente Desktop
+Tecnología Oficial
+Python 3.13
 +
-TypeScript
+PySide6 (Qt6)
 +
-Vite
+Design System (Atomic Design)
 ________________________________________
 Justificación
-•	Alta mantenibilidad.
-•	Interfaz moderna.
-•	Escalable.
-•	Amplio soporte comunitario.
+•	Experiencia de escritorio nativa, robusta y de alto rendimiento en Windows.
+•	Integración directa y concurrente con subprocesos de workers y Playwright.
+•	Sistema de diseño atómico corporativo con soporte nativo de modo claro/oscuro.
+•	Máxima productividad operativa estilo ERP / Mesa de Control.
 ________________________________________
 7. Backend
 Tecnología Recomendada

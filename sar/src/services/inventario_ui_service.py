@@ -478,6 +478,45 @@ class InventarioUIService:
                 repo = InventarioRepository(session)
                 return repo.get_ubicacion_by_coordenadas(desarrollo_id, mz, lote, edif, viv)
 
+    def get_asignacion_by_identificador(
+        self,
+        credito_titular: str = None,
+        pa: str = None,
+        folio_electronico: str = None,
+        desarrollo_id: int = None,
+        mz: str = None,
+        lote: str = None,
+        edif: str = None,
+        viv: str = None
+    ) -> Optional[Dict[str, Any]]:
+        """Multi-criteria search by business identifiers or coordinates."""
+        if self.api_client.connect_via_api:
+            params = {}
+            if credito_titular: params["credito_titular"] = credito_titular
+            if pa: params["pa"] = pa
+            if folio_electronico: params["folio_electronico"] = folio_electronico
+            if desarrollo_id: params["desarrollo_id"] = desarrollo_id
+            if mz: params["mz"] = mz
+            if lote: params["lote"] = lote
+            if edif: params["edif"] = edif
+            if viv: params["viv"] = viv
+            return self.api_client.request("GET", "/api/docs/inventario/buscar-identificador", data=params)
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                return repo.get_asignacion_by_identificador(
+                    credito_titular=credito_titular,
+                    pa=pa,
+                    folio_electronico=folio_electronico,
+                    desarrollo_id=desarrollo_id,
+                    mz=mz,
+                    lote=lote,
+                    edif=edif,
+                    viv=viv
+                )
+
     def get_referencias_disponibles_filtro(
         self, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int, orden_ids: list = None
     ) -> List[Dict[str, Any]]:

@@ -182,6 +182,8 @@ CREATE TABLE sar_catalogo.rfc
 
     razon_social VARCHAR(500) NOT NULL,
 
+    alias VARCHAR(100),
+
     calle VARCHAR(500),
 
     no_exterior VARCHAR(50),

@@ -2208,7 +2208,7 @@ class InventarioRepository(BaseRepository):
                     self.session.add(des_obj)
                     self.session.flush()
                 desarrollo_id = des_obj.desarrollo_id
-            if not desarrollo_id and not solo_reservar:
+            if not desarrollo_id and not solo_reservar and tipo_destino != "COLABORADOR":
                 desarrollo_id = 1
 
             key = (rfc_id, concepto_id, desarrollo_id)
@@ -2230,12 +2230,13 @@ class InventarioRepository(BaseRepository):
             ld_parent.cantidad_solicitada += 1
             ld_parent.cantidad_confirmada += 1
 
-            # Create or Reuse Ubicacion record (only if not solo_reservar)
+            # Create or Reuse Ubicacion record (only if not solo_reservar and not COLABORADOR)
             ubi_id = None
             cliente_val = None
             folio_val = None
             pa_val = None
-            if not solo_reservar:
+            if not solo_reservar and tipo_destino != "COLABORADOR":
+                sm_val = d.get("sm").strip().upper() if d.get("sm") else None
                 mz_val = d.get("mz").strip().upper() if d.get("mz") else None
                 lote_val = d.get("lote").strip().upper() if d.get("lote") else None
                 edif_val = d.get("edif").strip().upper() if d.get("edif") else None
@@ -2245,13 +2246,15 @@ class InventarioRepository(BaseRepository):
                 pa_val = d.get("pa")
 
                 ubi = None
-                if mz_val and lote_val:
+                if desarrollo_id and mz_val and lote_val:
                     from sqlalchemy import func
                     dup_stmt = select(Ubicacion).filter(
                         Ubicacion.desarrollo_id == desarrollo_id,
                         func.upper(func.trim(Ubicacion.mz)) == mz_val,
                         func.upper(func.trim(Ubicacion.lote)) == lote_val
                     )
+                    if sm_val:
+                        dup_stmt = dup_stmt.filter(func.upper(func.trim(Ubicacion.sm)) == sm_val)
                     if edif_val:
                         dup_stmt = dup_stmt.filter(func.upper(func.trim(Ubicacion.edif)) == edif_val)
                     if viv_val:
@@ -2259,10 +2262,10 @@ class InventarioRepository(BaseRepository):
                     
                     ubi = self.session.execute(dup_stmt).scalars().first()
 
-                if not ubi:
+                if not ubi and desarrollo_id and (mz_val or lote_val or sm_val or folio_val):
                     ubi = Ubicacion(
                         desarrollo_id=desarrollo_id,
-                        sm=d.get("sm"),
+                        sm=sm_val,
                         mz=mz_val,
                         lote=lote_val,
                         edif=edif_val,
@@ -2271,12 +2274,14 @@ class InventarioRepository(BaseRepository):
                     )
                     self.session.add(ubi)
                     self.session.flush()
-                else:
+                elif ubi:
                     if folio_val and not ubi.lote_id_erp:
                         ubi.lote_id_erp = folio_val
                     self.session.flush()
 
-                ubi_id = ubi.ubicacion_id
+                ubi_id = ubi.ubicacion_id if ubi else None
+            elif tipo_destino == "COLABORADOR":
+                cliente_val = d.get("cliente") or "ASIGNACIÓN A COLABORADOR"
 
             # Calculate consecutive attempt number (intento) for this location AND concept
             intento_val = 1
@@ -2319,16 +2324,16 @@ class InventarioRepository(BaseRepository):
                 estado_id=target_estado_id,
                 cliente=cliente_val if not solo_reservar else None,
                 credito_titular=d.get("credito_titular"),
-                pa=pa_val,
+                pa=d.get("pa") or pa_val,
                 no_oficial=folio_val,
                 fecha_solicitud=d.get("fecha_solicitud"),
                 fecha_reporte_notaria=d.get("fecha_reporte_notaria"),
                 fecha_ingreso_rpp=d.get("fecha_ingreso_rpp"),
                 fecha_escritura=d.get("fecha_escritura"),
                 fecha_titulacion=d.get("fecha_titulacion"),
-                comentarios=d.get("comentarios") or pa_val,
+                comentarios=d.get("comentarios"),
                 usuario_asignacion=usuario_creacion,
-                observaciones=pa_val
+                observaciones=d.get("observaciones") or observaciones or pa_val
             )
             self.session.add(asig)
             self.session.flush()
@@ -3177,6 +3182,120 @@ class InventarioRepository(BaseRepository):
             "fecha_solicitud": fecha_sol_res,
             "credito_titular": credito_res,
             "pa": pa_res
+        }
+
+    def get_asignacion_by_identificador(
+        self,
+        credito_titular: Optional[str] = None,
+        pa: Optional[str] = None,
+        folio_electronico: Optional[str] = None,
+        desarrollo_id: Optional[int] = None,
+        mz: Optional[str] = None,
+        lote: Optional[str] = None,
+        edif: Optional[str] = None,
+        viv: Optional[str] = None
+    ) -> Optional[dict]:
+        """Looks up the most recent assignment by any of the unique business identifiers (credito_titular, pa, folio_electronico/no_oficial) or coordinates."""
+        from sqlalchemy import text
+        
+        cred_clean = credito_titular.strip().upper() if credito_titular and len(credito_titular.strip()) >= 3 else None
+        pa_clean = pa.strip().upper() if pa and len(pa.strip()) >= 2 else None
+        folio_clean = folio_electronico.strip().upper() if folio_electronico and len(folio_electronico.strip()) >= 3 else None
+        mz_clean = mz.strip().upper() if mz and len(mz.strip()) > 0 else None
+        lote_clean = lote.strip().upper() if lote and len(lote.strip()) > 0 else None
+        
+        if not any([cred_clean, pa_clean, folio_clean, (desarrollo_id and mz_clean and lote_clean)]):
+            return None
+
+        clauses = []
+        params = {}
+        
+        if cred_clean:
+            clauses.append("UPPER(TRIM(ar.credito_titular)) = :cred")
+            params["cred"] = cred_clean
+        if pa_clean:
+            clauses.append("UPPER(TRIM(ar.pa)) = :pa")
+            params["pa"] = pa_clean
+        if folio_clean:
+            clauses.append("(UPPER(TRIM(ar.no_oficial)) = :folio OR UPPER(TRIM(ubi.lote_id_erp)) = :folio)")
+            params["folio"] = folio_clean
+        if desarrollo_id and mz_clean and lote_clean:
+            coords_clause = "ubi.desarrollo_id = :des_id AND UPPER(TRIM(ubi.mz)) = :mz AND UPPER(TRIM(ubi.lote)) = :lote"
+            params["des_id"] = desarrollo_id
+            params["mz"] = mz_clean
+            params["lote"] = lote_clean
+            if edif and edif.strip():
+                coords_clause += " AND UPPER(TRIM(ubi.edif)) = :edif"
+                params["edif"] = edif.strip().upper()
+            if viv and viv.strip():
+                coords_clause += " AND UPPER(TRIM(ubi.viv)) = :viv"
+                params["viv"] = viv.strip().upper()
+            clauses.append(f"({coords_clause})")
+
+        where_str = " OR ".join(clauses)
+        
+        sql = f"""
+            SELECT 
+                ar.asignacion_referencia_id,
+                ar.cliente,
+                ar.credito_titular,
+                ar.pa,
+                COALESCE(ar.no_oficial, ubi.lote_id_erp) as folio_electronico,
+                ar.fecha_solicitud,
+                ar.fecha_reporte_notaria,
+                ar.fecha_ingreso_rpp,
+                ar.fecha_escritura,
+                ar.fecha_titulacion,
+                ar.comentarios,
+                ubi.ubicacion_id,
+                ubi.desarrollo_id,
+                des.nombre as desarrollo_nombre,
+                ubi.sm,
+                ubi.mz,
+                ubi.lote,
+                ubi.edif,
+                ubi.viv
+            FROM sar_archivo.asignacion_referencia ar
+            LEFT JOIN sar_archivo.ubicacion ubi ON ar.ubicacion_id = ubi.ubicacion_id
+            LEFT JOIN sar_catalogo.desarrollo des ON ubi.desarrollo_id = des.desarrollo_id
+            WHERE {where_str}
+            ORDER BY ar.asignacion_referencia_id DESC
+            LIMIT 1
+        """
+        row = self.session.execute(text(sql), params).fetchone()
+        if not row:
+            return None
+        
+        # Determine match source
+        match_source = "coordenadas"
+        if cred_clean and row.credito_titular and cred_clean == row.credito_titular.strip().upper():
+            match_source = "credito"
+        elif pa_clean and row.pa and pa_clean == row.pa.strip().upper():
+            match_source = "pa"
+        elif folio_clean and row.folio_electronico and folio_clean == str(row.folio_electronico).strip().upper():
+            match_source = "folio"
+        
+        return {
+            "asignacion_referencia_id": row.asignacion_referencia_id,
+            "ubicacion_id": row.ubicacion_id,
+            "match_source": match_source,
+            "cliente": row.cliente or "",
+            "credito_titular": row.credito_titular or "",
+            "pa": row.pa or "",
+            "folio_electronico": row.folio_electronico or "",
+            "desarrollo_id": row.desarrollo_id,
+            "desarrollo_nombre": row.desarrollo_nombre or "",
+            "sm": row.sm or "",
+            "mz": row.mz or "",
+            "lote": row.lote or "",
+            "edif": row.edif or "",
+            "viv": row.viv or "",
+            "fecha_solicitud": row.fecha_solicitud.strftime("%Y-%m-%d") if row.fecha_solicitud else "",
+            "fecha_reporte_notaria": row.fecha_reporte_notaria.strftime("%Y-%m-%d") if row.fecha_reporte_notaria else "",
+            "fecha_ingreso_rpp": row.fecha_ingreso_rpp.strftime("%Y-%m-%d") if row.fecha_ingreso_rpp else "",
+            "fecha_escritura": row.fecha_escritura.strftime("%Y-%m-%d") if row.fecha_escritura else "",
+            "fecha_titulacion": row.fecha_titulacion.strftime("%Y-%m-%d") if row.fecha_titulacion else "",
+            "comentarios": row.comentarios or ""
         }
 
     def get_referencias_disponibles_filtro(

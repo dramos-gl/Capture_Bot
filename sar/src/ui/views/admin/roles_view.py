@@ -1,10 +1,14 @@
-"""Roles Administration Sub-view."""
-
-from PySide6.QtWidgets import QWidget, QHBoxLayout
-from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
+import re
+from PySide6.QtWidgets import (
+    QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel, 
+    QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QGridLayout
+)
+from PySide6.QtCore import Qt
+from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
-from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
-from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
+from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
 from sar.src.ui.design_system.components.organisms.gl_dialog import CustomDialog
 from sar.src.storage.repositories import UsuarioRepository
@@ -43,24 +47,83 @@ class RolesView(QWidget):
         
     def _create_dialog(self, title: str) -> CustomDialog:
         dialog = CustomDialog(title, self)
+        dialog.setMinimumSize(780, 640)
         
-        self.inp_r_codigo = LabeledInput("Código del Rol")
-        self.inp_r_nombre = LabeledInput("Nombre")
-        self.chk_r_activo = CustomCheckBox("Rol Activo")
-        self.chk_r_activo.setChecked(True)
+        # -------------------------------------------------------------
+        # 1. TARJETA: IDENTIFICACIÓN Y CONFIGURACIÓN DEL ROL
+        # -------------------------------------------------------------
+        card_rol = QFrame(dialog)
+        card_rol.setObjectName("card_rol")
+        card_rol.setStyleSheet(f"""
+            QFrame#card_rol {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_rol = QVBoxLayout(card_rol)
+        lay_rol.setContentsMargins(0, 0, 0, 0)
+        lay_rol.setSpacing(8)
         
-        dialog.add_widget(self.inp_r_codigo)
-        dialog.add_widget(self.inp_r_nombre)
-        dialog.add_widget(self.chk_r_activo)
+        lbl_rol = CustomLabel("🛡️ IDENTIFICACIÓN Y CONFIGURACIÓN DEL ROL", variant="subheader")
+        lbl_rol.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_rol.addWidget(lbl_rol)
         
-        from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QGridLayout
-        from PySide6.QtCore import Qt
+        form_rol = QFormLayout()
+        form_rol.setSpacing(8)
+        form_rol.setContentsMargins(0, 0, 0, 0)
         
-        self.group_permisos = QGroupBox("Matriz de Permisos")
-        self.group_permisos.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 10px; padding-top: 24px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
-        self.permisos_layout = QVBoxLayout()
+        rol_lay = QHBoxLayout()
+        rol_lay.setSpacing(10)
         
-        self.matrix_table = QTableWidget()
+        self.inp_r_codigo = CustomInput("Ej. OPERADOR", parent=card_rol)
+        self.inp_r_codigo.setMaxLength(30)
+        self.inp_r_codigo.textEdited.connect(lambda t: self.inp_r_codigo.setText(t.upper()))
+        
+        # Compatibility wrappers
+        self.inp_r_codigo.text = self.inp_r_codigo.text
+        self.inp_r_codigo.set_text = self.inp_r_codigo.setText
+        self.inp_r_codigo.set_focus = self.inp_r_codigo.setFocus
+        
+        lbl_nom = QLabel("Nombre *:")
+        lbl_nom.setStyleSheet(f"color: {Colors.TEXT_LIGHT_SECONDARY}; font-size: 12px; font-weight: 500;")
+        
+        self.inp_r_nombre = CustomInput("Nombre descriptivo del rol", parent=card_rol)
+        self.inp_r_nombre.setMaxLength(100)
+        self.inp_r_nombre.text = self.inp_r_nombre.text
+        self.inp_r_nombre.set_text = self.inp_r_nombre.setText
+        
+        rol_lay.addWidget(self.inp_r_codigo, 1)
+        rol_lay.addWidget(lbl_nom)
+        rol_lay.addWidget(self.inp_r_nombre, 2)
+        
+        form_rol.addRow("Código del Rol *:", rol_lay)
+        lay_rol.addLayout(form_rol)
+        dialog.add_widget(card_rol)
+        
+        # -------------------------------------------------------------
+        # 2. MATRIZ DE PERMISOS CRUZADOS (Módulos vs Acciones)
+        # -------------------------------------------------------------
+        card_matrix = QFrame(dialog)
+        card_matrix.setObjectName("card_matrix")
+        card_matrix.setStyleSheet(f"""
+            QFrame#card_matrix {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_matrix = QVBoxLayout(card_matrix)
+        lay_matrix.setContentsMargins(0, 0, 0, 0)
+        lay_matrix.setSpacing(8)
+        
+        lbl_matrix = CustomLabel("⚙️ MATRIZ DE PERMISOS CRUZADOS (MÓDULOS VS ACCIONES)", variant="subheader")
+        lbl_matrix.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_matrix.addWidget(lbl_matrix)
+        
+        self.matrix_table = QTableWidget(card_matrix)
         self.matrix_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.matrix_table.setSelectionMode(QAbstractItemView.NoSelection)
         self.matrix_table.setColumnCount(len(self.acciones))
@@ -69,62 +132,91 @@ class RolesView(QWidget):
         self.matrix_table.setVerticalHeaderLabels([m["nombre"] for m in self.modulos])
         self.matrix_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.matrix_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.matrix_table.setMinimumHeight(220)
+        self.matrix_table.setMinimumHeight(200)
         
-        self.checkboxes_matrix = {}  # (mod_id, acc_id): chk
-        
+        self.checkboxes_matrix = {}
         for r_idx, mod in enumerate(self.modulos):
             for c_idx, acc in enumerate(self.acciones):
                 chk = CustomCheckBox()
                 if not self.can_edit:
                     chk.setEnabled(False)
-                # Centering checkbox in cell
                 widget = QWidget()
                 widget.setStyleSheet("background-color: transparent;")
                 l = QHBoxLayout(widget)
                 l.addWidget(chk)
                 l.setAlignment(Qt.AlignCenter)
-                l.setContentsMargins(0,0,0,0)
+                l.setContentsMargins(0, 0, 0, 0)
                 self.matrix_table.setCellWidget(r_idx, c_idx, widget)
                 self.checkboxes_matrix[(mod["id"], acc["id"])] = chk
                 
-        self.permisos_layout.addWidget(self.matrix_table)
-        self.group_permisos.setLayout(self.permisos_layout)
-        dialog.add_widget(self.group_permisos)
+        lay_matrix.addWidget(self.matrix_table)
+        dialog.add_widget(card_matrix)
         
-        # Módulos de Aplicación (Nivel 1)
-        self.group_apps = QGroupBox("Módulos de Aplicación Autorizados (Acceso Nivel 1)")
-        self.group_apps.setStyleSheet("QGroupBox { font-weight: bold; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 10px; padding-top: 24px; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
-        self.apps_layout = QGridLayout()
-        self.apps_layout.setContentsMargins(15, 10, 15, 10)
-        self.apps_layout.setHorizontalSpacing(20)
-        self.apps_layout.setVerticalSpacing(10)
-        self.checkboxes_apps = {}  # app_modulo_id: chk
+        # -------------------------------------------------------------
+        # 3. MÓDULOS DE APLICACIÓN AUTORIZADOS (Acceso Nivel 1)
+        # -------------------------------------------------------------
+        card_apps = QFrame(dialog)
+        card_apps.setObjectName("card_apps")
+        card_apps.setStyleSheet(f"""
+            QFrame#card_apps {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_apps = QVBoxLayout(card_apps)
+        lay_apps.setContentsMargins(0, 0, 0, 0)
+        lay_apps.setSpacing(8)
         
+        lbl_apps = CustomLabel("📱 MÓDULOS DE APLICACIÓN AUTORIZADOS (ACCESO NIVEL 1)", variant="subheader")
+        lbl_apps.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_apps.addWidget(lbl_apps)
+        
+        grid_apps = QGridLayout()
+        grid_apps.setContentsMargins(0, 4, 0, 0)
+        grid_apps.setHorizontalSpacing(20)
+        grid_apps.setVerticalSpacing(8)
+        
+        self.checkboxes_apps = {}
         for idx, app in enumerate(self.app_modulos):
             chk = CustomCheckBox(app["nombre"])
             if not self.can_edit:
                 chk.setEnabled(False)
             row = idx // 2
             col = idx % 2
-            self.apps_layout.addWidget(chk, row, col)
+            grid_apps.addWidget(chk, row, col)
             self.checkboxes_apps[app["id"]] = chk
             
-        self.group_apps.setLayout(self.apps_layout)
-        dialog.add_widget(self.group_apps)
+        lay_apps.addLayout(grid_apps)
+        dialog.add_widget(card_apps)
         
-        # Make dialog wider and taller for the matrix and proper spacing
-        dialog.setMinimumSize(780, 640)
+        # -------------------------------------------------------------
+        # 4. ESTADO OPERATIVO (CustomCheckBox)
+        # -------------------------------------------------------------
+        self.chk_r_activo = CustomCheckBox("Rol de sistema activo para asignación de usuarios", dialog)
+        self.chk_r_activo.setChecked(True)
+        self.chk_r_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
+        dialog.add_widget(self.chk_r_activo)
+        
+        # Validación en tiempo real
+        def _validate_rol():
+            c_val = self.inp_r_codigo.text().strip()
+            n_val = self.inp_r_nombre.text().strip()
+            dialog.btn_save.setEnabled(bool(c_val and n_val))
+            
+        self.inp_r_codigo.textChanged.connect(_validate_rol)
+        self.inp_r_nombre.textChanged.connect(_validate_rol)
+        _validate_rol()
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
-            self.inp_r_codigo.input.setReadOnly(True)
-            self.inp_r_nombre.input.setReadOnly(True)
+            self.inp_r_codigo.setReadOnly(True)
+            self.inp_r_nombre.setReadOnly(True)
             self.chk_r_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
         dialog.btn_save.clicked.connect(lambda: self._save_rol(dialog))
-        
         return dialog
 
     def _on_new_rol(self):
@@ -141,7 +233,6 @@ class RolesView(QWidget):
         self.inp_r_nombre.set_text(data.get("nombre", ""))
         self.chk_r_activo.setChecked(bool(data.get("activo", False)))
         
-        # Load permissions
         try:
             if self.api_client.connect_via_api:
                 permisos = self.api_client.request("GET", f"/api/admin/permisos-for-rol/{self.current_rol_id}")
@@ -161,7 +252,6 @@ class RolesView(QWidget):
                     for (m_id, a_id), chk in self.checkboxes_matrix.items():
                         chk.setChecked((m_id, a_id) in permisos_set)
                         
-                    # Cargar módulos de aplicación autorizados
                     app_mods = repo.get_app_modulos_for_rol(self.current_rol_id)
                     app_mods_set = set(app_mods)
                     for am_id, chk in self.checkboxes_apps.items():
@@ -173,13 +263,12 @@ class RolesView(QWidget):
         dialog.exec()
 
     def _save_rol(self, dialog: CustomDialog):
-        
         permisos_matrix = [(m_id, a_id) for (m_id, a_id), chk in self.checkboxes_matrix.items() if chk.isChecked()]
         app_modulo_ids = [am_id for am_id, chk in self.checkboxes_apps.items() if chk.isChecked()]
         
         data = {
             "rol_id": self.current_rol_id,
-            "codigo": self.inp_r_codigo.text().strip(),
+            "codigo": self.inp_r_codigo.text().strip().upper(),
             "nombre": self.inp_r_nombre.text().strip(),
             "activo": self.chk_r_activo.isChecked(),
             "permisos_matrix": permisos_matrix,
@@ -218,7 +307,6 @@ class RolesView(QWidget):
                 with self.db_connector.get_session() as session:
                     repo = UsuarioRepository(session)
                     
-                    # Load matrix headers
                     self.modulos = [{"id": m.modulo_id, "nombre": m.nombre} for m in repo.get_all_modulos()]
                     self.acciones = [{"id": a.accion_id, "nombre": a.nombre} for a in repo.get_all_acciones()]
                     self.app_modulos = [{"id": am.app_modulo_id, "nombre": am.nombre} for am in repo.get_all_app_modulos()]
@@ -228,3 +316,4 @@ class RolesView(QWidget):
                     self.tbl_roles.populate(data)
         except Exception as e:
             print("Error refreshing roles:", e)
+
