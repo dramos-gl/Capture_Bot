@@ -47,6 +47,11 @@ La experiencia debe ser similar a:
 ERP
 CRM
 Sistemas de Mesa de Control
+
+UIX-007
+
+Responsividad y Adaptabilidad de Pantalla:
+Toda ventana, formulario modal y diálogo del sistema debe adaptarse de forma fluida a resoluciones desde 1366×768 (laptops estándar) hasta monitores 4K y diferentes escalas de DPI (100% a 150%). Ningún formulario debe desbordar los límites físicos de la pantalla ni ocultar botones de acción críticos; los formularios extensos deben estructurarse obligatoriamente en 3 niveles: Cabecera de contexto fija, Cuerpo central desplazable (`QScrollArea`) y Pie fijo con botones de confirmación (`[Guardar]`, `[Cancelar]`).
 3. Roles
 Administrador
 
@@ -691,14 +696,18 @@ Trazabilidad completa desde Orden → Solicitud → Referencia.
   2. **Reservar Derechos** (Apartado temporal de referencias, omite ubicación física).
   3. **Completar Lote Reservado** (Consolida apartados previos en `RESERVADA` hacia `ASIGNADA` con cliente y vivienda).
 
-### 26.4 Asignación con Wizard Secuencial y Guardado Seguro
+### 26.4 Asignación Manual con Wizard Secuencial y Borradores
+* **Estructura Responsiva en 3 Niveles (Soporte 1366x768)**:
+  1. **Cabecera Fija**: Banner de referencia, controles del paginador secuencial (`◀ Anterior` / `Siguiente ▶`), checkbox de replicación (`chk_replicar`) y selector de tipo de destino (`NOTARIA` / `COLABORADOR`).
+  2. **Cuerpo Central Desplazable (`QScrollArea`)**: Contenedores dinámicos con scroll suave e integrado visualmente al tema para visualizar y editar todos los campos notariales, ubicación física, clientes y fechas sin importar la resolución o escala DPI.
+  3. **Pie Fijo Pinned**: Botones **[Cancelar]** y **[Guardar]** anclados permanentemente en la parte inferior, garantizando accesibilidad y confirmación visual inmediata en todo momento.
 * **Paginador / Wizard Secuencial**: Navegación interactiva por derecho (`Derecho X de N`) con controles `◀ Anterior` / `Siguiente ▶` y banner informativo enriquecido con alias de concepto (`CLG`, `AVISO`, etc.), delegación (`CAN`, `PLA`, etc.) y empresa.
 * **Borradores Independientes**: Cada partida seleccionada mantiene su propio borrador en memoria (`_derechos_data`) con validación secuencial previa a la persistencia.
 * **Opción de Replicación**: Checkbox opcional (`chk_replicar`) para replicar datos notariales, fechas u observaciones capturadas a las siguientes partidas del lote.
-* **Búsqueda Predictiva Multi-criterio**: Detección inteligente con debounce de 350 ms capaz de resolver inmuebles e información previa por:
+* **Búsqueda Predictiva Multi-criterio**: Detección inteligente con debounce de 350 ms capaz de resolver inmuebles por:
   - Número de Crédito Titular
   - P.A. (Paquete)
-  - Folio Electrónico / No. Oficial
+  - Folio Electrónico
   - Coordenadas tradicionales (Desarrollo + Mz + Lote + Edif + Viv)
 * **Guardado y Confirmación**: Botón de acción **`Guardar`** con cuadro de diálogo de confirmación de seguridad antes de procesar el lote en base de datos.
 

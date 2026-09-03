@@ -263,9 +263,9 @@ class InventarioUIService:
                 
                 from sar.src.storage.models import Concepto, Delegacion, Rfc
                 from sqlalchemy import select
-                concepts = session.execute(select(Concepto).where(Concepto.activo == True)).scalars().all()
-                delegations = session.execute(select(Delegacion).where(Delegacion.activo == True)).scalars().all()
-                rfcs = session.execute(select(Rfc).where(Rfc.activo == True)).scalars().all()
+                concepts = session.execute(select(Concepto).where(Concepto.activo == True).order_by(Concepto.nombre)).scalars().all()
+                delegations = session.execute(select(Delegacion).where(Delegacion.activo == True).order_by(Delegacion.nombre)).scalars().all()
+                rfcs = session.execute(select(Rfc).where(Rfc.activo == True).order_by(Rfc.razon_social)).scalars().all()
                 
                 return {
                     "notarias": notarias,
@@ -290,8 +290,8 @@ class InventarioUIService:
             with self.db_connector.get_session() as session:
                 from sar.src.storage.models import Concepto, Rfc
                 from sqlalchemy import select
-                concepts = session.execute(select(Concepto).where(Concepto.activo == True)).scalars().all()
-                rfcs = session.execute(select(Rfc).where(Rfc.activo == True)).scalars().all()
+                concepts = session.execute(select(Concepto).where(Concepto.activo == True).order_by(Concepto.nombre)).scalars().all()
+                rfcs = session.execute(select(Rfc).where(Rfc.activo == True).order_by(Rfc.razon_social)).scalars().all()
                 return {
                     "conceptos": [{"concepto_id": c.concepto_id, "nombre": c.nombre} for c in concepts],
                     "rfcs": [{"rfc_id": r.rfc_id, "razon_social": r.razon_social} for r in rfcs]
@@ -333,7 +333,7 @@ class InventarioUIService:
                 repo.save_desarrollo(name, delegacion_id)
                 session.commit()
 
-    def crear_lote_asignacion(self, tipo_destino: str, notaria_id: int, colaborador_id: int, solicitante_externo: str, observaciones: str, usuario_creacion: int, detalles_list: List[Dict[str, Any]]) -> None:
+    def crear_lote_asignacion(self, tipo_destino: str, notaria_id: int, colaborador_id: int, solicitante_externo: str, observaciones: str, usuario_creacion: int, detalles_list: List[Dict[str, Any]], solo_reservar: bool = False) -> None:
         """Registers a new assignment lote."""
         if self.api_client.connect_via_api:
             detalles_payload = []
@@ -350,7 +350,8 @@ class InventarioUIService:
                 "solicitante_externo": solicitante_externo,
                 "observaciones": observaciones,
                 "usuario_creacion": usuario_creacion,
-                "detalles": detalles_payload
+                "detalles": detalles_payload,
+                "solo_reservar": solo_reservar
             }
             self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
         else:
@@ -365,7 +366,8 @@ class InventarioUIService:
                     solicitante_externo=solicitante_externo,
                     observaciones=observaciones,
                     usuario_creacion=usuario_creacion,
-                    detalles_list=detalles_list
+                    detalles_list=detalles_list,
+                    solo_reservar=solo_reservar
                 )
                 session.commit()
 

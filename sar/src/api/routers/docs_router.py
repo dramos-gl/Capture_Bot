@@ -924,6 +924,7 @@ class LoteAsignacionCreateRequest(BaseModel):
     observaciones: Optional[str] = None
     usuario_creacion: int
     detalles: List[LoteDetalleItem]
+    solo_reservar: bool = False
 
 class LoteValidarRequest(BaseModel):
     parsed_rows: List[dict]
@@ -1144,7 +1145,8 @@ def create_lote_asignacion(request: LoteAsignacionCreateRequest, db: Session = D
             solicitante_externo=request.solicitante_externo,
             observaciones=request.observaciones,
             usuario_creacion=request.usuario_creacion,
-            detalles_list=detalles_converted
+            detalles_list=detalles_converted,
+            solo_reservar=request.solo_reservar
         )
         db.commit()
         return {"lote_id": lote_id, "detail": "Lote de asignación creado con éxito"}

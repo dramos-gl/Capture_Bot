@@ -105,8 +105,8 @@ class ThemeManager:
             border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
             padding: 3px 8px;
-            min-height: 28px;
-            max-height: 28px;
+            min-height: 34px;
+            max-height: 34px;
             color: {txt_primary};
             font-size: 13px;
         }}
@@ -140,24 +140,19 @@ class ThemeManager:
             height: 16px;
             margin-right: 8px;
         }}
+        /* ComboBox Dropdown List */
         QComboBox QAbstractItemView {{
             border: 1px solid {border};
-            border-radius: 6px;
             background-color: {surf};
-            alternate-background-color: {surf};
             color: {txt_primary};
             selection-background-color: {Colors.ACCENT_BG if not is_dark else Colors.ACCENT_DARK_BG};
             selection-color: {Colors.TEXT_LIGHT_PRIMARY if not is_dark else Colors.TEXT_DARK_PRIMARY};
-            padding: 4px;
+            padding: 2px;
             outline: 0px;
-        }}
-        QComboBox QAbstractItemView::viewport {{
-            background-color: {surf};
         }}
         QComboBox QAbstractItemView::item {{
             min-height: 28px;
-            padding: 4px 8px;
-            border-radius: 4px;
+            padding: 4px 10px;
             background-color: {surf};
             color: {txt_primary};
         }}
@@ -175,10 +170,13 @@ class ThemeManager:
             background-color: {surf};
             border: 1px solid {border};
             border-radius: 8px;
-            margin-top: 8px;
+            margin-top: 6px;
             font-weight: bold;
             color: {"#2563EB" if not is_dark else "#60A5FA"};
             font-size: 11px;
+            height: 36px;
+            min-height: 36px;
+            max-height: 36px;
         }}
         QGroupBox#labeledGroup::title {{
             subcontrol-origin: margin;
@@ -191,20 +189,20 @@ class ThemeManager:
             border: none;
             background-color: transparent;
             min-width: 130px;
-            height: 35px;
-            min-height: 35px;
-            max-height: 35px;
-            padding: 2px 10px;
+            height: 30px;
+            min-height: 30px;
+            max-height: 30px;
+            padding: 0px 10px;
             font-size: 13px;
         }}
         QGroupBox#labeledGroup QDateEdit {{
             border: none;
             background-color: transparent;
             min-width: 120px;
-            height: 35px;
-            min-height: 35px;
-            max-height: 35px;
-            padding: 2px 6px 2px 10px;
+            height: 30px;
+            min-height: 30px;
+            max-height: 30px;
+            padding: 0px 6px 0px 10px;
             font-size: 13px;
             color: {txt_primary};
         }}
@@ -547,15 +545,17 @@ class ThemeManager:
         }}
         
         QLineEdit#filterBarSearch {{
-            padding: 10px 16px;
+            padding: 3px 10px;
+            min-height: 34px;
+            max-height: 34px;
             border: {Spacing.BORDER_WIDTH_SM} solid {border};
             border-radius: {Spacing.RADIUS_MD};
             background-color: {surf};
-            font-size: {Typography.SIZE_MD};
+            font-size: 13px;
             color: {txt_primary};
         }}
         QLineEdit#filterBarSearch:focus {{
-            border: {Spacing.BORDER_WIDTH_SM} solid {Colors.PRIMARY};
+            border: 1.5px solid {Colors.ACCENT};
         }}
         
         QPushButton#filterBarActionBtn {{

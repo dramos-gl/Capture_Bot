@@ -8,6 +8,7 @@ from sar.src.ui.design_system.components import CustomCard, CustomLabel, StyledD
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.theme_manager import ThemeManager
 from sar.src.services.referencias_service import ReferenciasService
 
 class DashboardKPIsLoadWorker(QThread):
@@ -232,11 +233,22 @@ class DashboardView(QWidget):
         
         # Search Box
         self.search_input = QLineEdit(self)
-        self.search_input.setPlaceholderText("Buscar derechos...")
+        self.search_input.setPlaceholderText("Buscar derecho, estado...")
         self.search_input.setFixedWidth(240)
+        self.search_input.setClearButtonEnabled(True)
         self.search_input.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
+        self.search_input.returnPressed.connect(self._on_search_trigger)
         self.search_input.textChanged.connect(self._on_search_changed)
         self.table_header_layout.addWidget(self.search_input)
+
+        # Botón Buscar explícito
+        self.btn_buscar = QPushButton()
+        self.btn_buscar.setObjectName("secondaryBtn")
+        self.btn_buscar.setIcon(Icons.buscar("#FFFFFF") if ThemeManager.is_dark_active() else Icons.buscar("#334155"))
+        self.btn_buscar.setFixedSize(36, 36)
+        self.btn_buscar.setToolTip("Buscar (o presione Enter)")
+        self.btn_buscar.clicked.connect(self._on_search_trigger)
+        self.table_header_layout.addWidget(self.btn_buscar)
         
         # Filter Button
         self.btn_filter = QPushButton()
@@ -426,13 +438,26 @@ class DashboardView(QWidget):
         self.lbl_pagination_info.setText("Error al cargar los derechos.")
         print("Dashboard references load error:", err_msg)
 
-    def _on_search_changed(self, text):
-        """Filters dashboard data using debounce timer to prevent SQL flood."""
+    def _on_search_changed(self, text: str):
+        """Dispara debounce cuando el usuario escribe; si borra todo el texto, refresca de inmediato."""
+        trimmed = text.strip()
+        if not trimmed:
+            if hasattr(self, "search_timer"):
+                self.search_timer.stop()
+            self._on_search_trigger()
+        else:
+            if hasattr(self, "search_timer"):
+                self.search_timer.start(700)
+
+    def _on_search_trigger(self):
+        """Ejecuta la búsqueda de inmediato al presionar Enter, clic en Buscar o cumplirse el debounce."""
+        if hasattr(self, "search_timer"):
+            self.search_timer.stop()
         self.current_page = 1
-        self.search_timer.start(350)
+        self.refresh_data_references()
 
     def _on_search_timer_timeout(self):
-        self.refresh_data_references()
+        self._on_search_trigger()
 
     def _on_page_size_changed(self, text):
         """Handles page size combo selection changes."""

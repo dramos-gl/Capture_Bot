@@ -856,19 +856,12 @@ class ProduccionRepository(BaseRepository):
             if search_text.isdigit():
                 search_conds = [
                     "referencia_id = :search_int",
-                    "consecutivo_grupo = :search_int",
-                    "referencia_portal ILIKE :search"
+                    "consecutivo_grupo = :search_int"
                 ]
                 params["search_int"] = int(search_text)
             else:
                 search_conds = [
-                    "referencia_portal ILIKE :search",
-                    "folio_orden ILIKE :search",
-                    "rfc_razon_social ILIKE :search",
-                    "concepto_nombre ILIKE :search",
-                    "delegacion_nombre ILIKE :search",
-                    "estado_codigo ILIKE :search",
-                    "usuario_asignado_nombre ILIKE :search"
+                    "estado_codigo ILIKE :search"
                 ]
             conditions.append(f"({' OR '.join(search_conds)})")
             params["search"] = f"%{search_text}%"
@@ -1971,14 +1964,14 @@ class InventarioRepository(BaseRepository):
         if search_text:
             search_conds = [
                 "r.referencia_portal ILIKE :search",
-                "rfc.razon_social ILIKE :search",
-                "c.nombre ILIKE :search",
-                "d.nombre ILIKE :search",
-                "u.nombre ILIKE :search",
                 "ar.cliente ILIKE :search",
-                "la.lote_asignacion_id::text ILIKE :search",
+                "des.nombre ILIKE :search",
+                "ar.no_oficial ILIKE :search",
+                "ubi.lote_id_erp ILIKE :search",
                 "n.nombre ILIKE :search",
-                "col.nombre ILIKE :search"
+                "col.nombre ILIKE :search",
+                "u.nombre ILIKE :search",
+                "d.nombre ILIKE :search"
             ]
             conditions_sql.append(f"({' OR '.join(search_conds)})")
             
@@ -2107,6 +2100,9 @@ class InventarioRepository(BaseRepository):
             LEFT JOIN sar_archivo.asignacion_referencia ar ON r.referencia_id = ar.referencia_id
             LEFT JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
             LEFT JOIN sar_archivo.lote_asignacion la ON ld.lote_asignacion_id = la.lote_asignacion_id
+            LEFT JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
+            LEFT JOIN sar_catalogo.colaborador col ON la.colaborador_id = col.colaborador_id
+            LEFT JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
             LEFT JOIN sar_archivo.ubicacion ubi ON ar.ubicacion_id = ubi.ubicacion_id
         """
         
@@ -2124,11 +2120,14 @@ class InventarioRepository(BaseRepository):
         if search_text:
             search_conds = [
                 "r.referencia_portal ILIKE :search",
-                "rfc.razon_social ILIKE :search",
-                "c.nombre ILIKE :search",
-                "d.nombre ILIKE :search",
+                "ar.cliente ILIKE :search",
+                "des.nombre ILIKE :search",
+                "ar.no_oficial ILIKE :search",
+                "ubi.lote_id_erp ILIKE :search",
+                "n.nombre ILIKE :search",
+                "col.nombre ILIKE :search",
                 "u.nombre ILIKE :search",
-                "ar.cliente ILIKE :search"
+                "d.nombre ILIKE :search"
             ]
             base_conditions.append(f"({' OR '.join(search_conds)})")
             

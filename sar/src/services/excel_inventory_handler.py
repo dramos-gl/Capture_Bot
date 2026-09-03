@@ -65,6 +65,26 @@ class ExcelInventoryHandler:
 
         parsed_records = []
 
+        def _normalize_date_str(val) -> Optional[str]:
+            if val is None:
+                return None
+            val_str = str(val).strip()
+            if not val_str or val_str.upper() in ("NONE", "NULL", "-", ""):
+                return None
+            if hasattr(val, "strftime"):
+                try:
+                    return val.strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+            # Split time if present e.g. '2026-09-03 00:00:00'
+            date_token = val_str.split()[0]
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%y", "%d-%m-%y"):
+                try:
+                    return datetime.strptime(date_token, fmt).strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+            return date_token
+
         # Process data rows
         for row_num, row in enumerate(rows[1:], start=2):
             # Skip empty rows
@@ -85,18 +105,12 @@ class ExcelInventoryHandler:
             if not cliente and not has_reference:
                 continue # Skip rows if neither client nor references exist
             
-            # Format date
-            fecha_sol = None
-            if idx_fecha_sol != -1 and row[idx_fecha_sol] is not None:
-                val = row[idx_fecha_sol]
-                if isinstance(val, (datetime, date)):
-                    fecha_sol = val
-                else:
-                    try:
-                        fecha_sol = datetime.strptime(str(val).split()[0], "%Y-%m-%d").date()
-                    except Exception:
-                        pass
-            
+            # Format dates to standardized ISO string YYYY-MM-DD
+            fecha_sol = _normalize_date_str(row[idx_fecha_sol]) if idx_fecha_sol != -1 else None
+            f_rep_notaria = _normalize_date_str(row[idx_fecha_reporte_notaria]) if idx_fecha_reporte_notaria != -1 else None
+            f_escritura = _normalize_date_str(row[idx_fecha_escritura]) if idx_fecha_escritura != -1 else None
+            f_titulacion = _normalize_date_str(row[idx_fecha_titulacion]) if idx_fecha_titulacion != -1 else None
+
             # Location fields
             mz = str(row[idx_mz]).strip() if idx_mz != -1 and row[idx_mz] is not None else ""
             lote = str(row[idx_lote]).strip() if idx_lote != -1 and row[idx_lote] is not None else ""
@@ -125,10 +139,6 @@ class ExcelInventoryHandler:
             pa = str(row[idx_pa]).strip() if idx_pa != -1 and row[idx_pa] is not None else ""
             comentarios = str(row[idx_comentarios]).strip() if idx_comentarios != -1 and row[idx_comentarios] is not None else ""
             delegacion = str(row[idx_delegacion]).strip() if idx_delegacion != -1 and row[idx_delegacion] is not None else ""
-            
-            f_rep_notaria = row[idx_fecha_reporte_notaria] if idx_fecha_reporte_notaria != -1 else None
-            f_escritura = row[idx_fecha_escritura] if idx_fecha_escritura != -1 else None
-            f_titulacion = row[idx_fecha_titulacion] if idx_fecha_titulacion != -1 else None
 
             # Check each concept reference column
             for concept_name, col_idx in concept_cols.items():

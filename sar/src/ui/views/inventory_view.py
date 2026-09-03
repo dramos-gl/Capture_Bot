@@ -1,12 +1,12 @@
 import os
 from datetime import datetime
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget,
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget,
     QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
     QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox, QCheckBox
 )
 
-from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize
+from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize, QTimer
 from PySide6.QtGui import QColor
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
@@ -417,7 +417,8 @@ class BatchConfirmationWorker(QThread):
                         "solicitante_externo": self.solicitante_externo,
                         "observaciones": self.observaciones,
                         "usuario_creacion": self.usuario_id,
-                        "detalles": detalles_payload
+                        "detalles": detalles_payload,
+                        "solo_reservar": self.solo_reservar
                     }
                     res = self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
                     lote_id = res["lote_id"]
@@ -555,6 +556,7 @@ class InventoryView(QWidget):
             parent=self
         )
         self.filter_bar.inp_search.setVisible(False)
+        self.filter_bar.btn_search.setVisible(False)
         
         # Add Labeled Concept combo filter to filter bar
         from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
@@ -650,11 +652,22 @@ class InventoryView(QWidget):
         
         # Search Box inside Table Header
         self.search_input_visor = QLineEdit(self)
-        self.search_input_visor.setPlaceholderText("Buscar referencia...")
-        self.search_input_visor.setFixedWidth(240)
+        self.search_input_visor.setPlaceholderText("Buscar derecho, cliente, desarrollo, folio...")
+        self.search_input_visor.setFixedWidth(290)
+        self.search_input_visor.setClearButtonEnabled(True)
         self.search_input_visor.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
-        self.search_input_visor.textChanged.connect(self._on_search_visor)
+        self.search_input_visor.returnPressed.connect(self._on_search_visor_trigger)
+        self.search_input_visor.textChanged.connect(self._on_search_visor_text_changed)
         self.table_header_layout.addWidget(self.search_input_visor)
+
+        # Botón Buscar explícito
+        self.btn_buscar_visor = QPushButton()
+        self.btn_buscar_visor.setObjectName("secondaryBtn")
+        self.btn_buscar_visor.setIcon(Icons.buscar("#FFFFFF") if ThemeManager.is_dark_active() else Icons.buscar("#334155"))
+        self.btn_buscar_visor.setFixedSize(36, 36)
+        self.btn_buscar_visor.setToolTip("Buscar (o presione Enter)")
+        self.btn_buscar_visor.clicked.connect(self._on_search_visor_trigger)
+        self.table_header_layout.addWidget(self.btn_buscar_visor)
         
         # Filter Button (Funnel) inside Table Header
         self.btn_filter_orden = QPushButton()
@@ -735,6 +748,12 @@ class InventoryView(QWidget):
         self._current_estado_filter = "Todos"
         self._current_concepto_id = None
         self._current_rfc_id = None
+        
+        # Debounce timer para búsqueda responsiva sin latencia al escribir (700 ms óptimo para cualquier velocidad de escritura)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(700)
+        self._search_timer.timeout.connect(self._on_search_visor_trigger)
         
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.table.cellDoubleClicked.connect(self._on_table_cell_double_clicked)
@@ -901,10 +920,37 @@ class InventoryView(QWidget):
         self.current_page = page
         self.refresh_visor_data()
 
-    def _on_search_visor(self, text):
-        self._current_search_text = text
-        self.current_page = 1
-        self.refresh_visor_data()
+    def _on_search_visor_text_changed(self, text: str):
+        """Dispara debounce cuando el usuario escribe; si borra todo el texto, refresca de inmediato."""
+        trimmed = text.strip()
+        if not trimmed:
+            if hasattr(self, "_search_timer"):
+                self._search_timer.stop()
+            self._on_search_visor_trigger()
+        else:
+            if hasattr(self, "_search_timer"):
+                self._search_timer.start()
+
+    def _on_search_visor_trigger(self):
+        """Ejecuta la búsqueda de inmediato al presionar Enter, clic en Buscar o cumplirse el debounce."""
+        if hasattr(self, "_search_timer"):
+            self._search_timer.stop()
+        new_text = self.search_input_visor.text().strip() if hasattr(self, "search_input_visor") else ""
+        if new_text != self._current_search_text:
+            self._current_search_text = new_text
+            self.current_page = 1
+            self.refresh_visor_data()
+
+    def _on_clear_search_visor(self):
+        """Limpia el campo de búsqueda y restaura inmediatamente los datos completos."""
+        if hasattr(self, "_search_timer"):
+            self._search_timer.stop()
+        if hasattr(self, "search_input_visor"):
+            self.search_input_visor.clear()
+        if self._current_search_text != "":
+            self._current_search_text = ""
+            self.current_page = 1
+            self.refresh_visor_data()
 
     def _on_state_filter_visor(self, text):
         if text == "Reservadas":
@@ -948,6 +994,7 @@ class InventoryView(QWidget):
             ordenes_count=len(getattr(self, "selected_orden_ids", [])),
             start_date=getattr(self, "_current_start_date", None),
             end_date=getattr(self, "_current_end_date", None),
+            todas_las_ordenes=getattr(self, "todas_las_ordenes", []),
             parent=self
         )
         dlg.exec()
@@ -2572,48 +2619,60 @@ class InventoryView(QWidget):
         # 1. Search Input
         self.search_lotes = QLineEdit()
         self.search_lotes.setObjectName("filterBarSearch")
-        self.search_lotes.setPlaceholderText("🔍 Buscar por ID, notaría, colaborador, solicitante...")
-        self.search_lotes.setFixedHeight(35)
-        self.search_lotes.textChanged.connect(self._on_search_lotes)
-        filter_row.addWidget(self.search_lotes, stretch=1, alignment=Qt.AlignmentFlag.AlignBottom)
+        self.search_lotes.setPlaceholderText("Buscar por ID, notaría, colaborador, solicitante...")
+        self.search_lotes.setFixedHeight(36)
+        self.search_lotes.setClearButtonEnabled(True)
+        self.search_lotes.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
+        self.search_lotes.textChanged.connect(self._on_search_lotes_text_changed)
+        self.search_lotes.returnPressed.connect(self._on_search_lotes_trigger)
+        filter_row.addWidget(self.search_lotes, stretch=1)
+
+        # Botón Buscar explícito para Lotes
+        self.btn_buscar_lotes = QPushButton()
+        self.btn_buscar_lotes.setObjectName("secondaryBtn")
+        self.btn_buscar_lotes.setIcon(Icons.buscar("#FFFFFF") if ThemeManager.is_dark_active() else Icons.buscar("#334155"))
+        self.btn_buscar_lotes.setFixedSize(36, 36)
+        self.btn_buscar_lotes.setToolTip("Buscar (o presione Enter)")
+        self.btn_buscar_lotes.clicked.connect(self._on_search_lotes_trigger)
+        filter_row.addWidget(self.btn_buscar_lotes)
 
         # 2. Tipo Destino
         self.labeled_destino_lotes = LabeledComboBox("Tipo Destino", ["Todos", "NOTARIA", "COLABORADOR"])
         self.cb_destino_filter_lotes = self.labeled_destino_lotes.combo
         self.cb_destino_filter_lotes.currentTextChanged.connect(self._on_destino_filter_lotes)
-        filter_row.addWidget(self.labeled_destino_lotes, alignment=Qt.AlignmentFlag.AlignBottom)
+        filter_row.addWidget(self.labeled_destino_lotes)
 
         # 3. Date Filters (Atomic Design Molecules)
         self.group_start_date = LabeledDateEdit("Desde", parent=self)
         self.start_date_filter = self.group_start_date.date_edit
         self.group_start_date.setDate(QDate.currentDate().addMonths(-3))
         self.start_date_filter.dateChanged.connect(self._on_date_changed_lotes)
-        filter_row.addWidget(self.group_start_date, alignment=Qt.AlignmentFlag.AlignBottom)
+        filter_row.addWidget(self.group_start_date)
 
         self.group_end_date = LabeledDateEdit("Hasta", parent=self)
         self.end_date_filter = self.group_end_date.date_edit
         self.group_end_date.setDate(QDate.currentDate())
         self.end_date_filter.dateChanged.connect(self._on_date_changed_lotes)
-        filter_row.addWidget(self.group_end_date, alignment=Qt.AlignmentFlag.AlignBottom)
+        filter_row.addWidget(self.group_end_date)
 
         # 4. Refresh button
         self.btn_refresh_lotes = QPushButton(self)
         self.btn_refresh_lotes.setObjectName("filterBarActionBtn")
         self.btn_refresh_lotes.setIcon(Icons.actualizar("#FFFFFF"))
         self.btn_refresh_lotes.setIconSize(QSize(20, 20))
-        self.btn_refresh_lotes.setFixedSize(35, 35)
+        self.btn_refresh_lotes.setFixedSize(36, 36)
         self.btn_refresh_lotes.setToolTip("Actualizar Asignaciones")
         self.btn_refresh_lotes.clicked.connect(self.refresh_lotes_data)
-        filter_row.addWidget(self.btn_refresh_lotes, alignment=Qt.AlignmentFlag.AlignBottom)
+        filter_row.addWidget(self.btn_refresh_lotes)
 
         # 5. Filter Button (Funnel) for Lotes
         self.btn_filter_orden_lotes = QPushButton()
         self.btn_filter_orden_lotes.setObjectName("secondaryBtn")
         self.btn_filter_orden_lotes.setIcon(Icons.filter_icon("#475569"))
-        self.btn_filter_orden_lotes.setFixedSize(35, 35)
+        self.btn_filter_orden_lotes.setFixedSize(36, 36)
         self.btn_filter_orden_lotes.setToolTip("Filtrar por Órdenes")
         self.btn_filter_orden_lotes.clicked.connect(self._show_order_filter_menu)
-        filter_row.addWidget(self.btn_filter_orden_lotes, alignment=Qt.AlignmentFlag.AlignBottom)
+        filter_row.addWidget(self.btn_filter_orden_lotes)
 
         layout.addWidget(filter_bar_frame)
 
@@ -2672,6 +2731,12 @@ class InventoryView(QWidget):
         self._current_search_text_lotes = ""
         self._current_tipo_destino_lotes = "Todos"
         self._current_rfc_id_lotes = None
+
+        # Debounce timer para búsqueda en Lotes (700 ms)
+        self._search_lotes_timer = QTimer(self)
+        self._search_lotes_timer.setSingleShot(True)
+        self._search_lotes_timer.setInterval(700)
+        self._search_lotes_timer.timeout.connect(self._on_search_lotes_trigger)
 
         self.table_lotes.cellDoubleClicked.connect(self._on_table_cell_double_clicked_lotes)
 
@@ -2763,10 +2828,24 @@ class InventoryView(QWidget):
         self.current_page_lotes = page
         self.refresh_lotes_data()
 
-    def _on_search_lotes(self, text):
-        self._current_search_text_lotes = text
-        self.current_page_lotes = 1
-        self.refresh_lotes_data()
+    def _on_search_lotes_text_changed(self, text: str):
+        trimmed = text.strip()
+        if not trimmed:
+            if hasattr(self, "_search_lotes_timer"):
+                self._search_lotes_timer.stop()
+            self._on_search_lotes_trigger()
+        else:
+            if hasattr(self, "_search_lotes_timer"):
+                self._search_lotes_timer.start()
+
+    def _on_search_lotes_trigger(self):
+        if hasattr(self, "_search_lotes_timer"):
+            self._search_lotes_timer.stop()
+        new_text = self.search_lotes.text().strip() if hasattr(self, "search_lotes") else ""
+        if new_text != self._current_search_text_lotes:
+            self._current_search_text_lotes = new_text
+            self.current_page_lotes = 1
+            self.refresh_lotes_data()
 
     def _on_destino_filter_lotes(self, text):
         self._current_tipo_destino_lotes = text
@@ -2914,20 +2993,31 @@ class ManualAssignmentDialog(QDialog):
         success_color = Colors.SUCCESS_DARK_TEXT if is_dark else Colors.SUCCESS
 
         self.setWindowTitle("Asignar Derechos")
-        self.setMinimumWidth(540)
+        self.setMinimumWidth(580)
+        
+        # Dimensionado responsivo adaptado a la resolución de pantalla activa (evita desborde en 1366x768 o menores)
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            dialog_w = min(720, max(580, avail.width() - 40))
+            dialog_h = min(600, max(460, avail.height() - 70))
+            self.resize(dialog_w, dialog_h)
+            self.setMaximumHeight(avail.height() - 30)
+        else:
+            self.resize(700, 580)
         
         main_vlayout = QVBoxLayout(self)
-        main_vlayout.setContentsMargins(16, 14, 16, 14)
-        main_vlayout.setSpacing(10)
+        main_vlayout.setContentsMargins(16, 12, 16, 12)
+        main_vlayout.setSpacing(8)
 
-        # Header Info Banner con formato dinámico según el tema
+        # -------------------------------------------------------------
+        # 1. CABECERA FIJA (Header Info Banner + Wizard Nav + Destino)
+        # -------------------------------------------------------------
         self.lbl_info = QLabel("", self)
-        self.lbl_info.setStyleSheet("padding: 4px 0px;")
+        self.lbl_info.setStyleSheet("padding: 2px 0px;")
         main_vlayout.addWidget(self.lbl_info)
 
-        # -------------------------------------------------------------
         # Barra de Navegación Secuencial (Wizard / Paginador)
-        # -------------------------------------------------------------
         self.nav_container = QFrame(self)
         self.nav_container.setObjectName("nav_bar")
         self.nav_container.setStyleSheet(f"QFrame#nav_bar {{ background-color: {nav_bg}; border: 1px solid {nav_border}; border-radius: 6px; padding: 4px 8px; }}")
@@ -2964,11 +3054,9 @@ class ManualAssignmentDialog(QDialog):
             self.nav_container.hide()
             self.chk_replicar.hide()
 
-        # -------------------------------------------------------------
-        # 1. Selector de Tipo de Destino
-        # -------------------------------------------------------------
+        # Selector de Tipo de Destino (en cabecera fija)
         dest_form = QFormLayout()
-        dest_form.setContentsMargins(0, 0, 0, 4)
+        dest_form.setContentsMargins(0, 0, 0, 2)
         dest_form.setSpacing(8)
         
         self.cb_destino = CustomComboBox(self)
@@ -2979,9 +3067,23 @@ class ManualAssignmentDialog(QDialog):
         main_vlayout.addLayout(dest_form)
 
         # -------------------------------------------------------------
-        # 2. CONTENEDOR: MODO COLABORADOR
+        # 2. ÁREA CENTRAL DESPLAZABLE (QScrollArea)
         # -------------------------------------------------------------
-        self.container_colaborador = QFrame(self)
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background: transparent;")
+        scroll_content_layout = QVBoxLayout(self.scroll_content)
+        scroll_content_layout.setContentsMargins(0, 2, 0, 2)
+        scroll_content_layout.setSpacing(8)
+
+        # -------------------------------------------------------------
+        # CONTENEDOR: MODO COLABORADOR
+        # -------------------------------------------------------------
+        self.container_colaborador = QFrame(self.scroll_content)
         self.container_colaborador.setObjectName("card_colab")
         self.container_colaborador.setStyleSheet(f"QFrame#card_colab {{ background-color: {bg_sub}; border: 1px solid {border_color}; border-radius: 8px; padding: 8px; }}")
         colab_vlayout = QVBoxLayout(self.container_colaborador)
@@ -3009,12 +3111,12 @@ class ManualAssignmentDialog(QDialog):
         form_colab.addRow("Observaciones *:", self.txt_obs_colab)
 
         colab_vlayout.addLayout(form_colab)
-        main_vlayout.addWidget(self.container_colaborador)
+        scroll_content_layout.addWidget(self.container_colaborador)
 
         # -------------------------------------------------------------
-        # 3. CONTENEDOR: MODO NOTARIA
+        # CONTENEDOR: MODO NOTARIA
         # -------------------------------------------------------------
-        self.container_notaria = QFrame(self)
+        self.container_notaria = QFrame(self.scroll_content)
         self.container_notaria.setObjectName("card_notaria")
         self.container_notaria.setStyleSheet(f"QFrame#card_notaria {{ background-color: {bg_card}; border: 1px solid {border_color}; border-radius: 8px; padding: 6px; }}")
         notaria_vlayout = QVBoxLayout(self.container_notaria)
@@ -3149,7 +3251,11 @@ class ManualAssignmentDialog(QDialog):
         form_obs.addRow("Observaciones:", self.txt_obs_notaria)
         notaria_vlayout.addLayout(form_obs)
 
-        main_vlayout.addWidget(self.container_notaria)
+        scroll_content_layout.addWidget(self.container_notaria)
+        scroll_content_layout.addStretch()
+
+        self.scroll_area.setWidget(self.scroll_content)
+        main_vlayout.addWidget(self.scroll_area, stretch=1)
 
         # -------------------------------------------------------------
         # Timers y Búsqueda Predictiva de Ubicación
@@ -3171,10 +3277,10 @@ class ManualAssignmentDialog(QDialog):
         self.txt_folio.textChanged.connect(lambda: self._ubi_timer.start())
 
         # -------------------------------------------------------------
-        # Botones de Acción
+        # 3. PIE FIJO (Botones de Acción siempre visibles)
         # -------------------------------------------------------------
         btns = QHBoxLayout()
-        btns.setContentsMargins(0, 8, 0, 0)
+        btns.setContentsMargins(0, 6, 0, 0)
         btn_cancel = CustomButton("Cancelar", is_secondary=True)
         btn_cancel.clicked.connect(self.reject)
         
@@ -3492,7 +3598,9 @@ class ManualAssignmentDialog(QDialog):
         else:
             self.container_notaria.hide()
             self.container_colaborador.hide()
-        self.adjustSize()
+            
+        if hasattr(self, "scroll_area"):
+            self.scroll_area.verticalScrollBar().setValue(0)
 
     def _load_catalogs(self):
         try:
