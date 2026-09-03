@@ -436,15 +436,15 @@ Las referencias transicionan a través de los siguientes estados a lo largo de s
 
 ### Reglas de Operación y Transición de Estados
 
-1. **Flujo de Ejecución del Bot A (Pago de Derechos)**:
-   * El Bot A toma solicitudes en estado `ASIGNADA` y las procesa.
+1. **Flujo de Ejecución del Bot Fase A (AutoGeneración de Derechos)**:
+   * El Bot Fase A (AutoGeneración de Derechos) toma solicitudes en estado `ASIGNADA` y las procesa en Tributanet.
    * A medida que cada consecutivo se descarga con éxito, la referencia correspondiente se crea en el sistema en estado `GENERADA`.
    * **Transición de Solicitud Completa**: Al completarse exitosamente todo el rango de la solicitud (estado cambia a `COMPLETADA`), el bot actualiza automáticamente todas las referencias generadas por esta solicitud al estado **`PENDIENTE_AUTORIZACION`** o el estado final correspondiente.
 
 2. **Flujo de Autorización de Referencias y Ordenes**:
    * Las referencias en estado `PENDIENTE_AUTORIZACION` son validadas por el usuario u operador (validación de pago).
    * Cuando el usuario autoriza una referencia, su estado individual cambia a **`AUTORIZADA`**.
-   * **Regla de Autorización Masiva**: La autorización o rechazo masivo de una orden completa desde el listado principal de órdenes solo se permite si el 100% de las referencias solicitadas se encuentran en estado `PENDIENTE_AUTORIZACION`. Si se ha aplicado alguna autorización parcial previa o si faltan referencias por generar por el Bot A, el sistema bloqueará la acción masiva y exigirá el procesamiento granular a través del diálogo "Procesar solicitudes de la orden".
+   * **Regla de Autorización Masiva**: La autorización o rechazo masivo de una orden completa desde el listado principal de órdenes solo se permite si el 100% de las referencias solicitadas se encuentran en estado `PENDIENTE_AUTORIZACION`. Si se ha aplicado alguna autorización parcial previa o si faltan referencias por generar por el Bot Fase A (AutoGeneración de Derechos), el sistema bloqueará la acción masiva y exigirá el procesamiento granular a través del diálogo "Procesar solicitudes de la orden".
    * **Transición de Solicitudes y Grupos**:
      * Si el 100% de las referencias de una solicitud son autorizadas, la solicitud cambia físicamente en la base de datos a **`AUTORIZADA`**.
      * Si el 100% de las referencias de una solicitud son rechazadas, la solicitud cambia físicamente en la base de datos a **`RECHAZADA`**.
@@ -452,11 +452,11 @@ Las referencias transicionan a través de los siguientes estados a lo largo de s
      * El estado de los **Grupos de Referencia** cambia correspondientemente a `AUTORIZADA`, `RECHAZADA` o `AUTORIZACION_PARCIAL` al procesarse la totalidad de sus solicitudes.
    * **Transición de la Orden de Generación**: Cuando **todas** las referencias de la orden han sido resueltas sin pendientes, si existe al menos una referencia autorizada, la orden principal cambia de forma automática a **`AUTORIZADA`**; de lo contrario, si el 100% de las referencias fueron rechazadas, la orden cambia a **`RECHAZADA`**.
 
-3. **Flujo de Ejecución del Bot C (Facturación)**:
-   * El Bot C (Facturación) toma para procesar aquellas solicitudes cuyo estado físico en base de datos sea **`AUTORIZADA`** o **`AUTORIZACION_PARCIAL`**.
-   * **Regla de Filtrado de Referencias**: Para solicitudes en estado **`AUTORIZACION_PARCIAL`**, el Bot C filtra y procesa **únicamente** las referencias hijas que tengan el estado físico **`AUTORIZADA`**, ignorando y saltando por completo aquellas marcadas como `RECHAZADA`.
-   * El Bot C procesa el timbrado y descarga del CFDI, y al finalizar la descarga física e inserción del registro en la tabla de facturas, transiciona el estado de la referencia a **`FACTURADA`**.
-   * **Finalización de la Solicitud**: Una vez que el Bot C ha procesado la totalidad de las referencias válidas asignadas a la solicitud, el estado físico de la **Solicitud** se actualiza automáticamente en la base de datos a **`FACTURADA`** (lo que indica el fin del ciclo de procesamiento automático de timbrado para esa solicitud).
+3. **Flujo de Ejecución del Bot Fase C (AutoFacturación de Derechos)**:
+   * El Bot Fase C (AutoFacturación de Derechos) toma para procesar aquellas solicitudes cuyo estado físico en base de datos sea **`AUTORIZADA`** o **`AUTORIZACION_PARCIAL`**.
+   * **Regla de Filtrado de Referencias**: Para solicitudes en estado **`AUTORIZACION_PARCIAL`**, el Bot Fase C (AutoFacturación de Derechos) filtra y procesa **únicamente** las referencias hijas que tengan el estado físico **`AUTORIZADA`**, ignorando y saltando por completo aquellas marcadas como `RECHAZADA`.
+   * El Bot Fase C procesa el timbrado y descarga del CFDI, y al finalizar la descarga física e inserción del registro en la tabla de facturas, transiciona el estado de la referencia a **`FACTURADA`**.
+   * **Finalización de la Solicitud**: Una vez que el Bot Fase C ha procesado la totalidad de las referencias válidas asignadas a la solicitud, el estado físico de la **Solicitud** se actualiza automáticamente en la base de datos a **`FACTURADA`** (lo que indica el fin del ciclo de procesamiento automático de timbrado para esa solicitud).
 
 ### Diagrama del Ciclo de Vida
 

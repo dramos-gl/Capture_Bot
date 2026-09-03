@@ -144,24 +144,29 @@ class ThemeManager:
             border: 1px solid {border};
             border-radius: 6px;
             background-color: {surf};
+            alternate-background-color: {surf};
             color: {txt_primary};
-            selection-background-color: {"#EFF6FF" if not is_dark else "#2563EB"};
-            selection-color: {"#1E293B" if not is_dark else "#FFFFFF"};
+            selection-background-color: {Colors.ACCENT_BG if not is_dark else Colors.ACCENT_DARK_BG};
+            selection-color: {Colors.TEXT_LIGHT_PRIMARY if not is_dark else Colors.TEXT_DARK_PRIMARY};
             padding: 4px;
             outline: 0px;
+        }}
+        QComboBox QAbstractItemView::viewport {{
+            background-color: {surf};
         }}
         QComboBox QAbstractItemView::item {{
             min-height: 28px;
             padding: 4px 8px;
             border-radius: 4px;
+            background-color: {surf};
             color: {txt_primary};
         }}
         QComboBox QAbstractItemView::item:selected {{
-            background-color: {"#EFF6FF" if not is_dark else "#2563EB"};
-            color: {"#1E293B" if not is_dark else "#FFFFFF"};
+            background-color: {Colors.ACCENT_BG if not is_dark else Colors.ACCENT_DARK_BG};
+            color: {Colors.TEXT_LIGHT_PRIMARY if not is_dark else Colors.TEXT_DARK_PRIMARY};
         }}
         QComboBox QAbstractItemView::item:hover {{
-            background-color: {"#F1F5F9" if not is_dark else "#334155"};
+            background-color: {Colors.NEUTRAL_BG if not is_dark else Colors.NEUTRAL_DARK_BG};
             color: {txt_primary};
         }}
 

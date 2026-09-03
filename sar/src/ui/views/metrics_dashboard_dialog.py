@@ -1,4 +1,4 @@
-"""Metrics and advanced reports dashboard dialog using QtCharts."""
+"""Metrics and advanced reports dashboard dialog — native QPainter charts."""
 
 from typing import List, Dict, Any
 from PySide6.QtWidgets import (
@@ -7,7 +7,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QMargins
 from PySide6.QtGui import QPainter, QColor, QAction
-from PySide6.QtCharts import QChart, QChartView, QBarSet, QBarSeries, QBarCategoryAxis, QValueAxis
 
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
@@ -16,6 +15,7 @@ from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.components.organisms.gl_data_table import StyledDataTable
 from sar.src.ui.design_system.components.molecules.gl_menu import KeepOpenMenu
+from sar.src.ui.design_system.components.molecules.gl_chart_widgets import DonutChartWidget, BarChartWidget
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.theme_manager import Colors
 from sar.src.services.referencias_service import ReferenciasService
@@ -84,15 +84,15 @@ _ESTADO_CONFIG = {
     "AUTORIZADA":              {"label": "Autorizadas",              "icon": "shield_check",  "color": Colors.SUCCESS},
     "RECHAZADA":               {"label": "Rechazadas",               "icon": "alert_triangle","color": Colors.ERROR},
     "ERROR":                   {"label": "Con Error",                "icon": "alert_triangle","color": Colors.ERROR},
-    "EXPIRADA":                {"label": "Expiradas",                "icon": "alert_triangle","color": "#F59E0B"},
-    "ASIGNADA":                {"label": "Asignadas",                "icon": "shield_check",  "color": "#10B981"},
-    "FACTURADA":               {"label": "Facturadas",               "icon": "file_text",     "color": "#6366F1"},
-    "CANCELADA":               {"label": "Canceladas",               "icon": "alert_triangle","color": "#64748B"},
+    "EXPIRADA":                {"label": "Expiradas",                "icon": "alert_triangle","color": Colors.ACCENT_AMBER},
+    "ASIGNADA":                {"label": "Asignadas",                "icon": "shield_check",  "color": Colors.ACCENT_EMERALD},
+    "FACTURADA":               {"label": "Facturadas",               "icon": "file_text",     "color": Colors.ACCENT_INDIGO},
+    "CANCELADA":               {"label": "Canceladas",               "icon": "alert_triangle","color": Colors.SLATE_500},
     "COMPLETADA":              {"label": "Completadas",              "icon": "shield_check",  "color": Colors.SUCCESS},
     "PENDIENTE":               {"label": "Pendientes",               "icon": "clock",         "color": Colors.WARNING},
 }
 
-_DEFAULT_ESTADO = {"label": None, "icon": "file_text", "color": "#64748B"}
+_DEFAULT_ESTADO = {"label": None, "icon": "file_text", "color": Colors.SLATE_500}
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@ class MetricsDashboardDialog(QWidget):
         v.addWidget(CustomLabel("Orden / Folio:", variant="body"))
         self.btn_orden_filter = QPushButton("  Seleccionar Orden")
         self.btn_orden_filter.setObjectName("secondaryBtn")
-        self.btn_orden_filter.setIcon(Icons.filter_icon("#475569"))
+        self.btn_orden_filter.setIcon(Icons.filter_icon(Colors.TEXT_LIGHT_SECONDARY))
         self.btn_orden_filter.setFixedHeight(32)
         self.btn_orden_filter.clicked.connect(self._show_orden_filter_menu)
         v.addWidget(self.btn_orden_filter)
@@ -234,12 +234,16 @@ class MetricsDashboardDialog(QWidget):
         v4.addWidget(self.cb_deleg)
         fl.addLayout(v4, stretch=1)
 
-        # Reset
-        btn_reset = CustomButton("Limpiar Filtros", is_secondary=True)
-        btn_reset.setFixedWidth(120)
+        # Reset — usando patrón is_clean_btn del Design System (ícono + estilo correcto)
+        v_reset = QVBoxLayout()
+        v_reset.setSpacing(4)
+        v_reset.addWidget(CustomLabel("", variant="body"))  # spacer label para alinear con combos
+        btn_reset = CustomButton("Limpiar Filtros", is_clean_btn=True)
         btn_reset.setFixedHeight(32)
+        btn_reset.setMinimumWidth(140)
         btn_reset.clicked.connect(self._reset_filters)
-        fl.addWidget(btn_reset, alignment=Qt.AlignBottom)
+        v_reset.addWidget(btn_reset)
+        fl.addLayout(v_reset)
 
         self.card_filters.layout.addLayout(fl)
         self.main_layout.addWidget(self.card_filters)
@@ -253,7 +257,7 @@ class MetricsDashboardDialog(QWidget):
         kpi_widget.setStyleSheet("background: transparent;")
         self._kpi_layout = QHBoxLayout(kpi_widget)
         self._kpi_layout.setContentsMargins(0, 0, 0, 0)
-        self._kpi_layout.setSpacing(12)
+        self._kpi_layout.setSpacing(8)
 
         # Static "Total General" card (monto)
         self.card_total_monto = StatCard(
@@ -284,7 +288,7 @@ class MetricsDashboardDialog(QWidget):
         self._kpi_estado_widget = kpi_widget
 
     def _update_kpi_cards(self, summary: dict):
-        """Updates static KPI cards and creates/updates per-estado stat cards."""
+        """Updates static KPI cards, per-estado stat cards, and the donut chart."""
         total_refs = summary.get("total_referencias", 0)
         importe = summary.get("importe_total", 0.0)
         por_estado: Dict[str, dict] = summary.get("por_estado", {})
@@ -318,7 +322,6 @@ class MetricsDashboardDialog(QWidget):
             count = vals["total"]
 
             if codigo not in self._estado_cards:
-                # Ocultamos la sparkline en las tarjetas del diálogo para reducir la altura vertical del KPI a la mitad
                 card = StatCard(label, str(count), icon_name=icon, color_hex=color, show_sparkline=False,
                                 parent=self._kpi_estado_widget)
                 card.lbl_sub.setText(f"$ {vals['importe']:,.0f}")
@@ -330,49 +333,65 @@ class MetricsDashboardDialog(QWidget):
                 card.set_value(f"{count:,}")
                 card.lbl_sub.setText(f"$ {vals['importe']:,.0f}")
 
+        # Feed the donut chart with state distribution data
+        donut_data = [
+            {
+                "label": _ESTADO_CONFIG.get(cod, _DEFAULT_ESTADO).get("label") or cod.replace("_", " ").title(),
+                "value": vals["total"],
+                "color": _ESTADO_CONFIG.get(cod, _DEFAULT_ESTADO).get("color", Colors.ACCENT),
+            }
+            for cod, vals in merged.items()
+            if vals["total"] > 0
+        ]
+        self.donut_chart.set_data(donut_data)
+
     # =========================================================================
     # Charts
     # =========================================================================
     def _setup_charts_area(self):
+        """Creates the charts section: one donut (state distribution) + two horizontal bar charts."""
         charts_widget = QWidget(self)
         charts_widget.setStyleSheet("background: transparent;")
         cl = QHBoxLayout(charts_widget)
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(20)
 
-        self.card_chart_qty = CustomCard(title="Referencias por Delegación", parent=self)
-        # Aplicamos padding de contenido reducido para minimalismo
-        self.card_chart_qty.layout.setContentsMargins(8, 4, 8, 8)
-        
-        self.chart_qty = QChart()
-        self.chart_qty.setAnimationOptions(QChart.SeriesAnimations)
-        self.chart_qty.legend().setVisible(False)
-        self.chart_qty.setBackgroundVisible(False)  # Fondo transparente moderno
-        self.chart_qty.setMargins(QMargins(10, 10, 10, 10))
-        
-        self.chart_qty_view = QChartView(self.chart_qty)
-        self.chart_qty_view.setRenderHint(QPainter.Antialiasing)
-        self.chart_qty_view.setMinimumHeight(200)
-        self.chart_qty_view.setStyleSheet("background: transparent;")
-        self.card_chart_qty.add_widget(self.chart_qty_view)
+        # --- Left column: Donut de estados ---
+        self.card_chart_donut = CustomCard(title="Distribución por Estado", parent=self)
+        self.card_chart_donut.layout.setContentsMargins(8, 4, 8, 8)
+        self.donut_chart = DonutChartWidget(parent=self.card_chart_donut)
+        self.donut_chart.setMinimumHeight(260)
+        self.card_chart_donut.add_widget(self.donut_chart)
 
+        # --- Right column: two stacked bar charts ---
+        right_col = QWidget(self)
+        right_col.setStyleSheet("background: transparent;")
+        right_layout = QVBoxLayout(right_col)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(16)
+
+        # Bar chart — quantity
+        self.card_chart_qty = CustomCard(title="Referencias por Delegación", parent=self)
+        self.card_chart_qty.layout.setContentsMargins(8, 4, 8, 8)
+        self.bar_chart_qty = BarChartWidget(parent=self.card_chart_qty)
+        self.bar_chart_qty.setMinimumHeight(130)
+        self.card_chart_qty.add_widget(self.bar_chart_qty)
+
+        # Bar chart — amounts
         self.card_chart_amount = CustomCard(title="Importe Total por Delegación ($)", parent=self)
         self.card_chart_amount.layout.setContentsMargins(8, 4, 8, 8)
-        
-        self.chart_amount = QChart()
-        self.chart_amount.setAnimationOptions(QChart.SeriesAnimations)
-        self.chart_amount.legend().setVisible(False)
-        self.chart_amount.setBackgroundVisible(False)
-        self.chart_amount.setMargins(QMargins(10, 10, 10, 10))
-        
-        self.chart_amount_view = QChartView(self.chart_amount)
-        self.chart_amount_view.setRenderHint(QPainter.Antialiasing)
-        self.chart_amount_view.setMinimumHeight(200)
-        self.chart_amount_view.setStyleSheet("background: transparent;")
-        self.card_chart_amount.add_widget(self.chart_amount_view)
+        self.bar_chart_amount = BarChartWidget(
+            value_formatter=lambda v: f"${v:,.0f}",
+            parent=self.card_chart_amount,
+        )
+        self.bar_chart_amount.setMinimumHeight(130)
+        self.card_chart_amount.add_widget(self.bar_chart_amount)
 
-        cl.addWidget(self.card_chart_qty, stretch=1)
-        cl.addWidget(self.card_chart_amount, stretch=1)
+        right_layout.addWidget(self.card_chart_qty, stretch=1)
+        right_layout.addWidget(self.card_chart_amount, stretch=1)
+
+        cl.addWidget(self.card_chart_donut, stretch=1)
+        cl.addWidget(right_col, stretch=2)
         self.main_layout.addWidget(charts_widget, stretch=1)
 
     # =========================================================================
@@ -562,7 +581,7 @@ class MetricsDashboardDialog(QWidget):
         rfc_txt = self.cb_rfc.currentText()
         if self.cb_rfc.currentIndex() == 0:
             rfc_txt = "Todas"
-        
+
         concepto_txt = self.cb_concepto.currentText()
         if self.cb_concepto.currentIndex() == 0:
             concepto_txt = "Todos"
@@ -573,7 +592,7 @@ class MetricsDashboardDialog(QWidget):
         self.card_chart_qty.header.setText(f"Referencias por Delegación ({rfc_txt} - {concepto_txt})")
         self.card_chart_amount.header.setText(f"Importe por Delegación ({rfc_txt} - {concepto_txt})")
 
-        # Aggregate by delegación for charts
+        # Aggregate by delegación for bar charts
         del_data: Dict[str, Dict] = {}
         for row in data:
             d = row["delegacion_name"]
@@ -581,57 +600,20 @@ class MetricsDashboardDialog(QWidget):
                 del_data[d] = {"qty": 0, "amount": 0.0}
             del_data[d]["qty"] += row["total_referencias"]
             del_data[d]["amount"] += row["importe_total"]
-        categories = list(del_data.keys())
 
-        # Chart 1 – References
-        self.chart_qty.removeAllSeries()
-        for ax in self.chart_qty.axes():
-            self.chart_qty.removeAxis(ax)
-        if categories:
-            qty_set = QBarSet("Referencias")
-            qty_set.setColor(QColor(Colors.ACCENT))
-            max_qty = 0
-            for cat in categories:
-                val = del_data[cat]["qty"]
-                qty_set.append(val)
-                max_qty = max(max_qty, val)
-            qty_series = QBarSeries()
-            qty_series.append(qty_set)
-            self.chart_qty.addSeries(qty_series)
-            ax_x = QBarCategoryAxis()
-            ax_x.append(categories)
-            self.chart_qty.addAxis(ax_x, Qt.AlignBottom)
-            qty_series.attachAxis(ax_x)
-            ax_y = QValueAxis()
-            ax_y.setRange(0, max(10, int(max_qty * 1.2)))
-            ax_y.setLabelFormat("%d")
-            self.chart_qty.addAxis(ax_y, Qt.AlignLeft)
-            qty_series.attachAxis(ax_y)
+        # Bar chart 1 — References per delegation
+        qty_data = [
+            {"label": delegacion, "value": vals["qty"],    "color": Colors.ACCENT}
+            for delegacion, vals in del_data.items()
+        ]
+        self.bar_chart_qty.set_data(qty_data)
 
-        # Chart 2 – Amounts
-        self.chart_amount.removeAllSeries()
-        for ax in self.chart_amount.axes():
-            self.chart_amount.removeAxis(ax)
-        if categories:
-            amt_set = QBarSet("Importe ($)")
-            amt_set.setColor(QColor(Colors.PRIMARY))
-            max_amt = 0.0
-            for cat in categories:
-                val = del_data[cat]["amount"]
-                amt_set.append(val)
-                max_amt = max(max_amt, val)
-            amt_series = QBarSeries()
-            amt_series.append(amt_set)
-            self.chart_amount.addSeries(amt_series)
-            ax_x2 = QBarCategoryAxis()
-            ax_x2.append(categories)
-            self.chart_amount.addAxis(ax_x2, Qt.AlignBottom)
-            amt_series.attachAxis(ax_x2)
-            ax_y2 = QValueAxis()
-            ax_y2.setRange(0, max(100.0, max_amt * 1.2))
-            ax_y2.setLabelFormat("$%d")
-            self.chart_amount.addAxis(ax_y2, Qt.AlignLeft)
-            amt_series.attachAxis(ax_y2)
+        # Bar chart 2 — Amounts per delegation
+        amt_data = [
+            {"label": delegacion, "value": vals["amount"], "color": Colors.PRIMARY}
+            for delegacion, vals in del_data.items()
+        ]
+        self.bar_chart_amount.set_data(amt_data)
 
     # =========================================================================
     # Reset
@@ -671,15 +653,20 @@ class MetricsDashboardDialog(QWidget):
         try:
             # 2. Capture charts as temporary image files
             temp_dir = tempfile.gettempdir()
+            chart_donut_path = os.path.join(temp_dir, "temp_chart_donut.png")
             chart_qty_path = os.path.join(temp_dir, "temp_chart_qty.png")
             chart_amount_path = os.path.join(temp_dir, "temp_chart_amount.png")
 
-            # Capture Chart 1
-            pixmap_qty = self.chart_qty_view.grab()
+            # Capture Donut
+            pixmap_donut = self.donut_chart.grab()
+            pixmap_donut.save(chart_donut_path, "PNG")
+
+            # Capture Bar Chart 1 (References)
+            pixmap_qty = self.bar_chart_qty.grab()
             pixmap_qty.save(chart_qty_path, "PNG")
 
-            # Capture Chart 2
-            pixmap_amt = self.chart_amount_view.grab()
+            # Capture Bar Chart 2 (Amounts)
+            pixmap_amt = self.bar_chart_amount.grab()
             pixmap_amt.save(chart_amount_path, "PNG")
 
             # 3. Gather filter information for the PDF header

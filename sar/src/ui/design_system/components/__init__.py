@@ -14,6 +14,7 @@ from sar.src.ui.design_system.components.molecules.gl_labeled_input import Label
 from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.molecules.gl_metric_box import MetricBox
 from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
+from sar.src.ui.design_system.components.molecules.gl_chart_widgets import DonutChartWidget, BarChartWidget
 
 # Organisms
 from sar.src.ui.design_system.components.organisms.gl_sidebar import NavigationSidebar
@@ -51,5 +52,7 @@ __all__ = [
     "GLLoadingDialog",
     "GLMessageDialog",
     "GLMessageBox",
-    "DialogType"
+    "DialogType",
+    "DonutChartWidget",
+    "BarChartWidget",
 ]

@@ -449,13 +449,17 @@ class SupportDialog(QDialog):
         layout.addWidget(btn_close, alignment=Qt.AlignRight)
 
 
+import os
+import subprocess
+
+
 class UserManualDialog(QDialog):
-    """Interactive User and Administrator Guide dialog with categorized topics."""
+    """Interactive User and Administrator Guide dialog with categorized topics and file viewer."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Manual de Administración y Guía de Operación")
-        self.resize(780, 560)
+        self.setWindowTitle("Manual de Administración y Guía de Operación — SAR")
+        self.resize(860, 620)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self._build_ui()
 
@@ -467,7 +471,7 @@ class UserManualDialog(QDialog):
         header_layout = QHBoxLayout()
         icon_lbl = QLabel()
         icon_lbl.setPixmap(Icons.get_pixmap("documento_abrir", size=24, color="#2563EB"))
-        lbl_title = CustomLabel("Guía Operativa y Manual del Módulo de Administración", variant="header")
+        lbl_title = CustomLabel("Centro de Documentación y Guías Operativas SAR", variant="header")
         header_layout.addWidget(icon_lbl)
         header_layout.addWidget(lbl_title)
         header_layout.addStretch()
@@ -499,39 +503,51 @@ class UserManualDialog(QDialog):
         """)
 
         manual_topics = [
-            ("1. Seguridad y Accesos", """
-                <h3 style='color: #1E293B;'>Gestión de Usuarios, Roles y Permisos</h3>
-                <p>El esquema <code>sar_seguridad</code> controla quién ingresa al sistema y qué acciones puede realizar.</p>
+            ("📘 Guía Operativa (Usuario)", """
+                <h3 style='color: #1E293B;'>Flujo Operativo de Referencias y Derechos</h3>
+                <p>Guía esencial para operadores de captura, supervisores y facturación.</p>
+                <div style='background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 10px; border-radius: 6px; margin-bottom: 12px;'>
+                    <b>⚠️ Regla de Oro:</b> Antes de crear una orden, valide rigurosamente la coincidencia de <b>RFC</b>, <b>Razón Social</b> y <b>Domicilio Fiscal</b>.
+                </div>
                 <ul>
-                    <li><b>Gestión de Usuarios:</b> Permite crear usuarios, modificar nombre/correo, asignar roles y cambiar contraseñas. Para desactivar a un operador, desmarque la casilla <i>Usuario Activo</i> (baja lógica).</li>
-                    <li><b>Gestión de Roles:</b> Asigna qué módulos de aplicación puede ver cada perfil de usuario.</li>
-                    <li><b>Matriz de Permisos:</b> Configura el cruce granular entre Roles, Módulos y Acciones (<i>LEER, CREAR, EDITAR, DESACTIVAR</i>).</li>
+                    <li><b>1. Control de Referencias:</b> Creación de órdenes, validaciones previas de catálogo y asignación de folios disponibles.</li>
+                    <li><b>2. Bot Fase A (AutoGeneración de Derechos):</b> Procesamiento automatizado en portal Tributanet, obtención de líneas de captura y boletas oficiales en PDF.</li>
+                    <li><b>3. Autorización / Rechazo:</b> Supervisión de importes y líneas de captura. El rechazo exige captura de motivo y libera los folios reservados.</li>
+                    <li><b>4. Bot Fase C (AutoFacturación de Derechos):</b> Procesamiento de órdenes autorizadas y descarga de comprobantes fiscales (XML y PDF).</li>
+                    <li><b>5. Verificación de Comprobantes:</b> Comprobación física de legibilidad, tamaño mayor a 0 KB y correspondencia fiscal.</li>
                 </ul>
             """),
-            ("2. Catálogos Base", """
-                <h3 style='color: #1E293B;'>Administración de Catálogos de Negocio y Geografía</h3>
+            ("📕 Manual de Administración", """
+                <h3 style='color: #1E293B;'>Gestión del Sistema y Configuración (SAR-ADM)</h3>
+                <p>Herramientas exclusivas para Administradores de TI y Supervisores.</p>
                 <ul>
-                    <li><b>Catálogos de Negocio:</b> Gestiona <i>Conceptos</i> (códigos de pago y referencias), <i>Notarías</i>, <i>Colaboradores</i> y <i>Desarrollos con sus RFCs asociados</i>.</li>
-                    <li><b>Geografía Operativa:</b> Municipios y Delegaciones. Las delegaciones están vinculadas a su municipio correspondiente y soportan el <code>codigo_portal</code> necesario para la automatización del Bot.</li>
-                    <li><b>Contribuyentes (RFC):</b> Registra empresas y personas físicas con su domicilio fiscal completo.</li>
-                    <li><b>Estados del Sistema:</b> Define los estados transaccionales válidos (<i>PENDIENTE, CAPTURADO, FACTURADO</i>, etc.).</li>
+                    <li><b>Seguridad y Usuarios:</b> Alta/baja lógica de operadores, asignación de roles (<code>ROLE_OPERADOR</code>, <code>ROLE_SUPERVISOR</code>, <code>ROLE_ADMIN</code>) y restablecimiento de claves.</li>
+                    <li><b>Catálogos Maestros:</b> Mantenimiento de Empresas, RFCs, Domicilios, Conceptos de Pago y Delegaciones con <code>codigo_portal</code>.</li>
+                    <li><b>Inventario de Folios:</b> Inyección de nuevos paquetes de derechos y control de disponibilidad transaccional.</li>
+                    <li><b>Parámetros y Selectores:</b> Ajuste de tamaños de lote (<code>TAMANO_LOTE</code>), timeouts y selectores Playwright sin recompilar la app.</li>
+                    <li><b>Procesos Especiales:</b> Carga masiva desde Excel, migración de bases de datos legadas y escaneo de facturas PDF.</li>
                 </ul>
             """),
-            ("3. Configuración Core", """
-                <h3 style='color: #1E293B;'>Parámetros Globales y Selectores del Bot</h3>
+            ("⚙️ Infraestructura y DB", """
+                <h3 style='color: #1E293B;'>Arquitectura Técnica, Concurrencia y Respaldos</h3>
                 <ul>
-                    <li><b>Parámetros del Sistema:</b> Controla variables globales de operación como tamaños de lote (<code>TAMANO_LOTE</code>), timeouts y límites operativos.</li>
-                    <li><b>Localizadores del Motor Bot:</b> Selectores Playwright dinámicos (XPath / CSS) para interactuar con los portales web gubernamentales o bancarios sin necesidad de recompilar la aplicación.</li>
+                    <li><b>Topología LAN:</b> Conexión directa TCP 5432 a PostgreSQL 16 y almacenamiento centralizado SMB en <code>\\SRV-SAR\\Comprobantes$</code>.</li>
+                    <li><b>Control Transaccional:</b> Asignación concurrente de folios con bloqueo pesimista a nivel de fila (<code>SELECT ... FOR UPDATE SKIP LOCKED</code>).</li>
+                    <li><b>Respaldos Automatizados:</b> Ejecución diaria de <code>pg_dump</code> y almacenamiento en volúmenes redundantes.</li>
+                    <li><b>Desbloqueo Seguro:</b> Procedimiento formal de liberación de folios y purga de órdenes en estados inconsistentes.</li>
                 </ul>
             """),
-            ("4. Procesos Especiales", """
-                <h3 style='color: #1E293B;'>Herramientas de Carga, Migración y Auditoría</h3>
-                <ul>
-                    <li><b>Carga Masiva de Referencias:</b> Importación estructurada desde archivos Excel/CSV con validación automática de duplicados.</li>
-                    <li><b>Migración de Referencias:</b> Sincronización entre bases de datos legadas y el esquema SAR v3.0.</li>
-                    <li><b>Reserva Masiva:</b> Bloqueo controlado de folios de referencias para proyectos o empresas específicas.</li>
-                    <li><b>Escaneo de Facturas (PDF):</b> Extracción automática de delegaciones y montos desde documentos PDF de facturas.</li>
-                </ul>
+            ("❓ Mesa de Ayuda y Reglas", """
+                <h3 style='color: #1E293B;'>Las 7 Reglas de Oro y Escalamiento de Soporte</h3>
+                <ol style='line-height: 1.8;'>
+                    <li><b>Verifica siempre el RFC y la Empresa</b> antes de hacer clic en Guardar.</li>
+                    <li><b>No repitas clics en "Iniciar Bot"</b> si la barra de progreso ya está en marcha.</li>
+                    <li><b>Revisa las referencias generadas</b> antes de proceder a la Autorización.</li>
+                    <li><b>Registra siempre un motivo claro</b> cuando tengas que rechazar una orden.</li>
+                    <li><b>Comprueba que los archivos PDF y XML existan físicamente</b> y no pesen 0 KB.</li>
+                    <li><b>Cierra tu sesión</b> al retirarte de tu equipo de cómputo.</li>
+                    <li><b>Ante cualquier error técnico</b>, escala a TI adjuntando el log generado en <code>logs/</code>.</li>
+                </ol>
             """)
         ]
 
@@ -547,6 +563,38 @@ class UserManualDialog(QDialog):
 
         layout.addWidget(self.tabs)
 
+        # Footer Actions
+        footer_layout = QHBoxLayout()
+
+        btn_open_op = CustomButton("Abrir Manual Operativo (MD)", is_secondary=True)
+        btn_open_op.setIcon(Icons.get_icon("documento_abrir", color="#2563EB"))
+        btn_open_op.clicked.connect(lambda: self._open_manual_file("MANUAL_OPERATIVO_SAR.md"))
+        footer_layout.addWidget(btn_open_op)
+
+        btn_open_tec = CustomButton("Abrir Manual Técnico (MD)", is_secondary=True)
+        btn_open_tec.setIcon(Icons.get_icon("configuracion", color="#475569"))
+        btn_open_tec.clicked.connect(lambda: self._open_manual_file("MANUAL_TECNICO_SAR.md"))
+        footer_layout.addWidget(btn_open_tec)
+
+        footer_layout.addStretch()
+
         btn_close = CustomButton("Cerrar Guía", is_secondary=False)
         btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close, alignment=Qt.AlignRight)
+        footer_layout.addWidget(btn_close)
+
+        layout.addLayout(footer_layout)
+
+    def _open_manual_file(self, filename: str):
+        """Opens the full editable markdown file in the system's default editor."""
+        try:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "doc_sar"))
+            target_path = os.path.join(base_dir, filename)
+            if os.path.exists(target_path):
+                if platform.system() == "Windows":
+                    os.startfile(target_path)
+                elif platform.system() == "Darwin":
+                    subprocess.run(["open", target_path])
+                else:
+                    subprocess.run(["xdg-open", target_path])
+        except Exception:
+            pass

@@ -2,6 +2,7 @@
 
 from PySide6.QtWidgets import QPushButton
 from sar.src.ui.design_system.utils.icons import Icons
+from sar.src.ui.design_system.tokens.colors import Colors
 
 class CustomButton(QPushButton):
     """A styled button widget representing a basic UI Atom."""
@@ -14,6 +15,6 @@ class CustomButton(QPushButton):
             self.setObjectName("primaryBtn")
             
         if is_clean_btn:
-            self.setIcon(Icons.get_icon("limpiar", color="#475569"))
+            self.setIcon(Icons.get_icon("limpiar", color=Colors.TEXT_LIGHT_SECONDARY))
         elif icon_name and hasattr(Icons, icon_name):
             self.setIcon(getattr(Icons, icon_name)())

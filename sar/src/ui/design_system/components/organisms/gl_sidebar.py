@@ -8,6 +8,8 @@ from PySide6.QtGui import QIcon
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.utils.icons import Icons
+from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.theme_manager import ThemeManager
 
 class NavigationSidebar(QFrame):
     """Sidebar mejorado con mejor jerarquía visual e interacción, con scrollbar automático."""
@@ -88,7 +90,11 @@ class NavigationSidebar(QFrame):
         # 3. Footer Area Container (Fixed Bottom - Pinned Logout and Profile)
         self.footer_widget = QWidget(self)
         self.footer_widget.setObjectName("sidebarFooterContainer")
-        self.footer_widget.setStyleSheet("QWidget#sidebarFooterContainer { background: transparent; border-top: 1px solid #E2E8F0; }")
+        # Borde del footer se adapta al tema activo
+        _border_color = Colors.BORDER_DARK if ThemeManager.is_dark_active() else Colors.BORDER_LIGHT
+        self.footer_widget.setStyleSheet(
+            f"QWidget#sidebarFooterContainer {{ background: transparent; border-top: 1px solid {_border_color}; }}"
+        )
         self.footer_layout = QVBoxLayout(self.footer_widget)
         self.footer_layout.setContentsMargins(16, 12, 16, 16)
         self.footer_layout.setSpacing(8)
@@ -334,8 +340,9 @@ class NavigationSidebar(QFrame):
         self.profile_layout.setContentsMargins(0, 0, 0, 0)
         self.profile_layout.setSpacing(10)
         
+        _icon_color = Colors.TEXT_LIGHT_SECONDARY if not ThemeManager.is_dark_active() else Colors.TEXT_DARK_SECONDARY
         self.lbl_profile_icon = QLabel()
-        self.lbl_profile_icon.setPixmap(Icons.user("#64748B").pixmap(20, 20))
+        self.lbl_profile_icon.setPixmap(Icons.user(_icon_color).pixmap(20, 20))
         self.lbl_profile_icon.setStyleSheet("background: transparent;")
         
         self.profile_text_layout = QVBoxLayout()
@@ -345,8 +352,10 @@ class NavigationSidebar(QFrame):
         self.lbl_profile_user = CustomLabel("Usuario: Administrador", variant="body")
         self.lbl_profile_user.setObjectName("sidebarProfileUser")
         
-        self.lbl_profile_status = CustomLabel("Sesión activa", variant="muted")
+        self.lbl_profile_status = CustomLabel("Sesión activa", variant="body")
         self.lbl_profile_status.setObjectName("sidebarProfileStatus")
+        _status_color = Colors.SLATE_500
+        self.lbl_profile_status.setStyleSheet(f"color: {_status_color}; font-size: 11px; background: transparent;")
         
         self.profile_text_layout.addWidget(self.lbl_profile_user)
         self.profile_text_layout.addWidget(self.lbl_profile_status)
