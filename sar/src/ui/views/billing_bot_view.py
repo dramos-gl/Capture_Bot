@@ -5,9 +5,9 @@ import re
 from sqlalchemy import text
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
     QFrame, QLabel, QPushButton, QCheckBox, QTextEdit, 
-    QProgressBar, QMenu, QFileDialog
+    QProgressBar, QMenu, QFileDialog, QMainWindow
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QCursor

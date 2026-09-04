@@ -59,19 +59,19 @@ class ReferenciasView(QWidget):
         
         # Filtros
         self.filter_bar = FilterBar(
-            search_placeholder="Buscar por referencia, consecutivo...",
+            search_placeholder="Buscar por derecho, consecutivo...",
             state_options=["Todos", "GENERADA", "AUTORIZADA", "RECHAZADA", "EXPIRADA"],
             on_search=self._filter_table_by_text,
             on_state_change=self._filter_table_by_state,
             on_action=self.refresh_data,
             action_icon_name="actualizar",
-            action_tooltip="Actualizar Referencias",
+            action_tooltip="Actualizar Derechos",
             parent=self
         )
         self.layout.addWidget(self.filter_bar)
         
         # Main Card for the Data Table
-        self.card = CustomCard(title="Producción de Referencias", parent=self)
+        self.card = CustomCard(title="Producción de Derechos", parent=self)
         
         # Table Organism
         headers = ["✔", "ID", "Consecutivo", "Referencia", "Importe", "Folio Orden", "Grupo", "Empresa", "Concepto", "Delegación", "Estado", "Procesado Por", "Fecha Gen.", "Vigencia"]
@@ -93,7 +93,7 @@ class ReferenciasView(QWidget):
         self.footer_layout = QHBoxLayout()
         self.footer_layout.setContentsMargins(0, 8, 0, 0)
         
-        self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 referencias", variant="muted")
+        self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 derechos", variant="muted")
         self.lbl_pagination_info.setObjectName("referenciasPaginationInfo")
         self.footer_layout.addWidget(self.lbl_pagination_info)
         
@@ -210,9 +210,8 @@ class ReferenciasView(QWidget):
                     item_check.setCheckState(target_state)
                     count += 1
         self.table.blockSignals(False)
-        
         self.update_marcar_button_text()
-        QMessageBox.information(self, "Selección", f"Se han {action_name} {count} referencias visibles.")
+        QMessageBox.information(self, "Selección", f"Se han {action_name} {count} derechos visibles.")
 
     def _on_table_item_changed(self, item):
         if item.column() == 0:
@@ -233,14 +232,19 @@ class ReferenciasView(QWidget):
             self.btn_marcar_visibles.setText("Marcar Visibles")
 
     def _on_cambiar_estado(self):
-        # 1. Obtener referencias seleccionadas y validar que estén en PENDIENTE_AUTORIZACION
+        """
+        Permite cambiar masivamente el estado de los derechos seleccionados por Checkbox (o selección simple)
+        a AUTORIZADA o RECHAZADA. Si quedan derechos pendientes en las solicitudes involucradas,
+        pregunta si desea rechazarlas automáticamente.
+        """
+        # 1. Obtener derechos seleccionados y validar que estén en PENDIENTE_AUTORIZACION
         selected_ids = []
         for row in range(self.table.rowCount()):
             item_check = self.table.item(row, 0)
             if item_check and item_check.checkState() == Qt.CheckState.Checked:
                 state_text = self.table.item(row, 10).text() if self.table.item(row, 10) else ""
                 if state_text != "PENDIENTE_AUTORIZACION":
-                    QMessageBox.warning(self, "Acción Inválida", "Solo se pueden autorizar o rechazar referencias en estado PENDIENTE_AUTORIZACION.")
+                    QMessageBox.warning(self, "Acción Inválida", "Solo se pueden autorizar o rechazar derechos en estado PENDIENTE_AUTORIZACION.")
                     return
                 selected_ids.append(int(self.table.item(row, 1).text()))
                 
@@ -251,17 +255,17 @@ class ReferenciasView(QWidget):
                 row = selected[0].row()
                 state_text = self.table.item(row, 10).text() if self.table.item(row, 10) else ""
                 if state_text != "PENDIENTE_AUTORIZACION":
-                    QMessageBox.warning(self, "Acción Inválida", "Solo se pueden autorizar o rechazar referencias en estado PENDIENTE_AUTORIZACION.")
+                    QMessageBox.warning(self, "Acción Inválida", "Solo se pueden autorizar o rechazar derechos en estado PENDIENTE_AUTORIZACION.")
                     return
                 selected_ids.append(int(self.table.item(row, 1).text()))
                 
         if not selected_ids:
-            QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una referencia pendiente.")
+            QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos un derecho pendiente.")
             return
             
         from PySide6.QtWidgets import QInputDialog
         opciones = ["AUTORIZADA", "RECHAZADA"]
-        item, ok = QInputDialog.getItem(self, "Cambiar Estado", f"Selecciona el nuevo estado para {len(selected_ids)} referencias:", opciones, 0, False)
+        item, ok = QInputDialog.getItem(self, "Cambiar Estado", f"Selecciona el nuevo estado para {len(selected_ids)} derechos:", opciones, 0, False)
         
         if ok and item:
             try:
@@ -278,11 +282,11 @@ class ReferenciasView(QWidget):
                         msg_box.setWindowTitle("Confirmar Acción Parcial")
                         msg_box.setIcon(QMessageBox.Question)
                         msg_box.setText(
-                            f"Ha seleccionado {len(selected_ids)} referencias de un total de {total_pendientes} pendientes en la(s) solicitud(es) vinculada(s).\n\n"
-                            f"¿Desea cambiar el estado de las {len(selected_ids)} seleccionadas a {item} y RECHAZAR automáticamente las {remaining_pending} restantes?"
+                            f"Ha seleccionado {len(selected_ids)} derechos de un total de {total_pendientes} pendientes en la(s) solicitud(es) vinculada(s).\n\n"
+                            f"¿Desea cambiar el estado de los {len(selected_ids)} seleccionados a {item} y RECHAZAR automáticamente los {remaining_pending} restantes?"
                         )
                         btn_yes = msg_box.addButton("Sí (Procesar y Rechazar Restantes)", QMessageBox.YesRole)
-                        btn_no = msg_box.addButton("No (Solo Procesar Seleccionadas)", QMessageBox.NoRole)
+                        btn_no = msg_box.addButton("No (Solo Procesar Seleccionados)", QMessageBox.NoRole)
                         btn_cancel = msg_box.addButton("Cancelar", QMessageBox.RejectRole)
                         msg_box.setDefaultButton(btn_no)
                         
@@ -296,7 +300,7 @@ class ReferenciasView(QWidget):
                         # Confirmación simple
                         reply = QMessageBox.question(
                             self, "Confirmar Cambio",
-                            f"¿Estás seguro de que deseas marcar las {len(selected_ids)} referencias seleccionadas como {item}?",
+                            f"¿Estás seguro de que deseas marcar los {len(selected_ids)} derechos seleccionados como {item}?",
                             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
                         )
                         if reply == QMessageBox.No:
@@ -305,7 +309,7 @@ class ReferenciasView(QWidget):
                 # Ejecutar actualización transaccional a través del servicio
                 self.referencias_service.update_referencias_estado_masivo(selected_ids, item, rechazar_restantes)
                     
-                QMessageBox.information(self, "Éxito", f"{len(selected_ids)} referencias cambiadas a {item}.")
+                QMessageBox.information(self, "Éxito", f"{len(selected_ids)} derechos cambiados a {item}.")
                 self.refresh_data()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error al cambiar estado: {str(e)}")
@@ -313,12 +317,12 @@ class ReferenciasView(QWidget):
     def _on_ver_detalle(self):
         ref_ids = self._get_selected_referencia_ids()
         if not ref_ids: return
-        QMessageBox.information(self, "Detalle", f"Detalles de la referencia ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")
+        QMessageBox.information(self, "Detalle", f"Detalles del derecho ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")
         
     def _on_ver_pdf(self):
         ref_ids = self._get_selected_referencia_ids()
         if not ref_ids: return
-        QMessageBox.information(self, "PDF", f"Abriendo visor PDF para la referencia ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")
+        QMessageBox.information(self, "PDF", f"Abriendo visor PDF para el derecho ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")
         
     def refresh_data(self):
         """Starts background thread to fetch data matching filters and current offset."""
@@ -334,7 +338,7 @@ class ReferenciasView(QWidget):
             self.active_worker.wait()
 
         # Visual feedback: set pagination info label to loading state
-        self.lbl_pagination_info.setText("Cargando referencias desde el servidor...")
+        self.lbl_pagination_info.setText("Cargando derechos desde el servidor...")
         self.pagination_widget.setEnabled(False) # Disable navigation buttons
         self.cb_page_size.setEnabled(False)
 
@@ -369,7 +373,7 @@ class ReferenciasView(QWidget):
     def _on_load_error(self, err_msg):
         self.pagination_widget.setEnabled(True)
         self.cb_page_size.setEnabled(True)
-        self.lbl_pagination_info.setText("Error al cargar datos de referencias.")
+        self.lbl_pagination_info.setText("Error al cargar datos de derechos.")
         QMessageBox.critical(self, "Error de Conexión", f"No se pudo consultar el servidor de base de datos:\n{err_msg}")
 
     def _populate_table_and_pagination(self):
@@ -404,9 +408,9 @@ class ReferenciasView(QWidget):
         
         # Update Footer Info
         if total_items == 0:
-            self.lbl_pagination_info.setText("Mostrando 0 a 0 de 0 referencias")
+            self.lbl_pagination_info.setText("Mostrando 0 a 0 de 0 derechos")
         else:
-            self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {total_items} referencias")
+            self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {total_items} derechos")
             
         # 3. Redraw Pagination Buttons
         # Clear layout
@@ -489,10 +493,9 @@ class ReferenciasView(QWidget):
             ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
-                if preserve_selection and self.is_custom_filter and self.selected_orden_ids:
+                if preserve_selection and self.is_custom_filter:
                     self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
-                
-                if not self.selected_orden_ids or (preserve_selection and not self.is_custom_filter):
+                elif not self.is_custom_filter:
                     self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
             else:
                 self.selected_orden_ids = []

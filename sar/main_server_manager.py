@@ -25,8 +25,14 @@ def main():
 
     app = QApplication(sys.argv)
     
-    # Apply global window icon
-    icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "src", "ui", "assets", "sar_logo.png"))
+    # Apply global window icon (compatible con modo script y compilado PyInstaller)
+    base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    icon_path = os.path.join(base_dir, "sar", "src", "ui", "assets", "sar_logo.png")
+    if not os.path.exists(icon_path):
+        icon_path = os.path.join(base_dir, "src", "ui", "assets", "sar_logo.png")
+    if not os.path.exists(icon_path):
+        icon_path = os.path.join(os.path.dirname(sys.executable), "sar", "src", "ui", "assets", "sar_logo.png")
+        
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
     

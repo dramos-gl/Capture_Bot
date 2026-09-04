@@ -42,7 +42,7 @@ class StatCard(QFrame):
     clicked = Signal()
     double_clicked = Signal()
     
-    def __init__(self, title: str, initial_value: str = "0", icon_name: str = None, color_hex: str = "#2563EB", show_sparkline: bool = True, parent=None):
+    def __init__(self, title: str, initial_value: str = "0", icon_name: str = None, color_hex: str = "#2563EB", show_sparkline: bool = True, parent=None, subtitle: str = "Derechos"):
         super().__init__(parent)
         self.setObjectName("cardFrame")
         self.setMinimumWidth(80)
@@ -107,7 +107,7 @@ class StatCard(QFrame):
         self.lbl_value.setScaledContents(False)
         self.lbl_value.setStyleSheet(f"color: {color_hex}; font-weight: bold; background: transparent;")
         
-        self.lbl_sub = CustomLabel("Referencias", variant="muted")
+        self.lbl_sub = CustomLabel(subtitle, variant="muted")
         self.lbl_sub.setObjectName("statCardSub")
         self.lbl_sub.setWordWrap(True)
         

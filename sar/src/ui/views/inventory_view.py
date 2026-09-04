@@ -445,6 +445,9 @@ class BatchConfirmationWorker(QThread):
 class InventoryView(QWidget):
     """View to manage Invoice/Reference Inventory Control (state: FACTURADA)."""
 
+    # Signal emitted when user requests to view Metrics & Production Analytics
+    show_metrics_requested = Signal(list)
+
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
@@ -678,6 +681,15 @@ class InventoryView(QWidget):
         self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
         self.table_header_layout.addWidget(self.btn_filter_orden)
         
+        # Botón de Redirección a Métricas y Analítica de Producción
+        self.btn_metrics_visor = QPushButton()
+        self.btn_metrics_visor.setObjectName("secondaryBtn")
+        self.btn_metrics_visor.setIcon(Icons.grafico(Colors.CHART_EMERALD_DARK))
+        self.btn_metrics_visor.setFixedSize(36, 36)
+        self.btn_metrics_visor.setToolTip("Ver Métricas y Analítica de Producción")
+        self.btn_metrics_visor.clicked.connect(self._on_open_metrics_requested)
+        self.table_header_layout.addWidget(self.btn_metrics_visor)
+        
         self.card.layout.addLayout(self.table_header_layout)
         
         headers = ["✔", "ID", "Referencia", "Concepto", "Empresa", "Importe", "Estado", "Asignado A", "Tipo", "Solicitante", "Desarrollo", "Cliente", "Mz", "Lt", "Edif", "Viv", "Folio Electrónico", "Fecha Asignación"]
@@ -788,7 +800,7 @@ class InventoryView(QWidget):
             filter_assigned=self._current_estado_filter,
             start_date=None,
             end_date=None,
-            orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
+            orden_ids=self.selected_orden_ids
         )
         self.active_worker.result_ready.connect(self._on_visor_data_loaded)
         self.active_worker.error_occurred.connect(self._on_visor_load_error)
@@ -890,7 +902,10 @@ class InventoryView(QWidget):
         start_idx = (self.current_page - 1) * self.page_size
         end_idx = min(start_idx + len(self.all_data), self.total_items)
 
-        self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {self.total_items} derechos")
+        if self.total_items == 0:
+            self.lbl_pagination_info.setText("Mostrando 0 a 0 de 0 derechos")
+        else:
+            self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {self.total_items} derechos")
 
         # Re-draw pagination buttons
         while self.pag_btn_layout.count():
@@ -1008,10 +1023,9 @@ class InventoryView(QWidget):
             ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
-                if preserve_selection and self.is_custom_filter and self.selected_orden_ids:
+                if preserve_selection and self.is_custom_filter:
                     self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
-                
-                if not self.selected_orden_ids or (preserve_selection and not self.is_custom_filter):
+                elif not self.is_custom_filter:
                     self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes if ord.get("total_disponibles", 0) > 0]
                     if not self.selected_orden_ids and self.todas_las_ordenes:
                         self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
@@ -1094,20 +1108,40 @@ class InventoryView(QWidget):
             
         menu.exec(sender_btn.mapToGlobal(sender_btn.rect().bottomLeft()))
 
+    def _on_open_metrics_requested(self):
+        """Redirige automáticamente al módulo de Métricas y Analítica pasando las órdenes seleccionadas."""
+        self.show_metrics_requested.emit(list(self.selected_orden_ids))
+
     def _refresh_active_tab_data(self):
-        active = self.tabs.currentWidget()
-        if active == self.tab_visor:
-            self.refresh_visor_data()
-        elif active == self.tab_individual:
-            self._update_all_grids_availability()
-            if self._pending_ind_refs:
-                self._on_buscar_referencias_ind()
-        elif active == self.tab_apartar:
-            self._update_all_grids_availability()
-        elif active == self.tab_lotes:
-            self.refresh_lotes_data()
+        if not self.selected_orden_ids:
+            # Clean pinned items in visor
+            self.selected_ref_map.clear()
+            self._update_selection_controls()
+            # Clean preview and pending in individual tab
+            if hasattr(self, 'table_preview_ind'):
+                self.table_preview_ind.clearContents()
+                self.table_preview_ind.setRowCount(0)
+            self._pending_ind_refs = []
+            if hasattr(self, 'btn_confirmar_ind'):
+                self.btn_confirmar_ind.setEnabled(False)
+
+        # Refresh Visor and Lotes tables/KPIs
+        self.refresh_visor_data()
+        self.refresh_lotes_data()
+
+        # Refresh availability in grids
+        self._update_all_grids_availability()
 
     def _update_all_grids_availability(self):
+        if not self.selected_orden_ids:
+            if hasattr(self, 'grid_individual') and hasattr(self.grid_individual, 'rows'):
+                for row in self.grid_individual.rows:
+                    row.set_disponibles(0)
+            if hasattr(self, 'grid_apartar') and hasattr(self.grid_apartar, 'rows'):
+                for row in self.grid_apartar.rows:
+                    row.set_disponibles(0)
+            return
+
         active = self.tabs.currentWidget()
         if active == self.tab_individual:
             for row in self.grid_individual.rows:
@@ -1508,7 +1542,7 @@ class InventoryView(QWidget):
             file_path=file_path,
             default_rfc_id=default_rfc_id,
             completar_notaria_id=completar_notaria_id,
-            orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None,
+            orden_ids=self.selected_orden_ids,
             solo_reservar=self.chk_solo_reservar.isChecked(),
             api_client=self.api_client,
             db_connector=self.db_connector
@@ -1946,7 +1980,7 @@ class InventoryView(QWidget):
             for row in grid_data:
                 refs = self.inventario_ui_service.get_referencias_disponibles_filtro(
                     row["rfc_id"], row["concepto_id"], row["delegacion_id"], row["cantidad"],
-                    orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
+                    orden_ids=self.selected_orden_ids
                 )
                 for r in refs:
                     r["desarrollo_id"] = None
@@ -2326,7 +2360,7 @@ class InventoryView(QWidget):
 
         worker = AvailabilityWorker(
             self.inventario_ui_service, row, rfc_id, concepto_id, delegacion_id,
-            orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
+            orden_ids=self.selected_orden_ids
         )
         worker.result_ready.connect(self._on_availability_result)
         worker.finished.connect(lambda: self._active_avail_workers.remove(worker) if worker in self._active_avail_workers else None)
@@ -2554,7 +2588,7 @@ class InventoryView(QWidget):
                         usuario_id=usuario_id,
                         partidas=rows_data,
                         observaciones=obs_text,
-                        orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
+                        orden_ids=self.selected_orden_ids
                     )
                     session.commit()
                     
@@ -2764,7 +2798,7 @@ class InventoryView(QWidget):
                 offset=offset,
                 start_date=start_date,
                 end_date=end_date,
-                orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None
+                orden_ids=self.selected_orden_ids
             )
             self.all_lotes_data = lotes
             self.total_lotes = total

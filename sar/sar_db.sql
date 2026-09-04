@@ -1163,5 +1163,86 @@ SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_produccion.recibo_cancu
 SELECT setval(COALESCE(pg_get_serial_sequence('cancunbot_produccion.factura_cancun', 'factura_id'), 'cancunbot_produccion.factura_cancun_factura_id_seq'), COALESCE((SELECT MAX(factura_id) FROM cancunbot_produccion.factura_cancun), 0) + 1, false);
 
 -- ===========================================================================
+-- 10. CREACIÓN Y PRIVILEGIOS DEL USUARIO DE APLICACIÓN (sar_app_user)
+-- ===========================================================================
+
+-- 1. Crear el usuario si no existe
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'sar_app_user') THEN
+        CREATE ROLE sar_app_user WITH 
+            LOGIN 
+            NOSUPERUSER 
+            NOCREATEDB 
+            NOCREATEROLE 
+            NOINHERIT 
+            PASSWORD 'tu_contrasenia_segura';
+    END IF;
+END
+$$;
+
+-- 2. Permiso de conexión a la base de datos db_sar
+GRANT CONNECT ON DATABASE db_sar TO sar_app_user;
+
+-- 3. Permiso de uso sobre todos los esquemas del sistema
+GRANT USAGE ON SCHEMA 
+    sar_seguridad, 
+    sar_catalogo, 
+    sar_produccion, 
+    sar_archivo, 
+    sar_auditoria, 
+    sar_configuracion, 
+    sar_reporte, 
+    cancunbot_produccion 
+TO sar_app_user;
+
+-- 4. Permisos DML en todas las tablas y vistas actuales
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA 
+    sar_seguridad, 
+    sar_catalogo, 
+    sar_produccion, 
+    sar_archivo, 
+    sar_auditoria, 
+    sar_configuracion, 
+    sar_reporte, 
+    cancunbot_produccion 
+TO sar_app_user;
+
+-- 5. Permisos sobre secuencias (para generación de IDs autoincrementales)
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA 
+    sar_seguridad, 
+    sar_catalogo, 
+    sar_produccion, 
+    sar_archivo, 
+    sar_auditoria, 
+    sar_configuracion, 
+    sar_reporte, 
+    cancunbot_produccion 
+TO sar_app_user;
+
+-- 6. Configurar permisos por defecto para cualquier tabla o secuencia futura
+ALTER DEFAULT PRIVILEGES IN SCHEMA 
+    sar_seguridad, 
+    sar_catalogo, 
+    sar_produccion, 
+    sar_archivo, 
+    sar_auditoria, 
+    sar_configuracion, 
+    sar_reporte, 
+    cancunbot_produccion 
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO sar_app_user;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA 
+    sar_seguridad, 
+    sar_catalogo, 
+    sar_produccion, 
+    sar_archivo, 
+    sar_auditoria, 
+    sar_configuracion, 
+    sar_reporte, 
+    cancunbot_produccion 
+    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO sar_app_user;
+
+-- ===========================================================================
 -- FIN DEL SCRIPT
 -- ===========================================================================

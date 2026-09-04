@@ -191,12 +191,12 @@ class DashboardView(QWidget):
         self.kpi_layout.setContentsMargins(0, 0, 0, 0)
         self.kpi_layout.setSpacing(10)
         
-        self.card_generadas = StatCard("Total Generadas", "0", "file_text", color_hex=Colors.ACCENT, parent=self.kpi_widget)
-        self.card_pendientes = StatCard("Pendientes Autorización", "0", "clock", color_hex=Colors.WARNING, parent=self.kpi_widget)
-        self.card_autorizadas = StatCard("Autorizadas por Facturar", "0", "shield_check", color_hex=Colors.SUCCESS, parent=self.kpi_widget)
-        self.card_rechazadas = StatCard("Rechazadas", "0", "x_circle", color_hex="#EA580C", parent=self.kpi_widget)
+        self.card_generadas = StatCard("Total Generados", "0", "file_text", color_hex=Colors.CHART_EMERALD_DARK, parent=self.kpi_widget)
+        self.card_pendientes = StatCard("Pendientes de Autorización", "0", "clock", color_hex=Colors.CHART_AMBER, parent=self.kpi_widget)
+        self.card_autorizadas = StatCard("Autorizados por Facturar", "0", "shield_check", color_hex=Colors.CHART_TEAL, parent=self.kpi_widget)
+        self.card_rechazadas = StatCard("Rechazados", "0", "x_circle", color_hex=Colors.CHART_CORAL, parent=self.kpi_widget)
         self.card_error = StatCard("Con Error", "0", "alert_triangle", color_hex=Colors.ERROR, parent=self.kpi_widget)
-        self.card_invalidas = StatCard("Derechos Invalidadas", "0", "alert_triangle", color_hex="#64748B", parent=self.kpi_widget)
+        self.card_invalidas = StatCard("Invalidos", "0", "alert_triangle", color_hex=Colors.CHART_SLATE, parent=self.kpi_widget)
         
         self.kpi_layout.addWidget(self.card_generadas, stretch=1)
         self.kpi_layout.addWidget(self.card_pendientes, stretch=1)
@@ -548,10 +548,11 @@ class DashboardView(QWidget):
             ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
-                if preserve_selection and self.is_custom_filter and self.selected_orden_ids:
+                if preserve_selection and self.is_custom_filter:
+                    # El usuario configuró activamente su selección de órdenes, filtrar por los IDs válidos existentes
                     self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
-                
-                if not self.selected_orden_ids or (preserve_selection and not self.is_custom_filter):
+                elif not self.is_custom_filter:
+                    # Comportamiento por defecto: seleccionar órdenes con pendientes o la más reciente
                     self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes if ord.get("total_pendiente_autorizacion", 0) > 0]
                     if not self.selected_orden_ids and self.todas_las_ordenes:
                         self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]

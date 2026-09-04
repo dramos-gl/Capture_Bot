@@ -507,6 +507,10 @@ class OperacionRepository(BaseRepository):
         from sar.src.storage.models import EstadoSistema
         from sqlalchemy import select
         
+        # Si se especifica explícitamente una lista vacía (filtro desmarcado), retornar lista vacía
+        if orden_ids is not None and len(orden_ids) == 0:
+            return []
+        
         # Get the ID of the 'FACTURADA' state for references precisely
         try:
             facturada_state_id = self.session.execute(
@@ -840,6 +844,11 @@ class ProduccionRepository(BaseRepository):
         """
         from sqlalchemy import text
         
+        # Si se especifica explícitamente una lista vacía de órdenes (filtro deseleccionado),
+        # retornar 0 registros inmediatamente.
+        if orden_ids is not None and len(orden_ids) == 0:
+            return [], 0
+            
         # Build base WHERE clause
         conditions = []
         params = {"lim": limit, "off": offset}
@@ -1504,6 +1513,18 @@ class ProduccionRepository(BaseRepository):
         from sqlalchemy import select, func
         from sar.src.storage.models import GrupoReferencia
         
+        # Si se pasa explícitamente una lista vacía de órdenes (usuario desmarcó todas las órdenes),
+        # retornar directamente todos los contadores en cero.
+        if orden_ids is not None and len(orden_ids) == 0:
+            return {
+                "total_generadas": 0,
+                "pendientes": 0,
+                "autorizadas": 0,
+                "con_error": 0,
+                "rechazadas": 0,
+                "invalidas": 0
+            }
+
         query_total = select(func.count(Referencia.referencia_id))
         if orden_ids:
             query_total = query_total.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
@@ -1511,7 +1532,8 @@ class ProduccionRepository(BaseRepository):
         total_generadas = self.session.execute(query_total).scalar_one()
         
         try:
-            pdte_codes = ["GENERADA", "ASIGNADA", "PENDIENTE", "PENDIENTE_AUTORIZACION"]
+            # Estado estricto para pendientes de autorización
+            pdte_codes = ["PENDIENTE_AUTORIZACION"]
             pdte_ids = []
             for code in pdte_codes:
                 try:
@@ -1519,7 +1541,8 @@ class ProduccionRepository(BaseRepository):
                 except ValueError:
                     pass
                     
-            aut_codes = ["AUTORIZADA", "COMPLETA", "COMPLETADA"]
+            # Estado estricto para autorizadas por facturar
+            aut_codes = ["AUTORIZADA"]
             aut_ids = []
             for code in aut_codes:
                 try:
@@ -1871,6 +1894,9 @@ class InventarioRepository(BaseRepository):
     ) -> tuple[List[dict], int]:
         from sqlalchemy import text
         
+        if orden_ids is not None and len(orden_ids) == 0:
+            return [], 0
+            
         conditions = []
         params = {"lim": limit, "off": offset}
         
@@ -2073,6 +2099,9 @@ class InventarioRepository(BaseRepository):
     ) -> dict:
         from sqlalchemy import text
         
+        if orden_ids is not None and len(orden_ids) == 0:
+            return {"disponibles": 0, "asignadas": 0, "reservadas": 0}
+            
         params = {}
         if search_text:
             params["search"] = f"%{search_text}%"
@@ -2394,6 +2423,9 @@ class InventarioRepository(BaseRepository):
         """Returns paginated lotes with optional filters including date range. Returns (list_of_dicts, total_count)."""
         from sqlalchemy import text
 
+        if orden_ids is not None and len(orden_ids) == 0:
+            return [], 0
+
         where_clauses = []
         params = {"limit": limit, "offset": offset}
 
@@ -2630,6 +2662,9 @@ class InventarioRepository(BaseRepository):
         """
         from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto
         from sqlalchemy import select, func
+
+        if orden_ids is not None and len(orden_ids) == 0:
+            return 0
 
         conc = self.session.get(Concepto, concepto_id)
         if not conc:
@@ -3303,6 +3338,9 @@ class InventarioRepository(BaseRepository):
         """Fetches available references matching criteria using FIFO order, returning lightweight dicts."""
         from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto
         from sqlalchemy import select
+
+        if orden_ids is not None and len(orden_ids) == 0:
+            return []
 
         conc = self.session.get(Concepto, concepto_id)
         if not conc:

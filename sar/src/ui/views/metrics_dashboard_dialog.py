@@ -78,18 +78,18 @@ class MetricsSummaryWorker(QThread):
 # State → display config map
 # ---------------------------------------------------------------------------
 _ESTADO_CONFIG = {
-    "GENERADA":                {"label": "Generadas",                "icon": "file_text",     "color": Colors.ACCENT},
-    "PENDIENTE_AUTORIZACION":  {"label": "Pend. Autorización",       "icon": "clock",         "color": Colors.WARNING},
-    "AUTORIZACION_PENDIENTE":  {"label": "Pend. Autorización",       "icon": "clock",         "color": Colors.WARNING},
-    "AUTORIZADA":              {"label": "Autorizadas",              "icon": "shield_check",  "color": Colors.SUCCESS},
-    "RECHAZADA":               {"label": "Rechazadas",               "icon": "alert_triangle","color": Colors.ERROR},
+    "GENERADA":                {"label": "Generadas",                "icon": "file_text",     "color": Colors.CHART_EMERALD_DARK},
+    "PENDIENTE_AUTORIZACION":  {"label": "Pend. Autorización",       "icon": "clock",         "color": Colors.CHART_AMBER},
+    "AUTORIZACION_PENDIENTE":  {"label": "Pend. Autorización",       "icon": "clock",         "color": Colors.CHART_AMBER},
+    "AUTORIZADA":              {"label": "Autorizadas",              "icon": "shield_check",  "color": Colors.CHART_TEAL},
+    "RECHAZADA":               {"label": "Rechazadas",               "icon": "alert_triangle","color": Colors.CHART_CORAL},
     "ERROR":                   {"label": "Con Error",                "icon": "alert_triangle","color": Colors.ERROR},
     "EXPIRADA":                {"label": "Expiradas",                "icon": "alert_triangle","color": Colors.ACCENT_AMBER},
-    "ASIGNADA":                {"label": "Asignadas",                "icon": "shield_check",  "color": Colors.ACCENT_EMERALD},
-    "FACTURADA":               {"label": "Facturadas",               "icon": "file_text",     "color": Colors.ACCENT_INDIGO},
-    "CANCELADA":               {"label": "Canceladas",               "icon": "alert_triangle","color": Colors.SLATE_500},
-    "COMPLETADA":              {"label": "Completadas",              "icon": "shield_check",  "color": Colors.SUCCESS},
-    "PENDIENTE":               {"label": "Pendientes",               "icon": "clock",         "color": Colors.WARNING},
+    "ASIGNADA":                {"label": "Asignadas",                "icon": "shield_check",  "color": Colors.CHART_PURPLE},
+    "FACTURADA":               {"label": "Facturadas",               "icon": "file_text",     "color": Colors.CHART_BLUE},
+    "CANCELADA":               {"label": "Canceladas",               "icon": "alert_triangle","color": Colors.CHART_SLATE},
+    "COMPLETADA":              {"label": "Completadas",              "icon": "shield_check",  "color": Colors.CHART_EMERALD_DARK},
+    "PENDIENTE":               {"label": "Pendientes",               "icon": "clock",         "color": Colors.CHART_AMBER},
 }
 
 _DEFAULT_ESTADO = {"label": None, "icon": "file_text", "color": Colors.SLATE_500}
@@ -449,7 +449,13 @@ class MetricsDashboardDialog(QWidget):
         self.refresh_metrics()
 
     def _update_orden_filter_label(self):
-        if not self.selected_orden_ids or not self.todas_las_ordenes:
+        if not self.todas_las_ordenes:
+            self.btn_orden_filter.setText("  Sin Órdenes")
+            return
+        if self.selected_orden_ids is not None and len(self.selected_orden_ids) == 0:
+            self.btn_orden_filter.setText("  0 órdenes")
+            return
+        if len(self.selected_orden_ids) == len(self.todas_las_ordenes):
             self.btn_orden_filter.setText("  Todas las Órdenes")
             return
         from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
@@ -533,7 +539,7 @@ class MetricsDashboardDialog(QWidget):
         if rfc_id == 0:      rfc_id = None
         if concepto_id == 0: concepto_id = None
         if deleg_id == 0:    deleg_id = None
-        orden_ids = self.selected_orden_ids if self.selected_orden_ids else None
+        orden_ids = self.selected_orden_ids
 
         # --- Report worker ---
         if self.active_report_worker and self.active_report_worker.isRunning():

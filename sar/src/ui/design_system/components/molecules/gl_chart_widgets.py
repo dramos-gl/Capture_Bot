@@ -128,6 +128,10 @@ class DonutChartWidget(QWidget):
     # Paint
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Paint
+    # ------------------------------------------------------------------
+
     def paintEvent(self, event):  # noqa: N802
         if not self.isVisible():
             return
@@ -137,21 +141,27 @@ class DonutChartWidget(QWidget):
         painter.fillRect(self.rect(), Qt.transparent)
 
         w, h = self.width(), self.height()
-        legend_h = 0
 
-        # Determine legend height (rows of 2 items each)
-        if self._data:
-            legend_rows = math.ceil(len(self._data) / 2)
-            legend_h = legend_rows * 20 + 8
+        # Layout horizontal: Anillo a la izquierda/centro y Leyenda a la derecha
+        # Si el ancho es suficiente (>= 320px), disponemos en dos columnas como en la imagen de referencia
+        is_wide_layout = w >= 280
 
-        # Donut area
-        donut_h = h - legend_h
-        side = min(w, donut_h)
-        cx = w / 2
-        cy = donut_h / 2
+        if is_wide_layout:
+            donut_w = int(w * 0.48)
+            legend_w = w - donut_w
+            side = min(donut_w, h)
+            cx = donut_w / 2
+            cy = h / 2
+        else:
+            legend_rows = len(self._data)
+            legend_h = legend_rows * 22 + 8
+            donut_h = max(h - legend_h, 80)
+            side = min(w, donut_h)
+            cx = w / 2
+            cy = donut_h / 2
 
         outer_r = side * 0.44
-        inner_r = outer_r * 0.60
+        inner_r = outer_r * 0.62
 
         outer_rect = QRectF(cx - outer_r, cy - outer_r, outer_r * 2, outer_r * 2)
 
@@ -162,7 +172,10 @@ class DonutChartWidget(QWidget):
             self._draw_center_label(painter, cx, cy, inner_r)
 
         if self._data:
-            self._draw_legend(painter, w, h, legend_h)
+            if is_wide_layout:
+                self._draw_side_legend(painter, donut_w, 0, legend_w, h)
+            else:
+                self._draw_bottom_legend(painter, w, h, legend_h)
 
         painter.end()
 
@@ -185,23 +198,23 @@ class DonutChartWidget(QWidget):
     def _draw_segments(self, painter: QPainter, outer_rect: QRectF,
                        inner_r: float, cx: float, cy: float, outer_r: float) -> None:
         start_angle = 90 * 16  # Qt angles: 1/16th degrees, starting from 12 o'clock
-        gap_deg = 1.5          # Small visual gap between segments
+        gap_deg = 1.2          # Gap sutil entre segmentos
 
         for idx, segment in enumerate(self._data):
             value = segment.get("value", 0)
             color_hex = segment.get("color", Colors.ACCENT)
             span = (value / self._total) * 360
-            span_16 = int((span - gap_deg) * 16)
+            span_16 = int((span - gap_deg) * 16) if len(self._data) > 1 else int(span * 16)
 
             color = _hex_to_qcolor(color_hex)
             is_hovered = (idx == self._hovered_index)
 
             if is_hovered:
-                # Expand hovered segment slightly
-                expand = outer_r * 0.06
+                # Expansión suave del segmento activo
+                expand = outer_r * 0.08
                 expanded_rect = outer_rect.adjusted(-expand, -expand, expand, expand)
                 draw_rect = expanded_rect
-                color = color.lighter(115)
+                color = color.lighter(112)
             else:
                 draw_rect = outer_rect
 
@@ -211,7 +224,7 @@ class DonutChartWidget(QWidget):
 
             start_angle -= int(span * 16)
 
-        # Punch inner hole
+        # Perforar el centro del anillo (inner hole)
         painter.setBrush(_surface_color())
         painter.setPen(Qt.NoPen)
         hole_rect = QRectF(cx - inner_r, cy - inner_r, inner_r * 2, inner_r * 2)
@@ -223,35 +236,121 @@ class DonutChartWidget(QWidget):
         label_top = "Total"
         label_val = f"{total_int:,}"
 
-        # Value (large, colored)
+        # Valor central destacado
         font_val = QFont()
-        font_val.setPointSize(int(inner_r * 0.38))
+        font_val.setPointSize(max(int(inner_r * 0.36), 11))
         font_val.setBold(True)
         painter.setFont(font_val)
         fm_val = QFontMetrics(font_val)
         tw_val = fm_val.horizontalAdvance(label_val)
 
-        painter.setPen(_hex_to_qcolor(Colors.ACCENT))
+        painter.setPen(_text_color())
         painter.drawText(
             int(cx - tw_val / 2),
-            int(cy + fm_val.ascent() * 0.3),
+            int(cy + fm_val.ascent() * 0.28),
             label_val,
         )
 
-        # "Total" sub-label (muted, smaller)
+        # Subtítulo "Total" discreto
         font_sub = QFont()
-        font_sub.setPointSize(int(inner_r * 0.22))
+        font_sub.setPointSize(max(int(inner_r * 0.20), 8))
         painter.setFont(font_sub)
         fm_sub = QFontMetrics(font_sub)
         tw_sub = fm_sub.horizontalAdvance(label_top)
         painter.setPen(_muted_color())
         painter.drawText(
             int(cx - tw_sub / 2),
-            int(cy - fm_val.ascent() * 0.4),
+            int(cy + fm_val.ascent() * 0.3 + fm_sub.height()),
             label_top,
         )
 
-    def _draw_legend(self, painter: QPainter, w: int, h: int, legend_h: int) -> None:
+    def _draw_side_legend(self, painter: QPainter, x_offset: int, y_offset: int, w: int, h: int) -> None:
+        """Dibuja la leyenda a la derecha con encabezado, dots de color, etiquetas y badges tipo pill."""
+        font_title = QFont()
+        font_title.setPointSize(9)
+        font_title.setBold(True)
+        painter.setFont(font_title)
+        fm_title = QFontMetrics(font_title)
+
+        start_x = x_offset + 10
+        total_items = len(self._data)
+        item_h = 24
+        header_h = 28
+        total_content_h = header_h + (total_items * item_h)
+        start_y = max((h - total_content_h) // 2, 8) + y_offset
+
+        # Encabezado con línea de acento
+        painter.setPen(_text_color())
+        painter.drawText(start_x, start_y + fm_title.ascent(), "Estado / Categoría")
+        
+        # Línea de acento verde/brand bajo el título
+        painter.setPen(QPen(_hex_to_qcolor(Colors.CHART_EMERALD_DARK), 2))
+        painter.drawLine(start_x, start_y + fm_title.ascent() + 4, start_x + 60, start_y + fm_title.ascent() + 4)
+
+        current_y = start_y + header_h
+
+        font_label = QFont()
+        font_label.setPointSize(8)
+        painter.setFont(font_label)
+        fm_label = QFontMetrics(font_label)
+
+        font_badge = QFont()
+        font_badge.setPointSize(7)
+        font_badge.setBold(True)
+        fm_badge = QFontMetrics(font_badge)
+
+        for idx, segment in enumerate(self._data):
+            label = segment.get("label", "")
+            value = segment.get("value", 0)
+            color = _hex_to_qcolor(segment.get("color", Colors.ACCENT))
+            pct = (value / self._total * 100) if self._total > 0 else 0
+            is_hovered = (idx == self._hovered_index)
+
+            y = current_y + idx * item_h
+
+            # Highlight row background on hover
+            if is_hovered:
+                row_rect = QRectF(start_x - 4, y - 2, w - 16, item_h - 2)
+                painter.setPen(Qt.NoPen)
+                hover_bg = QColor(Colors.SURFACE_LIGHT).lighter(105) if not ThemeManager.is_dark_active() else QColor(Colors.SURFACE_DARK).lighter(120)
+                painter.setBrush(QBrush(hover_bg))
+                painter.drawRoundedRect(row_rect, 4, 4)
+
+            # Dot circular de color vivo
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(color)
+            painter.drawEllipse(start_x, y + 4, 8, 8)
+
+            # Label de texto
+            painter.setPen(_text_color() if is_hovered else _muted_color())
+            painter.setFont(font_label)
+            
+            # Truncate text if needed to fit badge
+            max_label_w = w - 85
+            elided_label = fm_label.elidedText(label, Qt.ElideRight, max_label_w)
+            painter.drawText(start_x + 14, y + fm_label.ascent() + 2, elided_label)
+
+            # Pill Badge con contador y porcentaje
+            badge_text = f"{value:,}"
+            badge_w = max(fm_badge.horizontalAdvance(badge_text) + 12, 28)
+            badge_h = 16
+            badge_x = start_x + w - badge_w - 24
+            badge_y = y + 1
+
+            badge_rect = QRectF(badge_x, badge_y, badge_w, badge_h)
+            painter.setPen(Qt.NoPen)
+            # Pill background oscuro o translúcido
+            pill_bg = QColor("#64748B")
+            painter.setBrush(QBrush(pill_bg))
+            painter.drawRoundedRect(badge_rect, 8, 8)
+
+            # Badge text (blanco)
+            painter.setFont(font_badge)
+            painter.setPen(QColor("#FFFFFF"))
+            tw = fm_badge.horizontalAdvance(badge_text)
+            painter.drawText(int(badge_x + (badge_w - tw) / 2), int(badge_y + fm_badge.ascent() + 2), badge_text)
+
+    def _draw_bottom_legend(self, painter: QPainter, w: int, h: int, legend_h: int) -> None:
         font = QFont()
         font.setPointSize(8)
         painter.setFont(font)
@@ -295,20 +394,50 @@ class DonutChartWidget(QWidget):
             return
 
         w, h = self.width(), self.height()
-        legend_rows = math.ceil(len(self._data) / 2)
-        legend_h = legend_rows * 20 + 8
-        donut_h = h - legend_h
+        is_wide_layout = w >= 280
 
-        side = min(w, donut_h)
-        cx, cy = w / 2, donut_h / 2
+        if is_wide_layout:
+            donut_w = int(w * 0.48)
+            side = min(donut_w, h)
+            cx = donut_w / 2
+            cy = h / 2
+        else:
+            legend_rows = len(self._data)
+            legend_h = legend_rows * 22 + 8
+            donut_h = max(h - legend_h, 80)
+            side = min(w, donut_h)
+            cx = w / 2
+            cy = donut_h / 2
+
         outer_r = side * 0.44
+        inner_r = outer_r * 0.62
 
         mx, my = event.position().x(), event.position().y()
         dx, dy = mx - cx, my - cy
         dist = math.sqrt(dx * dx + dy * dy)
-        inner_r = outer_r * 0.60
 
-        if dist < inner_r or dist > outer_r * 1.1:
+        # Comprobar hover en leyenda lateral si está en la mitad derecha
+        if is_wide_layout and mx > donut_w:
+            header_h = 28
+            item_h = 24
+            total_items = len(self._data)
+            total_content_h = header_h + (total_items * item_h)
+            start_y = max((h - total_content_h) // 2, 8) + header_h
+            hover_idx = int((my - start_y) // item_h)
+            if 0 <= hover_idx < total_items:
+                if self._hovered_index != hover_idx:
+                    self._hovered_index = hover_idx
+                    seg = self._data[hover_idx]
+                    pct = seg.get("value", 0) / self._total * 100
+                    QToolTip.showText(
+                        event.globalPosition().toPoint(),
+                        f"{seg.get('label', '')}: {seg.get('value', 0):,} ({pct:.1f}%)",
+                        self,
+                    )
+                    self.update()
+                return
+
+        if dist < inner_r or dist > outer_r * 1.15:
             if self._hovered_index != -1:
                 self._hovered_index = -1
                 self.update()

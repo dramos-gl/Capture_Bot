@@ -39,6 +39,7 @@ class InteractiveGridRow(QFrame):
         self.layout.setAlignment(Qt.AlignVCenter)
 
         self._has_desarrollo = False
+        self._has_disponibles = True
         self._all_desarrollos = []  # Legacy: Tuplas (desarrollo_id, nombre, delegacion_id, es_default)
         self._cascade_mode = cascade_mode
 
@@ -114,6 +115,10 @@ class InteractiveGridRow(QFrame):
     def set_has_desarrollo(self, enabled: bool):
         self._has_desarrollo = enabled
         self.combo_desarrollo.setVisible(enabled)
+
+    def set_has_disponibles(self, enabled: bool):
+        self._has_disponibles = enabled
+        self.lbl_disponibles.setVisible(enabled)
 
     def set_cascade_mode(self, enabled: bool):
         """Switch between cascade mode (apartar) and legacy mode (individual)."""
@@ -491,6 +496,7 @@ class InteractiveGrid(QWidget):
         self._delegaciones = []
         self._desarrollos = []
         self._cascade_mode = False
+        self._has_disponibles = True
         self._cascade_desarrollos_entries = []
 
 
@@ -499,6 +505,12 @@ class InteractiveGrid(QWidget):
         self.lbl_h_desarrollo.setVisible(enabled)
         for r in self.rows:
             r.set_has_desarrollo(enabled)
+
+    def set_has_disponibles(self, enabled: bool):
+        self._has_disponibles = enabled
+        self.lbl_h_disp.setVisible(enabled)
+        for r in self.rows:
+            r.set_has_disponibles(enabled)
 
     def set_cascade_mode(self, enabled: bool, desarrollos_entries: list = None):
         """Enable cascade mode for the grid (used by the Apartar tab).
@@ -526,6 +538,7 @@ class InteractiveGrid(QWidget):
     def add_row(self):
         row_widget = InteractiveGridRow(self.rows_container, cascade_mode=self._cascade_mode)
         row_widget.set_has_desarrollo(self._has_desarrollo)
+        row_widget.set_has_disponibles(self._has_disponibles)
         if self._cascade_mode:
             # In cascade mode, populate only the Desarrollo combo initially
             row_widget.populate_cascade_desarrollos(self._cascade_desarrollos_entries)
@@ -546,6 +559,7 @@ class InteractiveGrid(QWidget):
     def add_row_with_data(self, rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada=0, desarrollo_id=None):
         row_widget = InteractiveGridRow(self.rows_container, cascade_mode=False)  # legacy
         row_widget.set_has_desarrollo(self._has_desarrollo)
+        row_widget.set_has_disponibles(self._has_disponibles)
         row_widget.populate(self._rfcs, self._conceptos, self._delegaciones, self._desarrollos)
         row_widget.set_values(rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada, desarrollo_id)
         row_widget.deleted.connect(self._remove_row)

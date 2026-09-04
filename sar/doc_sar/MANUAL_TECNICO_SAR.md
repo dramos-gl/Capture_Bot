@@ -86,7 +86,7 @@ SAR_Cliente/
 # Configuración de Conexión a Base de Datos Central
 SAR_DB_HOST=192.168.1.100
 SAR_DB_PORT=5432
-SAR_DB_NAME=sar_db
+SAR_DB_NAME=db_sar
 SAR_DB_USER=sar_app_user
 SAR_DB_PASS=PasswordSeguro2026!
 
@@ -149,7 +149,7 @@ COMMIT;
 ## 4.2 Estrategia de Respaldos (`pg_dump`)
 Ejecutar diariamente mediante tarea programada en el servidor:
 ```bash
-pg_dump -U postgres -h localhost -F c -b -v -f "D:\Backups_SAR\sar_db_%DATE%.dump" sar_db
+pg_dump -U postgres -h localhost -F c -b -v -f "D:\Backups_SAR\db_sar_%DATE%.dump" db_sar
 ```
 
 ---

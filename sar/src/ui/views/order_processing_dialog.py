@@ -25,7 +25,7 @@ class OrderProcessingDialog(QDialog):
         self.orden_estado = ""
         self.api_client = APIClient()
         
-        self.setWindowTitle("Procesar Referencias por Solicitud")
+        self.setWindowTitle("Procesar Derechos por Solicitudes")
         self.resize(1000, 680)
         self.setMinimumSize(900, 600)
         self.setObjectName("orderProcessingDialog")
@@ -37,12 +37,19 @@ class OrderProcessingDialog(QDialog):
 
         # 1. Header Section
         self.header_layout = QHBoxLayout()
-        self.lbl_title = CustomLabel("Procesar Referencias por Solicitud", variant="header")
-        self.lbl_subtitle = CustomLabel("Orden: ... | Total de solicitudes: 0 | Referencias pendientes por autorización: 0", variant="body")
+        self.lbl_title = CustomLabel("Procesar Derechos", variant="header")
+        self.lbl_desc = CustomLabel(
+            "Modulo de Autorizacion/Rechazo generacion de lote de archivos excel y pdf para el proceso de Autorizacion",
+            variant="muted"
+        )
+        self.lbl_desc.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 400;")
+        self.lbl_subtitle = CustomLabel("Orden: ... | Total de solicitudes: 0 | Derechos pendientes por autorización: 0", variant="body")
         self.lbl_subtitle.setObjectName("orderProcessingSubtitle")
         
         title_block = QVBoxLayout()
+        title_block.setSpacing(4)
         title_block.addWidget(self.lbl_title)
+        title_block.addWidget(self.lbl_desc)
         title_block.addWidget(self.lbl_subtitle)
         self.header_layout.addLayout(title_block)
         
@@ -332,7 +339,7 @@ class OrderProcessingDialog(QDialog):
         folio = self.solicitudes_data[0]["folio_orden"] if self.solicitudes_data else "N/A"
         
         self.lbl_subtitle.setText(
-            f"Orden: {folio} | Total de solicitudes: {total_sols} | Referencias pendientes por autorización: {total_pendientes}"
+            f"Orden: {folio} | Total de solicitudes: {total_sols} | Derechos pendientes por autorización: {total_pendientes}"
         )
         
         self.lbl_metric_solicitadas.setText(f"Solicitadas: {total_solicitadas}")
@@ -445,7 +452,7 @@ class OrderProcessingDialog(QDialog):
                 self, 
                 "Acción Bloqueada", 
                 f"No se pueden procesar las siguientes solicitudes porque no se encuentran en estado PENDIENTE_AUTORIZACION "
-                f"o tienen referencias ya autorizadas/rechazadas:\n\n"
+                f"o tienen derechos ya autorizados/rechazados:\n\n"
                 f"{invalid_list}\n\n"
                 f"Por favor, desmarque estas solicitudes antes de proceder."
             )
@@ -458,7 +465,7 @@ class OrderProcessingDialog(QDialog):
         reply = QMessageBox.question(
             self, "Confirmar Procesamiento",
             f"¿Estás seguro de que deseas marcar las {len(valid_ids)} solicitudes seleccionadas como {label_action}?\n"
-            "Esto actualizará todas sus referencias hijas pendientes.",
+            "Esto actualizará todos sus derechos hijos pendientes.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
         
@@ -480,7 +487,7 @@ class OrderProcessingDialog(QDialog):
                     
                 QMessageBox.information(
                     self, "Éxito", 
-                    f"Se procesaron con éxito {len(valid_ids)} solicitudes ({rows_updated} referencias actualizadas)."
+                    f"Se procesaron con éxito {len(valid_ids)} solicitudes ({rows_updated} derechos actualizados)."
                 )
                 self._load_data()
                 if self.parent() and hasattr(self.parent(), 'refresh_historial'):
@@ -541,9 +548,9 @@ class OrderProcessingDialog(QDialog):
         
         if has_mismatch:
             msg = (
-                f"Advertencia: Existe una discrepancia en la cantidad de referencias para las solicitudes seleccionadas.\n\n"
-                f"• Referencias Solicitadas: {sum_solicitadas}\n"
-                f"• Referencias Generadas: {sum_generadas}\n\n"
+                f"Advertencia: Existe una discrepancia en la cantidad de derechos para las solicitudes seleccionadas.\n\n"
+                f"• Derechos Solicitados: {sum_solicitadas}\n"
+                f"• Derechos Generados: {sum_generadas}\n\n"
                 f"Esto significa que una o varias solicitudes seleccionadas aún no han sido completamente procesadas por el Bot A.\n\n"
                 f"¿Está seguro de que desea proceder con la generación de archivos de todos modos?"
             )
@@ -556,8 +563,8 @@ class OrderProcessingDialog(QDialog):
         else:
             msg = (
                 f"Se procederá a generar los archivos {file_type} para las solicitudes seleccionadas.\n\n"
-                f"• Referencias Solicitadas: {sum_solicitadas}\n"
-                f"• Referencias Generadas: {sum_generadas}\n\n"
+                f"• Derechos Solicitados: {sum_solicitadas}\n"
+                f"• Derechos Generados: {sum_generadas}\n\n"
                 f"¿Está seguro de que desea continuar?"
             )
             confirm = QMessageBox.question(
@@ -616,7 +623,7 @@ class OrderProcessingDialog(QDialog):
                     archivos_str = "\n".join([f"- {name}" for name in result["archivos"]])
                     msg = (
                         f"¡Archivos Excel generados con éxito!\n\n"
-                        f"Total de referencias: {result['total_referencias']}\n"
+                        f"Total de derechos: {result['total_referencias']}\n"
                         f"Total de lotes: {result['lotes_generados']}\n\n"
                         f"Archivos:\n{archivos_str}\n\n"
                         f"Guardados en:\n{dest_dir}"
@@ -683,7 +690,7 @@ class OrderProcessingDialog(QDialog):
                     archivos_str = "\n".join([f"- {name}" for name in result["archivos"]])
                     msg = (
                         f"¡PDFs unificados generados con éxito!\n\n"
-                        f"Total de referencias: {result['total_referencias']}\n"
+                        f"Total de derechos: {result['total_referencias']}\n"
                         f"Total de lotes: {result['lotes_generados']}\n\n"
                         f"Archivos:\n{archivos_str}\n\n"
                         f"Guardados en:\n{dest_dir}"

@@ -287,7 +287,7 @@ class RequestsView(QWidget):
                     archivos_str = "\n".join([f"- {name}" for name in result["archivos"]])
                     msg = (
                         f"¡Archivos Excel generados con éxito!\n\n"
-                        f"Total de referencias: {result['total_referencias']}\n"
+                        f"Total de derechos: {result['total_referencias']}\n"
                         f"Total de lotes: {result['lotes_generados']}\n\n"
                         f"Archivos:\n{archivos_str}\n\n"
                         f"Guardados en:\n{dest_dir}"
@@ -358,7 +358,7 @@ class RequestsView(QWidget):
                     archivos_str = "\n".join([f"- {name}" for name in result["archivos"]])
                     msg = (
                         f"¡PDFs unificados generados con éxito!\n\n"
-                        f"Total de referencias: {result['total_referencias']}\n"
+                        f"Total de derechos: {result['total_referencias']}\n"
                         f"Total de lotes: {result['lotes_generados']}\n\n"
                         f"Archivos:\n{archivos_str}\n\n"
                         f"Guardados en:\n{dest_dir}"
@@ -542,15 +542,6 @@ class RequestsView(QWidget):
                 self.table.setRowHidden(row, True)
 
     def _load_available_orders(self, preserve_selection=False):
-        if hasattr(self, 'todas_las_ordenes') and self.todas_las_ordenes:
-            if preserve_selection:
-                valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
-                if self.is_custom_filter and self.selected_orden_ids:
-                    self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
-                if not self.selected_orden_ids:
-                    self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
-            return
-
         try:
             raw_ordenes = self.solicitudes_ui_service.get_ordenes(include_rejected=False)
             self.todas_las_ordenes = [
@@ -559,10 +550,9 @@ class RequestsView(QWidget):
             ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
-                if preserve_selection and self.is_custom_filter and self.selected_orden_ids:
+                if preserve_selection and self.is_custom_filter:
                     self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
-                
-                if not self.selected_orden_ids or (preserve_selection and not self.is_custom_filter):
+                elif not self.is_custom_filter:
                     self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
             else:
                 self.selected_orden_ids = []

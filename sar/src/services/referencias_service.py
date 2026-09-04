@@ -128,6 +128,9 @@ class ReferenciasService:
         The view encapsulates the correct JOINs between referencia, grupo_referencia
         (rfc_id, concepto_id), solicitud (delegacion_id), and orden_generacion.
         """
+        if orden_ids is not None and len(orden_ids) == 0:
+            return []
+
         if self.api_client.connect_via_api:
             payload = {}
             if rfc_id: payload["rfc_id"] = rfc_id
@@ -189,6 +192,9 @@ class ReferenciasService:
 
     def get_metrics_summary(self, rfc_id: int = None, concepto_id: int = None, delegacion_id: int = None, orden_ids: list = None) -> Dict[str, Any]:
         """Returns KPI summary from vw_metricas_referencias: total amount, total refs, and count/amount per estado_codigo."""
+        if orden_ids is not None and len(orden_ids) == 0:
+            return {"total_referencias": 0, "importe_total": 0.0, "por_estado": {}}
+
         if self.api_client.connect_via_api:
             try:
                 payload = {}

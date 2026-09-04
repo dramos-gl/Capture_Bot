@@ -1,6 +1,6 @@
 """Main shell coordinator view."""
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QStackedWidget
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QLabel
 from PySide6.QtCore import Signal, Qt
 from sar.src.ui.design_system.components import NavigationSidebar, CustomLabel
 
@@ -28,9 +28,32 @@ class MainView(QWidget):
         self.sidebar.set_username(self._get_username_string())
         self.layout.addWidget(self.sidebar)
         
+        # Main content area container (Stacked widget + Bottom right footer)
+        self.content_area = QWidget(self)
+        self.content_layout = QVBoxLayout(self.content_area)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        
         # Stacked layout for main views
-        self.stacked_widget = QStackedWidget(self)
-        self.layout.addWidget(self.stacked_widget)
+        self.stacked_widget = QStackedWidget(self.content_area)
+        self.content_layout.addWidget(self.stacked_widget, stretch=1)
+        
+        # Discreet right-aligned footer bar
+        self.footer_bar = QWidget(self.content_area)
+        self.footer_bar_layout = QHBoxLayout(self.footer_bar)
+        self.footer_bar_layout.setContentsMargins(16, 2, 20, 6)
+        self.footer_bar_layout.setSpacing(0)
+        
+        self.lbl_global_footer = QLabel("Sistema de Administración de Derechos | DRR | v1.0.0", self.footer_bar)
+        self.lbl_global_footer.setObjectName("globalAppFooter")
+        self.lbl_global_footer.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_global_footer.setStyleSheet("color: #94A3B8; font-size: 10px; background: transparent;")
+        
+        self.footer_bar_layout.addStretch()
+        self.footer_bar_layout.addWidget(self.lbl_global_footer)
+        self.content_layout.addWidget(self.footer_bar)
+        
+        self.layout.addWidget(self.content_area, stretch=1)
         
         # Setup child views lazily
         self.dashboard_view = None
@@ -39,7 +62,6 @@ class MainView(QWidget):
         self.refs_view = None
         self.inventory_view = None
         
-        from PySide6.QtWidgets import QLabel
         self.placeholder_lbl = QLabel("Cargando...", self)
         self.placeholder_lbl.setAlignment(Qt.AlignCenter)
         self.stacked_widget.addWidget(self.placeholder_lbl)
@@ -137,6 +159,27 @@ class MainView(QWidget):
         layout.addWidget(lbl)
         return widget
         
+    def _load_metrics_view(self, orden_ids: list, return_widget: QWidget = None):
+        """Handler to load and switch to metrics view inside QStackedWidget remembering previous view."""
+        if not hasattr(self, "metrics_view") or not self.metrics_view:
+            from sar.src.ui.views.metrics_dashboard_dialog import MetricsDashboardDialog
+            self.metrics_view = MetricsDashboardDialog(self.db_connector, initial_orden_ids=orden_ids, parent=self)
+            self.metrics_view._previous_view = return_widget or self.dashboard_view
+            
+            def _on_back():
+                prev = getattr(self.metrics_view, '_previous_view', None) or self.dashboard_view
+                self.stacked_widget.setCurrentWidget(prev)
+                
+            self.metrics_view.back_requested.connect(_on_back)
+            self.stacked_widget.addWidget(self.metrics_view)
+        else:
+            self.metrics_view._previous_view = return_widget or self.stacked_widget.currentWidget() or self.dashboard_view
+            self.metrics_view.selected_orden_ids = list(orden_ids)
+            self.metrics_view._update_orden_filter_label()
+            self.metrics_view.refresh_metrics()
+        
+        self.stacked_widget.setCurrentWidget(self.metrics_view)
+
     def _on_navigation(self, view_key: str):
         """Switches the stacked widget active view or opens independent windows with routing permissions check."""
         try:
@@ -206,24 +249,9 @@ class MainView(QWidget):
             if not self.dashboard_view:
                 from sar.src.ui.views.dashboard_view import DashboardView
                 self.dashboard_view = DashboardView(self.db_connector, self)
-                
-                # Handler to load and switch to metrics view inside QStackedWidget
-                def load_metrics_view(orden_ids):
-                    if not hasattr(self, "metrics_view") or not self.metrics_view:
-                        from sar.src.ui.views.metrics_dashboard_dialog import MetricsDashboardDialog
-                        self.metrics_view = MetricsDashboardDialog(self.db_connector, initial_orden_ids=orden_ids, parent=self)
-                        
-                        # Return to dashboard when back button is pressed
-                        self.metrics_view.back_requested.connect(lambda: self.stacked_widget.setCurrentWidget(self.dashboard_view))
-                        self.stacked_widget.addWidget(self.metrics_view)
-                    else:
-                        self.metrics_view.selected_orden_ids = list(orden_ids)
-                        self.metrics_view._update_orden_filter_label()
-                        self.metrics_view.refresh_metrics()
-                    
-                    self.stacked_widget.setCurrentWidget(self.metrics_view)
-
-                self.dashboard_view.show_metrics_requested.connect(load_metrics_view)
+                self.dashboard_view.show_metrics_requested.connect(
+                    lambda oids: self._load_metrics_view(oids, return_widget=self.dashboard_view)
+                )
                 self.stacked_widget.addWidget(self.dashboard_view)
             self.stacked_widget.setCurrentWidget(self.dashboard_view)
             self.dashboard_view.refresh_data()
@@ -263,6 +291,9 @@ class MainView(QWidget):
             if not self.inventory_view:
                 from sar.src.ui.views.inventory_view import InventoryView
                 self.inventory_view = InventoryView(self.db_connector, self)
+                self.inventory_view.show_metrics_requested.connect(
+                    lambda oids: self._load_metrics_view(oids, return_widget=self.inventory_view)
+                )
                 self.stacked_widget.addWidget(self.inventory_view)
             self.stacked_widget.setCurrentWidget(self.inventory_view)
             

@@ -28,7 +28,7 @@ class InventarioUIService:
                 payload["start_date"] = start_date
             if end_date:
                 payload["end_date"] = end_date
-            if orden_ids:
+            if orden_ids is not None:
                 payload["orden_ids"] = orden_ids
             res = self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas", data=payload)
             return {"records": res["records"], "total_count": res["total_count"]}
@@ -64,7 +64,7 @@ class InventarioUIService:
                 payload["start_date"] = start_date
             if end_date:
                 payload["end_date"] = end_date
-            if orden_ids:
+            if orden_ids is not None:
                 payload["orden_ids"] = orden_ids
             return self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas-summary", data=payload)
         else:

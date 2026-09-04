@@ -88,3 +88,24 @@ class Colors:
     ACCENT_RED      = "#EF4444"
     ACCENT_TEAL     = "#2DD4BF"
     ACCENT_BLUE_DEEP = "#1D4ED8"
+
+    # --- Analytics & Vivid Chart Palette (Inspirada en dashboards modernos) ---
+    CHART_EMERALD_DARK = "#2E7D32"  # Verde esmeralda profundo / boscoso (Generadas / Completadas)
+    CHART_AMBER        = "#F59E0B"  # Ámbar cálido / Mostaza brillante (Pendiente / Low)
+    CHART_PURPLE       = "#9333EA"  # Púrpura vivo / Violeta (Medium / Asignadas)
+    CHART_CORAL        = "#F43F5E"  # Coral / Rojo vivo (Rechazadas / Critical)
+    CHART_BLUE         = "#0284C7"  # Azul cian / Océano (General / High)
+    CHART_INDIGO       = "#6366F1"  # Índigo brillante
+    CHART_TEAL         = "#14B8A6"  # Verde azulado vibrante
+    CHART_SLATE        = "#64748B"  # Slate neutro
+
+    CHART_VIVID_PALETTE = [
+        CHART_EMERALD_DARK,
+        CHART_AMBER,
+        CHART_PURPLE,
+        CHART_CORAL,
+        CHART_BLUE,
+        CHART_INDIGO,
+        CHART_TEAL,
+        CHART_SLATE
+    ]

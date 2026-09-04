@@ -657,7 +657,7 @@ class InventoryKPIDetailDialog(QDialog):
             filter_assigned=self.state_filter,
             concepto_id=None, # We load broad matching and filter in UI for maximum flexibility
             rfc_id=None,
-            orden_ids=self.selected_orden_ids if self.selected_orden_ids else None,
+            orden_ids=self.selected_orden_ids,
             search_text="",
             start_date=self.start_date,
             end_date=self.end_date

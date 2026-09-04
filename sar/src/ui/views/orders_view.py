@@ -243,6 +243,7 @@ class OrdersView(QWidget):
         
         # Interactive Grid
         self.grid = InteractiveGrid(self)
+        self.grid.set_has_disponibles(False)
         self.grid.data_changed.connect(self._update_summary)
         self.grid.save_triggered.connect(self._on_guardar_orden)
         self.grid.cancel_triggered.connect(self._on_cancelar_edicion)
@@ -624,7 +625,7 @@ class OrdersView(QWidget):
             return
             
         menu = QMenu(self)
-        action_procesar = menu.addAction("Procesar referencias (Doble clic)")
+        action_procesar = menu.addAction("Procesar derechos (Doble clic)")
         action_editar = menu.addAction("Editar orden")
         
         id_item = self.table_historial.item(row, 0)
