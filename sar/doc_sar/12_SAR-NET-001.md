@@ -118,6 +118,9 @@ El administrador del sistema puede controlar el estatus del servicio, consultar 
 
 #### 2. Compilar a .exe independiente:
 ```powershell
+# Asegúrese de cerrar cualquier instancia previa de SAR_Servidor.exe antes de compilar
+Get-Process | Where-Object { $_.ProcessName -eq "SAR_Servidor" } | Stop-Process -Force -ErrorAction SilentlyContinue
+
 .venv_sar\Scripts\pyinstaller --noconfirm --onedir --windowed --paths=. --icon="sar/src/ui/assets/sar_logo.png" --add-data "sar/src/ui/assets;sar/src/ui/assets" --name="SAR_Servidor" sar/main_server_manager.py
 ```
 

@@ -830,7 +830,9 @@ class BillingBotWindow(QMainWindow):
             if self._on_logout and callable(self._on_logout):
                 self._on_logout(exit_app=True)
             event.accept()
-            QApplication.quit()
+            app_inst = QApplication.instance()
+            if app_inst:
+                app_inst.quit()
         else:
             event.ignore()
 

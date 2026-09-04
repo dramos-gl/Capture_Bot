@@ -277,6 +277,19 @@ def get_user_permissions(user_id: int, db: Session = Depends(get_db)):
 def get_active_sessions(db: Session = Depends(get_db)):
     try:
         from sar.src.storage.models import Sesion, Usuario
+        from sqlalchemy import text
+        # Depurar sesiones huérfanas inactivas
+        db.execute(text("""
+            UPDATE sar_seguridad.sesion
+            SET estado = 'FINALIZADA'
+            WHERE estado = 'ACTIVA' 
+              AND (
+                (ultimo_heartbeat IS NOT NULL AND ultimo_heartbeat < (NOW() - INTERVAL '12 hours'))
+                OR (ultimo_heartbeat IS NULL AND fecha_inicio < (NOW() - INTERVAL '12 hours'))
+              )
+        """))
+        db.commit()
+
         stmt = (
             select(
                 Sesion.sesion_id,

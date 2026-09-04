@@ -32,6 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['sar\\src\\ui\\assets\\sar_logo.png'],
 )
 coll = COLLECT(
     exe,

@@ -148,7 +148,7 @@ class APIServerWindow(QMainWindow):
         self.main_layout.addWidget(self.header_widget)
     def _setup_sidebar(self):
         self.sidebar_card = CustomCard(parent=self)
-        self.sidebar_card.setFixedWidth(160)
+        self.sidebar_card.setFixedWidth(175)
         self.sidebar_card.setStyleSheet("background-color: #FFFFFF; border: 1px solid #D2D6DC;")
         
         sidebar_layout = self.sidebar_card.layout
@@ -177,7 +177,7 @@ class APIServerWindow(QMainWindow):
                     background-color: transparent;
                     color: #475569;
                     border: none;
-                    padding: 5px 8px;
+                    padding: 6px 10px;
                     text-align: left;
                     font-size: 11px;
                     font-weight: 500;
@@ -263,23 +263,59 @@ class APIServerWindow(QMainWindow):
         layout = QHBoxLayout(widget)
         layout.setSpacing(10)
         
-        # Console output
+        # Console output left area
         left_layout = QVBoxLayout()
-        title = CustomLabel("Consola del Servidor de Aplicaciones API_SAR", variant="header")
-        left_layout.addWidget(title)
+        left_layout.setSpacing(6)
+        
+        header_row = QHBoxLayout()
+        title = CustomLabel("Consola de Eventos y Logs en Tiempo Real", variant="header")
+        header_row.addWidget(title)
+        header_row.addStretch()
+        
+        self.chk_autoscroll = QPushButton("Auto-scroll: ON")
+        self.chk_autoscroll.setCheckable(True)
+        self.chk_autoscroll.setChecked(True)
+        self.chk_autoscroll.setStyleSheet("""
+            QPushButton {
+                background-color: #1E293B;
+                color: #38BDF8;
+                border: 1px solid #334155;
+                border-radius: 4px;
+                padding: 3px 8px;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:checked {
+                background-color: #0369A1;
+                color: #FFFFFF;
+            }
+        """)
+        self.chk_autoscroll.clicked.connect(self._toggle_autoscroll)
+        header_row.addWidget(self.chk_autoscroll)
+        left_layout.addLayout(header_row)
         
         self.console_edit = QTextEdit()
         self.console_edit.setReadOnly(True)
         self.console_edit.setFont(QFont("Consolas", 10))
-        self.console_edit.setStyleSheet("background-color: #0F172A; color: #10B981; border: 1px solid #1E293B; border-radius: 4px; padding: 10px;")
+        self.console_edit.setStyleSheet("""
+            QTextEdit {
+                background-color: #0B132B;
+                color: #E2E8F0;
+                border: 1px solid #1E293B;
+                border-radius: 6px;
+                padding: 10px;
+                font-family: 'Consolas', 'Courier New', monospace;
+                line-height: 1.4;
+            }
+        """)
         left_layout.addWidget(self.console_edit)
         
         layout.addLayout(left_layout, 1)
         
         # Action buttons right side
         buttons_layout = QVBoxLayout()
-        buttons_layout.setSpacing(6)
-        buttons_layout.addSpacing(15)
+        buttons_layout.setSpacing(8)
+        buttons_layout.addSpacing(25)
         
         btn_limpiar = CustomButton("Limpiar", is_secondary=True)
         btn_limpiar.clicked.connect(self._clear_console)
@@ -289,7 +325,7 @@ class APIServerWindow(QMainWindow):
         btn_fuente.clicked.connect(self._change_font)
         buttons_layout.addWidget(btn_fuente)
         
-        buttons_layout.addSpacing(20)
+        buttons_layout.addSpacing(15)
         
         self.btn_iniciar = CustomButton("Iniciar Servicio", is_secondary=False)
         self.btn_iniciar.clicked.connect(self._start_service)
@@ -300,15 +336,11 @@ class APIServerWindow(QMainWindow):
         self.btn_detener.clicked.connect(self._stop_service)
         buttons_layout.addWidget(self.btn_detener)
         
-        buttons_layout.addSpacing(20)
+        buttons_layout.addSpacing(15)
         
-        btn_registrar = CustomButton("Registra", is_secondary=True)
-        btn_registrar.setEnabled(False) # Placeholder
-        buttons_layout.addWidget(btn_registrar)
-        
-        btn_quitar = CustomButton("Quitar", is_secondary=True)
-        btn_quitar.setEnabled(False) # Placeholder
-        buttons_layout.addWidget(btn_quitar)
+        btn_leer_archivo = CustomButton("Cargar Archivo Log", is_secondary=True)
+        btn_leer_archivo.clicked.connect(self._read_external_log_file)
+        buttons_layout.addWidget(btn_leer_archivo)
         
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
@@ -479,26 +511,110 @@ class APIServerWindow(QMainWindow):
             elif code == "General":
                 self._query_service_status()
                 
-    def _write_log(self, text):
+    def _toggle_autoscroll(self):
+        if self.chk_autoscroll.isChecked():
+            self.chk_autoscroll.setText("Auto-scroll: ON")
+            # Move cursor to end
+            cursor = self.console_edit.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self.console_edit.setTextCursor(cursor)
+        else:
+            self.chk_autoscroll.setText("Auto-scroll: OFF")
+
+    def _write_log(self, text, level="INFO"):
+        """Appends formatted HTML log entry with color coding by severity level."""
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.console_edit.append(f"{timestamp} {text}")
         
+        # Color mapping for log clarity
+        colors = {
+            "INFO": "#38BDF8",     # Cyan
+            "SUCCESS": "#34D399",  # Mint Green
+            "WARN": "#FBBF24",     # Amber Yellow
+            "ERROR": "#F87171",    # Soft Red
+            "MUTED": "#94A3B8"     # Slate Gray
+        }
+        badge_bg = {
+            "INFO": "#0369A1",
+            "SUCCESS": "#065F46",
+            "WARN": "#92400E",
+            "ERROR": "#991B1B",
+            "MUTED": "#334155"
+        }
+        
+        # Auto-detect level if standard string provided
+        upper_text = text.upper()
+        if "ERROR" in upper_text or "DENIED" in upper_text or "FAIL" in upper_text or "EXCEPCIÓN" in upper_text or "ERR" in upper_text:
+            level = "ERROR"
+        elif "ÉXITO" in upper_text or "SUCCESS" in upper_text or "RUNNING" in upper_text or "GUARDAD" in upper_text or "ACTUALIZAD" in upper_text:
+            level = "SUCCESS"
+        elif "ADVERTENCIA" in upper_text or "WARN" in upper_text or "STOPPED" in upper_text or "DETENID" in upper_text:
+            level = "WARN"
+
+        lvl_color = colors.get(level, colors["INFO"])
+        bg_color = badge_bg.get(level, badge_bg["INFO"])
+        
+        # Escape HTML entities in text
+        safe_text = (
+            text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\n", "<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;")
+        )
+        
+        html = (
+            f"<div style='margin-bottom: 3px; font-family: Consolas, monospace; font-size: 11px;'>"
+            f"<span style='color: #64748B;'>[{timestamp}]</span> "
+            f"<span style='background-color: {bg_color}; color: #FFFFFF; font-weight: bold; padding: 1px 4px; border-radius: 3px; font-size: 9px;'> {level} </span> "
+            f"<span style='color: {lvl_color};'>{safe_text}</span>"
+            f"</div>"
+        )
+        
+        self.console_edit.append(html)
+        
+        if getattr(self, 'chk_autoscroll', None) and self.chk_autoscroll.isChecked():
+            cursor = self.console_edit.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self.console_edit.setTextCursor(cursor)
+
     def _clear_console(self):
         self.console_edit.clear()
-        self._write_log("Consola limpiada.")
-        
+        self._write_log("Consola de eventos reinicializada.", level="INFO")
+
     def _change_font(self):
         ok, font = QFontDialog.getFont(self.console_font, self, "Seleccionar Fuente de Consola")
         if ok:
             self.console_font = font
             self.console_edit.setFont(font)
-            
+
     def _cleanup_worker(self, worker):
-        if worker in self.active_workers:
+        if hasattr(self, 'active_workers') and worker in self.active_workers:
             try:
                 self.active_workers.remove(worker)
             except ValueError:
                 pass
+        
+    def _read_external_log_file(self):
+        """Allows administrator to inspect an external log file (e.g. NSSM or Uvicorn logs)."""
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar Archivo de Log del Servidor",
+            "",
+            "Archivos de Log (*.log *.txt);;Todos los archivos (*.*)"
+        )
+        if file_path and os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()[-150:] # Last 150 lines
+                self.console_edit.clear()
+                self._write_log(f"--- Cargando últimas {len(lines)} líneas de: {os.path.basename(file_path)} ---", level="INFO")
+                for line in lines:
+                    line_clean = line.strip()
+                    if line_clean:
+                        self._write_log(line_clean)
+                self._write_log(f"--- Fin de archivo: {os.path.basename(file_path)} ---", level="SUCCESS")
+            except Exception as e:
+                self._write_log(f"Error al leer archivo de log: {e}", level="ERROR")
 
     def _query_service_status(self):
         worker = ServiceControlWorker("query")
@@ -546,6 +662,18 @@ class APIServerWindow(QMainWindow):
             else:
                 with self.db_connector.get_session() as session:
                     from sqlalchemy import text
+                    # Marcar como FINALIZADA cualquier sesión ACTIVA huérfana de más de 24 horas sin heartbeat
+                    session.execute(text("""
+                        UPDATE sar_seguridad.sesion
+                        SET estado = 'FINALIZADA'
+                        WHERE estado = 'ACTIVA' 
+                          AND (
+                            (ultimo_heartbeat IS NOT NULL AND ultimo_heartbeat < (NOW() - INTERVAL '12 hours'))
+                            OR (ultimo_heartbeat IS NULL AND fecha_inicio < (NOW() - INTERVAL '12 hours'))
+                          )
+                    """))
+                    session.commit()
+
                     stmt = text("""
                         SELECT s.sesion_id, u.username, s.equipo_nombre, s.ip_equipo, s.fecha_inicio, s.ultimo_heartbeat 
                         FROM sar_seguridad.sesion s
