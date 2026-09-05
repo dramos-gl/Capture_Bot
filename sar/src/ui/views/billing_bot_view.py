@@ -634,7 +634,7 @@ class BillingBotView(QWidget):
         self._update_row_status_ui(sol_id, "PROCESANDO")
 
     def _update_row_status_ui(self, sol_id: int, new_status: str):
-        from sar.src.ui.design_system.components.atoms.gl_status_badge import StatusBadge
+        from sar.src.ui.design_system.components.atoms.gl_badge import StatusBadge
         from sar.src.ui.design_system.components.organisms.gl_data_table import StatusTableWidgetItem
         from PySide6.QtWidgets import QWidget, QHBoxLayout
         from PySide6.QtCore import Qt

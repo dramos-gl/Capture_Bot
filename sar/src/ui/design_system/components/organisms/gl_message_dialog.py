@@ -472,6 +472,49 @@ class GLMessageBox(GLMessageDialog):
     Yes = 0x00004000
     No = 0x00010000
     NoButton = 0x00000000
+    Save = 0x00000800
+    Apply = 0x02000000
+    Close = 0x00200000
+    Discard = 0x00800000
+    Reset = 0x04000000
+    RestoreDefaults = 0x08000000
+    Help = 0x01000000
+    SaveAll = 0x00001000
+    Open = 0x00002000
+    Abort = 0x00040000
+    Retry = 0x00080000
+    Ignore = 0x00100000
+
+    class StandardButton:
+        Ok = 0x00000400
+        Cancel = 0x00400000
+        Yes = 0x00004000
+        No = 0x00010000
+        NoButton = 0x00000000
+        Save = 0x00000800
+        Apply = 0x02000000
+        Close = 0x00200000
+        Discard = 0x00800000
+        Reset = 0x04000000
+        RestoreDefaults = 0x08000000
+        Help = 0x01000000
+        SaveAll = 0x00001000
+        Open = 0x00002000
+        Abort = 0x00040000
+        Retry = 0x00080000
+        Ignore = 0x00100000
+
+    class ButtonRole:
+        InvalidRole = -1
+        AcceptRole = 0
+        RejectRole = 1
+        DestructiveRole = 2
+        ActionRole = 3
+        HelpRole = 4
+        YesRole = 5
+        NoRole = 6
+        ResetRole = 7
+        ApplyRole = 8
 
     # Standard Qt Icons
     NoIcon = 0

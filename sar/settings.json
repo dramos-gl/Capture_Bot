@@ -1,7 +1,7 @@
 {
   "CONNECT_VIA_API": false,
   "API_URL": "http://127.0.0.1:8000",
-  "DB_USER": "postgres",
+  "DB_USER": "sar_app_user",
   "DB_PASSWORD": "",
   "DB_HOST": "127.0.0.1",
   "DB_PORT": "5432",

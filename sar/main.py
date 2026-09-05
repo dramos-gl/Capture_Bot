@@ -107,6 +107,17 @@ class MainWindow(QMainWindow):
     def _handle_login(self, username, password, selected_mod_code):
         """Validates credentials using the API switch or direct database connection."""
         try:
+            # Obtener nombre de equipo e IP local real del cliente
+            import socket
+            hostname = socket.gethostname()
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                client_ip = s.getsockname()[0]
+                s.close()
+            except Exception:
+                client_ip = "127.0.0.1"
+
             if self.api_client.connect_via_api:
                 # ===================================================================
                 # RUTA A: Conexión mediante API REST (FastAPI)
@@ -114,8 +125,8 @@ class MainWindow(QMainWindow):
                 payload = {
                     "username": username,
                     "password": password,
-                    "ip_equipo": "127.0.0.1",
-                    "equipo_nombre": "Cliente LAN"
+                    "ip_equipo": client_ip,
+                    "equipo_nombre": hostname
                 }
                 res = self.api_client.request("POST", "/api/auth/login", data=payload)
                 
@@ -138,7 +149,12 @@ class MainWindow(QMainWindow):
                 # ===================================================================
                 with self.db_connector.get_session() as db_session:
                     security_service = SecurityService(db_session)
-                    sesion_obj = security_service.login(username, password)
+                    sesion_obj = security_service.login(
+                        username=username, 
+                        password_raw=password,
+                        ip_equipo=client_ip,
+                        equipo_nombre=hostname
+                    )
                     
                     if not sesion_obj:
                         self.login_view.set_login_error("Credenciales inválidas o usuario inactivo")
