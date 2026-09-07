@@ -13,7 +13,8 @@ class CustomDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(360)
+        self.setMinimumHeight(300)
         
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -41,7 +42,7 @@ class CustomDialog(QDialog):
         self.btn_min.clicked.connect(self.showMinimized)
 
         self.btn_max = CustomButton("", is_secondary=True)
-        self.btn_max.setIcon(Icons.maximize() if hasattr(Icons, 'maximize') else Icons.copy())
+        self.btn_max.setIcon(Icons.pantalla_completa())
         self.btn_max.setFixedSize(30, 30)
         self.btn_max.setObjectName("dialogHeaderBtn")
         self.btn_max.clicked.connect(self._toggle_maximize)
@@ -61,8 +62,8 @@ class CustomDialog(QDialog):
         # Body (for content injection)
         self.body_container = QWidget(self.main_frame)
         self.body_layout = QVBoxLayout(self.body_container)
-        self.body_layout.setContentsMargins(24, 24, 24, 24)
-        self.body_layout.setSpacing(16)
+        self.body_layout.setContentsMargins(16, 16, 16, 16)
+        self.body_layout.setSpacing(12)
 
         # Footer
         self.footer = QWidget(self.main_frame)
@@ -95,6 +96,23 @@ class CustomDialog(QDialog):
         self.setMouseTracking(True)
         self.main_frame.setMouseTracking(True)
         self.header.setMouseTracking(True)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Cap dialog size to fit screen/parent height so footer (Guardar/Cancelar) is always visible
+        screen_geo = None
+        if self.parent():
+            screen_geo = self.parent().window().geometry()
+        elif self.screen():
+            screen_geo = self.screen().availableGeometry()
+
+        if screen_geo:
+            max_h = max(300, screen_geo.height() - 40)
+            max_w = max(360, screen_geo.width() - 40)
+            target_w = min(self.width(), max_w)
+            target_h = min(self.height(), max_h)
+            if self.width() > target_w or self.height() > target_h:
+                self.resize(target_w, target_h)
 
     def _toggle_maximize(self):
         if self._is_maximized:

@@ -43,6 +43,36 @@ class OrdenesUIService:
                     "municipios": municipios
                 }
 
+    def get_rfcs_detalle_fiscal(self) -> List[Dict[str, Any]]:
+        """Fetches active RFCs with their full fiscal address and corporate data."""
+        if self.api_client.connect_via_api:
+            return self.api_client.request("GET", "/api/ops/rfcs-detalle")
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                repo = CatalogoRepository(session)
+                rfcs = repo.get_rfcs_activos()
+                return [
+                    {
+                        "rfc_id": r.rfc_id,
+                        "rfc": r.rfc,
+                        "razon_social": r.razon_social,
+                        "alias": r.alias,
+                        "calle": r.calle,
+                        "no_exterior": r.no_exterior,
+                        "no_interior": r.no_interior,
+                        "colonia": r.colonia,
+                        "codigo_postal": r.codigo_postal,
+                        "localidad": r.localidad,
+                        "municipio": r.municipio,
+                        "estado": r.estado,
+                        "activo": r.activo
+                    }
+                    for r in rfcs
+                ]
+
+
     def check_orden_ready_for_masivo(self, orden_id: int) -> Dict[str, Any]:
         """Checks if the order is ready for mass action."""
         if self.api_client.connect_via_api:

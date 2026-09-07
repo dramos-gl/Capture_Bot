@@ -113,6 +113,20 @@ class OrdersView(QWidget):
             print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
             return False
 
+    def _on_abrir_validador_fiscal(self):
+        """Opens the read-only fiscal domicile validation dialog for companies/RFC."""
+        if not self._check_permission("ORDENES", "LEER"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para consultar datos de empresas (ORDENES:LEER)."
+            )
+            return
+
+        from sar.src.ui.views.company_fiscal_dialog import CompanyFiscalValidationDialog
+        dialog = CompanyFiscalValidationDialog(self.ordenes_ui_service, parent=self)
+        dialog.exec()
+
     def _on_guardar_orden(self):
         # RBAC Check: CREAR for new order, EDITAR for edit mode
         required_action = "EDITAR" if self._edit_mode else "CREAR"
@@ -396,6 +410,30 @@ class OrdersView(QWidget):
         total_general_layout.addWidget(lbl_tot_text)
         total_general_layout.addWidget(self.lbl_tot_val)
         card_header_layout.addWidget(self.total_general_frame)
+
+        # Botón de Admiración / Validación Fiscal de Empresas (Regla de Oro)
+        self.btn_validar_fiscal = CustomButton("! Validar Domicilio Fiscal", is_secondary=True, parent=self)
+        self.btn_validar_fiscal.setObjectName("btnValidarDomicilioFiscal")
+        self.btn_validar_fiscal.setToolTip(
+            "REGLA DE ORO: Validar visualmente el domicilio fiscal registrado de las empresas (RFC) "
+            "antes de generar la orden y procesar derechos con los BOTs."
+        )
+        self.btn_validar_fiscal.setStyleSheet("""
+            QPushButton#btnValidarDomicilioFiscal {
+                background-color: rgba(217, 119, 6, 0.15);
+                color: #D97706;
+                border: 1px solid rgba(217, 119, 6, 0.40);
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 6px;
+            }
+            QPushButton#btnValidarDomicilioFiscal:hover {
+                background-color: rgba(217, 119, 6, 0.25);
+                border: 1px solid #D97706;
+            }
+        """)
+        self.btn_validar_fiscal.clicked.connect(self._on_abrir_validador_fiscal)
+        card_header_layout.addWidget(self.btn_validar_fiscal)
         
         card_layout.addLayout(card_header_layout)
         

@@ -138,32 +138,39 @@ class RolesView(QWidget):
         lay_matrix.setContentsMargins(0, 0, 0, 0)
         lay_matrix.setSpacing(10)
         
-        header_matrix_lay = QHBoxLayout()
+        header_matrix_lay = QVBoxLayout()
+        header_matrix_lay.setSpacing(6)
+        
         lbl_matrix = CustomLabel("⚙️ MATRIZ DE PERMISOS CRUZADOS (MÓDULOS VS ACCIONES)", variant="subheader")
         lbl_matrix.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY};")
         header_matrix_lay.addWidget(lbl_matrix)
-        header_matrix_lay.addStretch()
         
-        # Quick actions buttons for admin convenience
+        # Quick actions buttons row for admin convenience
         if self.can_edit:
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(8)
+            
             btn_check_all = CustomButton("Marcar Todo", is_secondary=True)
             btn_check_all.setFixedHeight(28)
-            btn_check_all.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+            btn_check_all.setStyleSheet("font-size: 11px; padding: 2px 10px;")
             btn_check_all.clicked.connect(lambda: self._set_all_matrix(True))
             
             btn_uncheck_all = CustomButton("Desmarcar Todo", is_secondary=True)
             btn_uncheck_all.setFixedHeight(28)
-            btn_uncheck_all.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+            btn_uncheck_all.setStyleSheet("font-size: 11px; padding: 2px 10px;")
             btn_uncheck_all.clicked.connect(lambda: self._set_all_matrix(False))
             
             btn_read_only = CustomButton("Solo Lectura (LEER)", is_secondary=True)
             btn_read_only.setFixedHeight(28)
-            btn_read_only.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+            btn_read_only.setStyleSheet("font-size: 11px; padding: 2px 10px;")
             btn_read_only.clicked.connect(self._set_read_only_matrix)
             
-            header_matrix_lay.addWidget(btn_check_all)
-            header_matrix_lay.addWidget(btn_uncheck_all)
-            header_matrix_lay.addWidget(btn_read_only)
+            btn_row.addWidget(btn_check_all)
+            btn_row.addWidget(btn_uncheck_all)
+            btn_row.addWidget(btn_read_only)
+            btn_row.addStretch()
+            
+            header_matrix_lay.addLayout(btn_row)
             
         lay_matrix.addLayout(header_matrix_lay)
         

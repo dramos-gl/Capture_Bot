@@ -81,7 +81,7 @@ La tabla de módulos internos `sar_seguridad.modulo` incluye la columna **`orden
 * `EJECUTAR`: Habilita la acción del botón **"Exportar Asignación Seleccionada"** (`_on_exportar_lote_seleccionado`), así como las acciones internas del diálogo de detalle: **"Generar Excel"** (`_on_generate_excel`) y **"Generar PDF"** (`_on_generate_pdf`) para la expedición formal de documentos. En caso de ausencia de permiso, el sistema deniega el acceso e informa mediante `QMessageBox.warning`.
 
 #### 📦 Módulo Órdenes de Generación (`ORDENES`)
-* `LEER`: Consulta del historial de órdenes capturadas (`tab_historial`), búsqueda por folio y apertura con **doble clic** del módulo interactivo *Procesar Derechos* (`OrderProcessingDialog`).
+* `LEER`: Consulta del historial de órdenes capturadas (`tab_historial`), búsqueda por folio, apertura con **doble clic** del módulo interactivo *Procesar Derechos* (`OrderProcessingDialog`), y habilitación del botón **"! Validar Domicilio Fiscal"** (`_on_abrir_validador_fiscal` $\rightarrow$ `CompanyFiscalValidationDialog`) para consultar de solo lectura el domicilio fiscal de las empresas registradas antes de generar órdenes.
 * `CREAR`: Habilita la acción de **Guardar Orden** (`_on_guardar_orden`) en modo de creación para registrar nuevas órdenes con sus partidas.
 * `EDITAR`: Habilita la carga de una orden para modificación (`load_order_for_editing`) y la acción **Actualizar Orden**.
 * `ELIMINAR`: Permite la acción **Cancelar Orden** (`_on_cancelar_orden`) para dar de baja órdenes y sus solicitudes asociadas.
