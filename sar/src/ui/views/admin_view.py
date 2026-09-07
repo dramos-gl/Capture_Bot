@@ -46,7 +46,7 @@ class AdminWindow(QMainWindow):
         self.api_client = APIClient()
         
         # Window setup
-        self.setWindowTitle("Configuración del Sistema")
+        self.setWindowTitle("SAR - Administración")
         self.resize(1000, 700)
         
         # RBAC permissions

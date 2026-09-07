@@ -8,6 +8,7 @@ from sqlalchemy import (
     Text,
     Integer,
     Numeric,
+    Float,
     Boolean,
     Date,
     DateTime,
@@ -96,6 +97,7 @@ class Modulo(Base):
     modulo_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
+    orden: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     descripcion: Mapped[Optional[str]] = mapped_column(String(200))
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

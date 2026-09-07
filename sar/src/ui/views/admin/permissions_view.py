@@ -35,49 +35,106 @@ class PermissionsView(QWidget):
         self._build_ui()
         
     def _build_ui(self):
-        # Top Bar
-        top_bar = QHBoxLayout()
+        from PySide6.QtWidgets import QFrame
+        from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
+        from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
+        
+        # 1. Top Bar Frame
+        top_bar_frame = QFrame(self)
+        top_bar_frame.setObjectName("topBarFrame")
+        top_bar_frame.setStyleSheet(f"""
+            QFrame#topBarFrame {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        top_bar = QHBoxLayout(top_bar_frame)
+        top_bar.setContentsMargins(0, 0, 0, 0)
+        top_bar.setSpacing(12)
         
         lbl_rol = QLabel("Seleccionar Rol:")
-        lbl_rol.setStyleSheet("font-weight: bold;")
+        lbl_rol.setStyleSheet(f"font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; font-size: 12px;")
         
-        self.cmb_roles = QComboBox()
-        self.cmb_roles.setFixedWidth(300)
+        self.cmb_roles = CustomComboBox(self)
+        self.cmb_roles.setMinimumWidth(320)
         self.cmb_roles.currentIndexChanged.connect(self._on_rol_selected)
         
+        top_bar.addWidget(lbl_rol)
+        top_bar.addWidget(self.cmb_roles)
+        top_bar.addStretch()
+        
+        # Quick Actions
+        if self.can_edit:
+            btn_check_all = CustomButton("Marcar Todo", is_secondary=True)
+            btn_check_all.setFixedHeight(34)
+            btn_check_all.clicked.connect(lambda: self._set_all_matrix(True))
+            
+            btn_uncheck_all = CustomButton("Desmarcar Todo", is_secondary=True)
+            btn_uncheck_all.setFixedHeight(34)
+            btn_uncheck_all.clicked.connect(lambda: self._set_all_matrix(False))
+            
+            btn_read_only = CustomButton("Solo Lectura (LEER)", is_secondary=True)
+            btn_read_only.setFixedHeight(34)
+            btn_read_only.clicked.connect(self._set_read_only_matrix)
+            
+            top_bar.addWidget(btn_check_all)
+            top_bar.addWidget(btn_uncheck_all)
+            top_bar.addWidget(btn_read_only)
+            
         self.btn_save = CustomButton("Guardar Cambios", icon_name="save")
+        self.btn_save.setFixedHeight(34)
         self.btn_save.clicked.connect(self._save_permissions)
         if not self.can_edit:
             self.btn_save.setEnabled(False)
             
-        top_bar.addWidget(lbl_rol)
-        top_bar.addWidget(self.cmb_roles)
-        top_bar.addStretch()
         top_bar.addWidget(self.btn_save)
+        self.layout.addWidget(top_bar_frame)
         
-        self.layout.addLayout(top_bar)
+        # 2. Main Card Container for Matrix Table
+        self.card_matrix = CustomCard(title="Matriz de Permisos Cruzados (Módulos vs Acciones)", parent=self)
         
-        # Matrix Table
-        self.matrix_table = QTableWidget()
+        self.matrix_table = QTableWidget(self.card_matrix)
         self.matrix_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.matrix_table.setSelectionMode(QAbstractItemView.NoSelection)
-        self.matrix_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.matrix_table.horizontalHeader().setStretchLastSection(False)
         self.matrix_table.verticalHeader().setVisible(False)
+        self.matrix_table.setMinimumHeight(380)
         
-        # Styling for table (to match Design System corporate navy header)
+        # Corporate styling matching design_system tokens
         self.matrix_table.setStyleSheet(f"""
+            QTableWidget {{
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 6px;
+                background-color: #FFFFFF;
+                gridline-color: #E2E8F0;
+            }}
             QHeaderView::section {{
                 background-color: {Colors.PRIMARY};
                 color: white;
                 font-weight: bold;
+                font-size: 12px;
                 border: 1px solid {Colors.PRIMARY_LIGHT};
-                padding: 8px;
+                padding: 8px 10px;
             }}
         """)
         
-        self.layout.addWidget(self.matrix_table)
-        
+        self.card_matrix.add_widget(self.matrix_table)
+        self.layout.addWidget(self.card_matrix)
+
+    def _set_all_matrix(self, checked: bool):
+        for chk in self.checkboxes_matrix.values():
+            chk.setChecked(checked)
+
+    def _set_read_only_matrix(self):
+        leer_acc_id = None
+        for a in self.acciones:
+            if a.get("codigo") == "LEER":
+                leer_acc_id = a["id"]
+                break
+        for (m_id, a_id), chk in self.checkboxes_matrix.items():
+            chk.setChecked(a_id == leer_acc_id)
+            
     def refresh_data(self):
         try:
             if self.api_client.connect_via_api:
@@ -85,7 +142,7 @@ class PermissionsView(QWidget):
                 self.roles = [{"id": r["rol_id"], "nombre": r["nombre"]} for r in roles_items if r.get("activo", True)]
                 
                 mod_items = self.api_client.request("GET", "/api/admin/data/modulos")
-                self.modulos = [{"id": m["id"], "nombre": m["nombre"]} for m in mod_items]
+                self.modulos = [{"id": m["id"], "nombre": m["nombre"], "orden": m.get("orden", 1.0)} for m in mod_items]
                 
                 acc_items = self.api_client.request("GET", "/api/admin/data/acciones")
                 self.acciones = [{"id": a["id"], "nombre": a["nombre"]} for a in acc_items]
@@ -99,7 +156,7 @@ class PermissionsView(QWidget):
                     
                     # Load matrix headers
                     mod_items = repo.get_all_modulos()
-                    self.modulos = [{"id": m.modulo_id, "nombre": m.nombre} for m in mod_items if m.activo]
+                    self.modulos = [{"id": m.modulo_id, "nombre": m.nombre, "orden": getattr(m, 'orden', 1.0)} for m in mod_items if m.activo]
                     
                     acc_items = repo.get_all_acciones()
                     self.acciones = [{"id": a.accion_id, "nombre": a.nombre} for a in acc_items if a.activo]
@@ -127,16 +184,21 @@ class PermissionsView(QWidget):
         headers = ["Módulo"] + [a["nombre"] for a in self.acciones]
         self.matrix_table.setHorizontalHeaderLabels(headers)
         
-        # Adjust all columns width to contents to prevent label truncation
-        for i in range(len(headers)):
-            self.matrix_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        # Configure Module column to fit content and action columns to stretch 100% width
+        self.matrix_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        for i in range(1, len(headers)):
+            self.matrix_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
         
         self.checkboxes_matrix.clear()
         
         for r_idx, mod in enumerate(self.modulos):
-            # Módulo Name
+            # Módulo Name con prefijo de orden (ej. [3.1] Inventario)
             from PySide6.QtWidgets import QTableWidgetItem
-            item = QTableWidgetItem(f" {mod['nombre']}")
+            ord_val = mod.get("orden", 1.0)
+            ord_str = f"{int(ord_val)}" if float(ord_val).is_integer() else f"{ord_val}"
+            mod_display_name = f" [{ord_str}] {mod['nombre']}"
+            
+            item = QTableWidgetItem(mod_display_name)
             item.setFlags(Qt.ItemIsEnabled)
             self.matrix_table.setItem(r_idx, 0, item)
             

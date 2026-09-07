@@ -495,10 +495,44 @@ class OrderProcessingDialog(QDialog):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Ocurrió un error al procesar las solicitudes:\n{str(e)}")
 
+    def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
+        """Helper to verify if current session/user holds permission for modulo + accion."""
+        parent_window = self.window()
+        usuario_id = getattr(parent_window, 'current_usuario_id', None)
+        if not usuario_id:
+            return True # Fallback if standalone/testing without active user session context
+        
+        try:
+            if getattr(self.api_client, 'connect_via_api', False):
+                perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                return perms.get(modulo_codigo, {}).get(accion_codigo, False)
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.services.security_service import SecurityService
+                    sec_service = SecurityService(session)
+                    return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+        except Exception as e:
+            print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
+            return False
+
     def _on_authorize_selected(self):
+        if not self._check_permission("ORDENES", "EJECUTAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para autorizar solicitudes de derechos (ORDENES:EJECUTAR)."
+            )
+            return
         self._process_selected_with_state("AUTORIZADA", "AUTORIZADAS")
 
     def _on_reject_selected(self):
+        if not self._check_permission("ORDENES", "EJECUTAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para rechazar solicitudes de derechos (ORDENES:EJECUTAR)."
+            )
+            return
         self._process_selected_with_state("RECHAZADA", "RECHAZADAS")
 
     def _get_default_directory(self) -> str:
@@ -577,6 +611,13 @@ class OrderProcessingDialog(QDialog):
         return confirm == QMessageBox.Yes
 
     def _on_generar_excel_lotes(self):
+        if not self._check_permission("ORDENES", "EJECUTAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para generar archivos Excel de lotes (ORDENES:EJECUTAR)."
+            )
+            return
         sol_ids = self._get_selected_solicitud_ids()
         if not sol_ids:
             QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una solicitud de la tabla primero.")
@@ -644,6 +685,13 @@ class OrderProcessingDialog(QDialog):
             QMessageBox.critical(self, "Error - Generar Excel", f"Ocurrió un error al iniciar la generación de Excel:\n{str(e)}")
 
     def _on_generar_pdf_unificado(self):
+        if not self._check_permission("ORDENES", "EJECUTAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para generar archivos PDF unificados (ORDENES:EJECUTAR)."
+            )
+            return
         sol_ids = self._get_selected_solicitud_ids()
         if not sol_ids:
             QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una solicitud de la tabla primero.")

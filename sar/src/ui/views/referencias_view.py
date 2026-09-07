@@ -165,7 +165,40 @@ class ReferenciasView(QWidget):
         self.table.itemChanged.connect(self._on_table_item_changed)
         
         self._load_available_orders()
+        self._apply_permissions()
         self.refresh_data()
+        
+    def _apply_permissions(self):
+        """Aplica la politica de seguridad Fail-Closed sobre los botones de accion de ReferenciasView."""
+        try:
+            parent_window = self.window()
+            usuario_id = getattr(parent_window, 'current_usuario_id', None)
+            if not usuario_id:
+                return
+
+            from sar.src.storage.api_client import APIClient
+            api_client = APIClient()
+            has_editar = False
+
+            if api_client.connect_via_api:
+                perms = api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                # Verifica permiso EDITAR en modulo DERECHOS o modulo legacy REFERENCIAS
+                has_editar = perms.get("DERECHOS", {}).get("EDITAR", False) or perms.get("REFERENCIAS", {}).get("EDITAR", False)
+            else:
+                from sar.src.services.security_service import SecurityService
+                with self.db_connector.get_session() as session:
+                    sec_service = SecurityService(session)
+                    has_editar = (
+                        sec_service.has_permission(usuario_id, "DERECHOS", "EDITAR") or
+                        sec_service.has_permission(usuario_id, "REFERENCIAS", "EDITAR")
+                    )
+
+            self.btn_marcar_visibles.setEnabled(has_editar)
+            self.btn_estado.setEnabled(has_editar)
+        except Exception as e:
+            # Fallback seguro (Fail-Closed)
+            self.btn_marcar_visibles.setEnabled(False)
+            self.btn_estado.setEnabled(False)
         
     def _get_selected_referencia_ids(self) -> list[int]:
         """Obtiene las referencias marcadas por checkbox, o la seleccionada si no hay checkboxes marcados."""
@@ -185,8 +218,37 @@ class ReferenciasView(QWidget):
                 
         return ids
 
+    def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
+        """Helper to verify if current session/user holds permission for modulo + accion."""
+        parent_window = self.window()
+        usuario_id = getattr(parent_window, 'current_usuario_id', None)
+        if not usuario_id:
+            return True # Fallback if standalone/testing without active user session context
+        
+        try:
+            from sar.src.storage.api_client import APIClient
+            api_client = APIClient()
+            if getattr(api_client, 'connect_via_api', False):
+                perms = api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                return perms.get(modulo_codigo, {}).get(accion_codigo, False)
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.services.security_service import SecurityService
+                    sec_service = SecurityService(session)
+                    return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+        except Exception as e:
+            print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
+            return False
+
     def _on_marcar_visibles(self):
         """Marca o desmarca las casillas de todas las filas que actualmente son visibles en la tabla."""
+        if not self._check_permission("DERECHOS", "EDITAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para modificar la selección de derechos (DERECHOS:EDITAR)."
+            )
+            return
         from PySide6.QtCore import Qt
         
         # Determinar si hay alguna fila visible marcada
@@ -237,6 +299,13 @@ class ReferenciasView(QWidget):
         a AUTORIZADA o RECHAZADA. Si quedan derechos pendientes en las solicitudes involucradas,
         pregunta si desea rechazarlas automáticamente.
         """
+        if not self._check_permission("DERECHOS", "EDITAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para modificar el estado de derechos (DERECHOS:EDITAR)."
+            )
+            return
         # 1. Obtener derechos seleccionados y validar que estén en PENDIENTE_AUTORIZACION
         selected_ids = []
         for row in range(self.table.rowCount()):
@@ -315,11 +384,25 @@ class ReferenciasView(QWidget):
                 QMessageBox.critical(self, "Error", f"Error al cambiar estado: {str(e)}")
 
     def _on_ver_detalle(self):
+        if not (self._check_permission("DERECHOS", "LEER") or self._check_permission("DASHBOARD", "LEER")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes para ver el detalle del derecho (DERECHOS:LEER)."
+            )
+            return
         ref_ids = self._get_selected_referencia_ids()
         if not ref_ids: return
         QMessageBox.information(self, "Detalle", f"Detalles del derecho ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")
         
     def _on_ver_pdf(self):
+        if not (self._check_permission("DERECHOS", "LEER") or self._check_permission("DASHBOARD", "LEER")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes para ver el documento PDF del derecho (DERECHOS:LEER)."
+            )
+            return
         ref_ids = self._get_selected_referencia_ids()
         if not ref_ids: return
         QMessageBox.information(self, "PDF", f"Abriendo visor PDF para el derecho ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")

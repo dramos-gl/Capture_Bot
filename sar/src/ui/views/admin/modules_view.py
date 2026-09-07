@@ -37,7 +37,7 @@ class ModulesView(QWidget):
         self.layout.addWidget(self.tbl_app)
         
         self.tbl_mod = CrudTablePanel("Módulos Internos")
-        self.tbl_mod.setup_table(["ID", "Código", "Nombre", "Descripción", "Estado"], ["modulo_id", "codigo", "nombre", "descripcion", "activo"])
+        self.tbl_mod.setup_table(["ID", "Orden", "Código", "Nombre", "Descripción", "Estado"], ["modulo_id", "orden", "codigo", "nombre", "descripcion", "activo"])
         self.tbl_mod.add_requested.connect(self._on_new_mod)
         self.tbl_mod.edit_requested.connect(self._on_edit_mod)
         self.layout.addWidget(self.tbl_mod)
@@ -288,6 +288,6 @@ class ModulesView(QWidget):
                     self.tbl_app.populate([{"app_modulo_id": a.app_modulo_id, "codigo": a.codigo, "nombre": a.nombre, "activo": a.activo} for a in apps])
                     
                     mods = repo.get_all_modulos()
-                    self.tbl_mod.populate([{"modulo_id": m.modulo_id, "codigo": m.codigo, "nombre": m.nombre, "descripcion": m.descripcion, "activo": m.activo} for m in mods])
+                    self.tbl_mod.populate([{"modulo_id": m.modulo_id, "orden": getattr(m, 'orden', 1.0), "codigo": m.codigo, "nombre": m.nombre, "descripcion": m.descripcion, "activo": m.activo} for m in mods])
         except Exception as e:
             print("Error refreshing modules:", e)

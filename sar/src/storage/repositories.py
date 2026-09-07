@@ -80,7 +80,7 @@ class UsuarioRepository(BaseRepository):
         return list(self.session.execute(stmt).scalars().all())
 
     def get_all_modulos(self) -> List[Modulo]:
-        stmt = select(Modulo).where(Modulo.activo == True).order_by(Modulo.nombre)
+        stmt = select(Modulo).where(Modulo.activo == True).order_by(Modulo.orden, Modulo.nombre)
         return list(self.session.execute(stmt).scalars().all())
         
     def get_all_acciones(self) -> List[Accion]:

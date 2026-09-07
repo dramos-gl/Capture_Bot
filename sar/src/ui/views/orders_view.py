@@ -93,6 +93,198 @@ class OrdersView(QWidget):
         # Agregamos el primer renglón por defecto en la nueva orden
         self.grid.add_row()
         
+    def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
+        """Helper to verify if current session/user holds permission for modulo + accion."""
+        parent_window = self.window()
+        usuario_id = getattr(parent_window, 'current_usuario_id', None)
+        if not usuario_id:
+            return True # Fallback if standalone/testing without active user session context
+        
+        try:
+            if getattr(self.api_client, 'connect_via_api', False):
+                perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                return perms.get(modulo_codigo, {}).get(accion_codigo, False)
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.services.security_service import SecurityService
+                    sec_service = SecurityService(session)
+                    return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+        except Exception as e:
+            print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
+            return False
+
+    def _on_guardar_orden(self):
+        # RBAC Check: CREAR for new order, EDITAR for edit mode
+        required_action = "EDITAR" if self._edit_mode else "CREAR"
+        if not self._check_permission("ORDENES", required_action):
+            action_desc = "modificar órdenes de generación" if self._edit_mode else "crear nuevas órdenes de generación"
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                f"No tiene permisos para {action_desc} (ORDENES:{required_action})."
+            )
+            return
+
+        desc = self.desc_input.text().strip()
+        data = self.grid.get_all_data()
+        municipio_id = self.combo_municipio.currentData()
+        
+        if not desc:
+            QMessageBox.warning(self, "Validación", "Debes ingresar una descripción para la orden.")
+            return
+            
+        if not municipio_id:
+            QMessageBox.warning(self, "Validación", "Debes seleccionar un municipio de acceso.")
+            return
+            
+        if not data:
+            QMessageBox.warning(self, "Validación", "Debes agregar al menos un renglón a la orden.")
+            return
+            
+        # Validate that all rows have selected elements and no duplicates
+        seen_combinations = set()
+        for i, row in enumerate(data):
+            if not row["rfc_id"] or not row["concepto_id"] or not row["delegacion_id"]:
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener todos los campos seleccionados (RFC, Concepto y Delegación).")
+                return
+                
+            key = (row["rfc_id"], row["concepto_id"], row.get("delegacion_id"))
+            if key in seen_combinations:
+                QMessageBox.warning(self, "Validación", f"El renglón {i+1} tiene una combinación duplicada de RFC, Concepto y Delegación. No se puede solicitar dos veces el mismo RFC y Concepto para la misma delegación.")
+                return
+            seen_combinations.add(key)
+            
+        # Confirmation Dialog
+        if self._edit_mode:
+            changes_summary = []
+            original_map = {}
+            for r in getattr(self, "_original_renglones", []):
+                key = (r["rfc_id"], r["concepto_id"], r["delegacion_id"])
+                original_map[key] = r
+                
+            current_keys = set()
+            has_increased_completed = False
+            
+            for row in data:
+                key = (row["rfc_id"], row["concepto_id"], row["delegacion_id"])
+                current_keys.add(key)
+                
+                rfc_txt = self.grid.get_rfc_text(row["rfc_id"]) or str(row["rfc_id"])
+                concept_txt = self.grid.get_concepto_text(row["concepto_id"]) or str(row["concepto_id"])
+                del_txt = self.grid.get_delegacion_text(row["delegacion_id"]) or str(row["delegacion_id"])
+                
+                if key in original_map:
+                    orig_row = original_map[key]
+                    orig_cant = orig_row["cantidad"]
+                    curr_cant = row["cantidad"]
+                    
+                    if orig_row.get("cantidad_generada", 0) > 0 and curr_cant > orig_row.get("cantidad_generada", 0):
+                        has_increased_completed = True
+                    
+                    if curr_cant != orig_cant:
+                        changes_summary.append(
+                            f"• {rfc_txt} - {concept_txt} ({del_txt}):\n"
+                            f"  Cant. Anterior: {orig_cant} → Cant. Actual: {curr_cant}"
+                        )
+                else:
+                    curr_cant = row["cantidad"]
+                    changes_summary.append(
+                        f"• [NUEVA] {rfc_txt} - {concept_txt} ({del_txt}):\n"
+                        f"  Cant. Anterior: 0 → Cant. Actual: {curr_cant}"
+                    )
+            
+            # Check deleted rows
+            for key, orig_row in original_map.items():
+                if key not in current_keys:
+                    rfc_txt = self.grid.get_rfc_text(orig_row["rfc_id"]) or str(orig_row["rfc_id"])
+                    concept_txt = self.grid.get_concepto_text(orig_row["concepto_id"]) or str(orig_row["concepto_id"])
+                    del_txt = self.grid.get_delegacion_text(orig_row["delegacion_id"]) or str(orig_row["delegacion_id"])
+                    orig_cant = orig_row["cantidad"]
+                    changes_summary.append(
+                        f"• [ELIMINADA] {rfc_txt} - {concept_txt} ({del_txt}):\n"
+                        f"  Cant. Anterior: {orig_cant} → Cant. Actual: 0 (Eliminada)"
+                    )
+                    
+            if changes_summary:
+                summary_text = "\n".join(changes_summary)
+                completed_warning = ""
+                if has_increased_completed:
+                    completed_warning = (
+                        "⚠️ IMPORTANTE: Has incrementado la cantidad en partidas que ya fueron procesadas por el bot.\n"
+                        "Se generará una nueva solicitud pendiente por la cantidad adicional.\n\n"
+                    )
+                    
+                reply = QMessageBox.question(
+                    self, "Resumen de Cambios a la Orden",
+                    f"{completed_warning}"
+                    f"Se realizarán los siguientes cambios en las partidas:\n\n"
+                    f"{summary_text}\n\n"
+                    f"¿Deseas continuar con la actualización?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return
+            else:
+                # No changes in rows, just confirm update header
+                reply = QMessageBox.question(
+                    self, "Confirmar Actualizar",
+                    "¿Estás seguro de que deseas actualizar esta orden (encabezado)?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+                if reply != QMessageBox.Yes:
+                    return
+        else:
+            action_title = "Confirmar Guardar"
+            action_msg = "¿Estás seguro de que deseas guardar esta orden?"
+            reply = QMessageBox.question(
+                self, action_title, action_msg,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+                
+        # Main Window should have the current session id and user id, but we might only have session id.
+        # We can extract the user_id by querying the session in the DB, or just pass it down.
+        # For this desktop app, we fetch user_id from the current session.
+        main_window = self.window()
+        current_sesion_id = getattr(main_window, 'current_sesion_id', None)
+        current_usuario_id = getattr(main_window, 'current_usuario_id', 1)
+        
+        try:
+            if self._edit_mode:
+                folio = self.ordenes_ui_service.actualizar_orden_manual(
+                    orden_id=self._editing_order_id,
+                    usuario_id=current_usuario_id,
+                    sesion_id=current_sesion_id,
+                    descripcion=desc,
+                    municipio_id=municipio_id,
+                    renglones=data
+                )
+                QMessageBox.information(
+                    self, "Éxito", 
+                    f"Orden {folio} actualizada correctamente."
+                )
+                self._on_cancelar_edicion()
+            else:
+                folio = self.ordenes_ui_service.crear_orden_manual(
+                    usuario_id=current_usuario_id,
+                    sesion_id=current_sesion_id,
+                    descripcion=desc,
+                    municipio_id=municipio_id,
+                    renglones=data
+                )
+                QMessageBox.information(
+                    self, "Éxito", 
+                    f"Orden {folio} creada correctamente con {len(data)} grupos."
+                )
+                # Reset Form
+                self.desc_input.setText("")
+                self.grid.clear()
+                self.grid.add_row()
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error al Guardar", f"Hubo un problema al crear la orden:\n{str(e)}")
+
     def _setup_historial_tab(self):
         from sar.src.ui.design_system.components import StyledDataTable, CustomCard
         layout = QVBoxLayout(self.tab_historial)
@@ -284,167 +476,6 @@ class OrdersView(QWidget):
             self.combo_municipio.setCurrentIndex(default_index)
         except Exception as e:
             QMessageBox.critical(self, "Error de Catálogos", f"No se pudieron cargar los catálogos.\n{str(e)}")
-            
-    def _on_guardar_orden(self):
-        desc = self.desc_input.text().strip()
-        data = self.grid.get_all_data()
-        municipio_id = self.combo_municipio.currentData()
-        
-        if not desc:
-            QMessageBox.warning(self, "Validación", "Debes ingresar una descripción para la orden.")
-            return
-            
-        if not municipio_id:
-            QMessageBox.warning(self, "Validación", "Debes seleccionar un municipio de acceso.")
-            return
-            
-        if not data:
-            QMessageBox.warning(self, "Validación", "Debes agregar al menos un renglón a la orden.")
-            return
-            
-        # Validate that all rows have selected elements and no duplicates
-        seen_combinations = set()
-        for i, row in enumerate(data):
-            if not row["rfc_id"] or not row["concepto_id"] or not row["delegacion_id"]:
-                QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener todos los campos seleccionados (RFC, Concepto y Delegación).")
-                return
-                
-            key = (row["rfc_id"], row["concepto_id"], row.get("delegacion_id"))
-            if key in seen_combinations:
-                QMessageBox.warning(self, "Validación", f"El renglón {i+1} tiene una combinación duplicada de RFC, Concepto y Delegación. No se puede solicitar dos veces el mismo RFC y Concepto para la misma delegación.")
-                return
-            seen_combinations.add(key)
-            
-        # Confirmation Dialog
-        if self._edit_mode:
-            changes_summary = []
-            original_map = {}
-            for r in getattr(self, "_original_renglones", []):
-                key = (r["rfc_id"], r["concepto_id"], r["delegacion_id"])
-                original_map[key] = r
-                
-            current_keys = set()
-            has_increased_completed = False
-            
-            for row in data:
-                key = (row["rfc_id"], row["concepto_id"], row["delegacion_id"])
-                current_keys.add(key)
-                
-                rfc_txt = self.grid.get_rfc_text(row["rfc_id"]) or str(row["rfc_id"])
-                concept_txt = self.grid.get_concepto_text(row["concepto_id"]) or str(row["concepto_id"])
-                del_txt = self.grid.get_delegacion_text(row["delegacion_id"]) or str(row["delegacion_id"])
-                
-                if key in original_map:
-                    orig_row = original_map[key]
-                    orig_cant = orig_row["cantidad"]
-                    curr_cant = row["cantidad"]
-                    
-                    if orig_row.get("cantidad_generada", 0) > 0 and curr_cant > orig_row.get("cantidad_generada", 0):
-                        has_increased_completed = True
-                    
-                    if curr_cant != orig_cant:
-                        changes_summary.append(
-                            f"• {rfc_txt} - {concept_txt} ({del_txt}):\n"
-                            f"  Cant. Anterior: {orig_cant} → Cant. Actual: {curr_cant}"
-                        )
-                else:
-                    curr_cant = row["cantidad"]
-                    changes_summary.append(
-                        f"• [NUEVA] {rfc_txt} - {concept_txt} ({del_txt}):\n"
-                        f"  Cant. Anterior: 0 → Cant. Actual: {curr_cant}"
-                    )
-            
-            # Check deleted rows
-            for key, orig_row in original_map.items():
-                if key not in current_keys:
-                    rfc_txt = self.grid.get_rfc_text(orig_row["rfc_id"]) or str(orig_row["rfc_id"])
-                    concept_txt = self.grid.get_concepto_text(orig_row["concepto_id"]) or str(orig_row["concepto_id"])
-                    del_txt = self.grid.get_delegacion_text(orig_row["delegacion_id"]) or str(orig_row["delegacion_id"])
-                    orig_cant = orig_row["cantidad"]
-                    changes_summary.append(
-                        f"• [ELIMINADA] {rfc_txt} - {concept_txt} ({del_txt}):\n"
-                        f"  Cant. Anterior: {orig_cant} → Cant. Actual: 0 (Eliminada)"
-                    )
-                    
-            if changes_summary:
-                summary_text = "\n".join(changes_summary)
-                completed_warning = ""
-                if has_increased_completed:
-                    completed_warning = (
-                        "⚠️ IMPORTANTE: Has incrementado la cantidad en partidas que ya fueron procesadas por el bot.\n"
-                        "Se generará una nueva solicitud pendiente por la cantidad adicional.\n\n"
-                    )
-                    
-                reply = QMessageBox.question(
-                    self, "Resumen de Cambios a la Orden",
-                    f"{completed_warning}"
-                    f"Se realizarán los siguientes cambios en las partidas:\n\n"
-                    f"{summary_text}\n\n"
-                    f"¿Deseas continuar con la actualización?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-                )
-                if reply != QMessageBox.Yes:
-                    return
-            else:
-                # No changes in rows, just confirm update header
-                reply = QMessageBox.question(
-                    self, "Confirmar Actualizar",
-                    "¿Estás seguro de que deseas actualizar esta orden (encabezado)?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-                )
-                if reply != QMessageBox.Yes:
-                    return
-        else:
-            action_title = "Confirmar Guardar"
-            action_msg = "¿Estás seguro de que deseas guardar esta orden?"
-            reply = QMessageBox.question(
-                self, action_title, action_msg,
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
-                return
-                
-        # Main Window should have the current session id and user id, but we might only have session id.
-        # We can extract the user_id by querying the session in the DB, or just pass it down.
-        # For this desktop app, we fetch user_id from the current session.
-        main_window = self.window()
-        current_sesion_id = getattr(main_window, 'current_sesion_id', None)
-        current_usuario_id = getattr(main_window, 'current_usuario_id', 1)
-        
-        try:
-            if self._edit_mode:
-                folio = self.ordenes_ui_service.actualizar_orden_manual(
-                    orden_id=self._editing_order_id,
-                    usuario_id=current_usuario_id,
-                    sesion_id=current_sesion_id,
-                    descripcion=desc,
-                    municipio_id=municipio_id,
-                    renglones=data
-                )
-                QMessageBox.information(
-                    self, "Éxito", 
-                    f"Orden {folio} actualizada correctamente."
-                )
-                self._on_cancelar_edicion()
-            else:
-                folio = self.ordenes_ui_service.crear_orden_manual(
-                    usuario_id=current_usuario_id,
-                    sesion_id=current_sesion_id,
-                    descripcion=desc,
-                    municipio_id=municipio_id,
-                    renglones=data
-                )
-                QMessageBox.information(
-                    self, "Éxito", 
-                    f"Orden {folio} creada correctamente con {len(data)} grupos."
-                )
-                # Reset Form
-                self.desc_input.setText("")
-                self.grid.clear()
-                self.grid.add_row()
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Error al Guardar", f"Hubo un problema al crear la orden:\n{str(e)}")
 
     def refresh_historial(self):
         # Cancel active thread if running safely
@@ -518,6 +549,13 @@ class OrdersView(QWidget):
             self.table_historial.setRowHidden(row, not (state_match and text_match))
 
     def _on_row_double_clicked(self, row: int, column: int):
+        if not (self._check_permission("ORDENES", "LEER") or self._check_permission("DERECHOS", "LEER")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes para consultar el detalle de procesamiento de órdenes (ORDENES:LEER)."
+            )
+            return
         id_item = self.table_historial.item(row, 0)
         if id_item:
             orden_id = int(id_item.text())
@@ -587,12 +625,33 @@ class OrdersView(QWidget):
                 QMessageBox.critical(self, "Error", f"Ocurrió un error al procesar las órdenes:\n{str(e)}")
 
     def _on_autorizar_orden(self):
+        if not self._check_permission("ORDENES", "EJECUTAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para autorizar órdenes completas (ORDENES:EJECUTAR)."
+            )
+            return
         self._change_orden_estado("AUTORIZADA")
         
     def _on_rechazar_orden(self):
+        if not self._check_permission("ORDENES", "EJECUTAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para rechazar órdenes completas (ORDENES:EJECUTAR)."
+            )
+            return
         self._change_orden_estado("RECHAZADA")
 
     def _on_cancelar_orden(self):
+        if not self._check_permission("ORDENES", "ELIMINAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para cancelar órdenes (ORDENES:ELIMINAR)."
+            )
+            return
         orden_ids = self._get_selected_ordenes()
         if not orden_ids:
             QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una orden para cancelar.")
@@ -639,6 +698,13 @@ class OrdersView(QWidget):
                 self.load_order_for_editing(orden_id)
 
     def _on_editar_orden_clicked(self):
+        if not self._check_permission("ORDENES", "EDITAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para modificar órdenes existentes (ORDENES:EDITAR)."
+            )
+            return
         selected_ids = self._get_selected_ordenes()
         if not selected_ids:
             QMessageBox.warning(self, "Selección Requerida", "Selecciona una orden para editar.")
@@ -651,6 +717,13 @@ class OrdersView(QWidget):
         self.load_order_for_editing(orden_id)
 
     def load_order_for_editing(self, orden_id: int):
+        if not self._check_permission("ORDENES", "EDITAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para modificar órdenes existentes (ORDENES:EDITAR)."
+            )
+            return
         try:
             if self.api_client.connect_via_api:
                 data = self.api_client.request("GET", f"/api/ops/ordenes/{orden_id}")

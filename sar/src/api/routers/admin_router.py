@@ -53,7 +53,7 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: 
             ]
         elif entity == "modulos":
             mods = user_repo.get_all_modulos()
-            return [{"id": m.modulo_id, "codigo": m.codigo, "nombre": m.nombre, "descripcion": m.descripcion, "activo": m.activo} for m in mods]
+            return [{"id": m.modulo_id, "codigo": m.codigo, "nombre": m.nombre, "orden": getattr(m, 'orden', 1.0), "descripcion": m.descripcion, "activo": m.activo} for m in mods]
         elif entity == "acciones":
             accs = user_repo.get_all_acciones()
             return [{"id": a.accion_id, "codigo": a.codigo, "nombre": a.nombre, "descripcion": a.descripcion, "activo": a.activo} for a in accs]

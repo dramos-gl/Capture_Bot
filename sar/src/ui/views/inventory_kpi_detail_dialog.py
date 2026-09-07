@@ -809,8 +809,37 @@ class InventoryKPIDetailDialog(QDialog):
 
         self.table.populate_rows(table_rows, checkable_first_col=False)
 
+    def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
+        """Helper to verify if current session/user holds permission for modulo + accion."""
+        parent_window = self.window()
+        usuario_id = getattr(parent_window, 'current_usuario_id', None)
+        if not usuario_id:
+            return True # Fallback if standalone/testing without active user session context
+        
+        try:
+            from sar.src.storage.api_client import APIClient
+            api_client = APIClient()
+            if getattr(api_client, 'connect_via_api', False):
+                perms = api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                return perms.get(modulo_codigo, {}).get(accion_codigo, False)
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.services.security_service import SecurityService
+                    sec_service = SecurityService(session)
+                    return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+        except Exception as e:
+            print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
+            return False
+
     def _on_export_excel(self):
         """Asynchronously generates an official styled Excel spreadsheet with the filtered records and displays a loading spinner."""
+        if not (self._check_permission("CTRL:INVENTARIO", "EJECUTAR") or self._check_permission("REFERENCIAS", "EJECUTAR")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para exportar el detalle de inventario a Excel (CTRL:INVENTARIO:EJECUTAR)."
+            )
+            return
         if not self.filtered_records:
             QMessageBox.warning(self, "Sin Registros", "No hay registros disponibles para exportar.")
             return

@@ -499,7 +499,44 @@ class InventoryView(QWidget):
         self.main_layout.addWidget(self.tabs)
         
         # Initial data loading (load only filters at start to make tab switching instant)
+        self._apply_permissions()
         self.refresh_all(load_catalogs=False)
+
+    def _apply_permissions(self):
+        """Aplica control de acceso atómico Fail-Closed en sub-pestañas y acciones de InventoryView."""
+        try:
+            parent_window = self.window()
+            usuario_id = getattr(parent_window, 'current_usuario_id', None)
+            if not usuario_id:
+                return
+
+            from sar.src.storage.api_client import APIClient
+            api_client = APIClient()
+
+            if api_client.connect_via_api:
+                perms = api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                has_inv_asignar = perms.get("CTRL:INVENTARIO", {}).get("ASIGNAR", False) or perms.get("REFERENCIAS", {}).get("ASIGNAR", False)
+                has_masivo_access = perms.get("CTRL:ASIGNAR_VALIDAR", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("ASIGNAR", False)
+                has_apartar_access = perms.get("CTRL:RESERVA_DERECHO", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("ASIGNAR", False)
+            else:
+                from sar.src.services.security_service import SecurityService
+                with self.db_connector.get_session() as session:
+                    sec_service = SecurityService(session)
+                    has_inv_asignar = sec_service.has_permission(usuario_id, "CTRL:INVENTARIO", "ASIGNAR") or sec_service.has_permission(usuario_id, "REFERENCIAS", "ASIGNAR")
+                    has_masivo_access = sec_service.has_permission(usuario_id, "CTRL:ASIGNAR_VALIDAR", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "ASIGNAR")
+                    has_apartar_access = sec_service.has_permission(usuario_id, "CTRL:RESERVA_DERECHO", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "ASIGNAR")
+
+            # 1. Habilitar o deshabilitar botón "Asignar Seleccionados"
+            self.btn_asignar_seleccionados.setEnabled(has_inv_asignar)
+            
+            # 2. Deshabilitar/Ocultar pestañas si carece de permisos de sub-módulo
+            self.tabs.setTabEnabled(1, has_masivo_access) # Asignar & Validar por lotes
+            self.tabs.setTabEnabled(2, has_apartar_access) # Reserva de Derechos
+        except Exception as e:
+            # Fallback seguro Fail-Closed
+            self.btn_asignar_seleccionados.setEnabled(False)
+            self.tabs.setTabEnabled(1, False)
+            self.tabs.setTabEnabled(2, False)
 
     def set_active_tab(self, tab_key: str):
         """Switches active widget based on sidebar submenu navigation key."""
@@ -991,28 +1028,25 @@ class InventoryView(QWidget):
         self.current_page = 1
         self.refresh_visor_data()
 
-    def _open_kpi_detail(self, kpi_type: str):
-        """Opens the full drill-down modal dialog for the selected KPI card."""
-        from sar.src.ui.views.inventory_kpi_detail_dialog import InventoryKPIDetailDialog
+    def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
+        """Helper to verify if current session/user holds permission for modulo + accion."""
+        parent_window = self.window()
+        usuario_id = getattr(parent_window, 'current_usuario_id', None)
+        if not usuario_id:
+            return True # Fallback if standalone/testing without active user session context
         
-        concepto_nom = self.cb_concept_filter.currentText() if hasattr(self, "cb_concept_filter") else "Todos los conceptos"
-        empresa_nom = self.cb_empresa_filter.currentText() if hasattr(self, "cb_empresa_filter") else "Todas las empresas"
-        
-        dlg = InventoryKPIDetailDialog(
-            db_connector=self.db_connector,
-            kpi_type=kpi_type,
-            concepto_id=getattr(self, "_current_concepto_id", None),
-            concepto_nombre=concepto_nom,
-            rfc_id=getattr(self, "_current_rfc_id", None),
-            rfc_nombre=empresa_nom,
-            orden_ids=getattr(self, "selected_orden_ids", []),
-            ordenes_count=len(getattr(self, "selected_orden_ids", [])),
-            start_date=getattr(self, "_current_start_date", None),
-            end_date=getattr(self, "_current_end_date", None),
-            todas_las_ordenes=getattr(self, "todas_las_ordenes", []),
-            parent=self
-        )
-        dlg.exec()
+        try:
+            if getattr(self.api_client, 'connect_via_api', False):
+                perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                return perms.get(modulo_codigo, {}).get(accion_codigo, False)
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.services.security_service import SecurityService
+                    sec_service = SecurityService(session)
+                    return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+        except Exception as e:
+            print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
+            return False
 
     def _load_available_orders(self, preserve_selection=False):
         try:
@@ -1041,7 +1075,7 @@ class InventoryView(QWidget):
         
         sender_btn = self.sender()
         if not sender_btn:
-            sender_btn = self.btn_filter_orden
+            sender_btn = getattr(self, "btn_filter_orden", None)
             
         if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
             self._load_available_orders()
@@ -1106,11 +1140,8 @@ class InventoryView(QWidget):
             action.triggered.connect(make_toggle_handler(oid))
             menu.addAction(action)
             
-        menu.exec(sender_btn.mapToGlobal(sender_btn.rect().bottomLeft()))
-
-    def _on_open_metrics_requested(self):
-        """Redirige automáticamente al módulo de Métricas y Analítica pasando las órdenes seleccionadas."""
-        self.show_metrics_requested.emit(list(self.selected_orden_ids))
+        if sender_btn:
+            menu.exec(sender_btn.mapToGlobal(sender_btn.rect().bottomLeft()))
 
     def _refresh_active_tab_data(self):
         if not self.selected_orden_ids:
@@ -1194,7 +1225,55 @@ class InventoryView(QWidget):
                             
             self._update_selection_controls()
 
+    def _open_kpi_detail(self, kpi_type: str):
+        """Opens the full drill-down modal dialog for the selected KPI card."""
+        if not (self._check_permission("CTRL:INVENTARIO", "LEER") or self._check_permission("REFERENCIAS", "LEER")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para consultar el detalle de indicadores de inventario (CTRL:INVENTARIO:LEER)."
+            )
+            return
+        from sar.src.ui.views.inventory_kpi_detail_dialog import InventoryKPIDetailDialog
+        
+        concepto_nom = self.cb_concept_filter.currentText() if hasattr(self, "cb_concept_filter") else "Todos los conceptos"
+        empresa_nom = self.cb_empresa_filter.currentText() if hasattr(self, "cb_empresa_filter") else "Todas las empresas"
+        
+        dlg = InventoryKPIDetailDialog(
+            db_connector=self.db_connector,
+            kpi_type=kpi_type,
+            concepto_id=getattr(self, "_current_concepto_id", None),
+            concepto_nombre=concepto_nom,
+            rfc_id=getattr(self, "_current_rfc_id", None),
+            rfc_nombre=empresa_nom,
+            orden_ids=getattr(self, "selected_orden_ids", []),
+            ordenes_count=len(getattr(self, "selected_orden_ids", [])),
+            start_date=getattr(self, "_current_start_date", None),
+            end_date=getattr(self, "_current_end_date", None),
+            todas_las_ordenes=getattr(self, "todas_las_ordenes", []),
+            parent=self
+        )
+        dlg.exec()
+
+    def _on_open_metrics_requested(self):
+        """Redirige automáticamente al módulo de Métricas y Analítica pasando las órdenes seleccionadas."""
+        if not (self._check_permission("DASHBOARD", "EJECUTAR") or self._check_permission("CTRL:INVENTARIO", "EJECUTAR")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para acceder a Métricas y Analítica de Producción (DASHBOARD:EJECUTAR)."
+            )
+            return
+        self.show_metrics_requested.emit(list(self.selected_orden_ids))
+
     def _on_table_cell_double_clicked(self, row, column):
+        if not (self._check_permission("CTRL:INVENTARIO", "ASIGNAR") or self._check_permission("REFERENCIAS", "ASIGNAR")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para asignar derechos a notaría/colaborador (CTRL:INVENTARIO:ASIGNAR)."
+            )
+            return
         if row < 0 or row >= len(self.visible_table_data):
             return
             
@@ -1423,6 +1502,11 @@ class InventoryView(QWidget):
     def _on_completar_reserva_changed(self, state):
         is_checked = (state == 2 or state == Qt.CheckState.Checked)
         if is_checked:
+            if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
+                self.chk_completar_reserva.blockSignals(True)
+                self.chk_completar_reserva.setChecked(False)
+                self.chk_completar_reserva.blockSignals(False)
+                return
             # Uncheck and disable mutual conflict
             self.chk_solo_reservar.blockSignals(True)
             self.chk_solo_reservar.setChecked(False)
@@ -1443,6 +1527,11 @@ class InventoryView(QWidget):
     def _on_solo_reservar_changed(self, state):
         is_checked = (state == 2 or state == Qt.CheckState.Checked)
         if is_checked:
+            if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
+                self.chk_solo_reservar.blockSignals(True)
+                self.chk_solo_reservar.setChecked(False)
+                self.chk_solo_reservar.blockSignals(False)
+                return
             # Uncheck and disable mutual conflict
             self.chk_completar_reserva.blockSignals(True)
             self.chk_completar_reserva.setChecked(False)
@@ -1489,6 +1578,8 @@ class InventoryView(QWidget):
             self.txt_solicitante_masivo.clear()
 
     def _on_download_template(self):
+        if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "LEER"):
+            return
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Guardar Plantilla de Importación",
             "Plantilla_Control_Inventario.xlsx",
@@ -1513,6 +1604,8 @@ class InventoryView(QWidget):
             del self._excel_file_path
 
     def _on_pick_excel_masivo(self):
+        if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "CREAR"):
+            return
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel de Control", "", "Excel Files (*.xlsx)")
         if not file_path:
             return
@@ -1618,6 +1711,8 @@ class InventoryView(QWidget):
         QMessageBox.critical(self, "Error al Cargar Excel", f"Ocurrió un error al procesar el archivo:\n{error_msg}")
 
     def _on_confirmar_masivo(self):
+        if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
+            return
         tipo_destino = self.cb_destino_masivo.currentText()
         notaria_id = None
         colaborador_id = None
@@ -1956,6 +2051,9 @@ class InventoryView(QWidget):
         self._avail_timer.start()
 
     def _on_buscar_referencias_ind(self):
+        if not self._check_permission("CTRL:ASIGNAR_DERECHO", "LEER"):
+            return
+
         tipo_destino = self.cb_tipo_destino_ind.currentText()
         if not tipo_destino or tipo_destino == "-- Seleccione Destino --":
             QMessageBox.warning(self, "Destino Requerido", "Debe seleccionar primero un Tipo de Destino válido.")
@@ -2013,6 +2111,8 @@ class InventoryView(QWidget):
             QMessageBox.critical(self, "Error al Consultar", f"Ocurrió un error al buscar referencias en la BD:\n{str(e)}")
 
     def _on_confirmar_asignacion_ind(self):
+        if not self._check_permission("CTRL:ASIGNAR_DERECHO", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
+            return
         selected_refs = []
         for r in range(self.table_preview_ind.rowCount()):
             if self.table_preview_ind.item(r, 0).checkState() == Qt.CheckState.Checked:
@@ -2414,6 +2514,9 @@ class InventoryView(QWidget):
 
 
     def _on_save_apartar(self):
+        if not self._check_permission("CTRL:RESERVA_DERECHO", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
+            return
+
         # --- Validación 1: Notaría seleccionada ---
         not_name = self.cb_notarias_apartar.currentText()
         notaria_id = self._notarias_map.get(not_name)
@@ -2899,6 +3002,8 @@ class InventoryView(QWidget):
 
     def _on_table_cell_double_clicked_lotes(self, row, column):
         """Open LoteProcessingDialog on double-click."""
+        if not self._check_permission("CTRL:GESTION_LOTES", "LEER"):
+            return
         if not self.all_lotes_data or row >= len(self.all_lotes_data):
             return
         lote = self.all_lotes_data[row]
@@ -2909,6 +3014,8 @@ class InventoryView(QWidget):
 
     def _on_ver_detalle_lote(self):
         """Open detail dialog for the currently selected lote row."""
+        if not self._check_permission("CTRL:GESTION_LOTES", "LEER"):
+            return
         selected = self.table_lotes.selectedItems()
         if not selected:
             QMessageBox.information(self, "Selección", "Selecciona una asignación de la tabla primero.")
@@ -2918,6 +3025,8 @@ class InventoryView(QWidget):
 
     def _on_exportar_lote_seleccionado(self):
         """Export the selected lote to Excel via ExportLotesDialog pre-filtered."""
+        if not self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") and not self._check_permission("REFERENCIAS", "EJECUTAR"):
+            return
         selected = self.table_lotes.selectedItems()
         if not selected:
             QMessageBox.information(self, "Selección", "Selecciona una asignación de la tabla primero.")
@@ -4143,8 +4252,34 @@ class LoteProcessingDialog(QDialog):
                     selected.append(self.detalles[r])
         return selected
 
+    def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
+        """Verifies RBAC permissions for dialog actions."""
+        parent_window = self.window()
+        usuario_id = getattr(parent_window, 'current_usuario_id', None)
+        if not usuario_id and hasattr(self.parent(), 'window'):
+            usuario_id = getattr(self.parent().window(), 'current_usuario_id', None)
+        if not usuario_id:
+            return True
+        try:
+            with self.db_connector.get_session() as session:
+                from sar.src.services.security_service import SecurityService
+                sec_service = SecurityService(session)
+                has_perm = sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+                if not has_perm:
+                    QMessageBox.warning(
+                        self,
+                        "Acceso Denegado",
+                        f"No tiene permisos suficientes ({modulo_codigo}:{accion_codigo}) para realizar esta acción."
+                    )
+                return has_perm
+        except Exception as e:
+            print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
+            return False
+
     # ── Excel generation ─────────────────────────────────────────────────────
     def _on_generate_excel(self):
+        if not self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") and not self._check_permission("REFERENCIAS", "EJECUTAR"):
+            return
         selected = self._get_selected_details()
         if not selected:
             QMessageBox.warning(self, "Selección Vacía",
@@ -4193,6 +4328,8 @@ class LoteProcessingDialog(QDialog):
 
     # ── PDF generation ───────────────────────────────────────────────────────
     def _on_generate_pdf(self):
+        if not self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") and not self._check_permission("REFERENCIAS", "EJECUTAR"):
+            return
         selected = self._get_selected_details()
         if not selected:
             QMessageBox.warning(self, "Selección Vacía",

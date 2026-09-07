@@ -186,7 +186,7 @@ class MainWindow(QMainWindow):
             elif selected_mod_code == "CTRL_REF":
                 from sar.src.ui.views.main_view import MainView
                 self.active_module = SARModuleWindow(
-                    title="SAR - Control de Referencias",
+                    title="SAR - Control de Derechos",
                     width=1000,
                     height=680,
                     on_logout=self._handle_logout

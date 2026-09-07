@@ -91,7 +91,12 @@ class MainView(QWidget):
                 has_dashboard = perms.get("DASHBOARD", {}).get("LEER", False)
                 has_ordenes = perms.get("ORDENES", {}).get("LEER", False)
                 has_solicitudes = perms.get("SOLICITUDES", {}).get("LEER", False)
-                has_referencias = perms.get("REFERENCIAS", {}).get("LEER", False)
+                has_derechos = perms.get("DERECHOS", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("LEER", False)
+                has_ctrl_inv = perms.get("CTRL:INVENTARIO", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("LEER", False)
+                has_ctrl_asignar = perms.get("CTRL:ASIGNAR_DERECHO", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("LEER", False)
+                has_ctrl_validar = perms.get("CTRL:ASIGNAR_VALIDAR", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("LEER", False)
+                has_ctrl_reserva = perms.get("CTRL:RESERVA_DERECHO", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("LEER", False)
+                has_ctrl_lotes = perms.get("CTRL:GESTION_LOTES", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("LEER", False)
                 has_seguridad = perms.get("SEGURIDAD", {}).get("LEER", False)
                 has_cancun = (
                     perms.get("FOLIOS_CANCUN", {}).get("LEER", False) or
@@ -105,7 +110,12 @@ class MainView(QWidget):
                     has_dashboard = sec_service.has_permission(usuario_id, "DASHBOARD", "LEER")
                     has_ordenes = sec_service.has_permission(usuario_id, "ORDENES", "LEER")
                     has_solicitudes = sec_service.has_permission(usuario_id, "SOLICITUDES", "LEER")
-                    has_referencias = sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
+                    has_derechos = sec_service.has_permission(usuario_id, "DERECHOS", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
+                    has_ctrl_inv = sec_service.has_permission(usuario_id, "CTRL:INVENTARIO", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
+                    has_ctrl_asignar = sec_service.has_permission(usuario_id, "CTRL:ASIGNAR_DERECHO", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
+                    has_ctrl_validar = sec_service.has_permission(usuario_id, "CTRL:ASIGNAR_VALIDAR", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
+                    has_ctrl_reserva = sec_service.has_permission(usuario_id, "CTRL:RESERVA_DERECHO", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
+                    has_ctrl_lotes = sec_service.has_permission(usuario_id, "CTRL:GESTION_LOTES", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
                     has_seguridad = sec_service.has_permission(usuario_id, "SEGURIDAD", "LEER")
                     has_cancun = (
                         sec_service.has_permission(usuario_id, "FOLIOS_CANCUN", "LEER") or
@@ -126,15 +136,21 @@ class MainView(QWidget):
             if has_solicitudes:
                 self.sidebar.show_item("solicitudes")
                 if not default_item: default_item = "solicitudes"
-            if has_referencias:
+            
+            if has_derechos:
                 self.sidebar.show_item("referencias")
-                self.sidebar.show_item("inventario")
-                self.sidebar.show_item("inventario_facturas")
-                self.sidebar.show_item("inventario_masivo")
-                self.sidebar.show_item("inventario_apartar")
-                self.sidebar.show_item("inventario_catalogos")
-                self.sidebar.show_item("inventario_lotes")
                 if not default_item: default_item = "referencias"
+
+            has_any_ctrl = any([has_ctrl_inv, has_ctrl_asignar, has_ctrl_validar, has_ctrl_reserva, has_ctrl_lotes])
+            if has_any_ctrl:
+                self.sidebar.show_item("inventario")
+                if not default_item: default_item = "inventario"
+
+            if has_ctrl_inv:     self.sidebar.show_item("inventario_facturas")
+            if has_ctrl_validar: self.sidebar.show_item("inventario_masivo")
+            if has_ctrl_reserva: self.sidebar.show_item("inventario_apartar")
+            if has_ctrl_asignar: self.sidebar.show_item("inventario_catalogos")
+            if has_ctrl_lotes:   self.sidebar.show_item("inventario_lotes")
 
             if has_cancun:
                 self.sidebar.show_item("r2f_control")
@@ -216,13 +232,13 @@ class MainView(QWidget):
                     "ordenes_capturadas": "ORDENES",
                     "capturar_orden": "ORDENES",
                     "solicitudes": "SOLICITUDES",
-                    "referencias": "REFERENCIAS",
-                    "inventario": "REFERENCIAS",
-                    "inventario_facturas": "REFERENCIAS",
-                    "inventario_masivo": "REFERENCIAS",
-                    "inventario_apartar": "REFERENCIAS",
-                    "inventario_catalogos": "REFERENCIAS",
-                    "inventario_lotes": "REFERENCIAS",
+                    "referencias": "DERECHOS",
+                    "inventario": "CONTROL_DERECHOS",
+                    "inventario_facturas": "CTRL:INVENTARIO",
+                    "inventario_masivo": "CTRL:ASIGNAR_VALIDAR",
+                    "inventario_apartar": "CTRL:RESERVA_DERECHO",
+                    "inventario_catalogos": "CTRL:ASIGNAR_DERECHO",
+                    "inventario_lotes": "CTRL:GESTION_LOTES",
                     "configuracion": "SEGURIDAD"
                 }
                 
@@ -230,12 +246,15 @@ class MainView(QWidget):
                 if req_mod:
                     if self.api_client.connect_via_api:
                         perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
-                        has_permission = perms.get(req_mod, {}).get("LEER", False)
+                        has_permission = perms.get(req_mod, {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("LEER", False)
                     else:
                         with self.db_connector.get_session() as session:
                             from sar.src.services.security_service import SecurityService
                             sec_service = SecurityService(session)
-                            has_permission = sec_service.has_permission(usuario_id, req_mod, "LEER")
+                            has_permission = (
+                                sec_service.has_permission(usuario_id, req_mod, "LEER") or
+                                sec_service.has_permission(usuario_id, "REFERENCIAS", "LEER")
+                            )
                     
                     if not has_permission:
                         from sar.src.ui.design_system.components import GLMessageBox as QMessageBox

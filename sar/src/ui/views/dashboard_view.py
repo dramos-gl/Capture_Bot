@@ -316,10 +316,42 @@ class DashboardView(QWidget):
         self._load_available_orders()
         self.refresh_data()
         
+    def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
+        """Helper to verify if current session/user holds permission for modulo + accion."""
+        parent_window = self.window()
+        usuario_id = getattr(parent_window, 'current_usuario_id', None)
+        if not usuario_id:
+            return True # Fallback if standalone/testing without active user session context
+        
+        try:
+            with self.db_connector.get_session() as session:
+                from sar.src.services.security_service import SecurityService
+                sec_service = SecurityService(session)
+                return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+        except Exception as e:
+            print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
+            return False
+
     def _on_card_double_clicked(self, event):
+        if not self._check_permission("DASHBOARD", "EJECUTAR"):
+            from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para acceder al módulo de Métricas y Analítica Operativa (DASHBOARD:EJECUTAR)."
+            )
+            return
         self.show_metrics_requested.emit(list(self.selected_orden_ids))
 
     def _on_error_card_double_clicked(self, event):
+        if not (self._check_permission("DASHBOARD", "LEER") or self._check_permission("DERECHOS", "LEER")):
+            from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes para consultar el detalle de errores de derechos (DERECHOS:LEER)."
+            )
+            return
         dialog = ErrorDetailDialog(
             db_connector=self.db_connector,
             title="Detalle de Derechos con Error",
@@ -330,6 +362,14 @@ class DashboardView(QWidget):
         dialog.exec()
 
     def _on_invalidas_card_double_clicked(self, event):
+        if not (self._check_permission("DASHBOARD", "LEER") or self._check_permission("DERECHOS", "LEER")):
+            from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes para consultar el detalle de derechos invalidados (DERECHOS:LEER)."
+            )
+            return
         dialog = ErrorDetailDialog(
             db_connector=self.db_connector,
             title="Detalle de Derechos Invalidados",

@@ -23,158 +23,136 @@ A continuación se define la matriz estándar de las 6 acciones registradas en e
 
 ---
 
-## 2. Aplicación Granular por Módulo y Sub-Módulo
+## 2. Aplicación Granular por Módulo y Sub-Módulo (Con Jerarquía de Orden)
 
-### 📊 Módulo 1: Tablero Principal (`DASHBOARD`)
-* **Código en Base de Datos:** `DASHBOARD`
-* **Vistas Impactadas:** [`dashboard_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/dashboard_view.py) (`DashboardView`).
+La tabla de módulos internos `sar_seguridad.modulo` incluye la columna **`orden NUMERIC(4,1)`** que rige tanto la secuencia de navegación en el Sidebar como el rotulado en la Matriz de Permisos (`[orden] Nombre`):
 
-| Sub-Sección / Componente | Acción Requerida | Efecto en la Interfaz y Control de Acceso |
-| :--- | :--- | :--- |
-| **Vista General Dashboard** | `DASHBOARD` + `LEER` | Muestra el item *"Tablero Principal"* en el Sidebar. Permite ver métricas operativas generales, filtros de fechas y búsquedas. |
-| **Filtros y Búsqueda Avanzada** | `DASHBOARD` + `LEER` | Permite interactuar con los inputs de búsqueda por folio/derecho y actualizar la tabla de resumen. |
-| **Métricas de Producción (Doble Clic / StatCards)** | `DASHBOARD` + `EJECUTAR` | Habilita el evento del doble clic en las StatCards y la apertura del diálogo de Analítica BI (`metrics_dashboard_dialog.py`). |
-
----
-
-### 📋 Módulo 2: Órdenes de Generación (`ORDENES`)
-* **Código en Base de Datos:** `ORDENES`
-* **Vistas Impactadas:** [`orders_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/orders_view.py) (`OrdersView`).
-
-| Sub-Sección / Componente | Acción Requerida | Efecto en la Interfaz y Control de Acceso |
-| :--- | :--- | :--- |
-| **Órdenes Capturadas (Historial)** | `ORDENES` + `LEER` | Muestra el listado del historial de órdenes, barra de estado, tabla de resultados y permite doble clic para consultar el detalle. |
-| **Capturar Nueva Orden** | `ORDENES` + `CREAR` | Habilita la pestaña *"Capturar Nueva Orden"*, el selector de cliente/municipio y el botón **"Guardar Orden"**. |
-| **Editar Orden Existente** | `ORDENES` + `EDITAR` | Permite seleccionar una orden capturada no procesada y cargarla en modo edición para modificar renglones. |
-| **Autorizar Orden Completa** | `ORDENES` + `EJECUTAR` | Habilita el botón **"Autorizar orden completa"** (cambia masivamente el estado de la orden a `AUTORIZADA`). |
-| **Rechazar Orden Completa** | `ORDENES` + `ELIMINAR` | Habilita el botón **"Rechazar orden completa"** (marca la orden como `RECHAZADA`). |
-| **Cancelar Orden** | `ORDENES` + `ELIMINAR` | Habilita el botón **"Cancelar Orden"** (recursivamente marca la orden y sus solicitudes como `CANCELADA`). |
-| **Procesar Derechos por Solicitudes** | `ORDENES` + `EDITAR` | Abre el diálogo `OrderProcessingDialog` para seleccionar solicitudes específicas dentro de una orden. |
-| **Acciones en Lote (Procesar Solicitudes)** | `ORDENES` + `EJECUTAR` | Permite usar **"Autorizar seleccionados"**, **"Generar Excel"** y **"Generar PDF"** desde el diálogo de procesamiento. |
+| Orden | Código Módulo (`sar_seguridad.modulo`) | Nombre en Pantalla | Vista PySide6 Impactada | Acciones Soportadas |
+| :---: | :--- | :--- | :--- | :--- |
+| **1.0** | `DASHBOARD` | Inicio | [`dashboard_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/dashboard_view.py) | `LEER`, `EJECUTAR` |
+| **2.0** | `DERECHOS` | Derechos (Producción) | [`referencias_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/referencias_view.py) | `LEER`, `EDITAR` |
+| **3.0** | `CONTROL_DERECHOS` | Control de Derechos | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) | `LEER` |
+| **3.1** | `CTRL:INVENTARIO` | Inventario | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Visor) | `LEER`, `ASIGNAR`, `EJECUTAR` |
+| **3.2** | `CTRL:ASIGNAR_DERECHO` | Asignar Derecho | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Asignación) | `LEER`, `ASIGNAR` |
+| **3.3** | `CTRL:ASIGNAR_VALIDAR` | Asignar/Validar por Lotes | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Masivo) | `LEER`, `CREAR`, `ASIGNAR` |
+| **3.4** | `CTRL:RESERVA_DERECHO` | Reservar Derecho (Apartados) | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Apartar) | `LEER`, `ASIGNAR` |
+| **3.5** | `CTRL:GESTION_LOTES` | Gestión de asignaciones | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Lotes) | `LEER`, `EJECUTAR` |
+| **--** | `ORDENES` | Órdenes de Generación | [`orders_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/orders_view.py) | `LEER`, `CREAR`, `EDITAR`, `ELIMINAR`, `EJECUTAR` |
+| **--** | `SOLICITUDES` | Solicitudes del Bot | [`requests_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/requests_view.py) | `LEER`, `ASIGNAR`, `EDITAR`, `ELIMINAR` |
+| **--** | `CATALOGOS` | Catálogos del Sistema | [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) | `LEER`, `CREAR`, `EDITAR`, `ELIMINAR` |
+| **--** | `SEGURIDAD` | Control de Acceso (RBAC) | [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) | `LEER`, `CREAR`, `EDITAR`, `ELIMINAR`, `ASIGNAR` |
+| **--** | `CONFIGURACION` | Configuración General | [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) | `LEER`, `EDITAR` |
 
 ---
 
-### 📥 Módulo 3: Solicitudes del Bot (`SOLICITUDES`)
-* **Código en Base de Datos:** `SOLICITUDES`
-* **Vistas Impactadas:** [`requests_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/requests_view.py) (`RequestsView`).
+### 📊 Detalle por Componente Visual
 
-| Sub-Sección / Componente | Acción Requerida | Efecto en la Interfaz y Control de Acceso |
-| :--- | :--- | :--- |
-| **Bandeja de Solicitudes** | `SOLICITUDES` + `LEER` | Muestra el listado de solicitudes pendientes/procesadas y la acción doble clic para ver metadatos. |
-| **Asignar Usuario Operador** | `SOLICITUDES` + `ASIGNAR` | Habilita la opción **"Asignar usuario"** en el menú contextual de la tabla para delegar la solicitud a un operador. |
-| **Editar Cantidad de Derechos** | `SOLICITUDES` + `EDITAR` | Permite abrir el diálogo `EditQuantityDialog` y actualizar la cantidad solicitada. |
-| **Cancelar Solicitud Individual** | `SOLICITUDES` + `ELIMINAR` | Habilita la opción **"Cancelar Solicitud"** en el menú contextual de la tabla. |
+#### 📊 Módulo [1] Inicio (`DASHBOARD`)
+* `LEER`: Acceso al tablero principal, búsqueda, filtros de fecha/orden y lectura de indicadores KPI.
+* `EJECUTAR`: Habilita la acción de **doble clic** en las StatCards de KPI (*Total Generadas*, *Pendientes*, *Autorizadas*, *Rechazadas*) para aperturar el módulo de *Métricas y Analítica Operativa (BI)*.
+* **Detalle de Errores e Invalidadas:** El **doble clic** en las StatCards de *Con Error* o *Invalidadas* requiere permisos de consulta de detalle (`DASHBOARD:LEER` o `DERECHOS:LEER`). En caso de falta de permisos, el sistema aplica la política de fallo seguro denegando el acceso e informando mediante `GLMessageBox.warning`.
 
----
+#### 📑 Módulo [2] Derechos (`DERECHOS`)
+* `LEER`: Visualización del listado general de referencias/facturas emitidas, paginación y activación de los botones **"Ver Detalle"** (`_on_ver_detalle`) y **"Ver PDF"** (`_on_ver_pdf`).
+* `EDITAR`: Habilita la ejecución de las acciones de modificación masiva: botones **"Marcar Visibles"** (`_on_marcar_visibles`) y **"Cambiar Estado"** (`_on_cambiar_estado`). En ausencia de este permiso, la acción se bloquea e informa mediante `QMessageBox.warning`.
 
-### 📑 Módulo 4: Referencias / Producción de Derechos (`REFERENCIAS`)
-* **Código en Base de Datos:** `REFERENCIAS`
-* **Vistas Impactadas:** [`referencias_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/referencias_view.py) (`ReferenciasView`).
+#### 🔑 Módulo [3] Control de Derechos y Submódulos
 
-| Sub-Sección / Componente | Acción Requerida | Efecto en la Interfaz y Control de Acceso |
-| :--- | :--- | :--- |
-| **Visor de Producción de Derechos** | `REFERENCIAS` + `LEER` | Visualización del listado general de referencias/facturas emitidas, paginación, ver detalle y visor interno de PDF. |
-| **Marcar Visibles / Cambiar Estado** | `REFERENCIAS` + `EDITAR` | Habilita las acciones de cambio manual de estado visual (`GENERADA`, `AUTORIZADA`, `EXPIRADA`). |
+##### [3.1] Inventario (`CTRL:INVENTARIO`)
+* `LEER`: Búsqueda de derechos en inventario, filtros por empresa/concepto, y apertura con **doble clic** del diálogo modal de detalle desde las StatCards KPI (`_open_kpi_detail` $\rightarrow$ `InventoryKPIDetailDialog`).
+* `ASIGNAR`: Habilita el botón **"Asignar Seleccionados"** (`_on_asignar_seleccionados`) y la acción de **doble clic** sobre las filas de la tabla (`_on_table_cell_double_clicked`) para aperturar el formulario de asignación a Notaría/Colaborador (`ManualAssignmentDialog`).
+* `EJECUTAR`: Habilita el botón de redirección **"Ver Métricas y Analítica de Producción"** (`_on_open_metrics_requested`) y el botón **"Exportar a Excel"** (`_on_export_excel`) dentro del diálogo de detalle KPI. En caso de ausencia de permiso, el sistema aplica el fallo seguro denegando el acceso vía `QMessageBox.warning`.
 
----
+##### [3.2] Asignar Derecho (`CTRL:ASIGNAR_DERECHO`)
+* `LEER`: Visibilidad de la pestaña *"Asignar Derechos"* y habilitación de la acción **"Buscar Derechos"** (`_on_buscar_referencias_ind`) para consultar disponibilidades físicas de referencias facturadas según los criterios de empresa, concepto y delegación.
+* `ASIGNAR`: Habilita el botón **"Continuar Asignación"** (`_on_confirmar_asignacion_ind`) para aperturar el diálogo de asignación manual (`ManualAssignmentDialog`) y transferir formalmente las referencias seleccionadas a la Notaría o Colaborador de destino. En caso de ausencia de permiso, el sistema aplica la política de fallo seguro denegando la acción vía `QMessageBox.warning`.
 
-### 🔑 Módulo 5: Control de Derechos e Inventarios (`REFERENCIAS` / Sub-módulo Inventario)
-* **Código en Base de Datos:** `REFERENCIAS`
-* **Vistas Impactadas:** [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (`InventoryView`).
+##### [3.3] Asignar/Validar por Lotes (`CTRL:ASIGNAR_VALIDAR`)
+* `LEER`: Visibilidad de la pestaña *"Asignar & Validar por lotes"* y habilitación del botón **"Descargar Plantilla"** (`_on_download_template`).
+* `CREAR`: Habilita la acción **"Seleccionar Excel"** (`_on_pick_excel_masivo`) para cargar, parsear y previsualizar en segundo plano el archivo Excel de lote.
+* `ASIGNAR`: Habilita la selección de las casillas **"Completar Lote Reservado"** (`_on_completar_reserva_changed`) y **"Reservar Derechos"** (`_on_solo_reservar_changed`), así como la ejecución del botón **"Confirmar"** (`_on_confirmar_masivo`) para aplicar y consolidar en la base de datos el lote de asignaciones masivas. En caso de ausencia de permiso, el sistema aplica el patrón de fallo seguro informando vía `QMessageBox.warning`.
 
-#### 5.1. Sub-tab: Inventario de Facturas/Derechos
-* `REFERENCIAS` + `LEER`: Búsqueda de derechos en inventario, doble clic para ver detalle, consulta de tarjetas de métricas (`StatCards`) y apertura de *Analítica de Producción*.
-* `REFERENCIAS` + `ASIGNAR`: Habilita la selección múltiple y los botones **"Asignar Seleccionados"** y **"Continuar Asignación"**.
-* `REFERENCIAS` + `EJECUTAR`: Habilita el botón **"Exportar a Excel"** para el inventario filtrado.
+##### [3.4] Reservar Derecho (`CTRL:RESERVA_DERECHO`)
+* `LEER`: Visibilidad de la pestaña *"Reserva de Derechos"*, filtros dinámicos por empresa/desarrollo y cálculo de disponibilidades.
+* `ASIGNAR`: Habilita la acción del botón **"Confirmar Apartados"** (`_on_save_apartar`) para reservar y apartar folios físicamente en favor de una Notaría seleccionada. En caso de ausencia de permiso, el sistema aplica la política de fallo seguro denegando la acción e informando vía `QMessageBox.warning`.
 
-#### 5.2. Sub-tab: Asignar Derechos (Asignación Directa)
-* `REFERENCIAS` + `ASIGNAR`: Permite seleccionar Notaría/Colaborador, asociar cliente y confirmar la asignación directa de referencias reservadas.
+##### [3.5] Gestión de asignaciones (`CTRL:GESTION_LOTES`)
+* `LEER`: Consulta del historial de lotes asignados, filtros dinámicos, activación del botón **"Ver Detalle"** (`_on_ver_detalle_lote`) y apertura por **doble clic** (`_on_table_cell_double_clicked_lotes`) del diálogo modal de desglose (`LoteProcessingDialog`).
+* `EJECUTAR`: Habilita la acción del botón **"Exportar Asignación Seleccionada"** (`_on_exportar_lote_seleccionado`), así como las acciones internas del diálogo de detalle: **"Generar Excel"** (`_on_generate_excel`) y **"Generar PDF"** (`_on_generate_pdf`) para la expedición formal de documentos. En caso de ausencia de permiso, el sistema deniega el acceso e informa mediante `QMessageBox.warning`.
 
-#### 5.3. Sub-tab: Asignar & Validar por Lotes
-* `REFERENCIAS` + `CREAR`: Carga y lectura del archivo Excel de lote.
-* `REFERENCIAS` + `ASIGNAR`: Habilita la acción **"Completar Lote Reservado"**, **"Reservar Derechos"** y el botón final **"Confirmar Lote"**.
+#### 📦 Módulo Órdenes de Generación (`ORDENES`)
+* `LEER`: Consulta del historial de órdenes capturadas (`tab_historial`), búsqueda por folio y apertura con **doble clic** del módulo interactivo *Procesar Derechos* (`OrderProcessingDialog`).
+* `CREAR`: Habilita la acción de **Guardar Orden** (`_on_guardar_orden`) en modo de creación para registrar nuevas órdenes con sus partidas.
+* `EDITAR`: Habilita la carga de una orden para modificación (`load_order_for_editing`) y la acción **Actualizar Orden**.
+* `ELIMINAR`: Permite la acción **Cancelar Orden** (`_on_cancelar_orden`) para dar de baja órdenes y sus solicitudes asociadas.
+* `EJECUTAR`: Permite la ejecución masiva desde el historial de **Autorizar Orden Completa** (`_on_autorizar_orden`) / **Rechazar Orden Completa** (`_on_rechazar_orden`), así como las acciones internas del diálogo *Procesar Derechos*: **Generar Excel** (`_on_generar_excel_lotes`), **Generar PDF** (`_on_generar_pdf_unificado`), **Autorizar seleccionadas** (`_on_authorize_selected`) y **Rechazar seleccionadas** (`_on_reject_selected`). En caso de ausencia del permiso `EJECUTAR`, el sistema aplica la política de fallo seguro denegando el procesamiento e informando mediante `QMessageBox.warning`.
 
-#### 5.4. Sub-tab: Reserva de Derechos (Apartados)
-* `REFERENCIAS` + `ASIGNAR`: Habilita la confirmación de apartado de números de folio de derechos sin cliente asignado.
-
-#### 5.5. Sub-tab: Gestión de Asignaciones
-* `REFERENCIAS` + `LEER`: Consulta del historial de lotes asignados, tabla de control y doble clic para ver desglose de detalle.
-* `REFERENCIAS` + `EJECUTAR`: Habilita las acciones **"Exportar Asignación"**, **"Generar Excel"** y **"Generar PDF"** de los expedientes de lote.
-
----
-
-### ⚙️ Módulos de Administración y Seguridad (`CATALOGOS`, `SEGURIDAD`, `CONFIGURACION`)
-* **Código en Base de Datos:** `CATALOGOS`, `SEGURIDAD`, `CONFIGURACION`
-* **Vistas Impactadas:** [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) (`AdminWindow`) y subvistas asociadas.
-
-| Módulo | Acción | Función Protegida |
-| :--- | :--- | :--- |
-| `CATALOGOS` | `LEER` / `EDITAR` | Consulta y mantenimiento de catálogos de RFCs, Conceptos, Municipios y Delegaciones. |
-| `SEGURIDAD` | `LEER` / `EDITAR` / `ASIGNAR` | Administración de Usuarios, Creación de Roles y Matriz de Permisos RBAC. |
-| `CONFIGURACION` | `LEER` / `EDITAR` | Parámetros del sistema, localizadores de portales y procesos especiales de migración/carga masiva. |
-
----
-
-### 🏝️ Módulos Especiales Cancún (`FOLIOS_CANCUN`, `RECIBOS_CANCUN`, `FACTURAS_CANCUN`)
-* **Código en Base de Datos:** `FOLIOS_CANCUN`, `RECIBOS_CANCUN`, `FACTURAS_CANCUN`
-* **Vistas Impactadas:** [`r2f_control_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/r2f_control_view.py) (`R2FControlView`).
-
-| Módulo | Acción | Función Protegida |
-| :--- | :--- | :--- |
-| `FOLIOS_CANCUN` | `LEER` / `EDITAR` | Carga y gestión de folios de capturas en el portal de Cancún. |
-| `RECIBOS_CANCUN` | `LEER` / `EJECUTAR` | Consulta y descarga masiva de recibos de pago en Cancún. |
-| `FACTURAS_CANCUN` | `LEER` / `EJECUTAR` | Proceso de facturación automatizado y vinculación con R2F. |
+#### 🤖 Módulo Solicitudes del Bot (`SOLICITUDES`)
+* `LEER`: Consulta de la bandeja de solicitudes de trabajo, filtros y búsqueda. Habilita el **doble clic** en la columna *Folio Orden* para aperturar el diálogo interactivo *Procesar Derechos* (`OrderProcessingDialog`).
+* `ASIGNAR`: Habilita el botón **Asignar Usuario** (`_on_asignar`) para reasignar solicitudes a operadores específicos.
+* `EDITAR`: Habilita el botón **Editar Cantidad** (`_on_editar`) para ajustar la cantidad solicitada de la orden de trabajo.
+* `ELIMINAR`: Habilita el botón **Cancelar Solicitud** (`_on_cancelar`) para dar de baja una solicitud de trabajo en la cola del bot. En ausencia de permisos, el sistema aplica la política de fallo seguro informando vía `QMessageBox.warning`.
 
 ---
 
 ## 3. Matriz de Roles Estándar de Fábrica
 
-### 🛡️ Rol `ADMINISTRADOR`
+### 🛡️ Rol `ADMINISTRADOR` (Rol ID 1)
 * **Ámbito:** Acceso total y global.
-* **Asignación de Permisos:** Posee **TODAS** las intersecciones Módulo x Acción (`DASHBOARD`, `ORDENES`, `SOLICITUDES`, `REFERENCIAS`, `CATALOGOS`, `SEGURIDAD`, `CONFIGURACION`, etc., cruzados con las 6 acciones).
+* **Permisos:** Posee **TODAS** las intersecciones Módulo x Acción en la base de datos.
 
 ### 👷 Rol `OPERADOR` (Rol ID 2)
-* **Ámbito:** Operación cotidiana y seguimiento.
-* **Permisos Otorgados:**
-  * `DASHBOARD`: `LEER`
-  * `ORDENES`: `LEER`, `CREAR`
-  * `SOLICITUDES`: `LEER`, `EDITAR`, `EJECUTAR`
-  * `REFERENCIAS`: `LEER`, `ASIGNAR`, `EJECUTAR`
-  * `FOLIOS_CANCUN` / `RECIBOS_CANCUN` / `FACTURAS_CANCUN`: `LEER`, `EJECUTAR`
+* **Ámbito:** Operación cotidiana de generación y scrapers.
+* **Permisos:** `DASHBOARD:LEER`, `ORDENES:LEER,CREAR`, `SOLICITUDES:LEER,EDITAR,EJECUTAR`, `DERECHOS:LEER`, `CTRL:INVENTARIO:LEER,ASIGNAR,EJECUTAR`.
 
 ### 👤 Rol `OPERADOR DE ASIGNACIONES Y BOTS` (Rol ID 4)
-* **Ámbito:** Operación sin restricciones en bots de captura/facturación y gestión controlada de inventarios y asignación de derechos.
+* **Ámbito:** Operación sin restricciones en bots y gestión controlada de asignación de derechos.
 * **1. Módulos de Aplicación (`sar_seguridad.app_modulo`):**
   * `BOT_FACE_A` ("Bot-Pago de derechos"): **Acceso Completo Operativo**
   * `BOT_C` ("Bot-Facturación"): **Acceso Completo Operativo**
   * `CTRL_REF` ("Control de Referencias"): **Acceso Habilitado**
-* **2. Matriz Granular de Permisos RBAC (`sar_seguridad.modulo` x `sar_seguridad.accion`):**
-  * **`DASHBOARD`**: `LEER` *(Acceso visual al tablero principal).*
-  * **`REFERENCIAS`**: `LEER` *(Lectura de inventario y consulta de asignaciones sin permiso de asignación masiva por lote ni doble clic).*
-  * **`REFERENCIAS`**: `ASIGNAR` *(Habilitado exclusivamente para las pestañas de "Asignar Derechos", "Reserva de Derechos" y "Gestión de Asignaciones").*
-* **3. Comportamiento Restrictivo en PySide6 UI (`InventoryView`):**
-  * 🛑 **Botón "Asignar Seleccionados" (Sub-tab Inventario):** Deshabilitado/Oculto para `rol_id=4`.
-  * 🛑 **Acción Doble Clic en Filas de Inventario:** Inactiva (no abre detalle ni modal de asignación rápida).
-  * ✅ **Pestaña "Asignar Derechos":** Habilitada para continuar asignaciones de derechos reservadas.
-  * ✅ **Pestaña "Gestión de Asignaciones":** Habilitada para consultar, exportar a Excel/PDF y verificar detalle de lotes asignados.
+* **2. Permisos Granulares RBAC Otorgados en BD:**
+  * `DASHBOARD`: `LEER`
+  * `DERECHOS`: `LEER` *(Lectura de tabla de derechos. Botones "Marcar Visibles" y "Cambiar Estado" deshabilitados al no tener EDITAR)*.
+  * `CTRL:INVENTARIO`: `LEER` *(Lectura y filtros. Botón "Asignar Seleccionados" deshabilitado y doble clic inactivo al no tener ASIGNAR)*.
+  * `CTRL:ASIGNAR_DERECHO`: `LEER`, `ASIGNAR` *(Pestaña y asignación directa habilitada)*.
+  * `CTRL:GESTION_LOTES`: `LEER`, `EJECUTAR` *(Pestaña y exportación a Excel/PDF de asignaciones habilitada)*.
+* **3. Submódulos Restringidos en Sidebar y UI:**
+  * 🛑 `CTRL:ASIGNAR_VALIDAR` ("Asignar/Validar por Lote"): **Oculto / Deshabilitado**.
+  * 🛑 `CTRL:RESERVA_DERECHO` ("Reserva de Derechos"): **Oculto / Deshabilitado**.
 
 ---
 
 ## 4. Política de Fallo Seguro (*Fail-Closed Pattern*)
 
 ```python
-# Ejemplo de implementación atómica en componentes PySide6
-def apply_rbac_security(self, usuario_id: int):
-    # Por defecto, deshabilitar acciones críticas (Fail-Closed)
-    self.btn_guardar.setEnabled(False)
-    self.btn_cancelar.setEnabled(False)
+# Ejemplo de implementación atómica en componentes PySide6 (DashboardView)
+def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
+    """Verifica permisos antes de ejecutar acciones en Dashboard."""
+    parent_window = self.window()
+    usuario_id = getattr(parent_window, 'current_usuario_id', None)
+    if not usuario_id:
+        return True # Fallback para pruebas/instanciación independiente
     
-    # Evaluar permisos vía API REST o SecurityService
-    has_crear = self.security_service.has_permission(usuario_id, "ORDENES", "CREAR")
-    has_eliminar = self.security_service.has_permission(usuario_id, "ORDENES", "ELIMINAR")
-    
-    self.btn_guardar.setEnabled(has_crear)
-    self.btn_cancelar.setEnabled(has_eliminar)
+    try:
+        with self.db_connector.get_session() as session:
+            from sar.src.services.security_service import SecurityService
+            sec_service = SecurityService(session)
+            return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+    except Exception as e:
+        print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
+        return False
+
+def _on_card_double_clicked(self, event):
+    if not self._check_permission("DASHBOARD", "EJECUTAR"):
+        from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
+        QMessageBox.warning(
+            self,
+            "Acceso Denegado",
+            "No tiene permisos para acceder al módulo de Métricas y Analítica Operativa (DASHBOARD:EJECUTAR)."
+        )
+        return
+    self.show_metrics_requested.emit(list(self.selected_orden_ids))
 ```
 
 Si ocurre cualquier excepción de red o base de datos durante la verificación de permisos, la interfaz **asume permisos nulos (`False`)**, previniendo que un usuario no autorizado realice acciones destructivas o administrativas.
