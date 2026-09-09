@@ -59,6 +59,9 @@ class SecurityService:
             )
             return None
 
+        # Cerrar automáticamente sesiones huérfanas previas del usuario antes de abrir una nueva
+        self.audit_repo.close_orphan_sessions_for_user(user.usuario_id)
+
         # Autenticación exitosa -> Crear sesión
         sesion = self.audit_repo.create_session(
             usuario_id=user.usuario_id,

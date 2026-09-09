@@ -344,6 +344,8 @@ def main():
     ThemeManager.apply_theme(app, is_dark=False)
     
     window = MainWindow()
+    # Conectar cierre general de la aplicación al handler de logout
+    app.aboutToQuit.connect(lambda: window._handle_logout(exit_app=True))
     window.show()
     
     sys.exit(app.exec())

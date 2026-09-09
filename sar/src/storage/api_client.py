@@ -28,6 +28,12 @@ class APIClient:
         
         # Almacén en memoria ram local por si el OS bloquea el Keyring de Windows
         self._token_fallback = None
+        
+        # Sesión HTTP persistente con connection pooling y HTTP Keep-Alive
+        self._http_session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=1)
+        self._http_session.mount("http://", adapter)
+        self._http_session.mount("https://", adapter)
 
     def save_token(self, username: str, token: str) -> None:
         """Guarda el token JWT usando keyring (OS) o el fallback en memoria ram."""
@@ -87,7 +93,7 @@ class APIClient:
         query_params = params if params is not None else (data if method_upper == "GET" else None)
         
         try:
-            response = requests.request(
+            response = self._http_session.request(
                 method=method_upper,
                 url=url,
                 headers=headers,

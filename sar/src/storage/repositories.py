@@ -184,6 +184,30 @@ class ReferenciaRepository(BaseRepository):
 class AuditRepository(BaseRepository):
     """Handles recording session logs, transational event logs, and bot errors."""
 
+    def close_orphan_sessions_for_user(self, usuario_id: int) -> None:
+        """Closes any dangling active sessions and registers logout time for the specified user."""
+        from datetime import datetime
+        now = datetime.utcnow()
+        # 1. Finalizar en tabla sar_seguridad.sesion
+        stmt_sesion = (
+            select(Sesion)
+            .where(and_(Sesion.usuario_id == usuario_id, Sesion.estado == "ACTIVA"))
+        )
+        orphan_sessions = self.session.execute(stmt_sesion).scalars().all()
+        for s in orphan_sessions:
+            s.estado = "FINALIZADA"
+            s.ultimo_heartbeat = now
+            
+            # 2. Registrar fecha_logout en sar_auditoria.auditoria_login si estaba pendiente
+            stmt_log = (
+                select(AuditoriaLogin)
+                .where(and_(AuditoriaLogin.sesion_id == s.sesion_id, AuditoriaLogin.fecha_logout.is_(None)))
+            )
+            logs = self.session.execute(stmt_log).scalars().all()
+            for l in logs:
+                l.fecha_logout = now
+        self.session.flush()
+
     def create_session(self, usuario_id: int, equipo_nombre: str, equipo_uuid: str, ip_equipo: str) -> Sesion:
         sesion = Sesion(
             usuario_id=usuario_id,

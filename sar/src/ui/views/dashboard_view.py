@@ -83,6 +83,8 @@ class DashboardView(QWidget):
         self.db_connector = db_connector
         self.referencias_service = ReferenciasService(self.db_connector)
         self.active_kpis_worker = None
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
         
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -324,10 +326,20 @@ class DashboardView(QWidget):
             return True # Fallback if standalone/testing without active user session context
         
         try:
-            with self.db_connector.get_session() as session:
-                from sar.src.services.security_service import SecurityService
-                sec_service = SecurityService(session)
-                return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+            if getattr(self.api_client, 'connect_via_api', False):
+                # 1. Usar caché en memoria de MainView si ya está cargada (Cero latencia de red)
+                parent_cw = getattr(parent_window, 'centralWidget', lambda: None)()
+                cached_perms = getattr(parent_cw, 'user_permissions_cache', None) or getattr(parent_window, 'user_permissions_cache', None)
+                if cached_perms is not None:
+                    return cached_perms.get(modulo_codigo, {}).get(accion_codigo, False)
+
+                perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                return perms.get(modulo_codigo, {}).get(accion_codigo, False)
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.services.security_service import SecurityService
+                    sec_service = SecurityService(session)
+                    return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
         except Exception as e:
             print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
             return False

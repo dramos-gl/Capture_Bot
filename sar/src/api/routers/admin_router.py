@@ -278,15 +278,27 @@ def get_active_sessions(db: Session = Depends(get_db)):
     try:
         from sar.src.storage.models import Sesion, Usuario
         from sqlalchemy import text
-        # Depurar sesiones huérfanas inactivas
+        # Depurar sesiones huérfanas inactivas (más de 2 horas sin actividad/heartbeat)
         db.execute(text("""
+            UPDATE sar_auditoria.auditoria_login al
+            SET fecha_logout = NOW()
+            FROM sar_seguridad.sesion s
+            WHERE al.sesion_id = s.sesion_id
+              AND s.estado = 'ACTIVA'
+              AND al.fecha_logout IS NULL
+              AND (
+                (s.ultimo_heartbeat IS NOT NULL AND s.ultimo_heartbeat < (NOW() - INTERVAL '2 hours'))
+                OR (s.ultimo_heartbeat IS NULL AND s.fecha_inicio < (NOW() - INTERVAL '2 hours'))
+              );
+
             UPDATE sar_seguridad.sesion
-            SET estado = 'FINALIZADA'
+            SET estado = 'FINALIZADA',
+                ultimo_heartbeat = COALESCE(ultimo_heartbeat, NOW())
             WHERE estado = 'ACTIVA' 
               AND (
-                (ultimo_heartbeat IS NOT NULL AND ultimo_heartbeat < (NOW() - INTERVAL '12 hours'))
-                OR (ultimo_heartbeat IS NULL AND fecha_inicio < (NOW() - INTERVAL '12 hours'))
-              )
+                (ultimo_heartbeat IS NOT NULL AND ultimo_heartbeat < (NOW() - INTERVAL '2 hours'))
+                OR (ultimo_heartbeat IS NULL AND fecha_inicio < (NOW() - INTERVAL '2 hours'))
+              );
         """))
         db.commit()
 

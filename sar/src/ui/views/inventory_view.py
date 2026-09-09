@@ -1304,6 +1304,14 @@ class InventoryView(QWidget):
         self._populate_visor_table()
 
     def _on_asignar_seleccionados(self):
+        if not (self._check_permission("CTRL:INVENTARIO", "ASIGNAR") or self._check_permission("REFERENCIAS", "ASIGNAR")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para asignar derechos a notaría/colaborador (CTRL:INVENTARIO:ASIGNAR)."
+            )
+            return
+
         if not self.selected_ref_map:
             QMessageBox.warning(self, "Selección Vacía", "Por favor, selecciona al menos un derecho disponible en la tabla para asignarlo.")
             return
@@ -2052,6 +2060,11 @@ class InventoryView(QWidget):
 
     def _on_buscar_referencias_ind(self):
         if not self._check_permission("CTRL:ASIGNAR_DERECHO", "LEER"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para buscar derechos (CTRL:ASIGNAR_DERECHO:LEER)."
+            )
             return
 
         tipo_destino = self.cb_tipo_destino_ind.currentText()
@@ -2112,6 +2125,11 @@ class InventoryView(QWidget):
 
     def _on_confirmar_asignacion_ind(self):
         if not self._check_permission("CTRL:ASIGNAR_DERECHO", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para continuar la asignación (CTRL:ASIGNAR_DERECHO:ASIGNAR)."
+            )
             return
         selected_refs = []
         for r in range(self.table_preview_ind.rowCount()):

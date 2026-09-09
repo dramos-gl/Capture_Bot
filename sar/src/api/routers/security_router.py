@@ -145,23 +145,22 @@ def get_all_users(db: Session = Depends(get_db)):
 
 @router.get("/permissions/{usuario_id}")
 def get_user_permissions(usuario_id: int, db: Session = Depends(get_db)):
-    """Retorna la matriz de permisos para todos los módulos activos del usuario."""
-    from sar.src.services.security_service import SecurityService
+    """Retorna la matriz de permisos para todos los módulos activos del usuario de forma ultra-rápida (1 query)."""
     from sar.src.storage.repositories import UsuarioRepository
     try:
-        sec_service = SecurityService(db)
         repo = UsuarioRepository(db)
         all_mods = repo.get_all_modulos()
+        user_perms_set = set(repo.get_user_permissions(usuario_id))
         perms = {}
         for m in all_mods:
             mod = m.codigo
             perms[mod] = {
-                "LEER": bool(sec_service.has_permission(usuario_id, mod, "LEER")),
-                "CREAR": bool(sec_service.has_permission(usuario_id, mod, "CREAR")),
-                "EDITAR": bool(sec_service.has_permission(usuario_id, mod, "EDITAR")),
-                "ELIMINAR": bool(sec_service.has_permission(usuario_id, mod, "ELIMINAR")),
-                "ASIGNAR": bool(sec_service.has_permission(usuario_id, mod, "ASIGNAR")),
-                "EJECUTAR": bool(sec_service.has_permission(usuario_id, mod, "EJECUTAR")),
+                "LEER": (mod, "LEER") in user_perms_set,
+                "CREAR": (mod, "CREAR") in user_perms_set,
+                "EDITAR": (mod, "EDITAR") in user_perms_set,
+                "ELIMINAR": (mod, "ELIMINAR") in user_perms_set,
+                "ASIGNAR": (mod, "ASIGNAR") in user_perms_set,
+                "EJECUTAR": (mod, "EJECUTAR") in user_perms_set,
             }
         return perms
     except Exception as e:

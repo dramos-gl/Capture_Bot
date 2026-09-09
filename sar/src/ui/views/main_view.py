@@ -88,6 +88,7 @@ class MainView(QWidget):
 
             if self.api_client.connect_via_api:
                 perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                self.user_permissions_cache = perms
                 has_dashboard = perms.get("DASHBOARD", {}).get("LEER", False)
                 has_ordenes = perms.get("ORDENES", {}).get("LEER", False)
                 has_solicitudes = perms.get("SOLICITUDES", {}).get("LEER", False)
@@ -206,7 +207,10 @@ class MainView(QWidget):
 
             if view_key == "r2f_control":
                 if self.api_client.connect_via_api:
-                    perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                    perms = getattr(self, 'user_permissions_cache', None)
+                    if perms is None:
+                        perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                        self.user_permissions_cache = perms
                     has_permission = (
                         perms.get("FOLIOS_CANCUN", {}).get("LEER", False) or
                         perms.get("RECIBOS_CANCUN", {}).get("LEER", False) or
@@ -245,7 +249,10 @@ class MainView(QWidget):
                 req_mod = mod_mapping.get(view_key)
                 if req_mod:
                     if self.api_client.connect_via_api:
-                        perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                        perms = getattr(self, 'user_permissions_cache', None)
+                        if perms is None:
+                            perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                            self.user_permissions_cache = perms
                         has_permission = perms.get(req_mod, {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("LEER", False)
                     else:
                         with self.db_connector.get_session() as session:
@@ -331,12 +338,16 @@ class MainView(QWidget):
                 parent_window = self.window()
                 uid = getattr(parent_window, 'current_usuario_id', None)
                 sid = getattr(parent_window, 'current_sesion_id', None)
+                on_logout_fn = getattr(parent_window, '_on_logout', None)
                 self.admin_window = AdminWindow(
                     self.db_connector,
                     self,
                     current_usuario_id=uid,
                     current_sesion_id=sid
                 )
+                if on_logout_fn:
+                    self.admin_window._on_logout = on_logout_fn
+                    self.admin_window.logout_requested.connect(self.logout_requested.emit)
             self.admin_window.show()
             self.admin_window.raise_()
             self.admin_window.activateWindow()
