@@ -76,7 +76,7 @@ class ReferenciasView(QWidget):
         scroll_content = QWidget()
         scroll_content.setObjectName("referenciasScrollContent")
         self.layout = QVBoxLayout(scroll_content)
-        self.layout.setContentsMargins(24, 24, 24, 24)
+        self.layout.setContentsMargins(16, 16, 16, 16)
         self.layout.setSpacing(24)
         
         # Filtros
@@ -94,6 +94,8 @@ class ReferenciasView(QWidget):
         
         # Main Card for the Data Table
         self.card = CustomCard(title="Producción de Derechos", parent=self)
+        if hasattr(self.card, "header") and self.card.header:
+            self.card.header.setMinimumWidth(0)
         
         # Table Organism
         headers = ["✔", "ID", "Consecutivo", "Referencia", "Importe", "Folio Orden", "Grupo", "Empresa", "Concepto", "Delegación", "Estado", "Procesado Por", "Fecha Gen.", "Vigencia"]
@@ -716,48 +718,70 @@ class ReferenciasView(QWidget):
         menu.exec(self.btn_filter_orden.mapToGlobal(self.btn_filter_orden.rect().bottomLeft()))
 
     def _get_active_orders_formatted_text(self) -> str:
-        """Genera el texto HTML formateado de las órdenes activas en el filtro."""
+        """Genera el texto HTML ultra-compacto de las órdenes activas en el filtro para pantallas 1366x768 y reducidas."""
         total_orders = len(getattr(self, "todas_las_ordenes", []))
         selected_ids = getattr(self, "selected_orden_ids", [])
         num_selected = len(selected_ids)
 
         if total_orders == 0 or num_selected == 0:
-            return '<span style="color: #EF4444; font-weight: bold;">(Ninguna orden seleccionada)</span>'
+            return '<span style="color: #EF4444; font-weight: bold;">(Sin orden)</span>'
         elif num_selected == total_orders:
-            return '<span style="color: #10B981; font-weight: bold;">Todas las órdenes</span>'
+            return f'<span style="color: #10B981; font-weight: bold;">Todas ({total_orders})</span>'
         else:
             from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
             selected_objs = [
                 ord for ord in self.todas_las_ordenes
                 if ord.get("orden_id") in selected_ids
             ]
-            if len(selected_objs) <= 3:
-                names = []
-                for o in selected_objs:
-                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=25)
-                    parts = label.split(" - ", 1)
-                    if len(parts) == 2:
-                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
-                    else:
-                        names.append(f"<b>{label}</b>")
-                return ", ".join(names)
+
+            if num_selected == 1:
+                o = selected_objs[0]
+                p = format_orden_filter_label(o.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                return f"<b>{p}</b>"
+
+            elif num_selected == 2:
+                o1, o2 = selected_objs[0], selected_objs[1]
+                p1 = format_orden_filter_label(o1.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                p2 = format_orden_filter_label(o2.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                return f"<b>{p1}, {p2}</b>"
+
             else:
-                names = []
-                for o in selected_objs[:2]:
-                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=20)
-                    parts = label.split(" - ", 1)
-                    if len(parts) == 2:
-                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
-                    else:
-                        names.append(f"<b>{label}</b>")
-                remaining = len(selected_objs) - 2
-                names_str = ", ".join(names)
-                return f'{names_str} y <span style="color: #2563EB; font-weight: bold;">+{remaining} órdenes más</span>'
+                return f'<span style="color: #2563EB; font-weight: bold;">{num_selected} órdenes</span>'
+
+    def _get_active_orders_tooltip_text(self) -> str:
+        """Genera el texto de tooltip multilínea detallando cada una de las órdenes seleccionadas."""
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            return "Filtro de Órdenes:\n(Ninguna orden seleccionada — no se mostrarán registros en las tablas)"
+        elif num_selected == total_orders:
+            return f"Filtro de Órdenes:\nTodas las órdenes seleccionadas ({total_orders} órdenes activas)"
+        else:
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            lines = [f"Órdenes activas en filtro ({num_selected} de {total_orders}):"]
+            for o in selected_objs:
+                folio = str(o.get("folio", "")).strip()
+                desc = str(o.get("descripcion", "") or "").strip()
+                if desc:
+                    lines.append(f"  • {folio} — {desc}")
+                else:
+                    lines.append(f"  • {folio}")
+            lines.append("\nPuede cambiar la selección con el botón de embudo [Filtro].")
+            return "\n".join(lines)
 
     def _update_order_filter_title(self):
         """Actualiza el título de la tarjeta principal con el estado de las órdenes activas."""
         if hasattr(self, "card") and hasattr(self.card, "header"):
             order_text = self._get_active_orders_formatted_text()
+            tooltip_text = self._get_active_orders_tooltip_text()
             self.card.header.setText(
-                f"Producción de Derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+                f"Producción de Derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Filtro: <b>{order_text}</b></span>"
             )
+            self.card.header.setToolTip(tooltip_text)
+            if hasattr(self, "btn_filter_orden"):
+                self.btn_filter_orden.setToolTip(f"Filtrar derechos por orden de generación\n\n{tooltip_text}")

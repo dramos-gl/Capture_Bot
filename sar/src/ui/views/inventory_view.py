@@ -3,7 +3,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget,
     QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
-    QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox, QCheckBox
+    QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox, QCheckBox, QSizePolicy
 )
 
 from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize, QTimer, QUrl
@@ -615,7 +615,7 @@ class InventoryView(QWidget):
         self.active_worker = None
         
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(24, 24, 24, 24)
+        self.main_layout.setContentsMargins(16, 16, 16, 16)
         self.main_layout.setSpacing(16)
 
         # Tab Widget
@@ -724,7 +724,7 @@ class InventoryView(QWidget):
 
         scroll_area = QScrollArea(self.tab_visor)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setStyleSheet("""
             QScrollArea { border: none; background-color: transparent; }
@@ -755,12 +755,18 @@ class InventoryView(QWidget):
         from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
         self.labeled_concept = LabeledComboBox("Concepto", ["Todos los conceptos"])
         self.cb_concept_filter = self.labeled_concept.combo
+        self.cb_concept_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.cb_concept_filter.setMinimumContentsLength(12)
+        self.labeled_concept.setMaximumWidth(260)
         self.cb_concept_filter.currentTextChanged.connect(self._on_concept_filter_visor)
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.labeled_concept)
 
         # Add Labeled Empresa combo filter to filter bar
         self.labeled_empresa = LabeledComboBox("Empresa", ["Todas las empresas"])
         self.cb_empresa_filter = self.labeled_empresa.combo
+        self.cb_empresa_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.cb_empresa_filter.setMinimumContentsLength(12)
+        self.labeled_empresa.setMaximumWidth(220)
         self.cb_empresa_filter.currentTextChanged.connect(self._on_empresa_filter_visor)
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.labeled_empresa)
         
@@ -837,7 +843,8 @@ class InventoryView(QWidget):
         self.lbl_table_icon.setPixmap(Icons.file_text("#2563EB").pixmap(18, 18))
         self.lbl_table_icon.setStyleSheet("background: transparent;")
         
-        self.lbl_table_title = CustomLabel("Derechos en Estado FACTURADA", variant="subheader")
+        self.lbl_table_title = CustomLabel("Derechos Facturados", variant="subheader")
+        self.lbl_table_title.setMinimumWidth(0)
         
         self.table_header_layout.addWidget(self.lbl_table_icon)
         self.table_header_layout.addWidget(self.lbl_table_title)
@@ -846,7 +853,9 @@ class InventoryView(QWidget):
         # Search Box inside Table Header
         self.search_input_visor = QLineEdit(self)
         self.search_input_visor.setPlaceholderText("Buscar derecho, cliente, desarrollo, folio...")
-        self.search_input_visor.setFixedWidth(290)
+        self.search_input_visor.setMinimumWidth(140)
+        self.search_input_visor.setMaximumWidth(260)
+        self.search_input_visor.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.search_input_visor.setClearButtonEnabled(True)
         self.search_input_visor.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
         self.search_input_visor.returnPressed.connect(self._on_search_visor_trigger)
@@ -1639,7 +1648,7 @@ class InventoryView(QWidget):
         # 1. Scroll Area to guarantee responsiveness in 1366x768 and small screens
         scroll_area = QScrollArea(self.tab_masivo)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setStyleSheet("""
             QScrollArea {
@@ -2157,7 +2166,7 @@ class InventoryView(QWidget):
 
         scroll_area = QScrollArea(self.tab_individual)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setStyleSheet("""
             QScrollArea { border: none; background-color: transparent; }
@@ -2647,7 +2656,7 @@ class InventoryView(QWidget):
 
         scroll_area = QScrollArea(self.tab_apartar)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setStyleSheet("""
             QScrollArea { border: none; background-color: transparent; }
@@ -3041,7 +3050,7 @@ class InventoryView(QWidget):
 
         scroll_area = QScrollArea(self.tab_lotes)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setStyleSheet("""
             QScrollArea { border: none; background-color: transparent; }
@@ -3190,77 +3199,105 @@ class InventoryView(QWidget):
         self.table_lotes.cellDoubleClicked.connect(self._on_table_cell_double_clicked_lotes)
 
     def _get_active_orders_formatted_text(self) -> str:
-        """Genera el texto HTML formateado de las órdenes activas en el filtro."""
+        """Genera el texto HTML ultra-compacto de las órdenes activas en el filtro para pantallas 1366x768 y reducidas."""
         total_orders = len(getattr(self, "todas_las_ordenes", []))
         selected_ids = getattr(self, "selected_orden_ids", [])
         num_selected = len(selected_ids)
 
         if total_orders == 0 or num_selected == 0:
-            return '<span style="color: #EF4444; font-weight: bold;">(Ninguna orden seleccionada)</span>'
+            return '<span style="color: #EF4444; font-weight: bold;">(Sin orden)</span>'
         elif num_selected == total_orders:
-            return '<span style="color: #10B981; font-weight: bold;">Todas las órdenes</span>'
+            return f'<span style="color: #10B981; font-weight: bold;">Todas ({total_orders})</span>'
         else:
             from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
             selected_objs = [
                 ord for ord in self.todas_las_ordenes
                 if ord.get("orden_id") in selected_ids
             ]
-            if len(selected_objs) <= 3:
-                names = []
-                for o in selected_objs:
-                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=25)
-                    parts = label.split(" - ", 1)
-                    if len(parts) == 2:
-                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
-                    else:
-                        names.append(f"<b>{label}</b>")
-                return ", ".join(names)
+
+            if num_selected == 1:
+                o = selected_objs[0]
+                p = format_orden_filter_label(o.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                return f"<b>{p}</b>"
+
+            elif num_selected == 2:
+                o1, o2 = selected_objs[0], selected_objs[1]
+                p1 = format_orden_filter_label(o1.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                p2 = format_orden_filter_label(o2.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                return f"<b>{p1}, {p2}</b>"
+
             else:
-                names = []
-                for o in selected_objs[:2]:
-                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=20)
-                    parts = label.split(" - ", 1)
-                    if len(parts) == 2:
-                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
-                    else:
-                        names.append(f"<b>{label}</b>")
-                remaining = len(selected_objs) - 2
-                names_str = ", ".join(names)
-                return f'{names_str} y <span style="color: #2563EB; font-weight: bold;">+{remaining} órdenes más</span>'
+                return f'<span style="color: #2563EB; font-weight: bold;">{num_selected} órdenes</span>'
+
+    def _get_active_orders_tooltip_text(self) -> str:
+        """Genera el texto de tooltip multilínea detallando cada una de las órdenes seleccionadas."""
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            return "Filtro de Órdenes:\n(Ninguna orden seleccionada — no se mostrarán registros en las tablas)"
+        elif num_selected == total_orders:
+            return f"Filtro de Órdenes:\nTodas las órdenes seleccionadas ({total_orders} órdenes activas)"
+        else:
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            lines = [f"Órdenes activas en filtro ({num_selected} de {total_orders}):"]
+            for o in selected_objs:
+                folio = str(o.get("folio", "")).strip()
+                desc = str(o.get("descripcion", "") or "").strip()
+                if desc:
+                    lines.append(f"  • {folio} — {desc}")
+                else:
+                    lines.append(f"  • {folio}")
+            lines.append("\nPuede cambiar la selección con el botón de embudo [Filtro].")
+            return "\n".join(lines)
 
     def _update_order_filter_banners(self):
-        """Actualiza el texto de los banners informativos dependientes del filtro de órdenes."""
+        """Actualiza el texto y tooltip de los banners informativos dependientes del filtro de órdenes."""
         order_text = self._get_active_orders_formatted_text()
+        tooltip_text = self._get_active_orders_tooltip_text()
 
         # Título en Visor de Inventario (tab_visor)
         if hasattr(self, "lbl_table_title"):
             self.lbl_table_title.setText(
-                f"Derechos en Estado FACTURADA &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+                f"Derechos Facturados &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Filtro: <b>{order_text}</b></span>"
             )
+            self.lbl_table_title.setToolTip(tooltip_text)
 
         # Título en Gestión de Asignaciones (tab_lotes - dentro de la tarjeta de la tabla)
         if hasattr(self, "card_lotes") and hasattr(self.card_lotes, "header"):
             self.card_lotes.header.setText(
-                f"Registro de Asignaciones &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+                f"Asignaciones &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Filtro: <b>{order_text}</b></span>"
             )
+            self.card_lotes.header.setToolTip(tooltip_text)
 
         # Título en Asignación de Derechos Directa (tab_individual)
         if hasattr(self, "lbl_card_title_ind"):
             self.lbl_card_title_ind.setText(
-                f"Asignar Derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+                f"Asignar Derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Filtro: <b>{order_text}</b></span>"
             )
+            self.lbl_card_title_ind.setToolTip(tooltip_text)
 
         # Título en Asignación Masiva (tab_masivo)
         if hasattr(self, "lbl_title_masivo"):
             self.lbl_title_masivo.setText(
-                f"Asignación Masiva por Lotes &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+                f"Asignación Masiva &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Filtro: <b>{order_text}</b></span>"
             )
+            self.lbl_title_masivo.setToolTip(tooltip_text)
 
         # Título en Reserva de Derechos (tab_apartar)
         if hasattr(self, "lbl_card_title_apartar"):
             self.lbl_card_title_apartar.setText(
-                f"Reservar Derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+                f"Reservar Derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Filtro: <b>{order_text}</b></span>"
             )
+            self.lbl_card_title_apartar.setToolTip(tooltip_text)
+
+        # Tooltip adicional en el botón de embudo
+        if hasattr(self, "btn_filter_orden"):
+            self.btn_filter_orden.setToolTip(f"Filtrar derechos por órdenes de generación\n\n{tooltip_text}")
 
     def _update_hint_lotes_banner(self):
         """Alias de compatibilidad para actualizar los banners de filtro."""

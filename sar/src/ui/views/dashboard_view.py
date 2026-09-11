@@ -1,7 +1,7 @@
 """Dashboard Main View matching the target design mockup."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QLineEdit, QPushButton, QComboBox, QLabel, QDialog, QScrollArea
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QLineEdit, QPushButton, QComboBox, QLabel, QDialog, QScrollArea, QSizePolicy
 )
 from PySide6.QtCore import Qt, QDateTime, QThread, Signal, QTimer, QSize
 from sar.src.ui.design_system.components import CustomCard, CustomLabel, StyledDataTable, CustomButton, CustomComboBox, KeepOpenMenu
@@ -92,7 +92,7 @@ class DashboardView(QWidget):
 
         scroll_area = QScrollArea(self)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setStyleSheet("""
             QScrollArea {
@@ -107,7 +107,7 @@ class DashboardView(QWidget):
         scroll_content = QWidget()
         scroll_content.setObjectName("dashboardScrollContent")
         self.layout = QVBoxLayout(scroll_content)
-        self.layout.setContentsMargins(24, 24, 24, 24)
+        self.layout.setContentsMargins(16, 16, 16, 16)
         self.layout.setSpacing(20)
         
         # Pagination and data state variables
@@ -228,6 +228,7 @@ class DashboardView(QWidget):
         
         self.lbl_table_title = CustomLabel("Últimos derechos generados", variant="subheader")
         self.lbl_table_title.setObjectName("dashboardTableTitle")
+        self.lbl_table_title.setMinimumWidth(0)
         
         self.table_header_layout.addWidget(self.lbl_table_icon)
         self.table_header_layout.addWidget(self.lbl_table_title)
@@ -236,7 +237,9 @@ class DashboardView(QWidget):
         # Search Box
         self.search_input = QLineEdit(self)
         self.search_input.setPlaceholderText("Buscar derecho, estado...")
-        self.search_input.setFixedWidth(240)
+        self.search_input.setMinimumWidth(140)
+        self.search_input.setMaximumWidth(240)
+        self.search_input.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.search_input.setClearButtonEnabled(True)
         self.search_input.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
         self.search_input.returnPressed.connect(self._on_search_trigger)
@@ -688,51 +691,73 @@ class DashboardView(QWidget):
         menu.exec(self.btn_filter.mapToGlobal(self.btn_filter.rect().bottomLeft()))
 
     def _get_active_orders_formatted_text(self) -> str:
-        """Genera el texto HTML formateado de las órdenes activas en el filtro."""
+        """Genera el texto HTML ultra-compacto de las órdenes activas en el filtro para pantallas 1366x768 y reducidas."""
         total_orders = len(getattr(self, "todas_las_ordenes", []))
         selected_ids = getattr(self, "selected_orden_ids", [])
         num_selected = len(selected_ids)
 
         if total_orders == 0 or num_selected == 0:
-            return '<span style="color: #EF4444; font-weight: bold;">(Ninguna orden seleccionada)</span>'
+            return '<span style="color: #EF4444; font-weight: bold;">(Sin orden)</span>'
         elif num_selected == total_orders:
-            return '<span style="color: #10B981; font-weight: bold;">Todas las órdenes</span>'
+            return f'<span style="color: #10B981; font-weight: bold;">Todas ({total_orders})</span>'
         else:
             from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
             selected_objs = [
                 ord for ord in self.todas_las_ordenes
                 if ord.get("orden_id") in selected_ids
             ]
-            if len(selected_objs) <= 3:
-                names = []
-                for o in selected_objs:
-                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=25)
-                    parts = label.split(" - ", 1)
-                    if len(parts) == 2:
-                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
-                    else:
-                        names.append(f"<b>{label}</b>")
-                return ", ".join(names)
+
+            if num_selected == 1:
+                o = selected_objs[0]
+                p = format_orden_filter_label(o.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                return f"<b>{p}</b>"
+
+            elif num_selected == 2:
+                o1, o2 = selected_objs[0], selected_objs[1]
+                p1 = format_orden_filter_label(o1.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                p2 = format_orden_filter_label(o2.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                return f"<b>{p1}, {p2}</b>"
+
             else:
-                names = []
-                for o in selected_objs[:2]:
-                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=20)
-                    parts = label.split(" - ", 1)
-                    if len(parts) == 2:
-                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
-                    else:
-                        names.append(f"<b>{label}</b>")
-                remaining = len(selected_objs) - 2
-                names_str = ", ".join(names)
-                return f'{names_str} y <span style="color: #2563EB; font-weight: bold;">+{remaining} órdenes más</span>'
+                return f'<span style="color: #2563EB; font-weight: bold;">{num_selected} órdenes</span>'
+
+    def _get_active_orders_tooltip_text(self) -> str:
+        """Genera el texto de tooltip multilínea detallando cada una de las órdenes seleccionadas."""
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            return "Filtro de Órdenes:\n(Ninguna orden seleccionada — no se mostrarán registros en las tablas)"
+        elif num_selected == total_orders:
+            return f"Filtro de Órdenes:\nTodas las órdenes seleccionadas ({total_orders} órdenes activas)"
+        else:
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            lines = [f"Órdenes activas en filtro ({num_selected} de {total_orders}):"]
+            for o in selected_objs:
+                folio = str(o.get("folio", "")).strip()
+                desc = str(o.get("descripcion", "") or "").strip()
+                if desc:
+                    lines.append(f"  • {folio} — {desc}")
+                else:
+                    lines.append(f"  • {folio}")
+            lines.append("\nPuede cambiar la selección con el botón de embudo [Filtro].")
+            return "\n".join(lines)
 
     def _update_order_filter_title(self):
         """Actualiza el título de la sección de actividad con el estado de las órdenes activas."""
         if hasattr(self, "lbl_table_title"):
             order_text = self._get_active_orders_formatted_text()
+            tooltip_text = self._get_active_orders_tooltip_text()
             self.lbl_table_title.setText(
-                f"Últimos derechos generados &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+                f"Últimos derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Filtro: <b>{order_text}</b></span>"
             )
+            self.lbl_table_title.setToolTip(tooltip_text)
+            if hasattr(self, "btn_filter"):
+                self.btn_filter.setToolTip(f"Filtrar derechos por órdenes de generación\n\n{tooltip_text}")
 
 
 class ErrorDetailDialog(QDialog):
