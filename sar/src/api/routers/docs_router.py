@@ -1090,6 +1090,7 @@ def api_buscar_identificador(
     pa: Optional[str] = None,
     folio_electronico: Optional[str] = None,
     desarrollo_id: Optional[int] = None,
+    sm: Optional[str] = None,
     mz: Optional[str] = None,
     lote: Optional[str] = None,
     edif: Optional[str] = None,
@@ -1103,11 +1104,24 @@ def api_buscar_identificador(
             pa=pa,
             folio_electronico=folio_electronico,
             desarrollo_id=desarrollo_id,
+            sm=sm,
             mz=mz,
             lote=lote,
             edif=edif,
             viv=viv
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/referencias/{referencia_id}/facturas")
+def api_get_facturas_by_referencia(
+    referencia_id: int,
+    db: Session = Depends(get_db)
+):
+    """Returns all invoice records (pdf_path, pdf2_path, etc.) for a given referencia_id."""
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_facturas_by_referencia_id(referencia_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1256,6 +1270,21 @@ def api_completar_reservaciones(request: LoteCompletarRequest, db: Session = Dep
         repo.completar_reservaciones(request.detalles, usuario_id=request.usuario_id)
         db.commit()
         return {"detail": "Reservaciones completadas con éxito"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class AsignacionUpdateRequest(BaseModel):
+    datos: dict
+    usuario_id: Optional[int] = 1
+
+@router.put("/inventario/asignaciones/{asignacion_id}")
+def api_update_asignacion_referencia(asignacion_id: int, request: AsignacionUpdateRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        res = repo.update_asignacion_referencia(asignacion_id, request.datos, usuario_id=request.usuario_id)
+        db.commit()
+        return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

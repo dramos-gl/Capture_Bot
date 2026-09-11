@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (
     QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox, QCheckBox
 )
 
-from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize, QTimer, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QAction
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomSpinBox,
     LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid, GLLoadingDialog,
@@ -442,6 +442,159 @@ class BatchConfirmationWorker(QThread):
             self.error_occurred.emit(str(e))
 
 
+class PdfFacturaWorker(QThread):
+    """Background worker that fetches invoice PDFs for a referencia_id,
+    merges pdf_path + pdf2_path using pypdf into a single temp file,
+    and emits the final path — or an error — back to the UI thread.
+    """
+    pdf_ready = Signal(str)            # emits final file path to open
+    error_occurred = Signal(str, str)   # emits (titulo, mensaje)
+    warning_parcial = Signal(str, str)  # emits (titulo, mensaje) — disponibilidad parcial
+
+    def __init__(self, inventario_ui_service, referencia_id: int, referencia_portal: str = "", parent=None):
+        super().__init__(parent)
+        self.inventario_ui_service = inventario_ui_service
+        self.referencia_id = referencia_id
+        self.referencia_portal = referencia_portal
+
+    def run(self):
+        import tempfile
+        import pathlib
+
+        # 1. Consultar facturas (puede implicar llamada DB o HTTP)
+        try:
+            facturas = self.inventario_ui_service.get_facturas_by_referencia_id(self.referencia_id)
+        except Exception as e:
+            self.error_occurred.emit(
+                "Error al Consultar Facturas",
+                f"No se pudo obtener la información de facturas del derecho '{self.referencia_portal}':\n{e}"
+            )
+            return
+
+        if not facturas:
+            self.error_occurred.emit(
+                "Sin Factura Registrada",
+                f"El derecho '{self.referencia_portal}' no tiene facturas registradas en el sistema."
+            )
+            return
+
+        # 2. Recopilar y clasificar rutas PDF por categoría de problema
+        rutas_validas = []
+        sin_ruta = []        # pdf_path / pdf2_path es None en BD
+        no_existe = []       # ruta registrada pero archivo movido / renombrado
+        sin_acceso = []      # OSError: unidad de red no disponible o sin permisos
+
+        for f in facturas:
+            for campo in ("pdf_path", "pdf2_path"):
+                ruta = f.get(campo)
+                if not ruta:
+                    continue  # campo NULL en BD — sin ruta registrada
+                p = pathlib.Path(ruta)
+                try:
+                    if p.exists() and p.is_file():
+                        rutas_validas.append(str(p))
+                    else:
+                        no_existe.append(str(p))
+                except (OSError, PermissionError) as exc:
+                    # La unidad de red no responde o no hay permisos de acceso
+                    sin_acceso.append(f"{p}  →  [{type(exc).__name__}] {exc}")
+
+        # ── Caso 1: Todos los campos son NULL en BD (nunca se generó PDF)
+        total_campos = sum(
+            1 for f in facturas for campo in ("pdf_path", "pdf2_path") if f.get(campo)
+        )
+        if total_campos == 0:
+            self.error_occurred.emit(
+                "Sin PDF Registrado",
+                f"El derecho '{self.referencia_portal}' no tiene ninguna ruta de PDF "
+                f"registrada en el sistema.\n\n"
+                f"Es posible que la factura no haya sido procesada o que el proceso de "
+                f"generación de PDF no haya concluido."
+            )
+            return
+
+        # ── Caso 2: Unidad de red inaccesible (al menos uno con OSError)
+        if sin_acceso and not rutas_validas:
+            detalle = "\n".join(sin_acceso)
+            self.error_occurred.emit(
+                "Unidad de Red No Disponible",
+                f"No se pudo acceder a los archivos PDF del derecho '{self.referencia_portal}'.\n\n"
+                f"Verifique que la unidad de red esté conectada y que tenga los "
+                f"permisos de lectura necesarios.\n\n"
+                f"Rutas con error de acceso:\n{detalle}"
+            )
+            return
+
+        # ── Caso 3: Archivos movidos o renombrados (sin_acceso vacío, no_existe presente)
+        if no_existe and not rutas_validas and not sin_acceso:
+            detalle = "\n".join(no_existe)
+            self.error_occurred.emit(
+                "Archivos PDF No Encontrados",
+                f"Las rutas registradas en el sistema para el derecho "
+                f"'{self.referencia_portal}' no corresponden a ningún archivo existente.\n\n"
+                f"Es posible que los archivos hayan sido movidos, renombrados o eliminados.\n\n"
+                f"Rutas consultadas:\n{detalle}"
+            )
+            return
+
+        # ── Caso 4: Disponibilidad parcial — algunos accesibles, otros no
+        #    Se avisa y se procede con los disponibles
+        avisos_parciales = []
+        if sin_acceso:
+            avisos_parciales.append(
+                f"⚠ Sin acceso a {len(sin_acceso)} archivo(s) "
+                f"(unidad de red no disponible o sin permisos)."
+            )
+        if no_existe:
+            avisos_parciales.append(
+                f"⚠ {len(no_existe)} archivo(s) no encontrado(s) "
+                f"(posiblemente movidos o renombrados)."
+            )
+        if avisos_parciales:
+            self.warning_parcial.emit(
+                "Disponibilidad Parcial de PDFs",
+                f"Se encontraron {len(rutas_validas)} de {len(rutas_validas) + len(no_existe) + len(sin_acceso)} "
+                f"archivo(s) PDF para el derecho '{self.referencia_portal}'.\n\n"
+                + "\n".join(avisos_parciales)
+                + "\n\nSe abrirán únicamente los archivos disponibles."
+            )
+
+        # 3. Si sólo hay 1 PDF válido, emitir directamente sin combinar
+        if len(rutas_validas) == 1:
+            self.pdf_ready.emit(rutas_validas[0])
+            return
+
+        # 4. Combinar múltiples PDFs en un archivo temporal con pypdf
+        try:
+            from pypdf import PdfWriter
+            writer = PdfWriter()
+            for ruta in rutas_validas:
+                writer.append(ruta)
+
+            # NamedTemporaryFile con delete=False para que el visor pueda leerlo
+            ref_safe = "".join(c for c in self.referencia_portal if c.isalnum() or c in "-_")
+            tmp = tempfile.NamedTemporaryFile(
+                suffix=".pdf",
+                prefix=f"SAR_factura_{ref_safe}_",
+                delete=False
+            )
+            writer.write(tmp)
+            tmp.close()
+            self.pdf_ready.emit(tmp.name)
+        except ImportError:
+            self.error_occurred.emit(
+                "Librería Faltante",
+                "No se puede combinar los PDFs: la librería 'pypdf' no está instalada.\n"
+                "Ejecute: pip install pypdf"
+            )
+        except Exception as e:
+            self.error_occurred.emit(
+                "Error al Combinar PDFs",
+                f"Ocurrió un error al generar el PDF combinado del derecho '{self.referencia_portal}':\n{e}"
+            )
+
+
+
 class InventoryView(QWidget):
     """View to manage Invoice/Reference Inventory Control (state: FACTURADA)."""
 
@@ -701,29 +854,26 @@ class InventoryView(QWidget):
         self.table_header_layout.addWidget(self.search_input_visor)
 
         # Botón Buscar explícito
-        self.btn_buscar_visor = QPushButton()
-        self.btn_buscar_visor.setObjectName("secondaryBtn")
-        self.btn_buscar_visor.setIcon(Icons.buscar("#FFFFFF") if ThemeManager.is_dark_active() else Icons.buscar("#334155"))
+        self.btn_buscar_visor = CustomButton("", is_secondary=True, parent=self)
+        self.btn_buscar_visor.setIcon(Icons.buscar(Colors.TEXT_LIGHT_SECONDARY))
         self.btn_buscar_visor.setFixedSize(36, 36)
-        self.btn_buscar_visor.setToolTip("Buscar (o presione Enter)")
+        self.btn_buscar_visor.setToolTip("Buscar en inventario (o presione Enter)")
         self.btn_buscar_visor.clicked.connect(self._on_search_visor_trigger)
         self.table_header_layout.addWidget(self.btn_buscar_visor)
         
         # Filter Button (Funnel) inside Table Header
-        self.btn_filter_orden = QPushButton()
-        self.btn_filter_orden.setObjectName("secondaryBtn")
-        self.btn_filter_orden.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
         self.btn_filter_orden.setFixedSize(36, 36)
-        self.btn_filter_orden.setToolTip("Filtrar por Órdenes")
+        self.btn_filter_orden.setToolTip("Filtrar derechos por órdenes de generación")
         self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
         self.table_header_layout.addWidget(self.btn_filter_orden)
         
         # Botón de Redirección a Métricas y Analítica de Producción
-        self.btn_metrics_visor = QPushButton()
-        self.btn_metrics_visor.setObjectName("secondaryBtn")
+        self.btn_metrics_visor = CustomButton("", is_secondary=True, parent=self)
         self.btn_metrics_visor.setIcon(Icons.grafico(Colors.CHART_EMERALD_DARK))
         self.btn_metrics_visor.setFixedSize(36, 36)
-        self.btn_metrics_visor.setToolTip("Ver Métricas y Analítica de Producción")
+        self.btn_metrics_visor.setToolTip("Ver métricas y analítica de inventario")
         self.btn_metrics_visor.clicked.connect(self._on_open_metrics_requested)
         self.table_header_layout.addWidget(self.btn_metrics_visor)
         
@@ -764,7 +914,13 @@ class InventoryView(QWidget):
         actions_layout = QHBoxLayout()
         actions_layout.setSpacing(10)
 
-        self.btn_limpiar_seleccion = CustomButton("Limpiar Selección", is_secondary=True)
+        self.btn_limpiar_seleccion = CustomButton(
+            "Limpiar",
+            is_clean_btn=True,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            parent=self
+        )
+        self.btn_limpiar_seleccion.setToolTip("Limpiar casillas de selección")
         self.btn_limpiar_seleccion.clicked.connect(self._on_limpiar_seleccion)
         self.btn_limpiar_seleccion.setVisible(False)
         actions_layout.addWidget(self.btn_limpiar_seleccion)
@@ -776,8 +932,14 @@ class InventoryView(QWidget):
 
         actions_layout.addStretch()
 
-        self.btn_asignar_seleccionados = CustomButton("Asignar Seleccionados")
-        self.btn_asignar_seleccionados.setIcon(Icons.aceptar("#FFFFFF"))
+        self.btn_asignar_seleccionados = CustomButton(
+            "Asignar",
+            is_secondary=False,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            parent=self
+        )
+        self.btn_asignar_seleccionados.setIcon(Icons.usuario("#FFFFFF"))
+        self.btn_asignar_seleccionados.setToolTip("Asignar derechos seleccionados")
         self.btn_asignar_seleccionados.setEnabled(False)
         self.btn_asignar_seleccionados.clicked.connect(self._on_asignar_seleccionados)
         actions_layout.addWidget(self.btn_asignar_seleccionados)
@@ -806,6 +968,8 @@ class InventoryView(QWidget):
         
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.table.cellDoubleClicked.connect(self._on_table_cell_double_clicked)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_table_context_menu)
         self._update_order_filter_banners()
 
     def refresh_visor_data(self):
@@ -1197,13 +1361,13 @@ class InventoryView(QWidget):
             
         if count > 0:
             self.btn_asignar_seleccionados.setEnabled(True)
-            self.btn_asignar_seleccionados.setText(f"Asignar Seleccionados ({count})")
+            self.btn_asignar_seleccionados.setText(f"Asignar ({count})")
             self.btn_limpiar_seleccion.setVisible(True)
             self.lbl_selected_badge.setText(f"{count} derecho(s) seleccionado(s)")
             self.lbl_selected_badge.setVisible(True)
         else:
             self.btn_asignar_seleccionados.setEnabled(False)
-            self.btn_asignar_seleccionados.setText("Asignar Seleccionados")
+            self.btn_asignar_seleccionados.setText("Asignar")
             self.btn_limpiar_seleccion.setVisible(False)
             self.lbl_selected_badge.setVisible(False)
 
@@ -1271,32 +1435,60 @@ class InventoryView(QWidget):
         self.show_metrics_requested.emit(list(self.selected_orden_ids))
 
     def _on_table_cell_double_clicked(self, row, column):
-        if not (self._check_permission("CTRL:INVENTARIO", "ASIGNAR") or self._check_permission("REFERENCIAS", "ASIGNAR")):
-            QMessageBox.warning(
-                self,
-                "Acceso Denegado",
-                "No tiene permisos para asignar derechos a notaría/colaborador (CTRL:INVENTARIO:ASIGNAR)."
-            )
-            return
         if row < 0 or row >= len(self.visible_table_data):
             return
             
         ref_dict = self.visible_table_data[row]
-        is_asignada = ref_dict.get("asignada", False) or ref_dict.get("estado_codigo") == "ASIGNADA"
-        if is_asignada:
-            QMessageBox.information(self, "Derecho Asignado", "Este derecho ya se encuentra en estado ASIGNADO y no puede volver a asignarse.")
+        estado_codigo = (ref_dict.get("estado_codigo") or "").strip().upper()
+        is_asignada = ref_dict.get("asignada", False) or estado_codigo in ("ASIGNADA", "RESERVADA")
+
+        if estado_codigo in ("CANCELADA", "RECHAZADA"):
+            QMessageBox.information(
+                self, 
+                "Derecho No Disponible", 
+                f"El derecho '{ref_dict.get('referencia_portal', '')}' se encuentra en estado '{estado_codigo}' y no puede ser asignado ni editado."
+            )
             return
 
         ref_id = ref_dict.get("referencia_id")
         ref_portal = ref_dict.get("referencia_portal", "")
 
-        dialog = ManualAssignmentDialog(
-            self.db_connector,
-            [ref_id],
-            [ref_portal],
-            parent=self,
-            selected_refs=[ref_dict]
-        )
+        if is_asignada:
+            if not (self._check_permission("CTRL:INVENTARIO", "LEER") or self._check_permission("REFERENCIAS", "LEER") or self._check_permission("CTRL:INVENTARIO", "ASIGNAR")):
+                QMessageBox.warning(
+                    self,
+                    "Acceso Denegado",
+                    "No tiene permisos para consultar el detalle de asignación (CTRL:INVENTARIO:LEER)."
+                )
+                return
+            can_edit = self._check_permission("CTRL:INVENTARIO", "EDITAR") or self._check_permission("REFERENCIAS", "EDITAR") or self._check_permission("CTRL:INVENTARIO", "ASIGNAR")
+            dialog = ManualAssignmentDialog(
+                self.db_connector,
+                [ref_id],
+                [ref_portal],
+                parent=self,
+                selected_refs=[ref_dict],
+                is_read_only=True,
+                can_edit=can_edit
+            )
+        else:
+            if not (self._check_permission("CTRL:INVENTARIO", "ASIGNAR") or self._check_permission("REFERENCIAS", "ASIGNAR")):
+                QMessageBox.warning(
+                    self,
+                    "Acceso Denegado",
+                    "No tiene permisos para asignar derechos a notaría/colaborador (CTRL:INVENTARIO:ASIGNAR)."
+                )
+                return
+            dialog = ManualAssignmentDialog(
+                self.db_connector,
+                [ref_id],
+                [ref_portal],
+                parent=self,
+                selected_refs=[ref_dict],
+                is_read_only=False,
+                can_edit=True
+            )
+
         if dialog.exec() == QDialog.Accepted:
             if ref_id in self.selected_ref_map:
                 del self.selected_ref_map[ref_id]
@@ -1306,6 +1498,80 @@ class InventoryView(QWidget):
     def _on_limpiar_seleccion(self):
         self.selected_ref_map.clear()
         self._populate_visor_table()
+
+    def _on_table_context_menu(self, pos):
+        """Shows a context menu on right-click over the inventory table.
+        Styling is inherited from ThemeManager's global QSS (QMenu rules),
+        complying with SAR Atomic Design — zero inline styles.
+        """
+        row = self.table.rowAt(pos.y())
+        if row < 0 or row >= len(self.visible_table_data):
+            return
+
+        ref_dict = self.visible_table_data[row]
+        referencia_id = ref_dict.get("referencia_id")
+        referencia_portal = ref_dict.get("referencia_portal", "")
+
+        menu = QMenu(self)
+
+        # --- Acción: Ver PDF de Factura ---
+        act_pdf = QAction(Icons.pdf() if hasattr(Icons, 'pdf') else menu.style().standardIcon(menu.style().SP_FileIcon),
+                          "🗂  Ver PDF de Factura", menu)
+        act_pdf.setToolTip(f"Abrir PDF de la factura del derecho {referencia_portal}")
+        act_pdf.triggered.connect(lambda: self._on_ver_pdf_factura(referencia_id, referencia_portal))
+        menu.addAction(act_pdf)
+
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _on_ver_pdf_factura(self, referencia_id: int, referencia_portal: str = ""):
+        """Fetches invoice PDF paths for a referencia, merges pdf_path + pdf2_path into a
+        single temporary file using pypdf, and opens it with the OS default PDF viewer.
+        Shows a GLLoadingDialog (design system) while the operation runs in a background thread.
+        """
+        if not referencia_id:
+            QMessageBox.warning(self, "Sin Referencia", "No se pudo determinar el ID del derecho seleccionado.")
+            return
+
+        # --- Mostrar spinner del design system ---
+        self._pdf_loading_dialog = GLLoadingDialog(
+            f"Preparando PDF de factura\n'{referencia_portal}'...", self
+        )
+
+        # --- Worker en hilo separado ---
+        self._pdf_worker = PdfFacturaWorker(
+            self.inventario_ui_service, referencia_id, referencia_portal
+        )
+
+        def on_ready(pdf_path: str):
+            """Cierra el spinner y abre el visor del SO."""
+            if hasattr(self, "_pdf_loading_dialog") and self._pdf_loading_dialog:
+                self._pdf_loading_dialog.accept()
+            try:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))
+            except Exception as e:
+                QMessageBox.critical(self, "Error al Abrir PDF",
+                                     f"No se pudo abrir el archivo PDF:\n{e}")
+
+        def on_error(titulo: str, mensaje: str):
+            """Cierra el spinner y muestra el mensaje de error apropiado."""
+            if hasattr(self, "_pdf_loading_dialog") and self._pdf_loading_dialog:
+                self._pdf_loading_dialog.accept()
+            QMessageBox.critical(self, titulo, mensaje)
+
+        def on_warning(titulo: str, mensaje: str):
+            """Cierra el spinner, muestra aviso de disponibilidad parcial y deja continuar."""
+            if hasattr(self, "_pdf_loading_dialog") and self._pdf_loading_dialog:
+                self._pdf_loading_dialog.accept()
+            QMessageBox.warning(self, titulo, mensaje)
+
+        self._pdf_worker.pdf_ready.connect(on_ready)
+        self._pdf_worker.error_occurred.connect(on_error)
+        self._pdf_worker.warning_parcial.connect(on_warning)
+        self._pdf_worker.start()
+
+        # Bloquea el hilo de UI con el spinner modal hasta que el worker emita señal
+        self._pdf_loading_dialog.exec()
+
 
     def _on_asignar_seleccionados(self):
         if not (self._check_permission("CTRL:INVENTARIO", "ASIGNAR") or self._check_permission("REFERENCIAS", "ASIGNAR")):
@@ -1321,6 +1587,23 @@ class InventoryView(QWidget):
             return
 
         selected_refs = list(self.selected_ref_map.values())
+        
+        # Validar que todos los derechos seleccionados estén en estado DISPONIBLE (sin asignación previa)
+        invalid_refs = [
+            r.get("referencia_portal", f"ID {r.get('referencia_id')}")
+            for r in selected_refs
+            if r.get("asignada", False) or (r.get("estado_codigo") or "").strip().upper() in ("ASIGNADA", "RESERVADA", "CANCELADA", "RECHAZADA")
+        ]
+        if invalid_refs:
+            QMessageBox.warning(
+                self,
+                "Selección Inválida",
+                f"Los siguientes derechos ya están asignados o no están disponibles para asignación:\n\n"
+                f"• {', '.join(invalid_refs[:5])}\n\n"
+                f"Sugerencia: Para consultar o editar un derecho asignado, haz doble clic sobre él en la tabla."
+            )
+            return
+
         ref_ids = [r["referencia_id"] for r in selected_refs]
         ref_portals = [r.get("referencia_portal", "") for r in selected_refs]
 
@@ -1329,7 +1612,9 @@ class InventoryView(QWidget):
             ref_ids,
             ref_portals,
             parent=self,
-            selected_refs=selected_refs
+            selected_refs=selected_refs,
+            is_read_only=False,
+            can_edit=True
         )
         if dialog.exec() == QDialog.Accepted:
             self.selected_ref_map.clear()
@@ -1374,19 +1659,13 @@ class InventoryView(QWidget):
 
         card_form = CustomCard(title="", parent=self)
         
-        # Header Layout with Filter Button
+        # Header Layout
         header_layout_masivo = QHBoxLayout()
+        card_title_vbox = QVBoxLayout()
         self.lbl_title_masivo = CustomLabel("Asignación Masiva por Lotes", variant="subheader")
-        header_layout_masivo.addWidget(self.lbl_title_masivo)
+        card_title_vbox.addWidget(self.lbl_title_masivo)
+        header_layout_masivo.addLayout(card_title_vbox)
         header_layout_masivo.addStretch()
-        
-        self.btn_filter_orden_masivo = QPushButton()
-        self.btn_filter_orden_masivo.setObjectName("secondaryBtn")
-        self.btn_filter_orden_masivo.setIcon(Icons.filter_icon("#475569"))
-        self.btn_filter_orden_masivo.setFixedSize(36, 36)
-        self.btn_filter_orden_masivo.setToolTip("Filtrar por Órdenes")
-        self.btn_filter_orden_masivo.clicked.connect(self._show_order_filter_menu)
-        header_layout_masivo.addWidget(self.btn_filter_orden_masivo)
         card_form.layout.addLayout(header_layout_masivo)
         
         # Checkboxes Container in a sleek 2-column horizontal layout
@@ -1420,56 +1699,111 @@ class InventoryView(QWidget):
 
         card_form.layout.addWidget(chk_container)
 
-        self.form_layout_masivo = QFormLayout()
-        self.form_layout_masivo.setVerticalSpacing(8)
-        self.form_layout_masivo.setHorizontalSpacing(16)
-        self.form_layout_masivo.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        # Two-Column Form Layout
+        form_grid = QVBoxLayout()
+        form_grid.setSpacing(12)
 
+        # Row 1: Tipo de Destino (Col 1) | Destinatario Notaria / Colaborador (Col 2)
+        row1_layout = QHBoxLayout()
+        row1_layout.setSpacing(16)
+
+        col_destino = QVBoxLayout()
+        lbl_tipo_destino = CustomLabel("Tipo Destino *", variant="body")
+        lbl_tipo_destino.setStyleSheet("font-weight: bold; background: transparent; border: none;")
         self.cb_destino_masivo = CustomComboBox(self)
+        self.cb_destino_masivo.setFixedHeight(36)
         self.cb_destino_masivo.addItems(["-- Seleccione un tipo de destino --", "NOTARIA", "COLABORADOR"])
         self.cb_destino_masivo.currentTextChanged.connect(self._on_destino_masivo_changed)
-        self.form_layout_masivo.addRow("Tipo Destino:", self.cb_destino_masivo)
+        col_destino.addWidget(lbl_tipo_destino)
+        col_destino.addWidget(self.cb_destino_masivo)
 
+        self.col_destinatario = QVBoxLayout()
+        self.lbl_destinatario_masivo = CustomLabel("Destinatario *", variant="body")
+        self.lbl_destinatario_masivo.setStyleSheet("font-weight: bold; background: transparent; border: none;")
         self.cb_notarias_masivo = CustomComboBox(self)
-        self.form_layout_masivo.addRow("Notaría:", self.cb_notarias_masivo)
-
+        self.cb_notarias_masivo.setFixedHeight(36)
         self.cb_colaboradores_masivo = CustomComboBox(self)
-        self.form_layout_masivo.addRow("Colaborador:", self.cb_colaboradores_masivo)
+        self.cb_colaboradores_masivo.setFixedHeight(36)
+        self.col_destinatario.addWidget(self.lbl_destinatario_masivo)
+        self.col_destinatario.addWidget(self.cb_notarias_masivo)
+        self.col_destinatario.addWidget(self.cb_colaboradores_masivo)
 
-        self.cb_empresa_masivo = CustomComboBox(self)
-        self.form_layout_masivo.addRow("Empresa por Defecto:", self.cb_empresa_masivo)
+        row1_layout.addLayout(col_destino, stretch=1)
+        row1_layout.addLayout(self.col_destinatario, stretch=1)
+        form_grid.addLayout(row1_layout)
 
-        self.txt_solicitante_masivo = QLineEdit(self)
-        self.txt_solicitante_masivo.setPlaceholderText("Ej. Pedro Gómez")
-        self.txt_solicitante_masivo.setMinimumHeight(36)
-        self.form_layout_masivo.addRow("Solicitante Externo (Persona):", self.txt_solicitante_masivo)
+        # Row 2: Solicitante Externo (Col 1) | Observaciones (Col 2)
+        row2_layout = QHBoxLayout()
+        row2_layout.setSpacing(16)
 
-        self.txt_obs_masivo = QTextEdit(self)
-        self.txt_obs_masivo.setFixedHeight(45)
-        self.txt_obs_masivo.setPlaceholderText("Notas u observaciones adicionales para el lote (opcional)...")
-        self.form_layout_masivo.addRow("Observaciones:", self.txt_obs_masivo)
+        self.col_solicitante = QVBoxLayout()
+        self.lbl_solicitante_masivo = CustomLabel("Solicitante Externo (Persona)", variant="body")
+        self.lbl_solicitante_masivo.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.txt_solicitante_masivo = CustomInput("Ej. Pedro Gómez")
+        self.txt_solicitante_masivo.setFixedHeight(36)
+        self.col_solicitante.addWidget(self.lbl_solicitante_masivo)
+        self.col_solicitante.addWidget(self.txt_solicitante_masivo)
 
-        # File picker row
-        file_layout = QHBoxLayout()
-        file_layout.setSpacing(10)
+        col_obs = QVBoxLayout()
+        lbl_obs = CustomLabel("Observaciones del Lote", variant="body")
+        lbl_obs.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.txt_obs_masivo = CustomInput("Notas u observaciones adicionales para el lote (opcional)...")
+        self.txt_obs_masivo.setFixedHeight(36)
+        col_obs.addWidget(lbl_obs)
+        col_obs.addWidget(self.txt_obs_masivo)
+
+        row2_layout.addLayout(self.col_solicitante, stretch=1)
+        row2_layout.addLayout(col_obs, stretch=1)
+        form_grid.addLayout(row2_layout)
+
+        # Row 3: Acciones (Importar Excel -> Descargar Plantilla -> Confirmar -> Limpiar -> Filtrar Órdenes)
+        row3_layout = QHBoxLayout()
+        row3_layout.setSpacing(10)
+
+        self.btn_pick_excel = CustomButton("Importar Excel", is_secondary=True, min_width=135, parent=self)
+        self.btn_pick_excel.setIcon(Icons.excel())
+        self.btn_pick_excel.setFixedHeight(36)
+        self.btn_pick_excel.setToolTip("Seleccionar archivo Excel para asignación masiva")
+        self.btn_pick_excel.clicked.connect(self._on_pick_excel_masivo)
+        
+        self.btn_download_template = CustomButton("Descargar Plantilla", is_secondary=True, min_width=150, parent=self)
+        self.btn_download_template.setIcon(Icons.documento_descargar(Colors.TEXT_LIGHT_PRIMARY))
+        self.btn_download_template.setFixedHeight(36)
+        self.btn_download_template.setToolTip("Descargar formato de plantilla Excel para asignación masiva")
+        self.btn_download_template.clicked.connect(self._on_download_template)
+
+        self.btn_confirmar_masivo = CustomButton("Confirmar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_confirmar_masivo.setIcon(Icons.aceptar("#FFFFFF"))
+        self.btn_confirmar_masivo.setFixedHeight(36)
+        self.btn_confirmar_masivo.setToolTip("Confirmar y procesar asignación masiva de derechos")
+        self.btn_confirmar_masivo.setEnabled(False)
+        self.btn_confirmar_masivo.clicked.connect(self._on_confirmar_masivo)
+
+        self.btn_limpiar_preview = CustomButton("Limpiar", is_clean_btn=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_limpiar_preview.setFixedHeight(36)
+        self.btn_limpiar_preview.setToolTip("Limpiar tabla de previsualización")
+        self.btn_limpiar_preview.clicked.connect(self._on_limpiar_preview)
+
+        self.btn_filter_orden_masivo = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden_masivo.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
+        self.btn_filter_orden_masivo.setFixedSize(36, 36)
+        self.btn_filter_orden_masivo.setToolTip("Filtrar derechos por órdenes de generación")
+        self.btn_filter_orden_masivo.clicked.connect(self._show_order_filter_menu)
+
         self.lbl_excel_path = QLabel("Ningún archivo seleccionado", self)
-        self.lbl_excel_path.setStyleSheet("color: #64748B; font-style: italic;")
-        
-        btn_pick_excel = CustomButton("Seleccionar Excel", is_secondary=True)
-        btn_pick_excel.setMinimumHeight(36)
-        btn_pick_excel.clicked.connect(self._on_pick_excel_masivo)
-        
-        btn_download_template = CustomButton("Descargar Plantilla", is_secondary=True)
-        btn_download_template.setMinimumHeight(36)
-        btn_download_template.clicked.connect(self._on_download_template)
-        
-        file_layout.addWidget(btn_pick_excel)
-        file_layout.addWidget(btn_download_template)
-        file_layout.addWidget(self.lbl_excel_path)
-        file_layout.addStretch()
-        self.form_layout_masivo.addRow("Archivo Excel:", file_layout)
+        self.lbl_excel_path.setStyleSheet("color: #64748B; font-style: italic; margin-left: 8px;")
 
-        card_form.layout.addLayout(self.form_layout_masivo)
+        row3_layout.addWidget(self.btn_pick_excel)
+        row3_layout.addWidget(self.btn_download_template)
+        row3_layout.addWidget(self.btn_confirmar_masivo)
+        row3_layout.addWidget(self.btn_limpiar_preview)
+        row3_layout.addWidget(self.btn_filter_orden_masivo)
+        row3_layout.addWidget(self.lbl_excel_path)
+        row3_layout.addStretch()
+
+        form_grid.addLayout(row3_layout)
+
+        card_form.layout.addLayout(form_grid)
         layout.addWidget(card_form)
 
         # Preview list card
@@ -1478,21 +1812,6 @@ class InventoryView(QWidget):
         self.preview_table.setMinimumHeight(160)
         self.preview_table.setMinimumWidth(200)
         self.card_preview.add_widget(self.preview_table)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(0, 8, 0, 0)
-        btn_layout.setSpacing(12)
-        btn_layout.addStretch()
-        self.btn_limpiar_preview = CustomButton("Limpiar", is_clean_btn=True)
-        self.btn_limpiar_preview.setMinimumHeight(36)
-        self.btn_limpiar_preview.clicked.connect(self._on_limpiar_preview)
-        btn_layout.addWidget(self.btn_limpiar_preview)
-        self.btn_confirmar_masivo = CustomButton("Confirmar")
-        self.btn_confirmar_masivo.setMinimumHeight(36)
-        self.btn_confirmar_masivo.setEnabled(False)
-        self.btn_confirmar_masivo.clicked.connect(self._on_confirmar_masivo)
-        btn_layout.addWidget(self.btn_confirmar_masivo)
-        self.card_preview.layout.addLayout(btn_layout)
 
         layout.addWidget(self.card_preview)
 
@@ -1504,12 +1823,8 @@ class InventoryView(QWidget):
         
         # Hide internal widgets initially
         self.cb_colaboradores_masivo.hide()
-        self.lbl_colab_row = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
-        if self.lbl_colab_row: self.lbl_colab_row.hide()
-
         self.cb_notarias_masivo.hide()
-        self.lbl_notaria_row = self.form_layout_masivo.labelForField(self.cb_notarias_masivo)
-        if self.lbl_notaria_row: self.lbl_notaria_row.hide()
+        self.lbl_destinatario_masivo.hide()
 
     def _on_completar_reserva_changed(self, state):
         is_checked = (state == 2 or state == Qt.CheckState.Checked)
@@ -1527,12 +1842,10 @@ class InventoryView(QWidget):
             self.cb_destino_masivo.setCurrentText("NOTARIA")
             self.cb_destino_masivo.setEnabled(False)
             self._on_destino_masivo_changed("NOTARIA")
-            self.cb_empresa_masivo.setEnabled(False)
             self.txt_solicitante_masivo.setEnabled(False)
             self.txt_obs_masivo.setEnabled(False)
         else:
             self.cb_destino_masivo.setEnabled(True)
-            self.cb_empresa_masivo.setEnabled(True)
             self.txt_solicitante_masivo.setEnabled(True)
             self.txt_obs_masivo.setEnabled(True)
 
@@ -1550,42 +1863,28 @@ class InventoryView(QWidget):
             self.chk_completar_reserva.blockSignals(False)
             
             self.cb_destino_masivo.setEnabled(True)
-            self.cb_empresa_masivo.setEnabled(True)
             self.txt_solicitante_masivo.setEnabled(True)
             self.txt_obs_masivo.setEnabled(True)
 
     def _on_destino_masivo_changed(self, text):
         if text == "NOTARIA":
+            self.lbl_destinatario_masivo.setText("Notaría *")
+            self.lbl_destinatario_masivo.show()
             self.cb_notarias_masivo.show()
-            lbl = self.form_layout_masivo.labelForField(self.cb_notarias_masivo)
-            if lbl: lbl.show()
-            
             self.cb_colaboradores_masivo.hide()
-            lbl_c = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
-            if lbl_c: lbl_c.hide()
-            
             self.txt_solicitante_masivo.setEnabled(True)
         elif text == "COLABORADOR":
+            self.lbl_destinatario_masivo.setText("Colaborador *")
+            self.lbl_destinatario_masivo.show()
             self.cb_notarias_masivo.hide()
-            lbl = self.form_layout_masivo.labelForField(self.cb_notarias_masivo)
-            if lbl: lbl.hide()
-            
             self.cb_colaboradores_masivo.show()
-            lbl_c = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
-            if lbl_c: lbl_c.show()
-            
             self.txt_solicitante_masivo.setEnabled(False)
             self.txt_solicitante_masivo.clear()
         else:
             # Hide both if '-- Seleccione un tipo de destino --' is selected
+            self.lbl_destinatario_masivo.hide()
             self.cb_notarias_masivo.hide()
-            lbl = self.form_layout_masivo.labelForField(self.cb_notarias_masivo)
-            if lbl: lbl.hide()
-            
             self.cb_colaboradores_masivo.hide()
-            lbl_c = self.form_layout_masivo.labelForField(self.cb_colaboradores_masivo)
-            if lbl_c: lbl_c.hide()
-            
             self.txt_solicitante_masivo.setEnabled(False)
             self.txt_solicitante_masivo.clear()
 
@@ -1625,11 +1924,7 @@ class InventoryView(QWidget):
         self.lbl_excel_path.setText(os.path.basename(file_path))
         self._excel_file_path = file_path
 
-        # Get selected default RFC/Empresa from dropdown
         default_rfc_id = None
-        default_empresa_txt = self.cb_empresa_masivo.currentText()
-        if default_empresa_txt != "Seleccione empresa..." and hasattr(self, "_rfcs_map"):
-            default_rfc_id = self._rfcs_map.get(default_empresa_txt)
 
         completar_notaria_id = None
         if self.chk_completar_reserva.isChecked():
@@ -1879,33 +2174,25 @@ class InventoryView(QWidget):
         form_layout = QVBoxLayout()
         form_layout.setSpacing(16)
 
-        # Header with Filter Button
+        # Header
         card_header_layout = QHBoxLayout()
         card_title_vbox = QVBoxLayout()
-        self.lbl_card_title_ind = CustomLabel("Asignación de Derechos Directa", variant="subheader")
+        self.lbl_card_title_ind = CustomLabel("Asignar Derechos", variant="subheader")
         card_title_vbox.addWidget(self.lbl_card_title_ind)
         card_header_layout.addLayout(card_title_vbox)
         card_header_layout.addStretch()
         
-        self.btn_filter_orden_ind = QPushButton()
-        self.btn_filter_orden_ind.setObjectName("secondaryBtn")
-        self.btn_filter_orden_ind.setIcon(Icons.filter_icon("#475569"))
-        self.btn_filter_orden_ind.setFixedSize(36, 36)
-        self.btn_filter_orden_ind.setToolTip("Filtrar por Órdenes")
-        self.btn_filter_orden_ind.clicked.connect(self._show_order_filter_menu)
-        card_header_layout.addWidget(self.btn_filter_orden_ind)
-        
         form_layout.addLayout(card_header_layout)
-
 
         # Destino Selectors
         dest_layout = QHBoxLayout()
         dest_layout.setSpacing(16)
 
         vbox_tipo = QVBoxLayout()
-        lbl_tipo = CustomLabel("Tipo de Destino", variant="body")
+        lbl_tipo = CustomLabel("Tipo de Destino *", variant="body")
         lbl_tipo.setStyleSheet("font-weight: bold; background: transparent; border: none;")
         self.cb_tipo_destino_ind = CustomComboBox(self)
+        self.cb_tipo_destino_ind.setFixedHeight(36)
         self.cb_tipo_destino_ind.addItem("-- Seleccione Destino --", None)
         self.cb_tipo_destino_ind.addItems(["NOTARIA", "COLABORADOR"])
         self.cb_tipo_destino_ind.setCurrentIndex(0)
@@ -1913,11 +2200,11 @@ class InventoryView(QWidget):
         vbox_tipo.addWidget(lbl_tipo)
         vbox_tipo.addWidget(self.cb_tipo_destino_ind)
 
-
         vbox_dest = QVBoxLayout()
-        lbl_dest = CustomLabel("Destinatario", variant="body")
+        lbl_dest = CustomLabel("Destinatario *", variant="body")
         lbl_dest.setStyleSheet("font-weight: bold; background: transparent; border: none;")
         self.cb_destinatario_ind = CustomComboBox(self)
+        self.cb_destinatario_ind.setFixedHeight(36)
         vbox_dest.addWidget(lbl_dest)
         vbox_dest.addWidget(self.cb_destinatario_ind)
 
@@ -1938,27 +2225,33 @@ class InventoryView(QWidget):
         self.grid_individual.cascade_delegaciones_needed.connect(self._on_cascade_delegaciones_needed)
         self.grid_individual.cascade_conceptos_needed.connect(self._on_cascade_conceptos_needed)
 
-        # Create aligned action buttons to go in the header alongside + Agregar Renglón
-
-        self.btn_buscar_ind = CustomButton("Buscar Derechos", parent=self)
-        self.btn_buscar_ind.setMinimumHeight(35)
-        self.btn_buscar_ind.setIcon(Icons.get_icon("buscar", color="#FFFFFF"))
+        # Action Buttons aligned with Agregar (Order: Agregar -> Buscar -> Continuar -> Limpiar -> Filtrar Orden)
+        self.btn_buscar_ind = CustomButton("Buscar", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_buscar_ind.setIcon(Icons.buscar(Colors.TEXT_LIGHT_PRIMARY))
+        self.btn_buscar_ind.setToolTip("Buscar derechos disponibles que cumplan con las partidas")
         self.btn_buscar_ind.clicked.connect(self._on_buscar_referencias_ind)
 
-        self.btn_confirmar_ind = CustomButton("Continuar Asignación", parent=self)
-        self.btn_confirmar_ind.setMinimumHeight(35)
-        self.btn_confirmar_ind.setIcon(Icons.get_icon("siguiente", color="#FFFFFF"))
+        self.btn_confirmar_ind = CustomButton("Continuar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_confirmar_ind.setIcon(Icons.siguiente("#FFFFFF"))
+        self.btn_confirmar_ind.setToolTip("Continuar al formulario de captura y asignación de datos")
         self.btn_confirmar_ind.setEnabled(False)
         self.btn_confirmar_ind.clicked.connect(self._on_confirmar_asignacion_ind)
 
-        self.btn_limpiar_ind = CustomButton("Limpiar", is_clean_btn=True)
+        self.btn_limpiar_ind = CustomButton("Limpiar", is_clean_btn=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_limpiar_ind.setToolTip("Limpiar partidas y destinatario")
         self.btn_limpiar_ind.clicked.connect(self._on_limpiar_ind)
 
+        self.btn_filter_orden_ind = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden_ind.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
+        self.btn_filter_orden_ind.setFixedSize(36, 36)
+        self.btn_filter_orden_ind.setToolTip("Filtrar derechos por órdenes de generación")
+        self.btn_filter_orden_ind.clicked.connect(self._show_order_filter_menu)
 
-        # Inject into the InteractiveGrid header layout (before stretch, so they align right next to btn_add)
+        # Inject into the InteractiveGrid header layout (Order: Agregar -> Buscar -> Continuar -> Limpiar -> Filtrar)
         self.grid_individual.header_layout.addWidget(self.btn_buscar_ind)
         self.grid_individual.header_layout.addWidget(self.btn_confirmar_ind)
         self.grid_individual.header_layout.addWidget(self.btn_limpiar_ind)
+        self.grid_individual.header_layout.addWidget(self.btn_filter_orden_ind)
 
         form_layout.addWidget(self.grid_individual)
 
@@ -2236,11 +2529,6 @@ class InventoryView(QWidget):
             self.cb_colaboradores_masivo.addItems(list(self._colaboradores_map.keys()))
             self.cb_colaboradores_masivo.setCurrentIndex(0)
 
-            self.cb_empresa_masivo.clear()
-            self.cb_empresa_masivo.addItem("-- Seleccione empresa --")
-            self.cb_empresa_masivo.addItems(list(self._rfcs_map.keys()))
-            self.cb_empresa_masivo.setCurrentIndex(0)
-
             current_concept_txt = self.cb_concept_filter.currentText()
             self.cb_concept_filter.clear()
             self.cb_concept_filter.addItem("Todos los conceptos")
@@ -2376,23 +2664,15 @@ class InventoryView(QWidget):
         form_layout = QVBoxLayout()
         form_layout.setSpacing(16)
 
-        # Build custom header for the card with Filter Button
+        # Build custom header for the card
         card_header_layout = QHBoxLayout()
         card_title_vbox = QVBoxLayout()
-        self.lbl_card_title_apartar = CustomLabel("Reserva de Derechos (Apartados)", variant="subheader")
-        lbl_card_subtitle = CustomLabel("Completa los datos para reservar derechos para una notaría", variant="muted")
+        self.lbl_card_title_apartar = CustomLabel("Reservar Derechos", variant="subheader")
+        #lbl_card_subtitle = CustomLabel("Completa los datos para reservar derechos para una notaría", variant="muted")
         card_title_vbox.addWidget(self.lbl_card_title_apartar)
-        card_title_vbox.addWidget(lbl_card_subtitle)
+        #card_title_vbox.addWidget(lbl_card_subtitle)
         card_header_layout.addLayout(card_title_vbox)
         card_header_layout.addStretch()
-        
-        self.btn_filter_orden_apartar = QPushButton()
-        self.btn_filter_orden_apartar.setObjectName("secondaryBtn")
-        self.btn_filter_orden_apartar.setIcon(Icons.filter_icon("#475569"))
-        self.btn_filter_orden_apartar.setFixedSize(36, 36)
-        self.btn_filter_orden_apartar.setToolTip("Filtrar por Órdenes")
-        self.btn_filter_orden_apartar.clicked.connect(self._show_order_filter_menu)
-        card_header_layout.addWidget(self.btn_filter_orden_apartar)
         
         form_layout.addLayout(card_header_layout)
 
@@ -2405,7 +2685,7 @@ class InventoryView(QWidget):
         lbl_notaria = CustomLabel("Notaría de Destino *", variant="body")
         lbl_notaria.setStyleSheet("font-weight: bold; background: transparent; border: none;")
         self.cb_notarias_apartar = CustomComboBox(self)
-        self.cb_notarias_apartar.setMinimumHeight(35)
+        self.cb_notarias_apartar.setFixedHeight(36)
         self.cb_notarias_apartar.setPlaceholderText("-- Seleccione una notaría --")
         not_layout.addWidget(lbl_notaria)
         not_layout.addWidget(self.cb_notarias_apartar)
@@ -2415,7 +2695,7 @@ class InventoryView(QWidget):
         lbl_obs = CustomLabel("Observaciones del Lote *", variant="body")
         lbl_obs.setStyleSheet("font-weight: bold; background: transparent; border: none;")
         self.txt_obs_apartar = CustomInput("Observaciones obligatorias para el apartado...")
-        self.txt_obs_apartar.setMinimumHeight(35)
+        self.txt_obs_apartar.setFixedHeight(36)
         obs_layout.addWidget(lbl_obs)
         obs_layout.addWidget(self.txt_obs_apartar)
 
@@ -2433,6 +2713,28 @@ class InventoryView(QWidget):
         self.grid_apartar.cascade_rfcs_needed.connect(self._on_cascade_rfcs_needed)
         self.grid_apartar.cascade_delegaciones_needed.connect(self._on_cascade_delegaciones_needed)
         self.grid_apartar.cascade_conceptos_needed.connect(self._on_cascade_conceptos_needed)
+
+        # Action Buttons aligned with Agregar (Order: Agregar -> Confirmar -> Limpiar -> Filtrar Orden)
+        self.btn_save_apartar = CustomButton("Confirmar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_save_apartar.setIcon(Icons.aceptar("#FFFFFF"))
+        self.btn_save_apartar.setToolTip("Confirmar y guardar reserva de derechos para la notaría seleccionada")
+        self.btn_save_apartar.clicked.connect(self._on_save_apartar)
+
+        self.btn_limpiar_apartar = CustomButton("Limpiar", is_clean_btn=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_limpiar_apartar.setToolTip("Limpiar partidas y formulario")
+        self.btn_limpiar_apartar.clicked.connect(self._on_limpiar_apartar)
+
+        self.btn_filter_orden_apartar = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden_apartar.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
+        self.btn_filter_orden_apartar.setFixedSize(36, 36)
+        self.btn_filter_orden_apartar.setToolTip("Filtrar derechos por órdenes de generación")
+        self.btn_filter_orden_apartar.clicked.connect(self._show_order_filter_menu)
+
+        # Inject into the InteractiveGrid header layout (Order: Agregar -> Confirmar -> Limpiar -> Filtrar)
+        self.grid_apartar.header_layout.addWidget(self.btn_save_apartar)
+        self.grid_apartar.header_layout.addWidget(self.btn_limpiar_apartar)
+        self.grid_apartar.header_layout.addWidget(self.btn_filter_orden_apartar)
+
         form_layout.addWidget(self.grid_apartar)
 
         # Debounce timer and pending availability worker tracking
@@ -2443,17 +2745,6 @@ class InventoryView(QWidget):
         self._avail_pending_row = None
         self._avail_timer.timeout.connect(self._launch_availability_worker)
         self._active_avail_workers = []  # track to avoid premature GC
-
-        # Confirm and Clean Buttons at the bottom
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        self.btn_limpiar_apartar = CustomButton("Limpiar", is_clean_btn=True)
-        self.btn_limpiar_apartar.clicked.connect(self._on_limpiar_apartar)
-        btn_layout.addWidget(self.btn_limpiar_apartar)
-        self.btn_save_apartar = CustomButton("Confirmar Apartados")
-        self.btn_save_apartar.clicked.connect(self._on_save_apartar)
-        btn_layout.addWidget(self.btn_save_apartar)
-        form_layout.addLayout(btn_layout)
 
         card_apartar.layout.addLayout(form_layout)
         layout.addWidget(card_apartar)
@@ -2782,11 +3073,10 @@ class InventoryView(QWidget):
         filter_row.addWidget(self.search_lotes, stretch=1)
 
         # Botón Buscar explícito para Lotes
-        self.btn_buscar_lotes = QPushButton()
-        self.btn_buscar_lotes.setObjectName("secondaryBtn")
-        self.btn_buscar_lotes.setIcon(Icons.buscar("#FFFFFF") if ThemeManager.is_dark_active() else Icons.buscar("#334155"))
+        self.btn_buscar_lotes = CustomButton("", is_secondary=True, parent=self)
+        self.btn_buscar_lotes.setIcon(Icons.buscar(Colors.TEXT_LIGHT_SECONDARY))
         self.btn_buscar_lotes.setFixedSize(36, 36)
-        self.btn_buscar_lotes.setToolTip("Buscar (o presione Enter)")
+        self.btn_buscar_lotes.setToolTip("Buscar asignaciones (o presione Enter)")
         self.btn_buscar_lotes.clicked.connect(self._on_search_lotes_trigger)
         filter_row.addWidget(self.btn_buscar_lotes)
 
@@ -2810,21 +3100,20 @@ class InventoryView(QWidget):
         filter_row.addWidget(self.group_end_date)
 
         # 4. Refresh button
-        self.btn_refresh_lotes = QPushButton(self)
+        self.btn_refresh_lotes = CustomButton("", is_secondary=True, parent=self)
         self.btn_refresh_lotes.setObjectName("filterBarActionBtn")
         self.btn_refresh_lotes.setIcon(Icons.actualizar("#FFFFFF"))
         self.btn_refresh_lotes.setIconSize(QSize(20, 20))
         self.btn_refresh_lotes.setFixedSize(36, 36)
-        self.btn_refresh_lotes.setToolTip("Actualizar Asignaciones")
+        self.btn_refresh_lotes.setToolTip("Actualizar asignaciones")
         self.btn_refresh_lotes.clicked.connect(self.refresh_lotes_data)
         filter_row.addWidget(self.btn_refresh_lotes)
 
         # 5. Filter Button (Funnel) for Lotes
-        self.btn_filter_orden_lotes = QPushButton()
-        self.btn_filter_orden_lotes.setObjectName("secondaryBtn")
-        self.btn_filter_orden_lotes.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden_lotes = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden_lotes.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
         self.btn_filter_orden_lotes.setFixedSize(36, 36)
-        self.btn_filter_orden_lotes.setToolTip("Filtrar por Órdenes")
+        self.btn_filter_orden_lotes.setToolTip("Filtrar derechos por órdenes de generación")
         self.btn_filter_orden_lotes.clicked.connect(self._show_order_filter_menu)
         filter_row.addWidget(self.btn_filter_orden_lotes)
 
@@ -2863,9 +3152,14 @@ class InventoryView(QWidget):
         actions_layout.addWidget(self.lbl_table_hint_lotes)
         actions_layout.addStretch()
 
-        self.btn_exportar_reporte_lotes = CustomButton("📊 Exportar Asignación Seleccionada", is_secondary=True)
+        self.btn_exportar_reporte_lotes = CustomButton("Exportar", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_exportar_reporte_lotes.setIcon(Icons.excel())
+        self.btn_exportar_reporte_lotes.setToolTip("Exportar asignación seleccionada a archivo Excel")
         self.btn_exportar_reporte_lotes.clicked.connect(self._on_exportar_lote_seleccionado)
-        self.btn_ver_detalles_lote = CustomButton("🔍 Ver Detalle", is_secondary=True)
+        
+        self.btn_ver_detalles_lote = CustomButton("Ver Detalle", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_ver_detalles_lote.setIcon(Icons.buscar(Colors.TEXT_LIGHT_PRIMARY))
+        self.btn_ver_detalles_lote.setToolTip("Ver información detallada de la asignación seleccionada")
         self.btn_ver_detalles_lote.clicked.connect(self._on_ver_detalle_lote)
 
         actions_layout.addWidget(self.btn_exportar_reporte_lotes)
@@ -2953,7 +3247,7 @@ class InventoryView(QWidget):
         # Título en Asignación de Derechos Directa (tab_individual)
         if hasattr(self, "lbl_card_title_ind"):
             self.lbl_card_title_ind.setText(
-                f"Asignación de Derechos Directa &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+                f"Asignar Derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
             )
 
         # Título en Asignación Masiva (tab_masivo)
@@ -2965,7 +3259,7 @@ class InventoryView(QWidget):
         # Título en Reserva de Derechos (tab_apartar)
         if hasattr(self, "lbl_card_title_apartar"):
             self.lbl_card_title_apartar.setText(
-                f"Reserva de Derechos (Apartados) &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+                f"Reservar Derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
             )
 
     def _update_hint_lotes_banner(self):
@@ -3162,14 +3456,17 @@ class InventoryView(QWidget):
 # DIALOGS
 # =============================================================================
 class ManualAssignmentDialog(QDialog):
-    """Dialog to perform individual or bulk manual reference assignments with a sequential wizard/paginator, per-reference drafting, and dynamic layout."""
+    """Dialog to perform individual or bulk manual reference assignments with a sequential wizard/paginator, per-reference drafting, dynamic layout, and read-only/edit support."""
     
-    def __init__(self, db_connector, ref_ids, ref_portals, parent=None, selected_refs=None):
+    def __init__(self, db_connector, ref_ids, ref_portals, parent=None, selected_refs=None, is_read_only: bool = False, can_edit: bool = False):
         super().__init__(parent)
         self.db_connector = db_connector
         self.ref_ids = ref_ids
         self.ref_portals = ref_portals or []
         self.selected_refs = selected_refs or []
+        self.is_read_only = is_read_only
+        self.can_edit = can_edit
+        self._is_editing_existing = False
         self.inventario_ui_service = InventarioUIService(self.db_connector)
 
         self.total_refs = len(self.ref_ids)
@@ -3185,35 +3482,41 @@ class ManualAssignmentDialog(QDialog):
         self._derechos_data = []
         for i in range(self.total_refs):
             r = self.selected_refs[i] if i < len(self.selected_refs) else {}
+            tipo_asig = r.get("tipo_asignacion") or (r.get("tipo_destino") if r.get("tipo_destino") in ("NOTARIA", "COLABORADOR") else None)
+            asig_a = r.get("asignado_a", "") or ""
+            not_name = asig_a if tipo_asig == "NOTARIA" else ""
+            col_name = asig_a if tipo_asig == "COLABORADOR" else ""
+
             self._derechos_data.append({
                 "referencia_id": self.ref_ids[i],
                 "referencia_portal": self.ref_portals[i] if i < len(self.ref_portals) else (r.get("referencia_portal", "") or ""),
                 "ref_meta": r,
-                "tipo_destino": None,
+                "asignacion_referencia_id": r.get("asignacion_referencia_id"),
+                "tipo_destino": tipo_asig,
                 "notaria_id": None,
-                "notaria_name": "",
+                "notaria_name": not_name,
                 "colaborador_id": None,
-                "colaborador_name": "",
-                "solicitante_externo": "",
-                "cliente": str(r.get("cliente", "") or ""),
+                "colaborador_name": col_name,
+                "solicitante_externo": str(r.get("solicitante_externo", "") or ""),
+                "cliente": str(r.get("cliente", "") or r.get("cliente_nombre", "") or ""),
                 "desarrollo_id": r.get("desarrollo_id"),
-                "desarrollo_name": str(r.get("desarrollo", "") or ""),
+                "desarrollo_name": str(r.get("desarrollo", "") or r.get("desarrollo_nombre", "") or ""),
                 "sm": str(r.get("sm", "") or ""),
                 "mz": str(r.get("mz", "") or ""),
                 "lote": str(r.get("lote", "") or ""),
                 "edif": str(r.get("edif", "") or ""),
                 "viv": str(r.get("viv", "") or ""),
-                "folio_electronico": str(r.get("folio_electronico", "") or ""),
+                "folio_electronico": str(r.get("folio_electronico", "") or r.get("no_oficial", "") or ""),
                 "credito_titular": str(r.get("credito_titular", "") or ""),
                 "pa": str(r.get("pa", "") or ""),
-                "fecha_sol": datetime.now().strftime("%Y-%m-%d"),
-                "fecha_ingreso_rpp": "",
-                "fecha_reporte_notaria": "",
-                "fecha_escritura": "",
-                "fecha_titulacion": "",
-                "estatus_aviso": "NUEVO INGRESO",
-                "observaciones": "",
-                "comentarios": ""
+                "fecha_sol": str(r.get("fecha_solicitud", "") or datetime.now().strftime("%Y-%m-%d")),
+                "fecha_ingreso_rpp": str(r.get("fecha_ingreso_rpp", "") or ""),
+                "fecha_reporte_notaria": str(r.get("fecha_reporte_notaria", "") or ""),
+                "fecha_escritura": str(r.get("fecha_escritura", "") or ""),
+                "fecha_titulacion": str(r.get("fecha_titulacion", "") or ""),
+                "estatus_aviso": str(r.get("estatus_aviso", "") or r.get("estatus_primer_aviso", "") or "NUEVO INGRESO"),
+                "observaciones": str(r.get("observaciones", "") or ""),
+                "comentarios": str(r.get("comentarios", "") or "")
             })
 
         # Obtenemos tokens dinámicos del Design System según el tema activo
@@ -3229,7 +3532,10 @@ class ManualAssignmentDialog(QDialog):
         accent_color = "#60A5FA" if is_dark else "#1D4ED8"
         success_color = Colors.SUCCESS_DARK_TEXT if is_dark else Colors.SUCCESS
 
-        self.setWindowTitle("Asignar Derechos")
+        if self.is_read_only:
+            self.setWindowTitle("Detalle de Asignación de Derecho")
+        else:
+            self.setWindowTitle("Asignar Derechos")
         self.setMinimumWidth(580)
         
         # Dimensionado responsivo adaptado a la resolución de pantalla activa (evita desborde en 1366x768 o menores)
@@ -3262,16 +3568,18 @@ class ManualAssignmentDialog(QDialog):
         nav_lay.setContentsMargins(4, 2, 4, 2)
         nav_lay.setSpacing(10)
         
-        self.btn_prev = CustomButton("◀ Anterior", is_secondary=True)
-        self.btn_prev.setMaximumWidth(110)
+        self.btn_prev = CustomButton("Anterior", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_prev.setIcon(Icons.anterior(Colors.TEXT_LIGHT_PRIMARY))
+        self.btn_prev.setToolTip("Ir al derecho anterior")
         self.btn_prev.clicked.connect(self._on_prev)
         
         self.lbl_step = QLabel(f"Derecho 1 de {self.total_refs}", self.nav_container)
         self.lbl_step.setAlignment(Qt.AlignCenter)
         self.lbl_step.setStyleSheet(f"font-weight: bold; font-size: 12px; color: {text_primary};")
         
-        self.btn_next = CustomButton("Siguiente ▶", is_secondary=False)
-        self.btn_next.setMaximumWidth(110)
+        self.btn_next = CustomButton("Siguiente", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_next.setIcon(Icons.siguiente("#FFFFFF"))
+        self.btn_next.setToolTip("Ir al siguiente derecho")
         self.btn_next.clicked.connect(self._on_next)
         
         nav_lay.addWidget(self.btn_prev)
@@ -3287,7 +3595,7 @@ class ManualAssignmentDialog(QDialog):
         self.chk_replicar.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_secondary}; margin-bottom: 2px;")
         main_vlayout.addWidget(self.chk_replicar)
         
-        if self.total_refs <= 1:
+        if self.total_refs <= 1 or self.is_read_only:
             self.nav_container.hide()
             self.chk_replicar.hide()
 
@@ -3518,15 +3826,31 @@ class ManualAssignmentDialog(QDialog):
         # -------------------------------------------------------------
         btns = QHBoxLayout()
         btns.setContentsMargins(0, 6, 0, 0)
-        btn_cancel = CustomButton("Cancelar", is_secondary=True)
+        
+        btn_cancel = CustomButton.action_cancelar(parent=self)
+        btn_cancel.setText("Cerrar" if self.is_read_only else "Cancelar")
+        btn_cancel.setToolTip("Cerrar ventana")
         btn_cancel.clicked.connect(self.reject)
         
-        self.btn_save = CustomButton("Guardar")
+        self.btn_save = CustomButton.action_guardar(parent=self)
+        self.btn_save.setToolTip("Guardar asignación de derechos")
         self.btn_save.clicked.connect(self._on_save)
         
         btns.addStretch()
         btns.addWidget(btn_cancel)
-        btns.addWidget(self.btn_save)
+        
+        if self.is_read_only:
+            self.btn_save.hide()
+            if self.can_edit:
+                self.btn_enable_edit = CustomButton.action_editar(parent=self)
+                self.btn_enable_edit.setText("✏️ Habilitar Edición")
+                self.btn_enable_edit.setToolTip("Habilitar la edición de los metadatos de este derecho")
+                self.btn_enable_edit.clicked.connect(self._on_enable_edit)
+                btns.addWidget(self.btn_enable_edit)
+            btns.addWidget(self.btn_save)
+        else:
+            btns.addWidget(self.btn_save)
+            
         main_vlayout.addLayout(btns)
 
         # Ocultar contenedores inicialmente hasta elegir destino
@@ -3535,6 +3859,49 @@ class ManualAssignmentDialog(QDialog):
         
         self._load_catalogs()
         self._load_current_draft()
+
+    def _set_inputs_enabled(self, enabled: bool):
+        """Enables or disables form inputs based on active mode."""
+        self.cb_destino.setEnabled(enabled)
+        self.cb_colaboradores.setEnabled(enabled)
+        self.txt_fecha_sol_colab.setEnabled(enabled)
+        self.txt_obs_colab.setEnabled(enabled)
+        
+        self.cb_notarias.setEnabled(enabled)
+        self.txt_solicitante.setEnabled(enabled)
+        self.cb_desarrollo.setEnabled(enabled)
+        self.txt_sm.setEnabled(enabled)
+        self.txt_mz.setEnabled(enabled)
+        self.txt_lote.setEnabled(enabled)
+        self.txt_edif.setEnabled(enabled)
+        self.txt_viv.setEnabled(enabled)
+        self.txt_folio.setEnabled(enabled)
+        self.txt_cliente.setEnabled(enabled)
+        self.txt_credito.setEnabled(enabled)
+        self.txt_pa.setEnabled(enabled)
+        self.txt_fecha_sol.setEnabled(enabled)
+        self.txt_fecha_ingreso_rpp.setEnabled(enabled)
+        self.txt_fecha_reporte_notaria.setEnabled(enabled)
+        self.txt_fecha_escritura.setEnabled(enabled)
+        self.txt_fecha_titulacion.setEnabled(enabled)
+        self.txt_estatus_aviso.setEnabled(enabled)
+        self.txt_comentarios.setEnabled(enabled)
+        self.txt_obs_notaria.setEnabled(enabled)
+
+    def _on_enable_edit(self):
+        """Unlocks inputs for editing existing assignment metadata."""
+        self._is_editing_existing = True
+        self._set_inputs_enabled(True)
+        # Keep destination selector locked to preserve assignment classification
+        self.cb_destino.setEnabled(False)
+        self.cb_notarias.setEnabled(False)
+        self.cb_colaboradores.setEnabled(False)
+        if hasattr(self, "btn_enable_edit"):
+            self.btn_enable_edit.hide()
+        self.btn_save.show()
+        self.btn_save.setText("Guardar Cambios")
+        self.btn_save.setToolTip("Guardar las modificaciones realizadas a este derecho")
+        self._update_header_info()
 
     def _update_header_info(self):
         if self.current_idx < 0 or self.current_idx >= len(self._derechos_data):
@@ -3572,6 +3939,24 @@ class ManualAssignmentDialog(QDialog):
         text_primary = Colors.TEXT_DARK_PRIMARY if is_dark else "#1E293B"
         text_muted = Colors.TEXT_DARK_MUTED if is_dark else "#64748B"
         accent_color = "#60A5FA" if is_dark else "#1D4ED8"
+
+        if self.is_read_only:
+            asig_a_txt = r_meta.get("asignado_a") or d.get("notaria_name") or d.get("colaborador_name") or "Sin Asignar"
+            tipo_txt = r_meta.get("tipo_asignacion") or d.get("tipo_destino") or "ASIGNADO"
+            f_asig_txt = r_meta.get("fecha_asignacion") or ""
+            edit_badge = " • <span style='color: #22C55E; font-weight: bold;'>[MODO EDICIÓN HABILITADO]</span>" if self._is_editing_existing else ""
+            header_html = (
+                f"<div style='margin-bottom: 2px;'>"
+                f"<b style='color: {accent_color}; font-size: 13px;'>ℹ️ DERECHO ASIGNADO:</b> "
+                f"<span style='color: {text_primary}; font-weight: bold; font-size: 13px;'>{alias_conc} | {alias_del} | {empresa}</span>{edit_badge}"
+                f"</div>"
+                f"<div style='font-size: 11px; color: {text_muted}; font-weight: bold;'>"
+                f"Referencia Portal: {portal} • Destino: <b>{tipo_txt}</b> • Asignado a: <b>{asig_a_txt}</b>"
+                f"{f' • Fecha: <b>{f_asig_txt}</b>' if f_asig_txt else ''}"
+                f"</div>"
+            )
+            self.lbl_info.setText(header_html)
+            return
 
         if self.total_refs > 1:
             self.setWindowTitle(f"Asignar Derechos ({self.current_idx + 1} de {self.total_refs})")
@@ -3720,6 +4105,10 @@ class ManualAssignmentDialog(QDialog):
                 self.txt_obs_colab.setPlainText(d.get("observaciones", ""))
 
             self.lbl_ubi_match.setText("")
+
+            # 5. Apply read-only locks if applicable
+            if self.is_read_only and not self._is_editing_existing:
+                self._set_inputs_enabled(False)
         finally:
             self._is_autocompleting = False
 
@@ -3736,94 +4125,46 @@ class ManualAssignmentDialog(QDialog):
             self._load_current_draft()
 
     def _lookup_existing_ubicacion(self):
-        if getattr(self, "_is_autocompleting", False):
+        """Looks up existing parcel/coordinates and suggests auto-completion if found."""
+        if self._is_autocompleting:
             return
-
+        
+        sm = self.txt_sm.text().strip()
+        mz = self.txt_mz.text().strip()
+        lote = self.txt_lote.text().strip()
+        edif = self.txt_edif.text().strip()
+        viv = self.txt_viv.text().strip()
         credito = self.txt_credito.text().strip()
         pa = self.txt_pa.text().strip()
         folio = self.txt_folio.text().strip()
-
         des_name = self.cb_desarrollo.currentText()
-        des_id = self._desarrollos_map.get(des_name) if des_name and des_name != "-- Seleccione Desarrollo (Opcional) --" else None
-        sm = self.txt_sm.text().strip() or None
-        mz = self.txt_mz.text().strip() or None
-        lote = self.txt_lote.text().strip() or None
-        edif = self.txt_edif.text().strip() or None
-        viv = self.txt_viv.text().strip() or None
+        desarrollo_id = self._desarrollos_map.get(des_name)
 
-        has_cred = len(credito) >= 3
-        has_pa = len(pa) >= 2
-        has_folio = len(folio) >= 3
-        has_coords = bool(des_id and mz and lote)
-
-        if not (has_cred or has_pa or has_folio or has_coords):
+        if not any([sm, mz, lote, credito, pa, folio]):
             self.lbl_ubi_match.setText("")
             return
 
         try:
-            match_data = self.inventario_ui_service.get_asignacion_by_identificador(
-                credito_titular=credito if has_cred else None,
-                pa=pa if has_pa else None,
-                folio_electronico=folio if has_folio else None,
-                desarrollo_id=des_id if has_coords else None,
-                mz=mz,
-                lote=lote,
-                edif=edif,
-                viv=viv
+            match = self.inventario_ui_service.get_asignacion_by_identificador(
+                desarrollo_id=desarrollo_id,
+                sm=sm, mz=mz, lote=lote, edif=edif, viv=viv,
+                credito_titular=credito, pa=pa, folio_electronico=folio
             )
-            if match_data:
-                src = match_data.get("match_source", "coordenadas")
-                if src == "credito":
-                    msg = f"✓ Coincidencia encontrada por No. de Crédito ({match_data['credito_titular']})"
-                elif src == "pa":
-                    msg = f"✓ Coincidencia encontrada por PA ({match_data['pa']})"
-                elif src == "folio":
-                    msg = f"✓ Coincidencia encontrada por Folio Electrónico ({match_data['folio_electronico']})"
-                else:
-                    msg = f"✓ Ubicación existente encontrada (ID #{match_data.get('ubicacion_id', '')})"
-                self.lbl_ubi_match.setText(msg)
-
-                # Autocomplete empty fields safely
-                self._is_autocompleting = True
-                try:
-                    # 1. Cliente
-                    if not self.txt_cliente.text().strip() and match_data.get("cliente") and match_data.get("cliente") not in ("RESERVA MASIVA MANUAL", "ASIGNACIÓN A COLABORADOR"):
-                        self.txt_cliente.setText(match_data["cliente"])
-
-                    # 2. Desarrollo (if combo is at default and match has desarrollo)
-                    if self.cb_desarrollo.currentIndex() <= 0 and match_data.get("desarrollo_nombre"):
-                        idx = self.cb_desarrollo.findText(match_data["desarrollo_nombre"])
-                        if idx >= 0:
-                            self.cb_desarrollo.setCurrentIndex(idx)
-
-                    # 3. Coordenadas
-                    if not self.txt_sm.text().strip() and match_data.get("sm"):
-                        self.txt_sm.setText(match_data["sm"])
-                    if not self.txt_mz.text().strip() and match_data.get("mz"):
-                        self.txt_mz.setText(match_data["mz"])
-                    if not self.txt_lote.text().strip() and match_data.get("lote"):
-                        self.txt_lote.setText(match_data["lote"])
-                    if not self.txt_edif.text().strip() and match_data.get("edif"):
-                        self.txt_edif.setText(match_data["edif"])
-                    if not self.txt_viv.text().strip() and match_data.get("viv"):
-                        self.txt_viv.setText(match_data["viv"])
-
-                    # 4. Folio, Crédito, PA
-                    if not self.txt_folio.text().strip() and match_data.get("folio_electronico"):
-                        self.txt_folio.setText(str(match_data["folio_electronico"]))
-                    if not self.txt_credito.text().strip() and match_data.get("credito_titular"):
-                        self.txt_credito.setText(match_data["credito_titular"])
-                    if not self.txt_pa.text().strip() and match_data.get("pa"):
-                        self.txt_pa.setText(match_data["pa"])
-                    if not self.txt_comentarios.text().strip() and match_data.get("comentarios"):
-                        self.txt_comentarios.setText(match_data["comentarios"])
-                finally:
-                    self._is_autocompleting = False
+            if match:
+                src = match.get("match_source", "coordenadas")
+                self.lbl_ubi_match.setText(f"✓ Coincidencia encontrada ({src}): {match.get('cliente', '')}")
+                if not self.txt_cliente.text().strip() and match.get("cliente"):
+                    self.txt_cliente.setText(match["cliente"])
+                if not self.txt_credito.text().strip() and match.get("credito_titular"):
+                    self.txt_credito.setText(match["credito_titular"])
+                if not self.txt_pa.text().strip() and match.get("pa"):
+                    self.txt_pa.setText(match["pa"])
+                if not self.txt_folio.text().strip() and match.get("folio_electronico"):
+                    self.txt_folio.setText(match["folio_electronico"])
             else:
                 self.lbl_ubi_match.setText("")
         except Exception as e:
             print("[ManualAssignmentDialog] Error checking identificador:", e)
-            self.lbl_ubi_match.setText("")
 
     def _on_destino_changed(self, text):
         if text == "NOTARIA":
@@ -3902,10 +4243,61 @@ class ManualAssignmentDialog(QDialog):
             print("Error filtering developments for current reference:", e)
 
     def _on_save(self):
-        # 1. Save current active screen draft
+        # 1. Handle Update Mode for existing assignments
+        if self._is_editing_existing:
+            d = self._derechos_data[0]
+            ar_id = d.get("asignacion_referencia_id")
+            if not ar_id:
+                QMessageBox.critical(self, "Error", "No se encontró el ID de asignación para actualizar.")
+                return
+
+            reply = QMessageBox.question(
+                self,
+                "Confirmar Actualización",
+                "¿Desea guardar los cambios realizados a esta asignación?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+            try:
+                parent_window = self.parent().window()
+                current_usuario_id = getattr(parent_window, "current_usuario_id", 1)
+
+                update_payload = {
+                    "cliente": self.txt_cliente.text().strip(),
+                    "desarrollo_id": self._desarrollos_map.get(self.cb_desarrollo.currentText()) if self.cb_desarrollo.currentIndex() > 0 else None,
+                    "sm": self.txt_sm.text().strip(),
+                    "mz": self.txt_mz.text().strip(),
+                    "lote": self.txt_lote.text().strip(),
+                    "edif": self.txt_edif.text().strip(),
+                    "viv": self.txt_viv.text().strip(),
+                    "folio_electronico": self.txt_folio.text().strip(),
+                    "credito_titular": self.txt_credito.text().strip(),
+                    "pa": self.txt_pa.text().strip(),
+                    "fecha_solicitud": self.txt_fecha_sol.text().strip() if self.cb_destino.currentText() == "NOTARIA" else self.txt_fecha_sol_colab.text().strip(),
+                    "fecha_ingreso_rpp": self.txt_fecha_ingreso_rpp.text().strip(),
+                    "fecha_reporte_notaria": self.txt_fecha_reporte_notaria.text().strip(),
+                    "fecha_escritura": self.txt_fecha_escritura.text().strip(),
+                    "fecha_titulacion": self.txt_fecha_titulacion.text().strip(),
+                    "estatus_primer_aviso": self.txt_estatus_aviso.text().strip(),
+                    "comentarios": self.txt_comentarios.text().strip(),
+                    "observaciones": self.txt_obs_notaria.toPlainText().strip() if self.cb_destino.currentText() == "NOTARIA" else self.txt_obs_colab.toPlainText().strip()
+                }
+
+                self.inventario_ui_service.update_asignacion_referencia(
+                    ar_id, update_payload, usuario_id=current_usuario_id
+                )
+                QMessageBox.information(self, "Éxito", "Los datos de la asignación fueron actualizados correctamente.")
+                self.accept()
+            except Exception as e:
+                QMessageBox.critical(self, "Error al Actualizar", f"No se pudieron guardar las modificaciones:\n{str(e)}")
+            return
+
+        # 2. Save current active screen draft
         self._save_current_draft()
 
-        # 2. Check destination type from active combo
+        # 3. Check destination type from active combo
         common_tipo_destino = self.cb_destino.currentText()
         if common_tipo_destino not in ("NOTARIA", "COLABORADOR"):
             QMessageBox.warning(self, "Tipo Destino Requerido", "Por favor seleccione un Tipo de Destino (NOTARIA o COLABORADOR).")
@@ -3913,7 +4305,7 @@ class ManualAssignmentDialog(QDialog):
 
         detalles_list = []
         
-        # 3. Validate each draft in sequence
+        # 4. Validate each draft in sequence
         for idx, d in enumerate(self._derechos_data):
             tipo_dest = d.get("tipo_destino") or common_tipo_destino
             d["tipo_destino"] = tipo_dest
@@ -4088,10 +4480,12 @@ class ExportLotesDialog(QDialog):
 
         # Buttons
         btns = QHBoxLayout()
-        btn_close = CustomButton("Cerrar", is_secondary=True)
+        btn_close = CustomButton.action_cerrar(parent=self)
         btn_close.clicked.connect(self.reject)
         
-        btn_export = CustomButton("Exportar Asignación")
+        btn_export = CustomButton("Exportar", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        btn_export.setIcon(Icons.excel())
+        btn_export.setToolTip("Exportar asignación seleccionada a archivo Excel")
         btn_export.clicked.connect(self._on_export)
         
         btns.addStretch()
@@ -4254,17 +4648,15 @@ class LoteProcessingDialog(QDialog):
         # ── Buttons ──────────────────────────────────────────────────────────
         btns = QHBoxLayout()
         
-        btn_excel = CustomButton("Generar Excel", is_secondary=True)
-        btn_excel.setIcon(Icons.file_excel("#16A34A")) # Excel green
-        btn_excel.setToolTip("Generar Archivos Excel Lotes")
+        btn_excel = CustomButton.action_excel(parent=self)
+        btn_excel.setToolTip("Generar lotes archivos excel")
         btn_excel.clicked.connect(self._on_generate_excel)
         
-        btn_pdf = CustomButton("Generar PDF", is_secondary=True)
-        btn_pdf.setIcon(Icons.file_pdf("#DC2626")) # PDF red
-        btn_pdf.setToolTip("Generar Archivos PDF Unificado")
+        btn_pdf = CustomButton.action_pdf(parent=self)
+        btn_pdf.setToolTip("Generar lotes archivos pdf")
         btn_pdf.clicked.connect(self._on_generate_pdf)
 
-        btn_close = CustomButton("Cerrar", is_secondary=True)
+        btn_close = CustomButton.action_cerrar(parent=self)
         btn_close.clicked.connect(self.reject)
 
         btns.addStretch()
@@ -4556,10 +4948,12 @@ class ApartarReferenciasDialog(QDialog):
         # Dialog Action Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        self.btn_cancel = CustomButton("Cancelar", is_secondary=True)
+        self.btn_cancel = CustomButton.action_cancelar(parent=self)
         self.btn_cancel.clicked.connect(self.reject)
         
-        self.btn_save = CustomButton("Confirmar Apartados")
+        self.btn_save = CustomButton("Confirmar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_save.setIcon(Icons.aceptar("#FFFFFF"))
+        self.btn_save.setToolTip("Confirmar y guardar reserva de derechos para la notaría seleccionada")
         self.btn_save.clicked.connect(self._on_save)
         
         btn_layout.addWidget(self.btn_cancel)

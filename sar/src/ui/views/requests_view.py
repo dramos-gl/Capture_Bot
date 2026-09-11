@@ -1,9 +1,10 @@
 """Requests (Bandeja de Trabajo) View."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QDialog, QLineEdit, QScrollArea
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QDialog, QScrollArea
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QIntValidator
 from sar.src.ui.design_system.components import (
-    CustomCard, CustomLabel, CustomButton, StyledDataTable, KeepOpenMenu,
+    CustomCard, CustomLabel, CustomInput, CustomButton, StyledDataTable, KeepOpenMenu,
     GLInfoBanner, GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.tokens.colors import Colors
@@ -41,8 +42,8 @@ class EditQuantityDialog(QDialog):
     def __init__(self, cant_actual: int, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Editar Cantidad")
-        self.resize(320, 220)
-        self.setMinimumSize(300, 200)
+        self.resize(360, 310)
+        self.setMinimumSize(340, 300)
         
         self.setStyleSheet(f"""
             QDialog {{
@@ -51,53 +52,40 @@ class EditQuantityDialog(QDialog):
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(10)
         
         self.lbl_title = CustomLabel("Actualizar Cantidad", variant="subheader")
         layout.addWidget(self.lbl_title)
         
         # Field 1: Cantidad Actual (read-only)
-        self.txt_actual = QLineEdit(str(cant_actual))
-        self.txt_actual.setEnabled(False)
-        self.txt_actual.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {Colors.SLATE_100};
-                color: {Colors.TEXT_LIGHT_MUTED};
-                border: 1px solid {Colors.SLATE_300};
-                border-radius: 6px;
-                padding: 8px;
-            }}
-        """)
         layout.addWidget(CustomLabel("Cantidad Actual:", variant="body"))
+        self.txt_actual = CustomInput(str(cant_actual))
+        self.txt_actual.setReadOnly(True)
+        self.txt_actual.setFixedHeight(36)
         layout.addWidget(self.txt_actual)
         
         # Field 2: Nueva Cantidad
-        self.txt_nueva = QLineEdit()
-        self.txt_nueva.setPlaceholderText("Ingresa la nueva cantidad")
-        self.txt_nueva.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {Colors.SURFACE_LIGHT};
-                color: {Colors.TEXT_LIGHT_PRIMARY};
-                border: 1px solid {Colors.SLATE_300};
-                border-radius: 6px;
-                padding: 8px;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {Colors.PRIMARY};
-            }}
-        """)
         layout.addWidget(CustomLabel("Nueva Cantidad:", variant="body"))
+        self.txt_nueva = CustomInput("Ingresa la nueva cantidad")
+        self.txt_nueva.setValidator(QIntValidator(1, 999999, self))
+        self.txt_nueva.setFixedHeight(36)
         layout.addWidget(self.txt_nueva)
         
+        layout.addStretch()
+
         # Buttons (Design System Action Factories)
         btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(0, 8, 0, 0)
+        btn_layout.setSpacing(12)
         btn_layout.addStretch()
         
         self.btn_cancel = CustomButton.action_cancelar(parent=self)
+        self.btn_cancel.setFixedHeight(36)
         self.btn_cancel.clicked.connect(self.reject)
         
         self.btn_save = CustomButton.action_guardar(parent=self)
+        self.btn_save.setFixedHeight(36)
         self.btn_save.clicked.connect(self.accept)
         
         btn_layout.addWidget(self.btn_cancel)
@@ -506,7 +494,19 @@ class RequestsView(QWidget):
         row = selected[0].row()
         sol_id = int(self.table.item(row, 0).text())
         cant_actual = int(self.table.item(row, 6).text())
-        
+        estado_item = self.table.item(row, 9)
+        estado_actual = estado_item.text().strip() if estado_item else ""
+
+        # Pre-validación UX: Únicamente permitir editar solicitudes en estado PENDIENTE
+        if estado_actual.upper() != "PENDIENTE":
+            QMessageBox.information(
+                self,
+                "Edición No Permitida",
+                f"Únicamente se pueden editar solicitudes en estado 'Pendiente'.\n\n"
+                f"La solicitud seleccionada (ID: {sol_id}) se encuentra en estado '{estado_actual}'."
+            )
+            return
+
         dialog = EditQuantityDialog(cant_actual, self)
         if dialog.exec() == QDialog.Accepted:
             qty = dialog.get_new_quantity()
@@ -539,10 +539,31 @@ class RequestsView(QWidget):
                 "No tiene permisos para cancelar solicitudes (SOLICITUDES:ELIMINAR)."
             )
             return
-        sol_id = self._get_selected_solicitud_id()
-        if sol_id == -1: return
+        selected = self.table.selectedItems()
+        if not selected:
+            QMessageBox.warning(self, "Selección Requerida", "Selecciona una solicitud de la tabla primero.")
+            return
+        row = selected[0].row()
+        sol_id = int(self.table.item(row, 0).text())
+        estado_item = self.table.item(row, 9)
+        estado_actual = estado_item.text().strip() if estado_item else ""
+
+        # Pre-validación UX: Únicamente permitir cancelar solicitudes en estado PENDIENTE
+        if estado_actual.upper() != "PENDIENTE":
+            QMessageBox.information(
+                self,
+                "Cancelación No Permitida",
+                f"Únicamente se pueden cancelar solicitudes en estado 'Pendiente'.\n\n"
+                f"La solicitud seleccionada (ID: {sol_id}) se encuentra en estado '{estado_actual}' y no puede ser cancelada."
+            )
+            return
         
-        reply = QMessageBox.question(self, "Confirmar Cancelación", f"¿Estás seguro que deseas cancelar la solicitud {sol_id}?", QMessageBox.Yes | QMessageBox.No)
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Cancelación",
+            f"¿Estás seguro de que deseas cancelar la solicitud ID: {sol_id}?",
+            QMessageBox.Yes | QMessageBox.No
+        )
         
         if reply == QMessageBox.Yes:
             try:

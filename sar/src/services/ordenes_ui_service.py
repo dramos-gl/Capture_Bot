@@ -73,16 +73,17 @@ class OrdenesUIService:
                 ]
 
 
-    def check_orden_ready_for_masivo(self, orden_id: int) -> Dict[str, Any]:
+    def check_orden_ready_for_masivo(self, orden_id: int, accion: str = None) -> Dict[str, Any]:
         """Checks if the order is ready for mass action."""
         if self.api_client.connect_via_api:
-            return self.api_client.request("GET", f"/api/ops/ordenes/{orden_id}/check-ready")
+            params = {"accion": accion} if accion else None
+            return self.api_client.request("GET", f"/api/ops/ordenes/{orden_id}/check-ready", params=params)
         else:
             if not self.db_connector:
                 raise ValueError("db_connector is required when connect_via_api is False")
             with self.db_connector.get_session() as session:
                 repo = ProduccionRepository(session)
-                return repo.check_orden_ready_for_masivo(orden_id)
+                return repo.check_orden_ready_for_masivo(orden_id, accion=accion)
 
     def update_orden_estado_masivo(self, orden_id: int, estado_codigo: str, usuario_id: int, sesion_id: int = None) -> None:
         """Updates the state of multiple references within the order to a new state."""

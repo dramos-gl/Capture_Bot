@@ -78,11 +78,11 @@ def create_orden(request: OrdenCrearRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error al crear la orden: {str(e)}")
 
 @router.get("/ordenes/{orden_id}/check-ready")
-def check_orden_ready(orden_id: int, db: Session = Depends(get_db)):
+def check_orden_ready(orden_id: int, accion: str = None, db: Session = Depends(get_db)):
     """Verifica si una orden está lista para procesamiento masivo y retorna metadatos."""
     repo = ProduccionRepository(db)
     try:
-        res = repo.check_orden_ready_for_masivo(orden_id)
+        res = repo.check_orden_ready_for_masivo(orden_id, accion=accion)
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

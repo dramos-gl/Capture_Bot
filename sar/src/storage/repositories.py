@@ -1158,6 +1158,20 @@ class ProduccionRepository(BaseRepository):
         from sqlalchemy import text
         from sar.src.storage.models import OrdenGeneracion
         
+        orden = self.session.get(OrdenGeneracion, orden_id)
+        if not orden:
+            raise ValueError(f"Orden con ID {orden_id} no encontrada.")
+
+        estado_codigo = self.session.execute(
+            text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
+            {"eid": orden.estado_id}
+        ).scalar()
+
+        if estado_codigo == "CANCELADA":
+            raise ValueError(f"La orden '{orden.folio}' ya se encuentra cancelada.")
+        if estado_codigo == "AUTORIZADA":
+            raise ValueError(f"No se puede cancelar la orden '{orden.folio}' porque se encuentra en estado AUTORIZADA.")
+
         # 1. Verificar si existen referencias asociadas a la orden
         check_stmt = text("""
             SELECT COUNT(*) FROM sar_produccion.referencia r
@@ -1166,7 +1180,7 @@ class ProduccionRepository(BaseRepository):
         """)
         ref_count = self.session.execute(check_stmt, {"orden_id": orden_id}).scalar()
         if ref_count and ref_count > 0:
-            raise ValueError("No se puede cancelar una orden que ya tiene referencias generadas.")
+            raise ValueError(f"No se puede cancelar la orden '{orden.folio}' porque ya tiene referencias generadas.")
             
         ord_cancel_id = self._get_or_create_estado_id("orden_generacion", "CANCELADA")
         grp_cancel_id = self._get_or_create_estado_id("grupo_referencia", "CANCELADO")
@@ -1219,30 +1233,64 @@ class ProduccionRepository(BaseRepository):
 
         return {"success": True}
 
-    def check_orden_ready_for_masivo(self, orden_id: int) -> dict:
+    def check_orden_ready_for_masivo(self, orden_id: int, accion: str = None) -> dict:
         from sqlalchemy import text
+        from sar.src.storage.models import OrdenGeneracion
         
-        # 1. Validar si la orden está cancelada
+        # 1. Obtener la orden, folio y estado
         stmt_est = text("""
-            SELECT es.codigo 
+            SELECT o.folio, es.codigo 
             FROM sar_produccion.orden_generacion o
             JOIN sar_catalogo.estado_sistema es ON o.estado_id = es.estado_id
             WHERE o.orden_id = :orden_id
         """)
-        est_cod = self.session.execute(stmt_est, {"orden_id": orden_id}).scalar()
-        if est_cod == "CANCELADA":
-            return {"ready": False, "reason": "No se puede autorizar o rechazar una orden cancelada."}
+        row = self.session.execute(stmt_est, {"orden_id": orden_id}).fetchone()
+        if not row:
+            return {"ready": False, "folio": f"ID {orden_id}", "reason": "La orden no existe en el sistema."}
+            
+        folio, est_cod = row[0], row[1]
+        
+        # Inteligencia de estados terminales según la acción solicitada
+        if accion == "AUTORIZADA":
+            if est_cod == "AUTORIZADA":
+                return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' ya fue autorizada previamente."}
+            if est_cod == "RECHAZADA":
+                return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' se encuentra en estado 'RECHAZADA' y no puede ser autorizada."}
+            if est_cod == "CANCELADA":
+                return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' se encuentra en estado 'CANCELADA' y no puede ser autorizada."}
+        elif accion == "RECHAZADA":
+            if est_cod == "RECHAZADA":
+                return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' ya fue rechazada previamente."}
+            if est_cod == "AUTORIZADA":
+                return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' se encuentra en estado 'AUTORIZADA' y no puede ser rechazada."}
+            if est_cod == "CANCELADA":
+                return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' se encuentra en estado 'CANCELADA' y no puede ser rechazada."}
+        else:
+            if est_cod == "CANCELADA":
+                return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' ya fue cancelada previamente."}
+            if est_cod == "AUTORIZADA":
+                return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' ya se encuentra autorizada y sus derechos están activos en inventario."}
+            if est_cod == "RECHAZADA":
+                return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' ya fue rechazada previamente."}
 
-        # 2. Obtener la cantidad de referencias solicitadas en total para la orden
+        # 2. Cantidad de referencias solicitadas en total para la orden
         stmt_sol = text("""
             SELECT COALESCE(SUM(s.cantidad_solicitada), 0)
             FROM sar_produccion.solicitud s
             JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
             WHERE gr.orden_id = :orden_id
         """)
-        total_solicitadas = self.session.execute(stmt_sol, {"orden_id": orden_id}).scalar()
+        total_solicitadas = self.session.execute(stmt_sol, {"orden_id": orden_id}).scalar() or 0
         
-        # 3. Obtener la cantidad de referencias actualmente en estado PENDIENTE_AUTORIZACION
+        # 3. Cantidad total de referencias generadas
+        stmt_gen = text("""
+            SELECT COUNT(*) 
+            FROM sar_produccion.referencia r
+            WHERE r.grupo_id IN (SELECT grupo_id FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id)
+        """)
+        total_generadas = self.session.execute(stmt_gen, {"orden_id": orden_id}).scalar() or 0
+
+        # 4. Cantidad de referencias actualmente en estado PENDIENTE_AUTORIZACION
         stmt_pdte = text("""
             SELECT COUNT(*) 
             FROM sar_produccion.referencia r
@@ -1250,22 +1298,58 @@ class ProduccionRepository(BaseRepository):
             WHERE r.grupo_id IN (SELECT grupo_id FROM sar_produccion.grupo_referencia WHERE orden_id = :orden_id)
               AND es.codigo = 'PENDIENTE_AUTORIZACION'
         """)
-        total_pendientes = self.session.execute(stmt_pdte, {"orden_id": orden_id}).scalar()
+        total_pendientes = self.session.execute(stmt_pdte, {"orden_id": orden_id}).scalar() or 0
         
         if total_solicitadas == 0:
-            return {"ready": False, "reason": "La orden no tiene solicitudes registradas."}
-            
-        if total_pendientes != total_solicitadas:
+            return {"ready": False, "folio": folio, "reason": f"La orden '{folio}' no tiene solicitudes registradas."}
+
+        if total_generadas == 0:
+            if accion == "RECHAZADA":
+                return {
+                    "ready": False,
+                    "folio": folio,
+                    "reason": (
+                        f"La orden '{folio}' no cuenta con derechos generados para rechazar.\n\n"
+                        f"(Si desea descartar una orden sin procesar, utilice el botón 'Cancelar Orden')."
+                    )
+                }
+            else:
+                return {
+                    "ready": False,
+                    "folio": folio,
+                    "reason": (
+                        f"La orden '{folio}' no cuenta con derechos generados para autorizar.\n\n"
+                        f"Primero debe procesarse en la cola de trabajo."
+                    )
+                }
+
+        if total_pendientes == 0:
             return {
                 "ready": False,
+                "folio": folio,
                 "reason": (
-                    f"No todas las referencias están listas para autorizar de forma masiva.\n\n"
-                    f"- Referencias Solicitadas: {total_solicitadas}\n"
-                    f"- Referencias Pendientes de Autorización: {total_pendientes}"
+                    f"La orden '{folio}' no cuenta con derechos en estado 'Pendiente de Autorización'.\n\n"
+                    f"• Referencias Solicitadas: {total_solicitadas}\n"
+                    f"• Referencias Generadas: {total_generadas}\n"
+                    f"• Pendientes de Autorización: {total_pendientes}"
                 )
             }
             
-        return {"ready": True, "total_referencias": total_solicitadas}
+        if total_pendientes != total_solicitadas:
+            accion_txt = "rechazar" if accion == "RECHAZADA" else "autorizar"
+            return {
+                "ready": False,
+                "folio": folio,
+                "reason": (
+                    f"No todas las referencias de la orden '{folio}' están listas para {accion_txt} de forma masiva.\n\n"
+                    f"• Referencias Solicitadas: {total_solicitadas}\n"
+                    f"• Referencias Generadas: {total_generadas}\n"
+                    f"• Pendientes de Autorización: {total_pendientes}"
+                ),
+                "suggestion": "Vaya al módulo 'Procesar Solicitud de la Orden' haciendo doble clic sobre la orden para realizar un procesamiento parcial."
+            }
+            
+        return {"ready": True, "folio": folio, "total_referencias": total_solicitadas}
 
     def update_orden_estado_masivo(self, orden_id: int, nuevo_estado_codigo: str, usuario_id: int = None, sesion_id: int = None):
         from sqlalchemy import text
@@ -3260,6 +3344,7 @@ class InventarioRepository(BaseRepository):
         pa: Optional[str] = None,
         folio_electronico: Optional[str] = None,
         desarrollo_id: Optional[int] = None,
+        sm: Optional[str] = None,
         mz: Optional[str] = None,
         lote: Optional[str] = None,
         edif: Optional[str] = None,
@@ -3294,6 +3379,10 @@ class InventarioRepository(BaseRepository):
             params["des_id"] = desarrollo_id
             params["mz"] = mz_clean
             params["lote"] = lote_clean
+            sm_clean = sm.strip().upper() if sm and sm.strip() else None
+            if sm_clean:
+                coords_clause += " AND UPPER(TRIM(ubi.sm)) = :sm"
+                params["sm"] = sm_clean
             if edif and edif.strip():
                 coords_clause += " AND UPPER(TRIM(ubi.edif)) = :edif"
                 params["edif"] = edif.strip().upper()
@@ -3595,6 +3684,105 @@ class InventarioRepository(BaseRepository):
             "errores": error_count,
             "detalles": details
         }
+
+    def update_asignacion_referencia(self, asignacion_referencia_id: int, datos: dict, usuario_id: Optional[int] = None) -> dict:
+        """Updates metadata and location fields for an existing assigned reference record."""
+        import datetime
+        from sar.src.storage.models import AsignacionReferencia, Ubicacion, LoteDetalle
+
+        ar = self.session.get(AsignacionReferencia, asignacion_referencia_id)
+        if not ar:
+            raise ValueError(f"No se encontró el registro de asignación con ID {asignacion_referencia_id}")
+
+        def _parse_date(val):
+            if not val:
+                return None
+            if isinstance(val, (datetime.date, datetime.datetime)):
+                return val.date() if hasattr(val, "date") else val
+            if isinstance(val, str):
+                val_str = val.strip().split()[0]
+                if not val_str:
+                    return None
+                try:
+                    if "-" in val_str:
+                        return datetime.datetime.strptime(val_str, "%Y-%m-%d").date()
+                    elif "/" in val_str:
+                        return datetime.datetime.strptime(val_str, "%d/%m/%Y").date()
+                except Exception:
+                    return None
+            return None
+
+        # 1. Update direct metadata on AsignacionReferencia
+        if "cliente" in datos:
+            ar.cliente = (datos["cliente"] or "").strip().upper() or None
+        if "credito_titular" in datos:
+            ar.credito_titular = (datos["credito_titular"] or "").strip().upper() or None
+        if "pa" in datos:
+            ar.pa = (datos["pa"] or "").strip().upper() or None
+        if "folio_electronico" in datos or "no_oficial" in datos:
+            folio_val = datos.get("folio_electronico") or datos.get("no_oficial")
+            ar.no_oficial = (folio_val or "").strip().upper() or None
+        if "estatus_primer_aviso" in datos or "estatus_aviso" in datos:
+            est_av = datos.get("estatus_primer_aviso") or datos.get("estatus_aviso")
+            ar.estatus_primer_aviso = (est_av or "").strip().upper() or "NUEVO INGRESO"
+        if "comentarios" in datos:
+            ar.comentarios = (datos["comentarios"] or "").strip() or None
+        if "observaciones" in datos:
+            ar.observaciones = (datos["observaciones"] or "").strip() or None
+
+        if "fecha_solicitud" in datos:
+            ar.fecha_solicitud = _parse_date(datos["fecha_solicitud"])
+        if "fecha_ingreso_rpp" in datos:
+            ar.fecha_ingreso_rpp = _parse_date(datos["fecha_ingreso_rpp"])
+        if "fecha_reporte_notaria" in datos:
+            ar.fecha_reporte_notaria = _parse_date(datos["fecha_reporte_notaria"])
+        if "fecha_escritura" in datos:
+            ar.fecha_escritura = _parse_date(datos["fecha_escritura"])
+        if "fecha_titulacion" in datos:
+            ar.fecha_titulacion = _parse_date(datos["fecha_titulacion"])
+
+        # 2. Location & Coordinate handling (Ubicacion)
+        sm = (datos.get("sm") or "").strip().upper() or None
+        mz = (datos.get("mz") or "").strip().upper() or None
+        lote = (datos.get("lote") or "").strip().upper() or None
+        edif = (datos.get("edif") or "").strip().upper() or None
+        viv = (datos.get("viv") or "").strip().upper() or None
+        desarrollo_id = datos.get("desarrollo_id")
+
+        if ar.ubicacion_id:
+            ubi = self.session.get(Ubicacion, ar.ubicacion_id)
+            if ubi:
+                if sm is not None or "sm" in datos: ubi.sm = sm
+                if mz is not None or "mz" in datos: ubi.mz = mz
+                if lote is not None or "lote" in datos: ubi.lote = lote
+                if edif is not None or "edif" in datos: ubi.edif = edif
+                if viv is not None or "viv" in datos: ubi.viv = viv
+                if desarrollo_id: ubi.desarrollo_id = desarrollo_id
+                if ar.no_oficial: ubi.lote_id_erp = ar.no_oficial
+        else:
+            if any([sm, mz, lote, edif, viv, desarrollo_id]):
+                nueva_ubi = Ubicacion(
+                    desarrollo_id=desarrollo_id or 1,
+                    sm=sm,
+                    mz=mz,
+                    lote=lote,
+                    edif=edif,
+                    viv=viv,
+                    lote_id_erp=ar.no_oficial
+                )
+                self.session.add(nueva_ubi)
+                self.session.flush()
+                ar.ubicacion_id = nueva_ubi.ubicacion_id
+
+        # 3. Update LoteDetalle desarrollo if provided
+        if desarrollo_id and ar.lote_detalle_id:
+            ld = self.session.get(LoteDetalle, ar.lote_detalle_id)
+            if ld:
+                ld.desarrollo_id = desarrollo_id
+
+        self.session.flush()
+        return {"success": True, "asignacion_referencia_id": ar.asignacion_referencia_id}
+
 
 
 

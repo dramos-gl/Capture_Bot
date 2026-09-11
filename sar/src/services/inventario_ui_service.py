@@ -486,6 +486,7 @@ class InventarioUIService:
         pa: str = None,
         folio_electronico: str = None,
         desarrollo_id: int = None,
+        sm: str = None,
         mz: str = None,
         lote: str = None,
         edif: str = None,
@@ -498,6 +499,7 @@ class InventarioUIService:
             if pa: params["pa"] = pa
             if folio_electronico: params["folio_electronico"] = folio_electronico
             if desarrollo_id: params["desarrollo_id"] = desarrollo_id
+            if sm: params["sm"] = sm
             if mz: params["mz"] = mz
             if lote: params["lote"] = lote
             if edif: params["edif"] = edif
@@ -513,6 +515,7 @@ class InventarioUIService:
                     pa=pa,
                     folio_electronico=folio_electronico,
                     desarrollo_id=desarrollo_id,
+                    sm=sm,
                     mz=mz,
                     lote=lote,
                     edif=edif,
@@ -566,3 +569,35 @@ class InventarioUIService:
                 )
                 session.commit()
                 return lote_id
+
+    def update_asignacion_referencia(
+        self, asignacion_referencia_id: int, datos: dict, usuario_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Updates metadata and location fields for an existing assigned reference record."""
+        if self.api_client.connect_via_api:
+            payload = {
+                "datos": datos,
+                "usuario_id": usuario_id
+            }
+            return self.api_client.request("PUT", f"/api/docs/inventario/asignaciones/{asignacion_referencia_id}", data=payload)
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                res = repo.update_asignacion_referencia(asignacion_referencia_id, datos, usuario_id=usuario_id)
+                session.commit()
+                return res
+
+    def get_facturas_by_referencia_id(self, referencia_id: int) -> List[Dict[str, Any]]:
+        """Returns all invoice records (with pdf_path and pdf2_path) for a given referencia_id."""
+        if self.api_client.connect_via_api:
+            return self.api_client.request(
+                "GET", f"/api/docs/inventario/referencias/{referencia_id}/facturas"
+            ) or []
+        else:
+            if not self.db_connector:
+                return []
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                return repo.get_facturas_by_referencia_id(referencia_id)

@@ -718,6 +718,27 @@ Trazabilidad completa desde Orden → Solicitud → Referencia.
   - **`RESERVADA` (Notaría)**: `{consec}_{referencia}_{notaria}_{concepto}_{deleg}.pdf` (Ej: `001_1020304050_Not4_Aviso_CUN.pdf`)
   - **`COLABORADOR`**: `{consec}_{referencia}_{concepto}_{deleg}.pdf` (Ej: `001_1020304050_Aviso_CUN.pdf`)
 
+### 26.6 Estandarización de Barras de Acción y Formularios en 2 Columnas
+
+Para maximizar la ergonomía, consistencia visual y reducir la carga cognitiva del operador, las sub-pestañas operativas de Control de Inventario y Validación implementan la siguiente arquitectura de componentes:
+
+#### 1. Formularios en Dos Columnas Simétricas (36px de Altura)
+* Todos los campos de captura (`Tipo Destino`, `Destinatario`, `Solicitante Externo`, `Observaciones`, `Desarrollo`) se distribuyen en filas horizontales de 2 columnas equilibradas con espaciado uniforme de 16px.
+* La empresa o RFC se resuelve automáticamente por la referencia física o la columna de la fila en Excel, eliminando selectores redundantes de "Empresa por Defecto".
+
+#### 2. Secuencia Estandarizada de Botones de Acción
+Las barras de herramientas alinean sus botones en una sola fila horizontal homogénea con la siguiente convención:
+
+* **Reserva de Derechos (`tab_apartar`):**
+  $$\mathbf{Agregar} \longrightarrow \mathbf{Confirmar} \longrightarrow \mathbf{Limpiar} \longrightarrow \mathbf{Filtrar\ \acute{O}rdenes\ (\nabla)}$$
+* **Asignación Individual (`tab_individual`):**
+  $$\mathbf{Agregar} \longrightarrow \mathbf{Buscar} \longrightarrow \mathbf{Continuar} \longrightarrow \mathbf{Limpiar} \longrightarrow \mathbf{Filtrar\ \acute{O}rdenes\ (\nabla)}$$
+* **Asignación & Validación por Lotes (`tab_masivo`):**
+  $$\mathbf{Importar\ Excel} \longrightarrow \mathbf{Descargar\ Plantilla} \longrightarrow \mathbf{Confirmar} \longrightarrow \mathbf{Limpiar} \longrightarrow \mathbf{Filtrar\ \acute{O}rdenes\ (\nabla)}$$
+
+* **Botón de Limpieza (`is_clean_btn`):** Estandarizado con semántica de peligro / rojo (`Colors.ERROR` / `#EF4444`) para evitar limpiezas accidentales y facilitar su reconocimiento inmediato.
+* **Validación Fiscal (`orders_view.py`):** El modal de advertencia de domicilio fiscal finaliza con un botón unificado **`Cerrar`** con estilo de peligro/rojo (`is_clean_btn=True`).
+
 ---
 
 ## 27. Sistema de Diseño Atómico, Temas y Badges de Estado

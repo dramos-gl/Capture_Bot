@@ -125,8 +125,8 @@ class ThemeManager:
             border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
             padding: 3px 10px;
-            min-height: 28px;
-            max-height: 28px;
+            min-height: 34px;
+            max-height: 34px;
             color: {txt_primary};
             font-size: 13px;
         }}
@@ -218,7 +218,6 @@ class ThemeManager:
             border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
             padding: 3px 10px;
-            min-height: 28px;
             max-height: 28px;
             color: {txt_primary};
             font-size: 13px;
@@ -286,8 +285,8 @@ class ThemeManager:
             border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
             padding: 3px 26px 3px 10px;
-            min-height: 28px;
-            max-height: 28px;
+            min-height: 34px;
+            max-height: 34px;
             color: {txt_primary};
             font-size: 13px;
         }}

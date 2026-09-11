@@ -648,31 +648,57 @@ class OrdersView(QWidget):
             QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una orden para procesar.")
             return
 
+        accion_nombre = "Rechazar" if estado_codigo == "RECHAZADA" else "Autorizar"
         total_referencias_acumuladas = 0
+        folios_procesados = []
+        
         try:
             for oid in orden_ids:
-                res = self.ordenes_ui_service.check_orden_ready_for_masivo(oid)
+                res = self.ordenes_ui_service.check_orden_ready_for_masivo(oid, accion=estado_codigo)
+                folio = res.get("folio", f"ID {oid}")
+                folios_procesados.append(folio)
+                
                 if not res["ready"]:
+                    msg = res.get("reason", "La orden no cumple con las condiciones para ser procesada.")
+                    if res.get("suggestion"):
+                        msg += f"\n\nSugerencia: {res['suggestion']}"
                     QMessageBox.warning(
                         self, 
-                        "Acción Inválida", 
-                        f"No se puede aplicar la acción masiva sobre la orden ID {oid}:\n\n"
-                        f"{res['reason']}\n\n"
-                        f"Sugerencia: Vaya al módulo 'Procesar Solicitud de la Orden' "
-                        f"haciendo doble clic sobre la orden para realizar un procesamiento parcial."
+                        f"No se puede {accion_nombre} la orden", 
+                        msg
                     )
                     return
                 total_referencias_acumuladas += res.get("total_referencias", 0)
         except Exception as e:
             QMessageBox.critical(self, "Error de Validación", f"No se pudo validar el estado de las órdenes:\n{str(e)}")
             return
-            
+
+        folios_str = ", ".join([f"'{f}'" for f in folios_procesados])
+
+        if estado_codigo == "RECHAZADA":
+            confirm_title = "Confirmar Rechazo de Orden"
+            confirm_msg = (
+                f"¿Estás seguro de que deseas rechazar la orden {folios_str}?\n\n"
+                f"⚠️ Advertencia de Rechazo:\n"
+                f"• Se rechazarán permanentemente todos los derechos ({total_referencias_acumuladas} referencias).\n"
+                f"• Las solicitudes y grupos asociados quedarán cancelados.\n"
+                f"• Esta orden quedará registrada como RECHAZADA en la auditoría y sus derechos no ingresarán al inventario."
+            )
+        else:
+            confirm_title = "Confirmar Autorización de Orden"
+            confirm_msg = (
+                f"¿Estás seguro de que deseas autorizar la orden {folios_str}?\n\n"
+                f"✔️ Resultado de Autorización:\n"
+                f"• Se autorizarán formalmente {total_referencias_acumuladas} referencias en estado PENDIENTE_AUTORIZACION.\n"
+                f"• Los derechos pasarán a estar disponibles en el Inventario para asignación o reserva."
+            )
+
         reply = QMessageBox.question(
             self, 
-            "Confirmar Acción", 
-            f"¿Estás seguro de que deseas marcar {len(orden_ids)} orden(es) como {estado_codigo}?\n\n"
-            f"Se procesará un total de {total_referencias_acumuladas} referencias en estado PENDIENTE_AUTORIZACION.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            confirm_title, 
+            confirm_msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
         )
             
         if reply == QMessageBox.Yes:
@@ -718,15 +744,86 @@ class OrdersView(QWidget):
                 "No tiene permisos para cancelar órdenes (ORDENES:ELIMINAR)."
             )
             return
-        orden_ids = self._get_selected_ordenes()
-        if not orden_ids:
+            
+        selected_items = self.table_historial.selectedItems()
+        if not selected_items:
             QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una orden para cancelar.")
             return
+
+        selected_rows = sorted(set(item.row() for item in selected_items))
+        orden_ids = []
+        
+        # Pre-validaciones de estado y referencias generadas
+        for row in selected_rows:
+            id_item = self.table_historial.item(row, 0)
+            folio_item = self.table_historial.item(row, 1)
+            estado_item = self.table_historial.item(row, 3)
+            generadas_item = self.table_historial.item(row, 7)
             
-        reply = QMessageBox.question(self, "Confirmar Cancelación", 
-            f"¿Estás seguro de que deseas cancelar {len(orden_ids)} orden(es)? "
+            if not id_item:
+                continue
+                
+            oid = int(id_item.text())
+            folio = folio_item.text().strip() if folio_item else f"ID {oid}"
+            estado = estado_item.text().strip().upper() if estado_item else ""
+            
+            generadas_str = generadas_item.text().strip() if generadas_item else "0"
+            generadas = int(generadas_str) if generadas_str.isdigit() else 0
+
+            if estado == "CANCELADA":
+                QMessageBox.information(
+                    self,
+                    "Cancelación No Permitida",
+                    f"La orden '{folio}' ya fue cancelada previamente."
+                )
+                return
+
+            if estado == "AUTORIZADA":
+                QMessageBox.information(
+                    self,
+                    "Cancelación No Permitida",
+                    f"La orden '{folio}' se encuentra en estado 'AUTORIZADA' y no puede ser cancelada."
+                )
+                return
+
+            if estado == "RECHAZADA":
+                QMessageBox.information(
+                    self,
+                    "Cancelación No Permitida",
+                    f"La orden '{folio}' se encuentra en estado 'RECHAZADA' y no puede ser cancelada."
+                )
+                return
+
+            if generadas > 0:
+                QMessageBox.information(
+                    self,
+                    "Cancelación No Permitida",
+                    f"No se puede cancelar la orden '{folio}' porque ya cuenta con {generadas} referencia(s) generada(s).\n\n"
+                    f"Las órdenes con derechos generados no pueden eliminarse para garantizar la trazabilidad."
+                )
+                return
+
+            if estado in ["COMPLETADA", "EN_PROCESO"]:
+                QMessageBox.information(
+                    self,
+                    "Cancelación No Permitida",
+                    f"La orden '{folio}' se encuentra en estado '{estado}' y no puede ser cancelada."
+                )
+                return
+
+            orden_ids.append(oid)
+
+        if not orden_ids:
+            return
+            
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Cancelación", 
+            f"¿Estás seguro de que deseas cancelar {len(orden_ids)} orden(es)?\n\n"
             "Esto cancelará de forma permanente la orden y todas sus solicitudes asociadas.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
             
         if reply == QMessageBox.Yes:
             try:

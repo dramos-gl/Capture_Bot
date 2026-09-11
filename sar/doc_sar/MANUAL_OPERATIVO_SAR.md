@@ -419,23 +419,32 @@ Antes de cargar el archivo, define el modo de operación seleccionando o desmarc
 3. **Modo 3: Check `Reservar derechos` [ ☑ ]**
    * **Uso:** Selecciona este check para cargar un Excel y apartar/reservar derechos en bloque para una Notaría o Desarrollo sin asignar nombres de clientes finales aún.
 
-### 8.3.2 Descarga de Plantilla y Selección de Archivo
-* **Botón 📄 Descargar Plantilla:** Hace clic para descargar el formato oficial (`Plantilla_Control_Inventario.xlsx`) con los encabezados requeridos (*Cliente*, *Desarrollo*, *Concepto*, *Folio Electrónico*, *Mz*, *Lote*, *Escritura*, etc.).
-* **Botón 📂 Seleccionar Excel:** Abre el explorador de archivos de Windows para cargar el archivo `.xlsx` completado.
+### 8.3.2 Formulario de Datos del Lote (2 Columnas Simétricas)
+* **Fila 1:**
+  * **Tipo Destino \*:** Selección entre `NOTARIA` o `COLABORADOR`.
+  * **Destinatario \*:** Selector desplegable de la Notaría o Colaborador según el tipo elegido.
+* **Fila 2:**
+  * **Solicitante Externo (Persona):** Captura opcional del responsable o contacto externo.
+  * **Observaciones del Lote:** Notas y justificaciones adicionales para el expediente del lote.
 
-### 8.3.3 Formulario de Campos Necesarios
-* **Tipo de Destino:** Selección entre `NOTARIA` o `COLABORADOR`.
-* **Notaría / Colaborador Destino:** Selección desplegable del destinatario oficial.
-* **Solicitante Externo & Observaciones:** Captura de notas de control o responsable del trámite.
-* **Empresa por Defecto:** RFC asignado para la validación de los folios del archivo.
+*(Nota: La empresa/RFC se resuelve de forma automática y transparente a partir de la columna del Excel o del número de referencia física, por lo que no requiere selección manual previa).*
 
-### 8.3.4 Proceso de Validación y Confirmación
-1. Haz clic en **🔍 Validar Archivo**.
-2. El sistema iniciará la validación asíncrona (`BatchValidationWorker`) mostrando la barra de carga (`GLLoadingDialog`).
-3. **Semáforo de Resultados:**
-   * **Verde (Válido):** El folio existe, está disponible y los datos fiscales coinciden.
-   * **Rojo (Inconsistencia/Error):** Folio no encontrado, referencia ya asignada o RFC no coincidente. Se mostrará el motivo exacto del fallo en la columna de comentarios.
-4. Al verificar que las filas son válidas, haz clic en **💾 Confirmar y Guardar Asignación** (`BatchConfirmationWorker`).
+### 8.3.3 Barra de Acciones Estandarizada
+Los botones de operación se ubican alineados en una sola barra horizontal en el siguiente orden secuencial:
+
+$$\mathbf{Importar\ Excel} \longrightarrow \mathbf{Descargar\ Plantilla} \longrightarrow \mathbf{Confirmar} \longrightarrow \mathbf{Limpiar} \longrightarrow \mathbf{Filtrar\ \acute{O}rdenes\ (\nabla)}$$
+
+1. **Botón 📊 Importar Excel:** Abre el explorador para cargar el archivo `.xlsx`. Al seleccionarlo, se ejecuta la validación asíncrona automática (`BatchValidationWorker`) con diálogo de progreso circular (`GLLoadingDialog`).
+2. **Botón 📄 Descargar Plantilla:** Descarga el formato oficial estructurado (`Plantilla_Control_Inventario.xlsx`).
+3. **Botón 💾 Confirmar:** Procesa formalmente la asignación masiva en base de datos tras verificar la previsualización.
+4. **Botón 🧹 Limpiar:** Limpia la tabla de previsualización y reinicia el archivo seleccionado.
+5. **Botón 🔍 Filtrar Órdenes ($\nabla$):** Menú persistente desplegable para acotar la asignación a una o más órdenes específicas.
+
+### 8.3.4 Previsualización y Diagnóstico
+* La tabla inferior muestra el semáforo de validación en tiempo real:
+  * **Verde (🟢 CORRECTO):** Folio existente, disponible y datos válidos.
+  * **Rojo (🔴 ERROR):** Folio no encontrado, ya asignado o discrepancia de datos.
+  * **Amarillo (🟡 WARNING):** Advertencias no bloqueantes.
 
 ---
 
@@ -443,30 +452,36 @@ Antes de cargar el archivo, define el modo de operación seleccionando o desmarc
 
 Permite apartar formalmente bloques de folios para Notarías o Desarrollos Inmobiliarios sin asignar nombres de acreditados finales.
 
-### 8.4.1 Procedimiento de Reserva y Filtros
+### 8.4.1 Formulario y Barra de Acciones Estandarizada
 1. Ve a la pestaña **🔑 Reserva de Derechos**.
-2. **Notaría Destino & Desarrollo:** Selecciona el número de notaría y escribe el nombre del proyecto o desarrollo.
-3. **Filtro de Órdenes (Opcional):** Permite acotar y restringir la reserva exclusivamente a folios generados bajo una o varias órdenes específicas.
-4. **Agregar Renglón (Botón ➕ Agregar Renglón):**
-   * Cada renglón permite definir una combinación única de: **Empresa (RFC) ➔ Delegación ➔ Concepto ➔ Cantidad a Reservar**.
-   * Haz clic en **➕ Agregar Renglón** para incorporar múltiples combinaciones de trámites dentro de la misma solicitud de apartado.
-5. **Confirmación:** Haz clic en **🔒 Reservar Referencias**. El sistema cambiará las referencias seleccionadas a estado `RESERVADA`, bloqueando su uso para otros operadores.
+2. **Formulario Superior (2 Columnas Simétricas - Altura 36px):**
+   * **Columna 1:** Notaría Destino \*, Desarrollo Inmobiliario.
+   * **Columna 2:** Solicitante Externo (Persona), Observaciones.
+3. **Barra de Acciones en la Cabecera de Partidas:**
+   $$\mathbf{Agregar} \longrightarrow \mathbf{Confirmar} \longrightarrow \mathbf{Limpiar} \longrightarrow \mathbf{Filtrar\ \acute{O}rdenes\ (\nabla)}$$
+   * **➕ Agregar:** Inserta una nueva fila de partida (Empresa, Delegación, Concepto, Cantidad a Reservar).
+   * **💾 Confirmar:** Aplica la reserva en base de datos marcando los folios como `RESERVADA`.
+   * **🧹 Limpiar:** Limpia las partidas agregadas y reinicia el formulario.
+   * **🔍 Filtrar Órdenes ($\nabla$):** Acota la reserva a órdenes seleccionadas.
 
 ---
 
 ## 8.5 Sub-módulo 4: Asignación Individual (`👤 Asignar Derechos`)
 
-Utiliza este sub-módulo para realizar la asignación puntual de una sola referencia.
+Permite gestionar asignaciones directas de derechos mediante captura interactiva de partidas.
 
-### 8.5.1 Flujo "Buscar y Continuar Asignación"
+### 8.5.1 Formulario y Barra de Acciones Estandarizada
 1. Ingresa a **👤 Asignar Derechos**.
-2. **Paso 1 (Búsqueda):** Escribe el número de referencia o selecciona la empresa/concepto y haz clic en **🔍 Buscar y continuar asignación**.
-3. El sistema verificará que la referencia esté en estado `DISPONIBLE` o `RESERVADA` y desplegará el formulario de detalle.
-4. **Paso 2 (Formulario de Asignación):**
-   * Selecciona el Destino (**Notaría** o **Colaborador Interno**).
-   * Ingresa el **Nombre del Cliente / Acreditado**.
-   * Captura el **Folio Electrónico / Número de Escritura**, **Desarrollo**, **Fecha de Solicitud** y **Observaciones**.
-5. Haz clic en **💾 Guardar Asignación Individual**. La referencia actualizará su estatus a `ASIGNADA`.
+2. **Formulario Superior (2 Columnas Simétricas - Altura 36px):**
+   * **Columna 1:** Tipo Destino \*, Destinatario (Notaría / Colaborador) \*.
+   * **Columna 2:** Solicitante Externo (Persona), Observaciones.
+3. **Barra de Acciones en la Cabecera de Partidas:**
+   $$\mathbf{Agregar} \longrightarrow \mathbf{Buscar} \longrightarrow \mathbf{Continuar} \longrightarrow \mathbf{Limpiar} \longrightarrow \mathbf{Filtrar\ \acute{O}rdenes\ (\nabla)}$$
+   * **➕ Agregar:** Inserta una partida interactiva.
+   * **🔍 Buscar:** Valida existencias y disponibilidad en tiempo real.
+   * **➡️ Continuar:** Despliega el formulario de ubicación (Mz, Lote, Edif, Viv) y cliente.
+   * **🧹 Limpiar:** Restablece las partidas y campos.
+   * **🔍 Filtrar Órdenes ($\nabla$):** Filtra por órdenes de generación.
 
 ---
 
