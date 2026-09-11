@@ -314,6 +314,7 @@ class MainView(QWidget):
             self.stacked_widget.setCurrentWidget(self.r2f_control_view)
             self.r2f_control_view.refresh_data()
         elif view_key in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+            is_new = False
             if not self.inventory_view:
                 from sar.src.ui.views.inventory_view import InventoryView
                 self.inventory_view = InventoryView(self.db_connector, self)
@@ -321,16 +322,16 @@ class MainView(QWidget):
                     lambda oids: self._load_metrics_view(oids, return_widget=self.inventory_view)
                 )
                 self.stacked_widget.addWidget(self.inventory_view)
+                is_new = True
             self.stacked_widget.setCurrentWidget(self.inventory_view)
             
-            # Load catalogs only if entering mass assignment, reservation or catalog tabs
-            load_cats = view_key in ["inventario_masivo", "inventario_apartar", "inventario_catalogos"]
-            self.inventory_view.refresh_all(load_catalogs=load_cats)
+            target_tab = "inventario_facturas" if view_key == "inventario" else view_key
+            self.inventory_view.set_active_tab(target_tab)
             
-            if view_key == "inventario":
-                self.inventory_view.set_active_tab("inventario_facturas")
-            else:
-                self.inventory_view.set_active_tab(view_key)
+            # Carga inteligente por pestaña: si ya fue instanciada o el destino no es el visor por defecto
+            if not is_new or target_tab != "inventario_facturas":
+                load_cats = view_key in ["inventario_masivo", "inventario_apartar", "inventario_catalogos"]
+                self.inventory_view.refresh_all(load_catalogs=load_cats, active_tab=target_tab)
         elif view_key == "configuracion":
 
             if not self.admin_window:

@@ -653,7 +653,7 @@ class InventoryView(QWidget):
         
         # Initial data loading (load only filters at start to make tab switching instant)
         self._apply_permissions()
-        self.refresh_all(load_catalogs=False)
+        self.refresh_all(load_catalogs=False, active_tab="inventario_facturas")
 
     def _apply_permissions(self):
         """Aplica control de acceso atómico Fail-Closed en sub-pestañas y acciones de InventoryView."""
@@ -705,13 +705,27 @@ class InventoryView(QWidget):
             self.tabs.setCurrentWidget(self.tab_lotes)
 
 
-    def refresh_all(self, load_catalogs=True):
-        if load_catalogs:
+    def refresh_all(self, load_catalogs=True, active_tab: str = None, refresh_both: bool = False):
+        """Refreshes inventory data intelligently based on active tab to avoid blocking Qt event loop."""
+        current_widget = self.tabs.currentWidget()
+        
+        is_visor = (active_tab == "inventario_facturas") or (not active_tab and current_widget == self.tab_visor)
+        is_lotes = (active_tab == "inventario_lotes") or (not active_tab and current_widget == self.tab_lotes)
+        is_assignment = (active_tab in ("inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_individual")) or \
+                        (not active_tab and current_widget in (self.tab_masivo, self.tab_apartar, self.tab_individual))
+
+        if load_catalogs or is_assignment:
             self._load_catalogs_data()
         else:
             self._load_filters_data()
-        self.refresh_visor_data()
-        self.refresh_lotes_data()
+
+        if refresh_both:
+            self.refresh_visor_data()
+            self.refresh_lotes_data()
+        elif is_lotes:
+            self.refresh_lotes_data()
+        else:
+            self.refresh_visor_data()
 
 
     # =========================================================================
@@ -743,7 +757,7 @@ class InventoryView(QWidget):
             state_options=["Todos", "Disponible", "Asignada", "Reservadas"],
             on_search=None,
             on_state_change=self._on_state_filter_visor,
-            on_action=self.refresh_visor_data,
+            on_action=self._on_manual_refresh_visor,
             action_icon_name="actualizar",
             action_tooltip="Actualizar Vista",
             parent=self
@@ -981,7 +995,12 @@ class InventoryView(QWidget):
         self.table.customContextMenuRequested.connect(self._on_table_context_menu)
         self._update_order_filter_banners()
 
-    def refresh_visor_data(self):
+    def _on_manual_refresh_visor(self):
+        """Disparado por el botón de actualizar en el visor: fuerza recarga fresca de órdenes y filtros."""
+        self._load_filters_data(force_reload=True)
+        self.refresh_visor_data(force_reload_orders=True)
+
+    def refresh_visor_data(self, force_reload_orders: bool = False):
         if self.active_worker and self.active_worker.isRunning():
             self.active_worker.cancel()
             try:
@@ -994,7 +1013,7 @@ class InventoryView(QWidget):
                 pass
             self.active_worker.wait()
 
-        self._load_available_orders(preserve_selection=True)
+        self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
         
         self.lbl_pagination_info.setText("Cargando inventario...")
         self.pagination_widget.setEnabled(False)
@@ -1222,13 +1241,16 @@ class InventoryView(QWidget):
             print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
             return False
 
-    def _load_available_orders(self, preserve_selection=False):
+    def _load_available_orders(self, preserve_selection=False, force_reload=False):
         try:
-            raw_ordenes = self.referencias_service.get_ordenes(include_rejected=False)
-            self.todas_las_ordenes = [
-                ord for ord in raw_ordenes
-                if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
-            ]
+            if not force_reload and getattr(self, 'todas_las_ordenes', None):
+                raw_ordenes = self.todas_las_ordenes
+            else:
+                raw_ordenes = self.referencias_service.get_ordenes(include_rejected=False)
+                self.todas_las_ordenes = [
+                    ord for ord in raw_ordenes
+                    if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+                ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
                 if preserve_selection and self.is_custom_filter:
@@ -2149,7 +2171,7 @@ class InventoryView(QWidget):
         self.parsed_records = []
         self.validated_records = []
 
-        self.refresh_all()
+        self.refresh_all(refresh_both=True)
 
     def _on_confirm_batch_error(self, error_msg):
         if hasattr(self, "_confirm_loading_dialog") and self._confirm_loading_dialog:
@@ -2502,7 +2524,7 @@ class InventoryView(QWidget):
             self.grid_individual.clear()
             self.grid_individual.add_row()
             self.btn_confirmar_ind.setEnabled(False)
-            self.refresh_all()
+            self.refresh_all(refresh_both=True)
 
     def _load_catalogs_data(self):
         try:
@@ -2584,8 +2606,10 @@ class InventoryView(QWidget):
         except Exception as e:
             print("Error loading catalog data for inventory view:", e)
 
-    def _load_filters_data(self):
+    def _load_filters_data(self, force_reload: bool = False):
         try:
+            if not force_reload and getattr(self, '_concepts_map', None) and getattr(self, '_rfcs_map', None):
+                return
             data = self.inventario_ui_service.get_filtros_data()
             concepts_list = data["conceptos"]
             rfcs_list = data["rfcs"]

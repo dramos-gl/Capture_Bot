@@ -138,7 +138,7 @@ class RequestsView(QWidget):
             state_options=["Todas", "ASIGNADA", "AUTORIZADA", "CANCELADA", "COMPLETADA", "ERROR", "FACTURADA", "FACTURADA_PARCIAL", "PENDIENTE", "PROCESANDO"],
             on_search=self._filter_table_by_text,
             on_state_change=self._filter_table_by_state,
-            on_action=self.refresh_data,
+            on_action=self._on_manual_refresh,
             action_icon_name="actualizar",
             action_tooltip="Actualizar Bandeja",
             parent=self
@@ -575,9 +575,13 @@ class RequestsView(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error al cancelar: {str(e)}")
         
-    def refresh_data(self):
+    def _on_manual_refresh(self):
+        """Fuerza actualización fresca de órdenes y solicitudes."""
+        self.refresh_data(force_reload_orders=True)
+
+    def refresh_data(self, force_reload_orders: bool = False):
         """Fetches the latest Solicitudes."""
-        self._load_available_orders(preserve_selection=True)
+        self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
         
         # Cancel active thread if running safely
         if self.active_worker and self.active_worker.isRunning():
@@ -659,13 +663,16 @@ class RequestsView(QWidget):
             else:
                 self.table.setRowHidden(row, True)
 
-    def _load_available_orders(self, preserve_selection=False):
+    def _load_available_orders(self, preserve_selection=False, force_reload=False):
         try:
-            raw_ordenes = self.solicitudes_ui_service.get_ordenes(include_rejected=False)
-            self.todas_las_ordenes = [
-                ord for ord in raw_ordenes
-                if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
-            ]
+            if not force_reload and getattr(self, 'todas_las_ordenes', None):
+                raw_ordenes = self.todas_las_ordenes
+            else:
+                raw_ordenes = self.solicitudes_ui_service.get_ordenes(include_rejected=False)
+                self.todas_las_ordenes = [
+                    ord for ord in raw_ordenes
+                    if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+                ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
                 if preserve_selection and self.is_custom_filter:

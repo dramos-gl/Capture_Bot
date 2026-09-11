@@ -180,7 +180,7 @@ class DashboardView(QWidget):
         self.btn_update.setIconSize(QSize(20, 20))
         self.btn_update.setFixedSize(35, 35)
         self.btn_update.setToolTip("Actualizar Tablero")
-        self.btn_update.clicked.connect(self.refresh_data)
+        self.btn_update.clicked.connect(self._on_manual_refresh)
         self.header_layout.addWidget(self.btn_update)
         
         self.layout.addLayout(self.header_layout)
@@ -395,12 +395,16 @@ class DashboardView(QWidget):
         )
         dialog.exec()
 
-    def refresh_data(self):
+    def _on_manual_refresh(self):
+        """Fuerza actualización fresca de órdenes y métricas."""
+        self.refresh_data(force_reload_orders=True)
+
+    def refresh_data(self, force_reload_orders: bool = False):
         """Fetches latest KPI metrics and launches background thread for paginated references."""
         # Update timestamp label
         self.lbl_datetime.setText(QDateTime.currentDateTime().toString("dd/MM/yyyy  hh:mm AP"))
         
-        self._load_available_orders(preserve_selection=True)
+        self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
         
         # Cancel active KPIs worker if running
         if self.active_kpis_worker and self.active_kpis_worker.isRunning():
@@ -595,13 +599,16 @@ class DashboardView(QWidget):
         self.current_page = page_num
         self.refresh_data_references()
 
-    def _load_available_orders(self, preserve_selection=False):
+    def _load_available_orders(self, preserve_selection=False, force_reload=False):
         try:
-            raw_ordenes = self.referencias_service.get_ordenes(include_rejected=False)
-            self.todas_las_ordenes = [
-                ord for ord in raw_ordenes
-                if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
-            ]
+            if not force_reload and getattr(self, 'todas_las_ordenes', None):
+                raw_ordenes = self.todas_las_ordenes
+            else:
+                raw_ordenes = self.referencias_service.get_ordenes(include_rejected=False)
+                self.todas_las_ordenes = [
+                    ord for ord in raw_ordenes
+                    if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+                ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
                 if preserve_selection and self.is_custom_filter:

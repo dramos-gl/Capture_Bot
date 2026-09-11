@@ -85,7 +85,7 @@ class ReferenciasView(QWidget):
             state_options=["Todos", "GENERADA", "AUTORIZADA", "RECHAZADA", "EXPIRADA"],
             on_search=self._filter_table_by_text,
             on_state_change=self._filter_table_by_state,
-            on_action=self.refresh_data,
+            on_action=self._on_manual_refresh,
             action_icon_name="actualizar",
             action_tooltip="Actualizar Derechos",
             parent=self
@@ -464,9 +464,13 @@ class ReferenciasView(QWidget):
         if not ref_ids: return
         QMessageBox.information(self, "PDF", f"Abriendo visor PDF para el derecho ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")
         
-    def refresh_data(self):
+    def _on_manual_refresh(self):
+        """Fuerza actualización fresca de órdenes y derechos."""
+        self.refresh_data(force_reload_orders=True)
+
+    def refresh_data(self, force_reload_orders: bool = False):
         """Starts background thread to fetch data matching filters and current offset."""
-        self._load_available_orders(preserve_selection=True)
+        self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
         # Cancel active thread if running safely
         if self.active_worker and self.active_worker.isRunning():
             self.active_worker.cancel()
@@ -624,13 +628,16 @@ class ReferenciasView(QWidget):
         self.current_page = page_num
         self.refresh_data()
 
-    def _load_available_orders(self, preserve_selection=False):
+    def _load_available_orders(self, preserve_selection=False, force_reload=False):
         try:
-            raw_ordenes = self.referencias_service.get_ordenes(include_rejected=False)
-            self.todas_las_ordenes = [
-                ord for ord in raw_ordenes
-                if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
-            ]
+            if not force_reload and getattr(self, 'todas_las_ordenes', None):
+                raw_ordenes = self.todas_las_ordenes
+            else:
+                raw_ordenes = self.referencias_service.get_ordenes(include_rejected=False)
+                self.todas_las_ordenes = [
+                    ord for ord in raw_ordenes
+                    if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+                ]
             if self.todas_las_ordenes:
                 valid_ids = {ord["orden_id"] for ord in self.todas_las_ordenes}
                 if preserve_selection and self.is_custom_filter:
