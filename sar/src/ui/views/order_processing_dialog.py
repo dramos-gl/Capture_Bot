@@ -188,41 +188,39 @@ class OrderProcessingDialog(QDialog):
         self.table.itemChanged.connect(self._on_item_changed)
         self.main_layout.addWidget(self.table)
 
-        # 5. Bottom Action Buttons Layout
+        # 5. Bottom Action Buttons Layout (Aligned to the Right)
         self.bottom_layout = QHBoxLayout()
+        self.bottom_layout.setSpacing(12)
+        self.bottom_layout.addStretch()
         
-        # Action Buttons
-        self.btn_fase_b_excel = CustomButton("Generar Excel", is_secondary=True)
-        self.btn_fase_b_excel.setIcon(Icons.file_excel("#16A34A")) # Excel green
-        self.btn_fase_b_excel.setToolTip("Generar Archivos Excel Lotes")
+        # Action Buttons (Standard Design System Factories)
+        self.btn_fase_b_excel = CustomButton.action_excel(parent=self)
+        self.btn_fase_b_excel.setToolTip("Generar lotes archivos excel")
         self.btn_fase_b_excel.clicked.connect(self._on_generar_excel_lotes)
         
-        self.btn_fase_b_pdf = CustomButton("Generar PDF", is_secondary=True)
-        self.btn_fase_b_pdf.setIcon(Icons.file_pdf("#DC2626")) # PDF red
-        self.btn_fase_b_pdf.setToolTip("Generar Archivos PDF Unificado")
+        self.btn_fase_b_pdf = CustomButton.action_pdf(parent=self)
+        self.btn_fase_b_pdf.setToolTip("Generar lotes archivos pdf")
         self.btn_fase_b_pdf.clicked.connect(self._on_generar_pdf_unificado)
 
-        self.btn_cancel = CustomButton("Cancelar", is_secondary=False)
-        self.btn_cancel.setObjectName("dangerBtn")
-        self.btn_cancel.setIcon(Icons.cancelar("#FFFFFF"))
-        self.btn_cancel.clicked.connect(self.reject)
-        
-        self.btn_reject = CustomButton("Rechazar seleccionadas", is_secondary=False)
-        self.btn_reject.setObjectName("orderProcessingRejectBtn")
-        self.btn_reject.setIcon(Icons.cancelar(Colors.ERROR))
-        self.btn_reject.clicked.connect(self._on_reject_selected)
-        
-        self.btn_authorize = CustomButton("Autorizar seleccionadas", is_secondary=False)
+        self.btn_authorize = CustomButton.action_autorizar(parent=self)
         self.btn_authorize.setObjectName("orderProcessingAuthBtn")
-        self.btn_authorize.setIcon(Icons.aceptar("#FFFFFF"))
+        self.btn_authorize.setToolTip("Autorizar solicitudes seleccionadas")
         self.btn_authorize.clicked.connect(self._on_authorize_selected)
+
+        self.btn_reject = CustomButton.action_rechazar(parent=self)
+        self.btn_reject.setObjectName("orderProcessingRejectBtn")
+        self.btn_reject.setToolTip("Rechazar solicitudes seleccionadas")
+        self.btn_reject.clicked.connect(self._on_reject_selected)
+
+        self.btn_cancel = CustomButton.action_cerrar(parent=self)
+        self.btn_cancel.setToolTip("Cerrar ventana")
+        self.btn_cancel.clicked.connect(self.reject)
         
         self.bottom_layout.addWidget(self.btn_fase_b_excel)
         self.bottom_layout.addWidget(self.btn_fase_b_pdf)
         self.bottom_layout.addWidget(self.btn_authorize)
         self.bottom_layout.addWidget(self.btn_reject)
         self.bottom_layout.addWidget(self.btn_cancel)
-        self.bottom_layout.addStretch()
         
         self.main_layout.addLayout(self.bottom_layout)
         

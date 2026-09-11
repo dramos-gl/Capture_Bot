@@ -21,6 +21,7 @@ from PySide6.QtGui import QFont, QCursor
 from sar.src.ui.design_system.components import (
     CustomCard, StyledDataTable, CustomButton, CustomLabel, 
     CustomCheckBox, CustomSwitch, MetricBox,
+    GLMessageDialog, DialogType,
     GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStatusIndicator
@@ -70,14 +71,21 @@ class R2FCancunView(QWidget):
         self.main_layout.setContentsMargins(10, 10, 10, 10)
         self.main_layout.setSpacing(10)
 
+        from sar.src.storage.api_client import APIClient
+        self.api_client = APIClient()
+
         # Cargar ruta base configurada
         self.default_output_dir = "T:\\CANCUN"
         try:
-            with self.db_connector.get_session() as session:
-                repo = ConfigRepository(session)
-                db_dir = repo.get_parametro("CANCUN_PDF_BASE_PATH")
-                if db_dir:
-                    self.default_output_dir = db_dir
+            if self.api_client.connect_via_api:
+                res = self.api_client.request("GET", "/api/docs/config/parametro/CANCUN_PDF_BASE_PATH")
+                db_dir = res.get("valor")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ConfigRepository(session)
+                    db_dir = repo.get_parametro("CANCUN_PDF_BASE_PATH")
+            if db_dir:
+                self.default_output_dir = db_dir
         except Exception as e:
             logger.error(f"Error cargando directorio de Cancún: {e}")
 
@@ -155,6 +163,10 @@ class R2FCancunView(QWidget):
         self.btn_importar_excel = CustomButton("📁 Importar Excel", is_secondary=True)
         self.btn_importar_excel.clicked.connect(self._on_importar_excel)
         buttons_row_layout.addWidget(self.btn_importar_excel)
+
+        self.btn_importar_pdf = CustomButton("📄 Importar PDF(s)", is_secondary=True)
+        self.btn_importar_pdf.clicked.connect(self._on_importar_pdf)
+        buttons_row_layout.addWidget(self.btn_importar_pdf)
 
         self.btn_descargar_plantilla = CustomButton("⬇ Plantilla", is_secondary=True)
         self.btn_descargar_plantilla.clicked.connect(self._on_descargar_plantilla)
@@ -321,81 +333,134 @@ class R2FCancunView(QWidget):
             QMessageBox.warning(self, "Lote no seleccionado", "Selecciona un lote haciendo doble clic en la tabla de lotes.")
             return
 
-        # Validar el estado del lote en la base de datos antes de iniciar
+        # Validar disponibilidad de la unidad de red o ruta por defecto
+        if hasattr(self, 'is_path_online') and not self.is_path_online:
+            target_path = self.selected_custom_path if self.selected_custom_path else self.default_output_dir
+            reply = QMessageBox.warning(
+                self,
+                "Unidad de Red No Conectada",
+                f"La ruta de almacenamiento 'CANCUN_PDF_BASE_PATH' ({target_path}) se encuentra NO CONECTADA.\n\n"
+                f"Por favor revise su conexión a la red o reporte la falla al departamento de TI.\n\n"
+                f"¿Desea continuar guardando temporalmente en contingencia local?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                self._write_log("Inicio de procesamiento cancelado por falta de conexión a la unidad de red.")
+                return
+
+        # Validar el estado del lote en la base de datos o API antes de iniciar
         try:
-            with self.db_connector.get_session() as session:
-                from sqlalchemy import text
-                lote_row = session.execute(
-                    text("""
-                        SELECT e.codigo 
-                        FROM cancunbot_produccion.lote_folio l
-                        JOIN sar_catalogo.estado_sistema e ON l.estado_id = e.estado_id
-                        WHERE l.lote_id = :lid
-                    """),
-                    {"lid": self.selected_lote_id}
-                ).fetchone()
-                
-                estado_lote = lote_row[0] if lote_row else "NUEVO"
+            if self.api_client and getattr(self.api_client, 'connect_via_api', False):
+                lote_data = self.api_client.request("GET", f"/api/docs/cancun/lotes/{self.selected_lote_id}/detalles") or {}
+                estado_lote = lote_data.get("estado_codigo", "NUEVO")
+            else:
+                with self.db_connector.get_session() as session:
+                    from sqlalchemy import text
+                    lote_row = session.execute(
+                        text("""
+                            SELECT e.codigo 
+                            FROM cancunbot_produccion.lote_folio l
+                            JOIN sar_catalogo.estado_sistema e ON l.estado_id = e.estado_id
+                            WHERE l.lote_id = :lid
+                        """),
+                        {"lid": self.selected_lote_id}
+                    ).fetchone()
+                    estado_lote = lote_row[0] if lote_row else "NUEVO"
 
-                if estado_lote == "COMPLETADO":
-                    QMessageBox.information(
-                        self, 
-                        "Lote Completado", 
-                        "Este lote ya ha sido procesado de forma exitosa en su totalidad.\nNo hay folios pendientes de descargar."
-                    )
+            if estado_lote == "COMPLETADO":
+                QMessageBox.information(
+                    self, 
+                    "Lote Completado", 
+                    "Este lote ya ha sido procesado de forma exitosa en su totalidad.\nNo hay folios pendientes de descargar."
+                )
+                return
+
+            # Si es un lote con errores (COMPLETADO_PARCIAL), reactivar los folios fallidos
+            if estado_lote in ("COMPLETADO_PARCIAL", "EN_PROCESO"):
+                reply = QMessageBox.question(
+                    self,
+                    "Reintentar Errores",
+                    "El lote seleccionado ya fue procesado pero contiene errores o descargas pendientes.\n"
+                    "¿Deseas reactivar los folios con error y volver a procesarlos?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                if reply == QMessageBox.Yes:
+                    if self.api_client and getattr(self.api_client, 'connect_via_api', False):
+                        self.api_client.request("POST", f"/api/docs/cancun/lotes/{self.selected_lote_id}/reactivar-errores")
+                    else:
+                        with self.db_connector.get_session() as session:
+                            from sqlalchemy import text
+                            st_pendiente = session.execute(
+                                text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'folio_cancun' AND codigo = 'PENDIENTE'")
+                            ).scalar()
+                            st_error = session.execute(
+                                text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'folio_cancun' AND codigo = 'ERROR_DESCARGA'")
+                            ).scalar()
+                            
+                            session.execute(
+                                text("""
+                                    UPDATE cancunbot_produccion.folio_cancun 
+                                    SET estado_id = :st_p, ultimo_error = NULL
+                                    WHERE lote_id = :lid AND estado_id = :st_e
+                                """),
+                                {"st_p": st_pendiente, "lid": self.selected_lote_id, "st_e": st_error}
+                            )
+                            session.commit()
+                    self._write_log(f"Reactivando folios con error del lote {self.selected_lote_id} para reintento.")
+                elif estado_lote == "COMPLETADO_PARCIAL":
                     return
-
-                # Si es un lote con errores (COMPLETADO_PARCIAL), reactivar los folios fallidos
-                if estado_lote in ("COMPLETADO_PARCIAL", "EN_PROCESO"):
-                    # Preguntar al usuario si desea reintentar los folios fallidos
-                    reply = QMessageBox.question(
-                        self,
-                        "Reintentar Errores",
-                        "El lote seleccionado ya fue procesado pero contiene errores o descargas pendientes.\n"
-                        "¿Deseas reactivar los folios con error y volver a procesarlos?",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.Yes
-                    )
-                    if reply == QMessageBox.Yes:
-                        # Resetear los folios que tengan estado 'ERROR_DESCARGA' de vuelta a 'PENDIENTE'
-                        st_pendiente = session.execute(
-                            text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'folio_cancun' AND codigo = 'PENDIENTE'")
-                        ).scalar()
-                        st_error = session.execute(
-                            text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'folio_cancun' AND codigo = 'ERROR_DESCARGA'")
-                        ).scalar()
-                        
-                        session.execute(
-                            text("""
-                                UPDATE cancunbot_produccion.folio_cancun 
-                                SET estado_id = :st_p, ultimo_error = NULL
-                                WHERE lote_id = :lid AND estado_id = :st_e
-                            """),
-                            {"st_p": st_pendiente, "lid": self.selected_lote_id, "st_e": st_error}
-                        )
-                        session.commit()
-                        self._write_log(f"Reactivando folios con error del lote {self.selected_lote_id} para reintento.")
-                    elif estado_lote == "COMPLETADO_PARCIAL":
-                        # Si decide no reactivar, no hay nada que procesar
-                        return
         except Exception as e:
             logger.error(f"Error validando estado del lote antes de iniciar: {e}")
 
+        # 4. Diálogo de confirmación antes de iniciar el bot
+        modo_ejecucion = "Navegador Visible (Manual)" if self.chk_autonomo.isChecked() else "En Segundo Plano (Autónomo)"
+        lote_info = f"Lote ID #{self.selected_lote_id}" if self.selected_lote_id else "Sin Lote"
+
+        confirm_dialog = GLMessageDialog(
+            title="Confirmar Inicio de Bot",
+            message=f"¿Deseas iniciar la descarga de recibos del portal de Tesorería de Cancún?\n\n"
+                    f"• {lote_info}\n"
+                    f"• Modo de Ejecución: {modo_ejecucion}\n"
+                    f"• Destino: {self.selected_custom_path or self.default_output_dir}",
+            dialog_type=DialogType.QUESTION,
+            confirm_text="Iniciar Bot",
+            cancel_text="Cancelar",
+            parent=self
+        )
+        if confirm_dialog.exec() != QDialog.Accepted:
+            self._write_log("Ejecución del Bot cancelada por el usuario.")
+            return
+
         self.btn_iniciar.setText("⏹ Detener Bot")
         self.btn_iniciar.setStyleSheet(f"background-color: {Colors.ERROR}; color: white;")
+        
+        # Deshabilitar TODOS los controles de UI para blindar ante errores humanos
         self.switch_modo.setEnabled(False)
+        self.chk_autonomo.setEnabled(False)
+        self.btn_importar_excel.setEnabled(False)
+        self.btn_importar_pdf.setEnabled(False)
+        self.btn_descargar_plantilla.setEnabled(False)
         self.btn_browse.setEnabled(False)
+        self.btn_control_r2f.setEnabled(False)
+        self.table_lotes.setEnabled(False)
+        self.table_detalles.setEnabled(False)
 
         # Si el interruptor de visible está activo (Checked), headless debe ser False (Navegador visible)
         es_visible = self.chk_autonomo.isChecked()
         headless_mode = not es_visible
 
-        # Inicializar el QThread Worker pasando la ruta personalizada si existe
+        # Cargar/refrescar métricas del lote actual en las tarjetas superiores antes de arrancar
+        self._load_lote_detalles(self.selected_lote_id)
+
+        # Inicializar el QThread Worker pasando la ruta personalizada si existe y el cliente API
         self.active_worker = BotReciboCunWorker(
             db_connector=self.db_connector,
             lote_id=self.selected_lote_id,
             headless=headless_mode,
-            custom_output_dir=self.selected_custom_path
+            custom_output_dir=self.selected_custom_path,
+            api_client=self.api_client
         )
 
         self.active_worker.status_changed.connect(self._write_log)
@@ -412,8 +477,17 @@ class R2FCancunView(QWidget):
         self.btn_iniciar.setEnabled(True)
         self.btn_iniciar.setText("▶ Iniciar Bot")
         self.btn_iniciar.setStyleSheet(f"background-color: {Colors.SURFACE_DARK}; color: white;")
+        
+        # Rehabilitar controles de UI tras finalizar el proceso
         self.switch_modo.setEnabled(True)
+        self.chk_autonomo.setEnabled(True)
+        self.btn_importar_excel.setEnabled(True)
+        self.btn_importar_pdf.setEnabled(True)
+        self.btn_descargar_plantilla.setEnabled(True)
         self.btn_browse.setEnabled(True)
+        self.btn_control_r2f.setEnabled(True)
+        self.table_lotes.setEnabled(True)
+        self.table_detalles.setEnabled(True)
         
         self.lbl_portal_status.setText("Portal: INACTIVO")
         self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.BORDER_DARK}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")
@@ -427,11 +501,39 @@ class R2FCancunView(QWidget):
         if self.selected_lote_id:
             self._load_lote_detalles(self.selected_lote_id)
 
+    def closeEvent(self, event):
+        """Asegura la detención limpia del worker al cerrar la vista/pestaña."""
+        if hasattr(self, 'active_worker') and self.active_worker and self.active_worker.isRunning():
+            self.active_worker.stop()
+            self.active_worker.wait(3000)
+        super().closeEvent(event)
+
     def _on_metric_updated(self, metric: str, value: int):
         if metric == "exitosos":
             self.box_exitosos.set_value(str(value))
+            if hasattr(self, "exitosos_base"):
+                self.current_success = self.exitosos_base + value
+            else:
+                self.current_success = value
         elif metric == "errores":
             self.box_errores.set_value(str(value))
+            if hasattr(self, "errores_base"):
+                self.current_errors = self.errores_base + value
+            else:
+                self.current_errors = value
+        elif metric == "pendientes":
+            self.box_pendientes.set_value(str(value))
+            return
+        
+        # Lógica exacta del Bot Face A (bot_view.py):
+        # Pendientes se calcula dinámicamente: total_referencias - total_exitosos - total_errores
+        if hasattr(self, "total_referencias"):
+            cur_succ = getattr(self, "current_success", 0)
+            cur_err = getattr(self, "current_errors", 0)
+            remaining = self.total_referencias - cur_succ - cur_err
+            nuevo_pendientes = max(0, remaining)
+            self.box_pendientes.set_value(str(nuevo_pendientes))
+            logger.debug(f"Métricas (Face A logic): Total={self.total_referencias}, Succ={cur_succ}, Err={cur_err} -> Pendientes={nuevo_pendientes}")
 
     def _on_progress_changed(self, current: int, total: int):
         if total > 0:
@@ -445,23 +547,34 @@ class R2FCancunView(QWidget):
         self.lbl_m_est.setText(data.get("estado", "--"))
 
     def _refresh_lotes_table(self):
-        """Carga la lista de lotes desde la base de datos usando el estándar populate_rows de StyledDataTable."""
+        """Carga la lista de lotes desde la base de datos o API REST usando el estándar populate_rows de StyledDataTable."""
         try:
-            with self.db_connector.get_session() as session:
-                repo = LoteFolioRepository(session)
-                lotes = repo.list_all()
-
-                data = []
+            data = []
+            if self.api_client and getattr(self.api_client, 'connect_via_api', False):
+                lotes = self.api_client.request("GET", "/api/docs/cancun/lotes")
                 for lote in lotes:
                     data.append([
-                        str(lote.lote_id),
-                        lote.folio_lote,
-                        lote.origen,
-                        str(lote.total_folios),
-                        str(lote.folios_procesados),
-                        lote.estado.codigo
+                        str(lote["lote_id"]),
+                        lote["folio_lote"],
+                        lote["origen"],
+                        str(lote["total_folios"]),
+                        str(lote["folios_procesados"]),
+                        lote["estado_codigo"]
                     ])
-                self.table_lotes.populate_rows(data)
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = LoteFolioRepository(session)
+                    lotes = repo.list_all()
+                    for lote in lotes:
+                        data.append([
+                            str(lote.lote_id),
+                            lote.folio_lote,
+                            lote.origen,
+                            str(lote.total_folios),
+                            str(lote.folios_procesados),
+                            lote.estado.codigo
+                        ])
+            self.table_lotes.populate_rows(data)
         except Exception as e:
             logger.error(f"Error cargando tabla de lotes: {e}")
 
@@ -503,25 +616,57 @@ class R2FCancunView(QWidget):
 
     def _load_lote_detalles(self, lote_id: int):
         try:
-            with self.db_connector.get_session() as session:
-                lote_repo = LoteFolioRepository(session)
-                lote = lote_repo.get_by_id(lote_id)
+            if self.api_client and getattr(self.api_client, 'connect_via_api', False):
+                lote = self.api_client.request("GET", f"/api/docs/cancun/lotes/{lote_id}/detalles")
                 if lote:
-                    self.box_pendientes.set_value(str(lote.total_folios - lote.folios_procesados - lote.folios_error))
-                    self.box_exitosos.set_value(str(lote.folios_procesados))
-                    self.box_errores.set_value(str(lote.folios_error))
+                    self.total_referencias = lote["total_folios"]
+                    self.exitosos_base = lote["folios_procesados"]
+                    self.errores_base = lote["folios_error"]
+                    self.current_success = self.exitosos_base
+                    self.current_errors = self.errores_base
+
+                    pendientes = max(0, self.total_referencias - self.current_success - self.current_errors)
+                    self.box_pendientes.set_value(str(pendientes))
+                    self.box_exitosos.set_value(str(self.current_success))
+                    self.box_errores.set_value(str(self.current_errors))
 
                     data = []
-                    for folio in lote.folios:
-                        f_text = folio.folio_electronico if folio.tipo_folio == "ELECTRONICO" else folio.folio_pase_caja
+                    for folio in lote.get("folios", []):
                         data.append([
-                            str(folio.folio_id),
-                            f_text,
-                            folio.tipo_folio,
-                            str(folio.intentos),
-                            folio.estado.codigo
+                            str(folio["folio_id"]),
+                            folio["folio_texto"],
+                            folio["tipo_folio"],
+                            str(folio["intentos"]),
+                            folio["estado_codigo"]
                         ])
                     self.table_detalles.populate_rows(data)
+            else:
+                with self.db_connector.get_session() as session:
+                    lote_repo = LoteFolioRepository(session)
+                    lote = lote_repo.get_by_id(lote_id)
+                    if lote:
+                        self.total_referencias = lote.total_folios
+                        self.exitosos_base = lote.folios_procesados
+                        self.errores_base = lote.folios_error
+                        self.current_success = self.exitosos_base
+                        self.current_errors = self.errores_base
+
+                        pendientes = max(0, self.total_referencias - self.current_success - self.current_errors)
+                        self.box_pendientes.set_value(str(pendientes))
+                        self.box_exitosos.set_value(str(self.current_success))
+                        self.box_errores.set_value(str(self.current_errors))
+
+                        data = []
+                        for folio in lote.folios:
+                            f_text = folio.folio_electronico if folio.tipo_folio == "ELECTRONICO" else folio.folio_pase_caja
+                            data.append([
+                                str(folio.folio_id),
+                                f_text,
+                                folio.tipo_folio,
+                                str(folio.intentos),
+                                folio.estado.codigo
+                            ])
+                        self.table_detalles.populate_rows(data)
         except Exception as e:
             logger.error(f"Error cargando folios de lote: {e}")
 
@@ -653,6 +798,29 @@ class R2FCancunView(QWidget):
             logger.error(f"Error importando lote desde Excel: {err}")
             QMessageBox.critical(self, "Error de Importación", f"No se pudo procesar el archivo Excel: {err}")
 
+    def _on_importar_pdf(self):
+        """Abre diálogo para seleccionar uno o varios archivos PDF de Pases de Caja y lanza la previsualización modal."""
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Seleccionar Boletas o Pases de Caja en PDF",
+            "",
+            "Archivos PDF (*.pdf)"
+        )
+        if not file_paths:
+            return
+
+        from cancunbot.src.ui.dialogs.pdf_analysis_dialog import PdfAnalysisDialog
+        dialog = PdfAnalysisDialog(
+            pdf_paths=file_paths,
+            api_client=self.api_client,
+            db_connector=self.db_connector,
+            usuario_id=self.usuario_id,
+            parent=self
+        )
+        if dialog.exec() == QDialog.Accepted:
+            self._write_log(f"Lote #{dialog.created_lote_id} generado exitosamente desde importación PDF.")
+            self._refresh_lotes_table()
+
     def _on_descargar_plantilla(self):
         """Genera y descarga una plantilla Excel vacía con el formato de columnas aceptado por el validador."""
         file_path, _ = QFileDialog.getSaveFileName(
@@ -702,14 +870,20 @@ class R2FCancunView(QWidget):
         url_facturas = "https://benitojuarez.expidefactura.com/"
 
         try:
-            with self.db_connector.get_session() as session:
-                repo = ConfigRepository(session)
-                db_url_r = repo.get_parametro("CANCUN_PORTAL_RECIBO_URL")
-                db_url_f = repo.get_parametro("CANCUN_PORTAL_FACTURA_URL")
-                if db_url_r:
-                    url_recibos = db_url_r
-                if db_url_f:
-                    url_facturas = db_url_f
+            if self.api_client and getattr(self.api_client, 'connect_via_api', False):
+                res_r = self.api_client.request("GET", "/api/docs/config/parametro/CANCUN_PORTAL_RECIBO_URL")
+                res_f = self.api_client.request("GET", "/api/docs/config/parametro/CANCUN_PORTAL_FACTURA_URL")
+                if res_r.get("valor"): url_recibos = res_r.get("valor")
+                if res_f.get("valor"): url_facturas = res_f.get("valor")
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = ConfigRepository(session)
+                    db_url_r = repo.get_parametro("CANCUN_PORTAL_RECIBO_URL")
+                    db_url_f = repo.get_parametro("CANCUN_PORTAL_FACTURA_URL")
+                    if db_url_r:
+                        url_recibos = db_url_r
+                    if db_url_f:
+                        url_facturas = db_url_f
         except Exception as e:
             logger.error(f"Error cargando URLs para menú de configuración: {e}")
 
@@ -730,11 +904,27 @@ class R2FCancunView(QWidget):
 
         nombre_usuario = f"Usuario ID: {self.usuario_id}"
         try:
-            with self.db_connector.get_session() as session:
-                from sar.src.storage.models import Usuario
-                db_user = session.get(Usuario, self.usuario_id)
-                if db_user and db_user.nombre:
-                    nombre_usuario = db_user.nombre
+            if self.api_client and getattr(self.api_client, 'connect_via_api', False):
+                parent_window = self.window()
+                cached_name = getattr(parent_window, 'current_username', None)
+                if not cached_name and parent_window and parent_window.parent():
+                    cached_name = getattr(parent_window.parent(), 'current_username', None)
+                
+                if cached_name:
+                    nombre_usuario = cached_name
+                elif self.usuario_id:
+                    users_list = self.api_client.request("GET", "/api/auth/users")
+                    if isinstance(users_list, list):
+                        for u in users_list:
+                            if u.get("usuario_id") == self.usuario_id or u.get("id") == self.usuario_id:
+                                nombre_usuario = u.get("nombre") or u.get("username") or nombre_usuario
+                                break
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.storage.models import Usuario
+                    db_user = session.get(Usuario, self.usuario_id)
+                    if db_user and db_user.nombre:
+                        nombre_usuario = db_user.nombre
         except Exception as e:
             logger.error(f"Error cargando perfil de usuario: {e}")
 
@@ -836,12 +1026,14 @@ class R2FCancunView(QWidget):
             self.path_verify_thread.start()
 
     def _on_path_verified(self, path_str, has_access, error_message):
+        self.is_path_online = has_access
         if has_access:
             self.status_indicator.set_status("online", "CONECTADO")
-            self._write_log(f"Ruta de almacenamiento accesible y verificada: {path_str}")
+            self._write_log(f"Ruta de almacenamiento 'CANCUN_PDF_BASE_PATH' accesible y verificada: {path_str}")
         else:
-            self.status_indicator.set_status("offline", "SIN ACCESO")
-            self._write_log(f"⚠️ ADVERTENCIA: La ruta de almacenamiento '{path_str}' no es accesible. Detalle: {error_message}")
+            self.status_indicator.set_status("offline", "NO CONECTADO")
+            self._write_log(f"⚠️ ADVERTENCIA CRÍTICA: La ruta por defecto 'CANCUN_PDF_BASE_PATH' ('{path_str}') no está accesible o su unidad de red está desconectada.")
+            self._write_log("👉 Por favor revise que la unidad de red esté conectada o reporte el problema al área de TI.")
 
     def _on_browse_path_clicked(self):
         """Diálogo de selección de directorio de almacenamiento, replicando la confirmación de Face A."""

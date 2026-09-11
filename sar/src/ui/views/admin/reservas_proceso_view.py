@@ -4,8 +4,9 @@ import os
 import openpyxl
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QFrame,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QComboBox, QTextEdit, QLabel
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QTextEdit, QLabel
 )
+from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QBrush
@@ -79,7 +80,7 @@ class ReservasProcesoView(QWidget):
         colab_title_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #1E293B;")
         left_col.addWidget(colab_title_lbl)
 
-        self.cb_colaborador = QComboBox()
+        self.cb_colaborador = CustomComboBox()
         self.cb_colaborador.setFixedWidth(300)
         self.cb_colaborador.setStyleSheet("""
             QComboBox {
@@ -264,7 +265,7 @@ class ReservasProcesoView(QWidget):
         self.footer_layout.addStretch()
 
         self.footer_layout.addWidget(CustomLabel("Filas por página", variant="muted"))
-        self.cb_page_limit = QComboBox()
+        self.cb_page_limit = CustomComboBox()
         self.cb_page_limit.addItems(["25", "50", "100"])
         self.cb_page_limit.setFixedWidth(70)
         self.cb_page_limit.setStyleSheet("padding: 3px; border: 1px solid #CBD5E1; border-radius: 4px;")

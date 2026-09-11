@@ -39,12 +39,13 @@ class BotReciboCunWorker(QThread):
     finished_processing = Signal(bool, str) # success, message
     folio_status_changed = Signal(dict)     # metadata dict: {"referencia": str, "rfc": str, "estado": str}
 
-    def __init__(self, db_connector: DatabaseConnector, lote_id: int, headless: bool = True, custom_output_dir: Optional[str] = None, parent=None):
+    def __init__(self, db_connector: DatabaseConnector, lote_id: int, headless: bool = True, custom_output_dir: Optional[str] = None, api_client=None, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
         self.lote_id = lote_id
         self.headless = headless
         self.custom_output_dir = custom_output_dir
+        self.api_client = api_client
         self._stop_requested = False
 
     def stop(self):
@@ -58,24 +59,34 @@ class BotReciboCunWorker(QThread):
         browser = None
         browser_context = None
 
-        try:
-            # 1. Cargar configuración y selectores desde sar_db
-            self.status_changed.emit("Cargando parámetros y localizadores desde la base de datos...")
-            with self.db_connector.get_session() as session:
-                config_repo = ConfigRepository(session)
-                portal_url = config_repo.get_parametro("CANCUN_PORTAL_RECIBO_URL") or "https://recibo.tesoreriacancun.com"
-                max_retries = int(config_repo.get_parametro("CANCUN_MAX_REINTENTOS") or 3)
-                output_dir_raw = self.custom_output_dir if self.custom_output_dir else (config_repo.get_parametro("CANCUN_PDF_BASE_PATH") or "Y:\\R2F\\Recibos")
-                timeout_ms = int(config_repo.get_parametro("CANCUN_BOT_TIMEOUT_MS") or 30000)
+        use_api = (self.api_client is not None and getattr(self.api_client, "connect_via_api", False))
 
-                # Obtener selectores de portal y desacoplar sus campos
-                db_locators = config_repo.get_localizadores_portal("CANCUN_RECIBO")
-                locators = {}
-                for k, v in db_locators.items():
-                    locators[k] = {
-                        "estrategia_selector": v.estrategia_selector,
-                        "valor_selector": v.valor_selector
-                    }
+        try:
+            # 1. Cargar configuración y selectores desde la BD o REST API
+            self.status_changed.emit("Cargando parámetros y localizadores de portal...")
+            if use_api:
+                resp_cfg = self.api_client.request("GET", "/api/docs/cancun/bot-config")
+                portal_url = resp_cfg.get("portal_url", "https://recibo.tesoreriacancun.com")
+                max_retries = int(resp_cfg.get("max_retries", 3))
+                output_dir_raw = self.custom_output_dir if self.custom_output_dir else resp_cfg.get("output_dir_raw", "Y:\\R2F\\Recibos")
+                timeout_ms = int(resp_cfg.get("timeout_ms", 30000))
+                locators = resp_cfg.get("locators", {})
+            else:
+                with self.db_connector.get_session() as session:
+                    config_repo = ConfigRepository(session)
+                    portal_url = config_repo.get_parametro("CANCUN_PORTAL_RECIBO_URL") or "https://recibo.tesoreriacancun.com"
+                    max_retries = int(config_repo.get_parametro("CANCUN_MAX_REINTENTOS") or 3)
+                    output_dir_raw = self.custom_output_dir if self.custom_output_dir else (config_repo.get_parametro("CANCUN_PDF_BASE_PATH") or "Y:\\R2F\\Recibos")
+                    timeout_ms = int(config_repo.get_parametro("CANCUN_BOT_TIMEOUT_MS") or 30000)
+
+                    # Obtener selectores de portal y desacoplar sus campos
+                    db_locators = config_repo.get_localizadores_portal("CANCUN_RECIBO")
+                    locators = {}
+                    for k, v in db_locators.items():
+                        locators[k] = {
+                            "estrategia_selector": v.estrategia_selector,
+                            "valor_selector": v.valor_selector
+                        }
 
             # Validar y crear directorio de descarga final
             output_path = Path(output_dir_raw)
@@ -89,86 +100,86 @@ class BotReciboCunWorker(QThread):
 
             self.status_changed.emit(f"Ruta de almacenamiento de recibos: {output_path}")
 
-            # 2. Consultar los folios pendientes del lote desde la BD
-            with self.db_connector.get_session() as session:
-                folio_repo = FolioCancunRepository(session)
-                lote_repo = LoteFolioRepository(session)
-                
-                lote = lote_repo.get_by_id(self.lote_id)
-                if not lote:
-                    self.finished_processing.emit(False, f"El lote con ID {self.lote_id} no existe.")
+            # 2. Consultar los folios pendientes del lote desde la BD o REST API
+            if use_api:
+                resp_init = self.api_client.request("POST", f"/api/docs/cancun/lotes/{self.lote_id}/iniciar")
+                if not resp_init.get("success"):
+                    self.finished_processing.emit(False, f"No se pudo iniciar el lote ID {self.lote_id} vía API.")
                     return
-                
-                # Actualiza estado del lote a procesando
-                lote.estado_id = lote_repo._get_estado_id("lote_folio", "EN_PROCESO")
-                session.commit()
+                folios_pendientes = resp_init.get("folios_pendientes", [])
+            else:
+                with self.db_connector.get_session() as session:
+                    folio_repo = FolioCancunRepository(session)
+                    lote_repo = LoteFolioRepository(session)
+                    
+                    lote = lote_repo.get_by_id(self.lote_id)
+                    if not lote:
+                        self.finished_processing.emit(False, f"El lote con ID {self.lote_id} no existe.")
+                        return
+                    
+                    # Actualiza estado del lote a procesando
+                    lote.estado_id = lote_repo._get_estado_id("lote_folio", "EN_PROCESO")
+                    session.commit()
 
-                # Obtener folios pendientes del lote
-                st_pending_id = folio_repo._get_estado_id("folio_cancun", "PENDIENTE")
-                
-                # Extraemos y desacoplamos los datos de los folios a diccionarios en memoria dentro de la sesión activa
-                folios_pendientes = []
-                for f in lote.folios:
-                    if f.estado_id == st_pending_id:
-                        folios_pendientes.append({
-                            "folio_id": f.folio_id,
-                            "tipo_folio": f.tipo_folio,
-                            "folio_electronico": f.folio_electronico,
-                            "folio_pase_caja": f.folio_pase_caja,
-                            "intentos": f.intentos,
-                            "rfc_id": f.rfc_id,
-                            "desarrollo_nombre": f.desarrollo_asoc.nombre if f.desarrollo_asoc else None
-                        })
+                    # Obtener folios pendientes del lote
+                    st_pending_id = folio_repo._get_estado_id("folio_cancun", "PENDIENTE")
+                    
+                    # Extraemos y desacoplamos los datos de los folios a diccionarios en memoria dentro de la sesión activa
+                    folios_pendientes = []
+                    for f in lote.folios:
+                        if f.estado_id == st_pending_id:
+                            folios_pendientes.append({
+                                "folio_id": f.folio_id,
+                                "tipo_folio": f.tipo_folio,
+                                "folio_electronico": f.folio_electronico,
+                                "folio_pase_caja": f.folio_pase_caja,
+                                "intentos": f.intentos,
+                                "rfc_id": f.rfc_id,
+                                "desarrollo_nombre": f.desarrollo_asoc.nombre if f.desarrollo_asoc else None
+                            })
 
             total_items = len(folios_pendientes)
             if total_items == 0:
                 self.status_changed.emit("No hay folios pendientes por procesar en este lote.")
-                self.finished_processing.emit(True, "No se encontraron folios pendientes en este lote.")
+                self.finished_processing.emit(True, "El lote no contiene folios pendientes.")
                 return
 
-            self.status_changed.emit(f"Se encontraron {total_items} folios listos para descargar.")
-            self.progress_changed.emit(0, total_items)
+            self.status_changed.emit(f"Folios pendientes por procesar: {total_items}")
 
-            # 3. Inicializar navegador con Playwright
-            self.status_changed.emit("Inicializando navegador Playwright...")
+            # 3. Inicializar Playwright resolviendo el ejecutable (soporte para PyInstaller congelado y Chrome/Edge local)
+            self.status_changed.emit("Resolviendo ejecutable del navegador...")
+            chromium_exe_path = resolve_chromium_executable(progress_callback=self.status_changed.emit)
+
+            self.status_changed.emit("Abriendo navegador de automatización...")
             playwright_inst = sync_playwright().start()
-
-            # Resolver ejecutable de Chromium (para despliegues PyInstaller)
-            executable_path = resolve_chromium_executable(
-                progress_callback=lambda msg: self.status_changed.emit(msg)
-            )
-
-            launch_args = [
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-infobars",
-                "--ignore-certificate-errors",
-            ]
+            
             launch_kwargs = {
                 "headless": self.headless,
-                "args": launch_args,
+                "args": [
+                    "--start-maximized",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox"
+                ]
             }
-            if executable_path:
-                launch_kwargs["executable_path"] = executable_path
+            if chromium_exe_path:
+                launch_kwargs["executable_path"] = chromium_exe_path
+                self.status_changed.emit(f"Usando ejecutable de navegador: {chromium_exe_path}")
 
             browser = playwright_inst.chromium.launch(**launch_kwargs)
             browser_context = browser.new_context(
-                viewport={"width": 1280, "height": 800},
+                viewport=None, # Permite maximizar tamaño nativo
                 accept_downloads=True,
-                ignore_https_errors=True
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
-            browser_context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-            # 4. Iniciar bucle de procesamiento
-            procesados_ok = 0
-            procesados_err = 0
+            # 4. Bucle principal de procesamiento de folios
             extractor = PdfExtractor()
-            
-            # Instanciar la página persistente fuera del bucle de folios
             page = browser_context.new_page()
             page.set_default_timeout(timeout_ms)
             page_needs_init = True
+            
+            procesados_ok = 0
+            procesados_err = 0
 
             for idx, folio_dict in enumerate(folios_pendientes):
                 if self._stop_requested:
@@ -191,10 +202,13 @@ class BotReciboCunWorker(QThread):
                 })
 
                 # Actualiza estado del folio a descarga en proceso
-                with self.db_connector.get_session() as session:
-                    f_repo = FolioCancunRepository(session)
-                    f_repo.update_status(folio_id, "DESCARGANDO")
-                    session.commit()
+                if use_api:
+                    self.api_client.request("POST", f"/api/docs/cancun/folios/{folio_id}/resultado", json={"estado_codigo": "DESCARGANDO"})
+                else:
+                    with self.db_connector.get_session() as session:
+                        f_repo = FolioCancunRepository(session)
+                        f_repo.update_status(folio_id, "DESCARGANDO")
+                        session.commit()
 
                 retry_attempt = 0
                 step_success = False
@@ -275,134 +289,87 @@ class BotReciboCunWorker(QThread):
                         # Forzar el cierre y reapertura de la ventana en el siguiente reintento
                         page_needs_init = True
 
-                # Guardar el resultado en la base de datos
-                with self.db_connector.get_session() as session:
-                    f_repo = FolioCancunRepository(session)
-                    r_repo = ReciboCancunRepository(session)
+                # Guardar el resultado en la base de datos o vía API
+                if step_success and temp_pdf_path:
+                    try:
+                        # Parsear el PDF para extraer los campos clave
+                        self.status_changed.emit("   -> Analizando PDF y extrayendo campos...")
+                        datos_pdf = extractor.extraer(temp_pdf_path, db_session=None)
+                        hash_file = extractor.calcular_hash(temp_pdf_path)
 
-                    if step_success and temp_pdf_path:
+                        # Definir subcarpeta de Desarrollo dinámicamente forzando subdirectorio \Recibos\
+                        des_name = folio_dict.get("desarrollo_nombre")
+                        des_folder = "".join([c if c.isalnum() or c in (" ", "_", "-") else "" for c in des_name]).strip() if des_name else "Sin_Desarrollo"
+                         
+                        # Si output_path ya termina con "Recibos", no lo duplicamos, de lo contrario lo añadimos
+                        if output_path.name.lower() == "recibos":
+                            target_des_dir = output_path / des_folder
+                        else:
+                            target_des_dir = output_path / "Recibos" / des_folder
+                          
                         try:
-                            # Parsear el PDF para extraer los campos clave
-                            self.status_changed.emit("   -> Analizando PDF y extrayendo campos...")
-                            datos_pdf = extractor.extraer(temp_pdf_path, db_session=session)
-                            hash_file = extractor.calcular_hash(temp_pdf_path)
+                            target_des_dir.mkdir(parents=True, exist_ok=True)
+                        except Exception as dir_err:
+                            logger.warning(f"No se pudo crear subcarpeta de desarrollo {target_des_dir}: {dir_err}. Usando raíz de salida.")
+                            target_des_dir = output_path
 
-                            # Definir subcarpeta de Desarrollo dinámicamente forzando subdirectorio \Recibos\
-                            des_name = folio_dict.get("desarrollo_nombre")
-                            des_folder = "".join([c if c.isalnum() or c in (" ", "_", "-") else "" for c in des_name]).strip() if des_name else "Sin_Desarrollo"
-                             
-                            # Si output_path ya termina con "Recibos", no lo duplicamos, de lo contrario lo añadimos
-                            if output_path.name.lower() == "recibos":
-                                target_des_dir = output_path / des_folder
-                            else:
-                                target_des_dir = output_path / "Recibos" / des_folder
-                              
-                            try:
-                                target_des_dir.mkdir(parents=True, exist_ok=True)
-                            except Exception as dir_err:
-                                logger.warning(f"No se pudo crear subcarpeta de desarrollo {target_des_dir}: {dir_err}. Usando raíz de salida.")
-                                target_des_dir = output_path
+                        # Definir nombre de archivo y ruta organizada
+                        pdf_name = f"Recibo_{folio_texto}_{int(datetime.now().timestamp())}.pdf"
+                        final_pdf_path = target_des_dir / pdf_name
 
-                            # Definir nombre de archivo y ruta organizada
-                            pdf_name = f"Recibo_{folio_texto}_{int(datetime.now().timestamp())}.pdf"
-                            final_pdf_path = target_des_dir / pdf_name
+                        # Mover archivo
+                        shutil.move(temp_pdf_path, final_pdf_path)
 
-                            # Mover archivo
-                            shutil.move(temp_pdf_path, final_pdf_path)
+                        # Estructurar datos a insertar en recibo_cancun
+                        dict_recibo = {
+                            "folio_pase_caja": datos_pdf.folio_pase_caja or folio_dict["folio_pase_caja"],
+                            "folio_electronico": datos_pdf.folio_electronico or folio_dict["folio_electronico"],
+                            "fecha_expedicion": datos_pdf.fecha_expedicion,
+                            "hora_expedicion": datos_pdf.hora_expedicion,
+                            "lugar_expedicion": datos_pdf.lugar_expedicion,
+                            "rfc": datos_pdf.rfc or None,
+                            "contribucion": datos_pdf.contribucion,
+                            "nombre_contribuyente": datos_pdf.nombre_contribuyente or "CONTRIBUYENTE GENERAL",
+                            "concepto": datos_pdf.concepto,
+                            "total": datos_pdf.total,
+                            "forma_pago": datos_pdf.forma_pago,
+                            "pdf_nombre": pdf_name,
+                            "pdf_ruta": str(final_pdf_path),
+                            "hash_sha256": hash_file,
+                            "padron": datos_pdf.padron or None,
+                            "clave_catastral": datos_pdf.clave_catastral or None,
+                            "sm": datos_pdf.sm or None,
+                            "mz": datos_pdf.mz or None,
+                            "l": datos_pdf.l or None,
+                            "correo_factura": datos_pdf.datos_adicionales.get("correo"),
+                            "datos_adicionales": datos_pdf.datos_adicionales
+                        }
 
-                            # Estructurar datos a insertar en recibo_cancun
-                            dict_recibo = {
-                                "folio_pase_caja": datos_pdf.folio_pase_caja or folio_dict["folio_pase_caja"],
-                                "folio_electronico": datos_pdf.folio_electronico or folio_dict["folio_electronico"],
-                                "fecha_expedicion": datos_pdf.fecha_expedicion,
-                                "hora_expedicion": datos_pdf.hora_expedicion,
-                                "lugar_expedicion": datos_pdf.lugar_expedicion,
-                                "rfc": datos_pdf.rfc or None,
-                                "contribucion": datos_pdf.contribucion,
-                                "nombre_contribuyente": datos_pdf.nombre_contribuyente or "CONTRIBUYENTE GENERAL",
-                                "concepto": datos_pdf.concepto,
-                                "total": datos_pdf.total,
-                                "forma_pago": datos_pdf.forma_pago,
-                                "pdf_nombre": pdf_name,
-                                "pdf_ruta": str(final_pdf_path),
-                                "hash_sha256": hash_file,
-                                "padron": datos_pdf.padron or None,
-                                "clave_catastral": datos_pdf.clave_catastral or None,
-                                "sm": datos_pdf.sm or None,
-                                "mz": datos_pdf.mz or None,
-                                "l": datos_pdf.l or None,
-                                "correo_factura": datos_pdf.datos_adicionales.get("correo"),
-                                "datos_adicionales": datos_pdf.datos_adicionales
-                            }
+                        # Lógica de Validación de RFC
+                        rfc_pdf = (datos_pdf.rfc or "").strip().upper()
+                        rfc_id_final = folio_dict.get("rfc_id")
+                        error_rfc_detectado = False
 
-                            # Lógica de Validación de RFC
-                            rfc_pdf = (datos_pdf.rfc or "").strip().upper()
-                            rfc_id_final = folio_dict.get("rfc_id")
-                            error_rfc_detectado = False
+                        if use_api:
+                            res_rfc = self.api_client.request("POST", "/api/docs/cancun/rfc/resolver", json={
+                                "rfc_pdf": rfc_pdf,
+                                "nombre_contribuyente": dict_recibo["nombre_contribuyente"],
+                                "rfc_id_base": rfc_id_final
+                            })
+                            rfc_id_final = res_rfc.get("rfc_id_final")
+                            error_rfc_detectado = res_rfc.get("error_rfc_detectado", False)
+                            if res_rfc.get("rfc_texto_resuelto"):
+                                dict_recibo["rfc"] = res_rfc.get("rfc_texto_resuelto")
+                            if res_rfc.get("mensaje"):
+                                self.status_changed.emit(f"   ℹ️ {res_rfc.get('mensaje')}")
 
-                            # Tratamos el RFC genérico XAXX010101000 igual que si estuviera vacío
-                            # para forzar la resolución por el nombre limpio del contribuyente
-                            es_generico = rfc_pdf in ("XAXX010101000", "XEXX010101000")
-
-                            if rfc_pdf and not es_generico:
-                                # 1. Resolver el rfc_id real del PDF desde el catálogo maestro
-                                db_rfc_row = session.execute(
-                                    text("SELECT rfc_id FROM sar_catalogo.rfc WHERE rfc = :r AND activo = true"),
-                                    {"r": rfc_pdf}
-                                ).fetchone()
-                                
-                                rfc_id_catalogo = db_rfc_row[0] if db_rfc_row else None
-
-                                if rfc_id_catalogo:
-                                    # Coincide o se corrige al ID existente del catálogo
-                                    if rfc_id_final != rfc_id_catalogo:
-                                        if rfc_id_final is not None:
-                                            self.status_changed.emit(f"   ⚠️ Corrigiendo RFC: De base {rfc_id_final} a real {rfc_pdf} ({rfc_id_catalogo}).")
-                                        rfc_id_final = rfc_id_catalogo
-                                else:
-                                    # El RFC real no existe en el catálogo maestro
-                                    error_rfc_detectado = True
-                                    self.status_changed.emit(f"   ❌ ERROR: El RFC '{rfc_pdf}' extraído del PDF no está catalogado en SAR.")
-                            else:
-                                # Si el RFC no viene en el PDF o es el genérico, resolverlo dinámicamente mediante el nombre de contribuyente limpio
-                                nombre_limpio = dict_recibo["nombre_contribuyente"]
-                                rfc_id_resuelto = None
-                                rfc_texto_resuelto = None
-                                
-                                if nombre_limpio and nombre_limpio != "CONTRIBUYENTE GENERAL":
-                                    # Buscar coincidencia aproximada (ILIKE) en el catálogo de RFCs usando la razón social limpia
-                                    # Compara tanto con el inicio de la razón social como buscando palabras clave
-                                    db_match = session.execute(
-                                        text("""
-                                            SELECT rfc_id, rfc, razon_social 
-                                            FROM sar_catalogo.rfc 
-                                            WHERE (razon_social ILIKE :n OR :n_clean ILIKE '%' || razon_social || '%')
-                                              AND activo = true
-                                            LIMIT 1
-                                        """),
-                                        {"n": f"%{nombre_limpio}%", "n_clean": nombre_limpio}
-                                    ).fetchone()
-                                    
-                                    if db_match:
-                                        rfc_id_resuelto = db_match[0]
-                                        rfc_texto_resuelto = db_match[1]
-                                        self.status_changed.emit(f"   ℹ️ RFC resuelto por Nombre: '{nombre_limpio}' -> {rfc_texto_resuelto} ({db_match[2]})")
-                                
-                                if rfc_id_resuelto:
-                                    rfc_id_final = rfc_id_resuelto
-                                    # Inyectar el RFC resuelto al diccionario de recibo para que no se guarde vacío en la columna RFC
-                                    dict_recibo["rfc"] = rfc_texto_resuelto
-                                else:
-                                    self.status_changed.emit(f"   ℹ️ RFC no especificado en el recibo y no pudo ser resuelto por el nombre '{nombre_limpio}'.")
-                                    rfc_id_final = None
-
-                            # Asignar rfc_id al recibo
                             dict_recibo["rfc_id"] = rfc_id_final
 
                             if error_rfc_detectado:
-                                # Guardar con error de RFC no catalogado
-                                f_repo.update_status(folio_id, "ERROR_RFC_NO_CATALOGADO", error_msg=f"El RFC {rfc_pdf} del PDF no existe en el catálogo maestro.")
-                                session.commit()
+                                self.api_client.request("POST", f"/api/docs/cancun/folios/{folio_id}/resultado", json={
+                                    "estado_codigo": "ERROR_RFC_NO_CATALOGADO",
+                                    "error_msg": f"El RFC {rfc_pdf} del PDF no existe en el catálogo maestro."
+                                })
                                 procesados_err += 1
                                 self.metric_updated.emit("errores", procesados_err)
                                 self.folio_status_changed.emit({
@@ -411,23 +378,13 @@ class BotReciboCunWorker(QThread):
                                     "estado": "ERROR_RFC_NO_CATALOGADO"
                                 })
                             else:
-                                # Guardar Recibo y actualizar Folio a RECIBO_OK
-                                rec = r_repo.save_extracted_receipt(folio_id, dict_recibo)
-                                
-                                # Alimentar de vuelta los folios extraídos al registro original de Folio (FolioCancun)
-                                db_folio = session.get(FolioCancun, folio_id)
-                                if db_folio:
-                                    if dict_recibo["folio_electronico"]:
-                                        db_folio.folio_electronico = dict_recibo["folio_electronico"]
-                                    if dict_recibo["folio_pase_caja"]:
-                                        db_folio.folio_pase_caja = dict_recibo["folio_pase_caja"]
-                                    db_folio.rfc_id = rfc_id_final
-
-                                # Pasar el recibo a PENDIENTE_FACTURAR automáticamente para el siguiente bot
-                                r_repo.update_status(rec.recibo_id, "PENDIENTE_FACTURAR")
-                                f_repo.update_status(folio_id, "RECIBO_OK")
-                                session.commit()
-                                
+                                self.api_client.request("POST", f"/api/docs/cancun/folios/{folio_id}/resultado", json={
+                                    "estado_codigo": "RECIBO_OK",
+                                    "dict_recibo": dict_recibo,
+                                    "rfc_id_final": rfc_id_final,
+                                    "folio_electronico": dict_recibo.get("folio_electronico"),
+                                    "folio_pase_caja": dict_recibo.get("folio_pase_caja")
+                                })
                                 procesados_ok += 1
                                 self.metric_updated.emit("exitosos", procesados_ok)
                                 self.status_changed.emit("   ✅ Recibo capturado y guardado correctamente.")
@@ -436,35 +393,138 @@ class BotReciboCunWorker(QThread):
                                     "rfc": rfc_pdf or "No detectado",
                                     "estado": "RECIBO_OK"
                                 })
+                        else:
+                            with self.db_connector.get_session() as session:
+                                f_repo = FolioCancunRepository(session)
+                                r_repo = ReciboCancunRepository(session)
+                                es_generico = rfc_pdf in ("XAXX010101000", "XEXX010101000")
 
-                        except Exception as parse_error:
-                            logger.error(f"Error procesando PDF del folio {folio_texto}: {parse_error}")
-                            f_repo.update_status(folio_id, "ERROR_DESCARGA", error_msg=f"Error parseando PDF: {parse_error}")
-                            procesados_err += 1
-                            self.metric_updated.emit("errores", procesados_err)
-                            self.folio_status_changed.emit({
-                                "referencia": folio_texto,
-                                "rfc": "Error PDF",
-                                "estado": "ERROR_DESCARGA"
+                                if rfc_pdf and not es_generico:
+                                    db_rfc_row = session.execute(
+                                        text("SELECT rfc_id FROM sar_catalogo.rfc WHERE rfc = :r AND activo = true"),
+                                        {"r": rfc_pdf}
+                                    ).fetchone()
+                                    rfc_id_catalogo = db_rfc_row[0] if db_rfc_row else None
+
+                                    if rfc_id_catalogo:
+                                        if rfc_id_final != rfc_id_catalogo:
+                                            if rfc_id_final is not None:
+                                                self.status_changed.emit(f"   ⚠️ Corrigiendo RFC: De base {rfc_id_final} a real {rfc_pdf} ({rfc_id_catalogo}).")
+                                            rfc_id_final = rfc_id_catalogo
+                                    else:
+                                        error_rfc_detectado = True
+                                        self.status_changed.emit(f"   ❌ ERROR: El RFC '{rfc_pdf}' extraído del PDF no está catalogado en SAR.")
+                                else:
+                                    nombre_limpio = dict_recibo["nombre_contribuyente"]
+                                    rfc_id_resuelto = None
+                                    rfc_texto_resuelto = None
+                                    
+                                    if nombre_limpio and nombre_limpio != "CONTRIBUYENTE GENERAL":
+                                        db_match = session.execute(
+                                            text("""
+                                                SELECT rfc_id, rfc, razon_social 
+                                                FROM sar_catalogo.rfc 
+                                                WHERE (razon_social ILIKE :n OR :n_clean ILIKE '%' || razon_social || '%')
+                                                  AND activo = true
+                                                LIMIT 1
+                                            """),
+                                            {"n": f"%{nombre_limpio}%", "n_clean": nombre_limpio}
+                                        ).fetchone()
+                                        
+                                        if db_match:
+                                            rfc_id_resuelto = db_match[0]
+                                            rfc_texto_resuelto = db_match[1]
+                                            self.status_changed.emit(f"   ℹ️ RFC resuelto por Nombre: '{nombre_limpio}' -> {rfc_texto_resuelto} ({db_match[2]})")
+                                    
+                                    if rfc_id_resuelto:
+                                        rfc_id_final = rfc_id_resuelto
+                                        dict_recibo["rfc"] = rfc_texto_resuelto
+                                    else:
+                                        self.status_changed.emit(f"   ℹ️ RFC no especificado en el recibo y no pudo ser resuelto por el nombre '{nombre_limpio}'.")
+                                        rfc_id_final = None
+
+                                dict_recibo["rfc_id"] = rfc_id_final
+
+                                if error_rfc_detectado:
+                                    f_repo.update_status(folio_id, "ERROR_RFC_NO_CATALOGADO", error_msg=f"El RFC {rfc_pdf} del PDF no existe en el catálogo maestro.")
+                                    session.commit()
+                                    procesados_err += 1
+                                    self.metric_updated.emit("errores", procesados_err)
+                                    self.folio_status_changed.emit({
+                                        "referencia": folio_texto,
+                                        "rfc": rfc_pdf,
+                                        "estado": "ERROR_RFC_NO_CATALOGADO"
+                                    })
+                                else:
+                                    rec = r_repo.save_extracted_receipt(folio_id, dict_recibo)
+                                    db_folio = session.get(FolioCancun, folio_id)
+                                    if db_folio:
+                                        if dict_recibo["folio_electronico"]:
+                                            db_folio.folio_electronico = dict_recibo["folio_electronico"]
+                                        if dict_recibo["folio_pase_caja"]:
+                                            db_folio.folio_pase_caja = dict_recibo["folio_pase_caja"]
+                                        db_folio.rfc_id = rfc_id_final
+
+                                    r_repo.update_status(rec.recibo_id, "PENDIENTE_FACTURAR")
+                                    f_repo.update_status(folio_id, "RECIBO_OK")
+                                    session.commit()
+                                    
+                                    procesados_ok += 1
+                                    self.metric_updated.emit("exitosos", procesados_ok)
+                                    self.status_changed.emit("   ✅ Recibo capturado y guardado correctamente.")
+                                    self.folio_status_changed.emit({
+                                        "referencia": folio_texto,
+                                        "rfc": rfc_pdf or "No detectado",
+                                        "estado": "RECIBO_OK"
+                                    })
+
+                    except Exception as parse_error:
+                        logger.error(f"Error procesando PDF del folio {folio_texto}: {parse_error}")
+                        if use_api:
+                            self.api_client.request("POST", f"/api/docs/cancun/folios/{folio_id}/resultado", json={
+                                "estado_codigo": "ERROR_DESCARGA",
+                                "error_msg": f"Error parseando PDF: {parse_error}"
                             })
-                    else:
-                        f_repo.update_status(folio_id, "ERROR_DESCARGA", error_msg=error_msg)
+                        else:
+                            with self.db_connector.get_session() as session:
+                                f_repo = FolioCancunRepository(session)
+                                f_repo.update_status(folio_id, "ERROR_DESCARGA", error_msg=f"Error parseando PDF: {parse_error}")
+                                session.commit()
                         procesados_err += 1
                         self.metric_updated.emit("errores", procesados_err)
-                        self.status_changed.emit(f"   ❌ Error en folio: {error_msg}")
                         self.folio_status_changed.emit({
                             "referencia": folio_texto,
-                            "rfc": "Fallo",
+                            "rfc": "Error PDF",
                             "estado": "ERROR_DESCARGA"
                         })
-
-                    session.commit()
+                else:
+                    if use_api:
+                        self.api_client.request("POST", f"/api/docs/cancun/folios/{folio_id}/resultado", json={
+                            "estado_codigo": "ERROR_DESCARGA",
+                            "error_msg": error_msg
+                        })
+                    else:
+                        with self.db_connector.get_session() as session:
+                            f_repo = FolioCancunRepository(session)
+                            f_repo.update_status(folio_id, "ERROR_DESCARGA", error_msg=error_msg)
+                            session.commit()
+                    procesados_err += 1
+                    self.metric_updated.emit("errores", procesados_err)
+                    self.status_changed.emit(f"   ❌ Error en folio: {error_msg}")
+                    self.folio_status_changed.emit({
+                        "referencia": folio_texto,
+                        "rfc": "Fallo",
+                        "estado": "ERROR_DESCARGA"
+                    })
 
             # 5. Actualizar contadores del lote
-            with self.db_connector.get_session() as session:
-                lote_repo = LoteFolioRepository(session)
-                lote_repo.update_metrics_and_status(self.lote_id)
-                session.commit()
+            if use_api:
+                self.api_client.request("POST", f"/api/docs/cancun/lotes/{self.lote_id}/finalizar")
+            else:
+                with self.db_connector.get_session() as session:
+                    lote_repo = LoteFolioRepository(session)
+                    lote_repo.update_metrics_and_status(self.lote_id)
+                    session.commit()
 
             self.status_changed.emit(f"Procesamiento finalizado. Exitosos: {procesados_ok}, Errores: {procesados_err}.")
             self.finished_processing.emit(True, "Ejecución finalizada con éxito.")

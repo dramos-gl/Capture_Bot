@@ -33,7 +33,7 @@ def get_catalogos(db: Session = Depends(get_db)):
     """Retorna los catálogos activos (RFCs, Conceptos, Delegaciones, Municipios)."""
     repo = CatalogoRepository(db)
     try:
-        rfcs = [{"rfc_id": r.rfc_id, "rfc": r.rfc, "razon_social": r.razon_social} for r in repo.get_rfcs_activos()]
+        rfcs = [{"rfc_id": r.rfc_id, "rfc": r.rfc, "alias": r.alias, "razon_social": r.razon_social} for r in repo.get_rfcs_activos()]
         conceptos = [{"concepto_id": c.concepto_id, "nombre": c.nombre} for c in repo.get_conceptos_activos()]
         delegaciones = [{"delegacion_id": d.delegacion_id, "nombre": d.nombre} for d in repo.get_delegaciones_activas()]
         municipios = [{"municipio_id": m.municipio_id, "nombre": m.nombre, "activo": m.activo} for m in repo.get_all_municipios()]

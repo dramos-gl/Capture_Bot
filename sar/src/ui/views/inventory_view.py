@@ -9,9 +9,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize, QTimer
 from PySide6.QtGui import QColor
 from sar.src.ui.design_system.components import (
-    CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
+    CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomSpinBox,
     LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid, GLLoadingDialog,
-    GLMessageBox as QMessageBox
+    GLMessageBox as QMessageBox, GLInfoBanner
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.theme_manager import Colors, ThemeManager
@@ -806,6 +806,7 @@ class InventoryView(QWidget):
         
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.table.cellDoubleClicked.connect(self._on_table_cell_double_clicked)
+        self._update_order_filter_banners()
 
     def refresh_visor_data(self):
         if self.active_worker and self.active_worker.isRunning():
@@ -1069,6 +1070,7 @@ class InventoryView(QWidget):
             print("Error loading available orders for inventory:", e)
             self.todas_las_ordenes = []
             self.selected_orden_ids = []
+        self._update_order_filter_banners()
 
     def _show_order_filter_menu(self):
         from PySide6.QtGui import QAction
@@ -1108,6 +1110,7 @@ class InventoryView(QWidget):
                 
             self.current_page = 1
             self.current_page_lotes = 1
+            self._update_order_filter_banners()
             self._refresh_active_tab_data()
             
         action_all.triggered.connect(toggle_all)
@@ -1134,6 +1137,7 @@ class InventoryView(QWidget):
                     update_all_action_state()
                     self.current_page = 1
                     self.current_page_lotes = 1
+                    self._update_order_filter_banners()
                     self._refresh_active_tab_data()
                 return handler
                 
@@ -1372,8 +1376,8 @@ class InventoryView(QWidget):
         
         # Header Layout with Filter Button
         header_layout_masivo = QHBoxLayout()
-        lbl_title_masivo = CustomLabel("Asignación Masiva por Lotes", variant="subheader")
-        header_layout_masivo.addWidget(lbl_title_masivo)
+        self.lbl_title_masivo = CustomLabel("Asignación Masiva por Lotes", variant="subheader")
+        header_layout_masivo.addWidget(self.lbl_title_masivo)
         header_layout_masivo.addStretch()
         
         self.btn_filter_orden_masivo = QPushButton()
@@ -1878,8 +1882,8 @@ class InventoryView(QWidget):
         # Header with Filter Button
         card_header_layout = QHBoxLayout()
         card_title_vbox = QVBoxLayout()
-        lbl_card_title = CustomLabel("Asignación de Derechos Directa", variant="subheader")
-        card_title_vbox.addWidget(lbl_card_title)
+        self.lbl_card_title_ind = CustomLabel("Asignación de Derechos Directa", variant="subheader")
+        card_title_vbox.addWidget(self.lbl_card_title_ind)
         card_header_layout.addLayout(card_title_vbox)
         card_header_layout.addStretch()
         
@@ -1971,6 +1975,7 @@ class InventoryView(QWidget):
 
         scroll_area.setWidget(scroll_content)
         tab_layout.addWidget(scroll_area)
+        self._update_order_filter_banners()
 
         self._pending_ind_refs = []
 
@@ -2374,9 +2379,9 @@ class InventoryView(QWidget):
         # Build custom header for the card with Filter Button
         card_header_layout = QHBoxLayout()
         card_title_vbox = QVBoxLayout()
-        lbl_card_title = CustomLabel("Reserva de Derechos (Apartados)", variant="subheader")
+        self.lbl_card_title_apartar = CustomLabel("Reserva de Derechos (Apartados)", variant="subheader")
         lbl_card_subtitle = CustomLabel("Completa los datos para reservar derechos para una notaría", variant="muted")
-        card_title_vbox.addWidget(lbl_card_title)
+        card_title_vbox.addWidget(self.lbl_card_title_apartar)
         card_title_vbox.addWidget(lbl_card_subtitle)
         card_header_layout.addLayout(card_title_vbox)
         card_header_layout.addStretch()
@@ -2452,7 +2457,8 @@ class InventoryView(QWidget):
 
         card_apartar.layout.addLayout(form_layout)
         layout.addWidget(card_apartar)
-        
+        self._update_order_filter_banners()
+
         scroll_area.setWidget(scroll_content)
         tab_layout.addWidget(scroll_area)
         
@@ -2755,16 +2761,9 @@ class InventoryView(QWidget):
         scroll_content.setObjectName("lotesScrollContent")
         layout = QVBoxLayout(scroll_content)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
-
-        # --- Header area ---
-        header_layout = QHBoxLayout()
-        title_lbl = CustomLabel("📋 Gestión de Asignaciones", variant="subheader")
-        header_layout.addWidget(title_lbl)
-        header_layout.addStretch()
-        layout.addLayout(header_layout)
-
-        # --- Filter bar ---
+        layout.setSpacing(24)
+        
+        # --- Filter bar (Clean top area matching Solicitudes) ---
         filter_bar_frame = QFrame(self)
         filter_bar_frame.setObjectName("filterBarFrame")
         filter_row = QHBoxLayout(filter_bar_frame)
@@ -2858,21 +2857,22 @@ class InventoryView(QWidget):
         footer_layout.addWidget(self.pagination_widget_lotes)
         self.card_lotes.layout.addLayout(footer_layout)
 
-        # Action buttons
+        # Action buttons & table footer hint
         actions_layout = QHBoxLayout()
+        self.lbl_table_hint_lotes = CustomLabel("💡 Doble clic sobre cualquier asignación para ver detalle, generar Excel o generar PDF", variant="muted")
+        actions_layout.addWidget(self.lbl_table_hint_lotes)
+        actions_layout.addStretch()
+
         self.btn_exportar_reporte_lotes = CustomButton("📊 Exportar Asignación Seleccionada", is_secondary=True)
         self.btn_exportar_reporte_lotes.clicked.connect(self._on_exportar_lote_seleccionado)
         self.btn_ver_detalles_lote = CustomButton("🔍 Ver Detalle", is_secondary=True)
         self.btn_ver_detalles_lote.clicked.connect(self._on_ver_detalle_lote)
-        actions_layout.addStretch()
+
         actions_layout.addWidget(self.btn_exportar_reporte_lotes)
         actions_layout.addWidget(self.btn_ver_detalles_lote)
         self.card_lotes.layout.addLayout(actions_layout)
         layout.addWidget(self.card_lotes)
-
-        # Hint label
-        hint = CustomLabel("💡 Doble clic sobre una asignación para ver sus referencias.", variant="muted")
-        layout.addWidget(hint)
+        self._update_order_filter_banners()
 
         scroll_area.setWidget(scroll_content)
         tab_layout.addWidget(scroll_area)
@@ -2895,6 +2895,82 @@ class InventoryView(QWidget):
 
         self.table_lotes.cellDoubleClicked.connect(self._on_table_cell_double_clicked_lotes)
 
+    def _get_active_orders_formatted_text(self) -> str:
+        """Genera el texto HTML formateado de las órdenes activas en el filtro."""
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            return '<span style="color: #EF4444; font-weight: bold;">(Ninguna orden seleccionada)</span>'
+        elif num_selected == total_orders:
+            return '<span style="color: #10B981; font-weight: bold;">Todas las órdenes</span>'
+        else:
+            from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            if len(selected_objs) <= 3:
+                names = []
+                for o in selected_objs:
+                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=25)
+                    parts = label.split(" - ", 1)
+                    if len(parts) == 2:
+                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
+                    else:
+                        names.append(f"<b>{label}</b>")
+                return ", ".join(names)
+            else:
+                names = []
+                for o in selected_objs[:2]:
+                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=20)
+                    parts = label.split(" - ", 1)
+                    if len(parts) == 2:
+                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
+                    else:
+                        names.append(f"<b>{label}</b>")
+                remaining = len(selected_objs) - 2
+                names_str = ", ".join(names)
+                return f'{names_str} y <span style="color: #2563EB; font-weight: bold;">+{remaining} órdenes más</span>'
+
+    def _update_order_filter_banners(self):
+        """Actualiza el texto de los banners informativos dependientes del filtro de órdenes."""
+        order_text = self._get_active_orders_formatted_text()
+
+        # Título en Visor de Inventario (tab_visor)
+        if hasattr(self, "lbl_table_title"):
+            self.lbl_table_title.setText(
+                f"Derechos en Estado FACTURADA &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+            )
+
+        # Título en Gestión de Asignaciones (tab_lotes - dentro de la tarjeta de la tabla)
+        if hasattr(self, "card_lotes") and hasattr(self.card_lotes, "header"):
+            self.card_lotes.header.setText(
+                f"Registro de Asignaciones &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+            )
+
+        # Título en Asignación de Derechos Directa (tab_individual)
+        if hasattr(self, "lbl_card_title_ind"):
+            self.lbl_card_title_ind.setText(
+                f"Asignación de Derechos Directa &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+            )
+
+        # Título en Asignación Masiva (tab_masivo)
+        if hasattr(self, "lbl_title_masivo"):
+            self.lbl_title_masivo.setText(
+                f"Asignación Masiva por Lotes &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+            )
+
+        # Título en Reserva de Derechos (tab_apartar)
+        if hasattr(self, "lbl_card_title_apartar"):
+            self.lbl_card_title_apartar.setText(
+                f"Reserva de Derechos (Apartados) &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+            )
+
+    def _update_hint_lotes_banner(self):
+        """Alias de compatibilidad para actualizar los banners de filtro."""
+        self._update_order_filter_banners()
 
     def refresh_lotes_data(self):
         """Loads assignments from service with active filters and populates the table."""
@@ -4406,8 +4482,7 @@ class ReservaGridRow(QFrame):
         self.cb_desarrollo.setMinimumWidth(140)
         self.cb_desarrollo.setPlaceholderText("Desarrollo...")
         
-        from PySide6.QtWidgets import QSpinBox
-        self.sb_cantidad = QSpinBox(self)
+        self.sb_cantidad = CustomSpinBox(self)
         self.sb_cantidad.setRange(1, 1000)
         self.sb_cantidad.setValue(10)
         

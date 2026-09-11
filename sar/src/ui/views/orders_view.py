@@ -1,13 +1,14 @@
 """Orders Management View."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QStackedWidget
 )
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components import (
     CustomCard, CustomLabel, CustomButton, InteractiveGrid, CustomInput, CustomComboBox, FilterBar,
-    GLMessageBox as QMessageBox
+    GLInfoBanner, GLMessageBox as QMessageBox
 )
+from sar.src.ui.design_system.utils.icons import Icons
 from PySide6.QtCore import QThread, Signal
 from sar.src.services.ordenes_ui_service import OrdenesUIService
 from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
@@ -47,33 +48,41 @@ class OrdersView(QWidget):
         self.ordenes_ui_service = OrdenesUIService(self.db_connector)
         self.active_worker = None
         
-        self.layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QWidget#ordersScrollContent {
+                background-color: transparent;
+            }
+        """)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("ordersScrollContent")
+        self.layout = QVBoxLayout(scroll_content)
         self.layout.setContentsMargins(24, 24, 24, 24)
         self.layout.setSpacing(24)
         
-        # Header layout with Title (NO Subtitle, NO Help button)
-        header_text_layout = QVBoxLayout()
-        self.lbl_title = CustomLabel("Gestión de Órdenes", variant="header")
-        self.lbl_title.setObjectName("orderViewTitle")
-        header_text_layout.addWidget(self.lbl_title)
-        self.layout.addLayout(header_text_layout)
+        self.tabs = QStackedWidget()
         
-        from PySide6.QtWidgets import QTabWidget
-        self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane { border: none; background: transparent; }
-        """)
-        
-        # Hide physical tab bar
-        self.tabs.tabBar().hide()
-        
-        self.tab_historial = QWidget()
         self.tab_nueva = QWidget()
+        self.tab_historial = QWidget()
         
-        self.tabs.addTab(self.tab_nueva, "Capturar Nueva Orden")
-        self.tabs.addTab(self.tab_historial, "Órdenes Capturadas")
+        self.tabs.addWidget(self.tab_nueva) # Index 0: Capturar Nueva Orden
+        self.tabs.addWidget(self.tab_historial) # Index 1: Órdenes Capturadas
         
         self.layout.addWidget(self.tabs)
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area)
         
         self._setup_historial_tab()
         self._setup_nueva_orden_tab()
@@ -302,8 +311,8 @@ class OrdersView(QWidget):
     def _setup_historial_tab(self):
         from sar.src.ui.design_system.components import StyledDataTable, CustomCard
         layout = QVBoxLayout(self.tab_historial)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(24)
         
         # Filter Bar
         self.filter_bar_historial = FilterBar(
@@ -319,11 +328,13 @@ class OrdersView(QWidget):
         layout.addWidget(self.filter_bar_historial)
         
         # Main Card for the Data Table
-        self.historial_card = CustomCard(parent=self)
+        self.historial_card = CustomCard(title="Órdenes de Generación Capturadas", parent=self)
         
         headers = ["ID", "Folio", "Descripción", "Estado", "Creador", "Fecha Creación", "Total Solicitadas", "Total Generadas"]
         self.table_historial = StyledDataTable(headers, parent=self)
         self.table_historial.setColumnHidden(0, True) # Ocultar ID interno
+        self.table_historial.setMinimumHeight(200)
+        self.table_historial.setMinimumWidth(200)
         self.table_historial.cellDoubleClicked.connect(self._on_row_double_clicked)
         self.table_historial.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table_historial.customContextMenuRequested.connect(self._show_context_menu)
@@ -331,24 +342,34 @@ class OrdersView(QWidget):
         self.historial_card.add_widget(self.table_historial)
         
         actions_layout = QHBoxLayout()
-        actions_layout.addStretch()
+        self.lbl_table_hint = CustomLabel(
+            "💡 Doble clic sobre cualquier orden para ver solicitudes, generar lotes Excel/PDF o Autorizar/Rechazar",
+            variant="muted"
+        )
+        self.lbl_table_hint.setWordWrap(True)
+        actions_layout.addWidget(self.lbl_table_hint, stretch=1)
+        actions_layout.addSpacing(12)
         
-        self.btn_autorizar_orden = CustomButton("Autorizar Orden Completa")
+        self.btn_editar_orden = CustomButton.action_editar(parent=self)
+        self.btn_editar_orden.setToolTip("Editar orden seleccionada")
+        self.btn_editar_orden.clicked.connect(self._on_editar_orden_clicked)
+
+        self.btn_autorizar_orden = CustomButton.action_autorizar(parent=self)
+        self.btn_autorizar_orden.setToolTip("Autorizar orden seleccionada")
         self.btn_autorizar_orden.clicked.connect(self._on_autorizar_orden)
         
-        self.btn_rechazar_orden = CustomButton("Rechazar Orden Completa", is_secondary=True)
+        self.btn_rechazar_orden = CustomButton.action_rechazar(parent=self)
+        self.btn_rechazar_orden.setToolTip("Rechazar orden seleccionada")
         self.btn_rechazar_orden.clicked.connect(self._on_rechazar_orden)
         
-        self.btn_cancelar_orden = CustomButton("Cancelar Orden", is_secondary=True)
+        self.btn_cancelar_orden = CustomButton.action_cancelar(parent=self)
+        self.btn_cancelar_orden.setToolTip("Cancelar orden seleccionada")
         self.btn_cancelar_orden.clicked.connect(self._on_cancelar_orden)
         
-        self.btn_editar_orden = CustomButton("Editar Orden", is_secondary=True)
-        self.btn_editar_orden.clicked.connect(self._on_editar_orden_clicked)
-        
+        actions_layout.addWidget(self.btn_editar_orden)
         actions_layout.addWidget(self.btn_autorizar_orden)
         actions_layout.addWidget(self.btn_rechazar_orden)
         actions_layout.addWidget(self.btn_cancelar_orden)
-        actions_layout.addWidget(self.btn_editar_orden)
         
         self.historial_card.layout.addLayout(actions_layout)
         
@@ -356,8 +377,8 @@ class OrdersView(QWidget):
 
     def _setup_nueva_orden_tab(self):
         layout = QVBoxLayout(self.tab_nueva)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(16)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(24)
         
         # New Order Card initialized without title so we can construct a custom header
         from PySide6.QtWidgets import QFrame
@@ -411,8 +432,9 @@ class OrdersView(QWidget):
         total_general_layout.addWidget(self.lbl_tot_val)
         card_header_layout.addWidget(self.total_general_frame)
 
-        # Botón de Admiración / Validación Fiscal de Empresas (Regla de Oro)
-        self.btn_validar_fiscal = CustomButton("! Validar Domicilio Fiscal", is_secondary=True, parent=self)
+        # Botón de Validación Fiscal de Empresas (Regla de Oro)
+        self.btn_validar_fiscal = CustomButton("Validar Domicilio Fiscal", is_secondary=True, parent=self)
+        self.btn_validar_fiscal.setIcon(Icons.advertencia("#D97706"))
         self.btn_validar_fiscal.setObjectName("btnValidarDomicilioFiscal")
         self.btn_validar_fiscal.setToolTip(
             "REGLA DE ORO: Validar visualmente el domicilio fiscal registrado de las empresas (RFC) "
@@ -497,7 +519,13 @@ class OrdersView(QWidget):
     def _load_catalogs(self):
         try:
             data = self.ordenes_ui_service.get_catalogos()
-            rfcs = [(r["rfc_id"], r["rfc"]) for r in data["rfcs"]]
+            rfcs = [
+                (
+                    r["rfc_id"],
+                    f"{r['alias'].strip()} | {r['rfc']}" if r.get("alias") and r.get("alias").strip() else r["rfc"]
+                )
+                for r in data["rfcs"]
+            ]
             conceptos = [(c["concepto_id"], c["nombre"]) for c in data["conceptos"]]
             delegaciones = [(d["delegacion_id"], d["nombre"]) for d in data["delegaciones"]]
             
@@ -790,8 +818,10 @@ class OrdersView(QWidget):
             # Update UI header
             self.lbl_card_title.setText(f"Editar Orden: {data['folio']}")
             self.lbl_card_subtitle.setText("Modifica los datos y partidas de la orden")
-            self.grid.btn_save.setText("Actualizar Orden")
+            self.grid.btn_save.setText("Guardar")
+            self.grid.btn_save.setToolTip("Actualizar orden con los cambios realizados")
             self.grid.btn_cancel.setVisible(True)
+            self.grid.btn_cancel.setToolTip("Cancelar edición y descartar cambios")
             
             # Calculate total anterior and display it
             total_anterior = sum(r["cantidad"] for r in data["renglones"])
@@ -833,7 +863,8 @@ class OrdersView(QWidget):
         # Reset UI
         self.lbl_card_title.setText("Configuración de la Orden")
         self.lbl_card_subtitle.setText("Completa los datos para crear una nueva orden")
-        self.grid.btn_save.setText("Guardar Orden")
+        self.grid.btn_save.setText("Guardar")
+        self.grid.btn_save.setToolTip("Guardar orden")
         self.grid.btn_cancel.setVisible(False)
         self.total_anterior_frame.setVisible(False)
         self.lbl_tot_ant_val.setText("0")

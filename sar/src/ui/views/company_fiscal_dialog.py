@@ -44,8 +44,11 @@ class CompanyFiscalValidationDialog(CustomDialog):
 
         # Disable dialog save button since this is read-only
         self.btn_save.setVisible(False)
-        self.btn_cancel.setText("Entendido / Cerrar")
-        self.btn_cancel.setIcon(Icons.check("#FFFFFF") if hasattr(Icons, 'check') else Icons.close())
+        self.btn_cancel.setText("Cerrar")
+        self.btn_cancel.setObjectName("dangerBtn")
+        self.btn_cancel.setIcon(Icons.cancelar("#FFFFFF"))
+        self.btn_cancel.setToolTip("Cerrar ventana")
+        self.btn_cancel.setMinimumWidth(CustomButton.DEFAULT_MIN_WIDTH)
 
         self._all_rfcs: List[Dict[str, Any]] = []
         self._filtered_rfcs: List[Dict[str, Any]] = []

@@ -67,7 +67,12 @@ class Colors:
     SLATE_50        = "#F8FAFC"
     SLATE_100       = "#F1F5F9"
     SLATE_200       = "#E2E8F0"
+    SLATE_300       = "#CBD5E1"
+    SLATE_400       = "#94A3B8"
     SLATE_500       = "#64748B"
+    SLATE_600       = "#475569"
+    SLATE_700       = "#334155"
+    SLATE_800       = "#1E293B"
     SLATE_900       = "#0F172A"
 
     # --- Flet Semantic Colors ---

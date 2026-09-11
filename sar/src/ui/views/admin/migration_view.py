@@ -5,8 +5,9 @@ import csv
 from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QComboBox
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 )
+from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from PySide6.QtCore import Qt, QThread, Signal
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
@@ -84,7 +85,7 @@ class MigrationView(QWidget):
         
         # Selector de orden de origen
         self.controls_layout.addWidget(CustomLabel("Orden de Origen:", variant="body"))
-        self.combo_orden = QComboBox()
+        self.combo_orden = CustomComboBox()
         self.combo_orden.setFixedWidth(250)
         self.controls_layout.addWidget(self.combo_orden)
         

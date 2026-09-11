@@ -488,10 +488,20 @@ class BotView(QWidget):
         # Double check if completed in DB right before starting
         sol_id = self.current_bot_context.get("solicitud_id")
         try:
+            valid_states = ("ASIGNADA", "PROCESANDO", "ERROR")
             if self.api_client.connect_via_api:
-                # Backend check can be bypassed here as we trust the UI state or list requests load,
-                # but to be sure we can continue:
-                pass
+                ctx_fresh = self.api_client.request("GET", f"/api/docs/solicitudes/{sol_id}/bot-context")
+                state_code = (ctx_fresh.get("estado") or "ASIGNADA").upper()
+                if state_code and state_code not in valid_states:
+                    QMessageBox.warning(
+                        self, 
+                        "Atención", 
+                        f"El estado de la solicitud en el servidor es '{state_code}' y no se puede procesar.\n"
+                        f"El robot solo puede iniciar solicitudes en estado: {', '.join(valid_states)}."
+                    )
+                    self.current_bot_context = None
+                    self._load_solicitudes()
+                    return
             else:
                 with self.db_connector.get_session() as session:
                     sol = session.get(Solicitud, sol_id)
@@ -500,7 +510,6 @@ class BotView(QWidget):
                             text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
                             {"eid": sol.estado_id}
                         ).scalar()
-                        valid_states = ("ASIGNADA", "PROCESANDO", "ERROR")
                         if state_code not in valid_states:
                             QMessageBox.warning(
                                 self, 
@@ -512,7 +521,7 @@ class BotView(QWidget):
                             self._load_solicitudes()
                             return
         except Exception as e:
-            self.log(f"Advertencia al validar estado de solicitud en BD: {str(e)}")
+            self.log(f"Advertencia al validar estado de solicitud en BD/API: {str(e)}")
             
         # Confirmation Dialog before starting Playwright
         razon_social = self.current_bot_context.get("razon_social", "Desconocido")

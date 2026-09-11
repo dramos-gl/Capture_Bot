@@ -54,6 +54,11 @@ class ThemeManager:
             border-right: {Spacing.BORDER_WIDTH_SM} solid {border};
         }}
         
+        /* Info Banner Callout Molecule */
+        QFrame#glInfoBanner {{
+            border-radius: {Spacing.RADIUS_MD};
+        }}
+        
         /* Floating Label Container */
         QFrame#floatingInputFrame {{
             background-color: {surf};
@@ -356,7 +361,7 @@ class ThemeManager:
             background-color: {Colors.ACCENT_HOVER};
         }}
         
-        /* Danger Action Buttons */
+        /* Danger Action Buttons (Solid Red, e.g. Cancelar) */
         QPushButton#dangerBtn {{
             background-color: {Colors.ERROR};
             color: #FFFFFF;
@@ -364,6 +369,19 @@ class ThemeManager:
         }}
         QPushButton#dangerBtn:hover {{
             background-color: #DC2626;
+        }}
+
+        /* Outline Danger Action Buttons (Red text & border, e.g. Rechazar) */
+        QPushButton#outlineDangerBtn, QPushButton#orderProcessingRejectBtn {{
+            background-color: transparent;
+            color: {Colors.ERROR};
+            border: {Spacing.BORDER_WIDTH_SM} solid {"#FCA5A5" if not is_dark else Colors.ERROR};
+            font-weight: {Typography.WEIGHT_BOLD};
+        }}
+        QPushButton#outlineDangerBtn:hover, QPushButton#orderProcessingRejectBtn:hover {{
+            background-color: {"#FEF2F2" if not is_dark else "rgba(239, 68, 68, 0.18)"};
+            border-color: {Colors.ERROR};
+            color: {Colors.ERROR};
         }}
         
         /* Secondary Action Buttons */

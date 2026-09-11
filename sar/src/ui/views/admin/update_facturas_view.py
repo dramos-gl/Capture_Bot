@@ -4,8 +4,9 @@ import os
 from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
-    QProgressBar, QCheckBox, QComboBox
+    QProgressBar, QCheckBox
 )
+from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from PySide6.QtCore import Qt, QThread, Signal
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
@@ -218,7 +219,7 @@ class UpdateFacturasView(QWidget):
         # Selector de orden
         self.order_layout = QHBoxLayout()
         self.order_layout.addWidget(CustomLabel("Filtrar por Orden:", variant="body"))
-        self.combo_orden = QComboBox()
+        self.combo_orden = CustomComboBox()
         self.combo_orden.setMinimumWidth(300)
         self.order_layout.addWidget(self.combo_orden)
         self.order_layout.addStretch()

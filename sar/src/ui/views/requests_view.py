@@ -1,10 +1,10 @@
 """Requests (Bandeja de Trabajo) View."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QDialog, QLineEdit
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QDialog, QLineEdit, QScrollArea
 from PySide6.QtCore import Qt, QThread, Signal
 from sar.src.ui.design_system.components import (
     CustomCard, CustomLabel, CustomButton, StyledDataTable, KeepOpenMenu,
-    GLMessageBox as QMessageBox
+    GLInfoBanner, GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.services.solicitudes_ui_service import SolicitudesUIService
@@ -58,35 +58,48 @@ class EditQuantityDialog(QDialog):
         layout.addWidget(self.lbl_title)
         
         # Field 1: Cantidad Actual (read-only)
-        lbl_actual = CustomLabel("Cantidad actual (fija):", variant="body")
-        self.txt_actual = QLineEdit()
-        self.txt_actual.setText(str(cant_actual))
-        self.txt_actual.setReadOnly(True)
-        self.txt_actual.setFixedHeight(36)
-        self.txt_actual.setStyleSheet(f"background-color: {Colors.BG_LIGHT}; color: {Colors.TEXT_LIGHT_MUTED}; font-weight: bold; border: 1px solid {Colors.BORDER_LIGHT}; padding: 6px 10px;")
+        self.txt_actual = QLineEdit(str(cant_actual))
+        self.txt_actual.setEnabled(False)
+        self.txt_actual.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {Colors.SLATE_100};
+                color: {Colors.TEXT_LIGHT_MUTED};
+                border: 1px solid {Colors.SLATE_300};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+        """)
+        layout.addWidget(CustomLabel("Cantidad Actual:", variant="body"))
+        layout.addWidget(self.txt_actual)
         
         # Field 2: Nueva Cantidad
-        lbl_nueva = CustomLabel("Nueva cantidad:", variant="body")
         self.txt_nueva = QLineEdit()
-        self.txt_nueva.setPlaceholderText("Ej. 100")
-        self.txt_nueva.setFixedHeight(36)
-        self.txt_nueva.setStyleSheet(f"background-color: {Colors.SURFACE_LIGHT}; color: {Colors.TEXT_LIGHT_PRIMARY}; border: 1px solid {Colors.BORDER_LIGHT}; padding: 6px 10px;")
+        self.txt_nueva.setPlaceholderText("Ingresa la nueva cantidad")
+        self.txt_nueva.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {Colors.SURFACE_LIGHT};
+                color: {Colors.TEXT_LIGHT_PRIMARY};
+                border: 1px solid {Colors.SLATE_300};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {Colors.PRIMARY};
+            }}
+        """)
+        layout.addWidget(CustomLabel("Nueva Cantidad:", variant="body"))
+        layout.addWidget(self.txt_nueva)
         
-        form_layout = QVBoxLayout()
-        form_layout.addWidget(lbl_actual)
-        form_layout.addWidget(self.txt_actual)
-        form_layout.addWidget(lbl_nueva)
-        form_layout.addWidget(self.txt_nueva)
-        layout.addLayout(form_layout)
-        
+        # Buttons (Design System Action Factories)
         btn_layout = QHBoxLayout()
-        self.btn_cancel = CustomButton("Cancelar", is_secondary=True)
+        btn_layout.addStretch()
+        
+        self.btn_cancel = CustomButton.action_cancelar(parent=self)
         self.btn_cancel.clicked.connect(self.reject)
         
-        self.btn_save = CustomButton("Guardar", is_secondary=False)
+        self.btn_save = CustomButton.action_guardar(parent=self)
         self.btn_save.clicked.connect(self.accept)
         
-        btn_layout.addStretch()
         btn_layout.addWidget(self.btn_cancel)
         btn_layout.addWidget(self.btn_save)
         layout.addLayout(btn_layout)
@@ -106,7 +119,27 @@ class RequestsView(QWidget):
         self.solicitudes_ui_service = SolicitudesUIService(self.db_connector)
         self.active_worker = None
         
-        self.layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QWidget#requestsScrollContent {
+                background-color: transparent;
+            }
+        """)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("requestsScrollContent")
+        self.layout = QVBoxLayout(scroll_content)
         self.layout.setContentsMargins(24, 24, 24, 24)
         self.layout.setSpacing(24)
         
@@ -138,28 +171,34 @@ class RequestsView(QWidget):
         
         self.card.add_widget(self.table)
         
-        # Action Buttons Layout
+        # Action Buttons & Footer Hint Layout
         actions_layout = QHBoxLayout()
-        actions_layout.addStretch()
+        self.lbl_table_hint = CustomLabel("💡 Doble clic en 'Folio Orden' para ver detalle / lotes • Doble clic en 'Asignado a' para asignar usuario", variant="muted")
+        self.lbl_table_hint.setWordWrap(True)
+        actions_layout.addWidget(self.lbl_table_hint, stretch=1)
+        actions_layout.addSpacing(12)
         
-        from sar.src.ui.design_system.utils.icons import Icons
-        
-        self.btn_asignar = CustomButton("Asignar Usuario", is_secondary=True)
+        self.btn_editar = CustomButton.action_editar(parent=self)
+        self.btn_editar.setToolTip("Editar cantidad de la solicitud seleccionada")
+        self.btn_editar.clicked.connect(self._on_editar)
+
+        self.btn_asignar = CustomButton.action_asignar(parent=self)
+        self.btn_asignar.setToolTip("Asignar usuario a solicitudes seleccionadas")
         self.btn_asignar.clicked.connect(self._on_asignar)
         
-        self.btn_editar = CustomButton("Editar Cantidad", is_secondary=True)
-        self.btn_editar.clicked.connect(self._on_editar)
-        
-        self.btn_cancelar = CustomButton("Cancelar Solicitud", is_secondary=True)
-        self.btn_cancelar.setObjectName("dangerBtn")
+        self.btn_cancelar = CustomButton.action_cancelar(parent=self)
+        self.btn_cancelar.setToolTip("Cancelar solicitud seleccionada")
         self.btn_cancelar.clicked.connect(self._on_cancelar)
         
-        actions_layout.addWidget(self.btn_asignar)
         actions_layout.addWidget(self.btn_editar)
+        actions_layout.addWidget(self.btn_asignar)
         actions_layout.addWidget(self.btn_cancelar)
         
         self.card.layout.addLayout(actions_layout)
         self.layout.addWidget(self.card)
+
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area)
         
         self.selected_orden_ids = []
         self.todas_las_ordenes = []
@@ -170,12 +209,13 @@ class RequestsView(QWidget):
         self.btn_filter_orden = CustomButton("", is_secondary=True)
         self.btn_filter_orden.setIcon(Icons.filter_icon("#475569"))
         self.btn_filter_orden.setFixedSize(36, 36)
-        self.btn_filter_orden.setToolTip("Filtrar por Orden")
+        self.btn_filter_orden.setToolTip("Filtrar solicitudes por órdenes específicas (selección múltiple)")
         self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
         
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.btn_filter_orden, alignment=Qt.AlignmentFlag.AlignBottom)
         
         self._load_available_orders()
+        self._update_order_filter_title()
         
     def _get_selected_solicitud_id(self) -> int:
         selected = self.table.selectedItems()
@@ -224,6 +264,10 @@ class RequestsView(QWidget):
             return False
 
     def _on_cell_double_clicked(self, row, column):
+        item = self.table.item(row, 0)
+        if not item: return
+        sol_id = int(item.text())
+
         # Column 2 corresponds to "Folio Orden"
         if column == 2:
             if not (self._check_permission("SOLICITUDES", "LEER") or self._check_permission("ORDENES", "LEER")):
@@ -233,9 +277,6 @@ class RequestsView(QWidget):
                     "No tiene permisos suficientes para consultar el detalle de procesamiento de la orden (ORDENES:LEER)."
                 )
                 return
-            item = self.table.item(row, 0)
-            if not item: return
-            sol_id = int(item.text())
             
             try:
                 orden_id = self.solicitudes_ui_service.get_orden_id_by_solicitud(sol_id)
@@ -246,6 +287,10 @@ class RequestsView(QWidget):
                 self.refresh_data()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"No se pudo abrir el detalle de la orden:\n{str(e)}")
+
+        # Column 10 corresponds to "Asignado a"
+        elif column == 10:
+            self._on_asignar(target_sol_id=sol_id)
 
     def _get_default_directory(self) -> str:
         """Helper to get the default directory configured in parametro_sistema, pointing to 'boletas'."""
@@ -407,7 +452,7 @@ class RequestsView(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error - Generar PDF Unificado", f"Ocurrió un error al iniciar la generación de PDFs:\n{str(e)}")
 
-    def _on_asignar(self):
+    def _on_asignar(self, target_sol_id: int = None):
         if not self._check_permission("SOLICITUDES", "ASIGNAR"):
             QMessageBox.warning(
                 self,
@@ -415,7 +460,7 @@ class RequestsView(QWidget):
                 "No tiene permisos para asignar usuarios a solicitudes (SOLICITUDES:ASIGNAR)."
             )
             return
-        sol_id = self._get_selected_solicitud_id()
+        sol_id = target_sol_id if target_sol_id is not None else self._get_selected_solicitud_id()
         if sol_id == -1: return
         
         try:
@@ -610,6 +655,7 @@ class RequestsView(QWidget):
             print("Error loading available orders for requests:", e)
             self.todas_las_ordenes = []
             self.selected_orden_ids = []
+        self._update_order_filter_title()
 
     def _show_order_filter_menu(self):
         from PySide6.QtGui import QAction
@@ -645,6 +691,7 @@ class RequestsView(QWidget):
                 act.setChecked(checked)
                 act.blockSignals(False)
                 
+            self._update_order_filter_title()
             self.refresh_data()
             
         action_all.triggered.connect(toggle_all)
@@ -670,6 +717,7 @@ class RequestsView(QWidget):
                         if target_oid in self.selected_orden_ids:
                             self.selected_orden_ids.remove(target_oid)
                     update_all_action_state()
+                    self._update_order_filter_title()
                     self.refresh_data()
                 return handler
                 
@@ -678,3 +726,50 @@ class RequestsView(QWidget):
             
         # Display the menu directly under the filter button
         menu.exec(self.btn_filter_orden.mapToGlobal(self.btn_filter_orden.rect().bottomLeft()))
+
+    def _get_active_orders_formatted_text(self) -> str:
+        """Genera el texto HTML formateado de las órdenes activas en el filtro."""
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            return '<span style="color: #EF4444; font-weight: bold;">(Ninguna orden seleccionada)</span>'
+        elif num_selected == total_orders:
+            return '<span style="color: #10B981; font-weight: bold;">Todas las órdenes</span>'
+        else:
+            from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            if len(selected_objs) <= 3:
+                names = []
+                for o in selected_objs:
+                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=25)
+                    parts = label.split(" - ", 1)
+                    if len(parts) == 2:
+                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
+                    else:
+                        names.append(f"<b>{label}</b>")
+                return ", ".join(names)
+            else:
+                names = []
+                for o in selected_objs[:2]:
+                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=20)
+                    parts = label.split(" - ", 1)
+                    if len(parts) == 2:
+                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
+                    else:
+                        names.append(f"<b>{label}</b>")
+                remaining = len(selected_objs) - 2
+                names_str = ", ".join(names)
+                return f'{names_str} y <span style="color: #2563EB; font-weight: bold;">+{remaining} órdenes más</span>'
+
+    def _update_order_filter_title(self):
+        """Actualiza el título de la tarjeta principal con el estado de las órdenes activas."""
+        if hasattr(self, "card") and hasattr(self.card, "header"):
+            order_text = self._get_active_orders_formatted_text()
+            self.card.header.setText(
+                f"Solicitudes Pendientes y en Proceso &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+            )

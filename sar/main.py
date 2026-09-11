@@ -234,6 +234,7 @@ class MainWindow(QMainWindow):
                 from cancunbot.src.ui.views.r2f_cancun_view import R2FCancunWindow
                 self.active_module = R2FCancunWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
                 self.active_module.current_sesion_id = self.current_sesion_id
+                self.active_module.current_username = getattr(self, 'current_username', None)
                 self.active_module._on_logout = self._handle_logout
                 
                 # Hook up logout for R2FCancunWindow

@@ -62,11 +62,13 @@ cancunbot_auditoria       → Bitácora de eventos y errores
 
 | Código | Valor | Descripción |
 | :--- | :--- | :--- |
-| `PORTAL_RECIBO_URL` | `https://recibo.tesoreriacancun.com` | URL del portal de recibos |
-| `PORTAL_FACTURA_URL` | `https://benitojuarez.expidefactura.com/` | URL del portal de facturación |
-| `PDF_BASE_PATH` | *(a definir)* | Ruta base del repositorio de PDFs |
+| `CANCUN_PORTAL_RECIBO_URL` | `https://recibo.tesoreriacancun.com` | URL del portal de recibos de Tesorería Cancún |
+| `CANCUN_PORTAL_FACTURA_URL` | `https://benitojuarez.expidefactura.com/` | URL del portal de facturación de Benito Juárez |
+| `CANCUN_PDF_BASE_PATH` | `T:\CANCUN` | Ruta base del repositorio de almacenado de PDFs |
+| `CANCUN_MAX_REINTENTOS` | `3` | Límite máximo de reintentos automáticos por folio |
+| `CANCUN_BOT_TIMEOUT_MS` | `30000` | Tiempo de espera límite por transacción Playwright (ms) |
 | `PDF_NAMING_PATTERN` | `{folio_electronico}` | Patrón de renombrado de PDFs |
-| `SOLICITUD_FOLIO_PREFIX` | `SOL` | Prefijo para folio de solicitud |
+| `SOLICITUD_FOLIO_PREFIX` | `SOL` | Prefijo para folio de lote o solicitud |
 
 ---
 

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
+from sar.src.ui.design_system.components.atoms.gl_spin_box import CustomSpinBox
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.utils.icons import Icons
 
@@ -48,42 +49,42 @@ class InteractiveGridRow(QFrame):
         # Desarrollo
         self.combo_desarrollo = CustomComboBox()
         self.combo_desarrollo.setPlaceholderText("Seleccionar Desarrollo")
-        self.combo_desarrollo.setMinimumWidth(160)
+        self.combo_desarrollo.setMinimumWidth(120)
         self.combo_desarrollo.setFixedHeight(36)
         self.combo_desarrollo.setVisible(False)
 
         # RFC / Empresa
         self.combo_rfc = CustomComboBox()
         self.combo_rfc.setPlaceholderText("Seleccionar RFC")
-        self.combo_rfc.setMinimumWidth(150)
+        self.combo_rfc.setMinimumWidth(130)
         self.combo_rfc.setFixedHeight(36)
 
         # Delegación
         self.combo_delegacion = CustomComboBox()
         self.combo_delegacion.setPlaceholderText("Delegación")
-        self.combo_delegacion.setMinimumWidth(120)
+        self.combo_delegacion.setMinimumWidth(90)
         self.combo_delegacion.setFixedHeight(36)
 
         # Concepto
         self.combo_concepto = CustomComboBox()
         self.combo_concepto.setPlaceholderText("Seleccionar Concepto")
-        self.combo_concepto.setMinimumWidth(150)
+        self.combo_concepto.setMinimumWidth(110)
         self.combo_concepto.setFixedHeight(36)
 
         # Cantidad
-        self.spin_cantidad = QSpinBox(self)
+        self.spin_cantidad = CustomSpinBox(self)
         self.spin_cantidad.setMinimum(1)
         self.spin_cantidad.setMaximum(100000)
         self.spin_cantidad.setValue(1)
-        self.spin_cantidad.setMinimumWidth(100)
-        self.spin_cantidad.setMaximumWidth(120)
+        self.spin_cantidad.setMinimumWidth(75)
+        self.spin_cantidad.setMaximumWidth(110)
         self.spin_cantidad.setFixedHeight(36)
 
         # Disponibles (semáforo read-only)
         self.lbl_disponibles = QLabel("—", self)
         self.lbl_disponibles.setAlignment(Qt.AlignCenter)
-        self.lbl_disponibles.setMinimumWidth(80)
-        self.lbl_disponibles.setMaximumWidth(100)
+        self.lbl_disponibles.setMinimumWidth(65)
+        self.lbl_disponibles.setMaximumWidth(90)
         self.lbl_disponibles.setFixedHeight(36)
         self._update_disponibles_style("neutral", "—")
 
@@ -186,7 +187,15 @@ class InteractiveGridRow(QFrame):
         self.combo_rfc.clear()
         default_idx = 0
         for i, rfc in enumerate(rfcs):
-            self.combo_rfc.addItem(rfc["razon_social"], rfc["rfc_id"])
+            alias = rfc.get("alias")
+            rfc_code = rfc.get("rfc")
+            if alias and rfc_code:
+                label = f"{alias.strip()} | {rfc_code.strip()}"
+            elif rfc_code:
+                label = rfc_code.strip()
+            else:
+                label = rfc.get("razon_social") or ""
+            self.combo_rfc.addItem(label, rfc["rfc_id"])
             if rfc.get("es_default") or (default_rfc_id and rfc["rfc_id"] == default_rfc_id):
                 default_idx = i
         self.combo_rfc.setCurrentIndex(default_idx)
@@ -418,17 +427,17 @@ class InteractiveGrid(QWidget):
         self.header_layout.addStretch()
         
         # Buttons
-        self.btn_add = CustomButton("+ Agregar Renglón", parent=self)
-        self.btn_add.setMinimumHeight(35)
+        self.btn_add = CustomButton.action_agregar(parent=self)
+        self.btn_add.setToolTip("Agregar nuevo renglón a la tabla")
         self.btn_add.clicked.connect(self.add_row)
         
-        self.btn_cancel = CustomButton("Cancelar Edición", is_secondary=True, parent=self)
-        self.btn_cancel.setMinimumHeight(35)
+        self.btn_cancel = CustomButton.action_cancelar(parent=self)
+        self.btn_cancel.setToolTip("Cancelar edición y descartar cambios")
         self.btn_cancel.setVisible(False)
         self.btn_cancel.clicked.connect(self.cancel_triggered.emit)
         
-        self.btn_save = CustomButton("Guardar Orden", parent=self)
-        self.btn_save.setMinimumHeight(35)
+        self.btn_save = CustomButton.action_guardar(parent=self)
+        self.btn_save.setToolTip("Guardar orden")
         self.btn_save.clicked.connect(self.save_triggered.emit)
         
         self.header_layout.addWidget(self.btn_add)
@@ -437,9 +446,12 @@ class InteractiveGrid(QWidget):
         
         self.main_layout.addLayout(self.header_layout)
         
-        # Scroll area for rows
+        # Scroll area for rows and headers
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_area.setMinimumHeight(240)
         self.scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         self.rows_container = QWidget()
@@ -463,12 +475,12 @@ class InteractiveGrid(QWidget):
         self.lbl_h_concepto = CustomLabel("Concepto", variant="muted")
 
         self.lbl_h_cant = CustomLabel("Cantidad", variant="muted")
-        self.lbl_h_cant.setMinimumWidth(100)
-        self.lbl_h_cant.setMaximumWidth(120)
+        self.lbl_h_cant.setMinimumWidth(75)
+        self.lbl_h_cant.setMaximumWidth(110)
 
         self.lbl_h_disp = CustomLabel("Disponibles", variant="muted")
-        self.lbl_h_disp.setMinimumWidth(80)
-        self.lbl_h_disp.setMaximumWidth(100)
+        self.lbl_h_disp.setMinimumWidth(65)
+        self.lbl_h_disp.setMaximumWidth(90)
         self.lbl_h_disp.setAlignment(Qt.AlignCenter)
 
         self.lbl_h_empty = CustomLabel("", variant="muted")

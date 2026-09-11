@@ -41,6 +41,32 @@ class RegistrarPdfRequest(BaseModel):
     hash_sha256: str
     tamano_bytes: int
 
+class CancunResolverRfcRequest(BaseModel):
+    rfc_pdf: Optional[str] = None
+    nombre_contribuyente: Optional[str] = None
+    rfc_id_base: Optional[int] = None
+
+class CancunFolioResultadoRequest(BaseModel):
+    estado_codigo: str
+    dict_recibo: Optional[Dict[str, Any]] = None
+    error_msg: Optional[str] = None
+    rfc_id_final: Optional[int] = None
+    folio_electronico: Optional[str] = None
+    folio_pase_caja: Optional[str] = None
+
+class CancunImportarPdfFolioItem(BaseModel):
+    tipo_folio: str
+    folio_pase_caja: Optional[str] = None
+    folio_electronico: Optional[str] = None
+    rfc: Optional[str] = None
+
+class CancunImportarPdfRequest(BaseModel):
+    usuario_id: int
+    origen: str = "MANUAL"
+    descripcion: Optional[str] = None
+    desarrollo_id: Optional[int] = None
+    folios: List[CancunImportarPdfFolioItem]
+
 # Endpoints de Solicitudes
 @router.get("/solicitudes")
 def list_solicitudes(orden_ids: Optional[str] = None, db: Session = Depends(get_db)):
@@ -1289,3 +1315,361 @@ def api_asignar_referencias_directo(request: AsignarDirectoRequest, db: Session 
         return {"lote_id": lote_id, "detail": "Asignaciones realizadas con éxito"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Cancún R2F Endpoints ---
+
+@router.get("/cancun/lotes")
+def list_cancun_lotes(db: Session = Depends(get_db)):
+    """Retorna el listado completo de lotes de R2F Cancún."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository
+        repo = LoteFolioRepository(db)
+        lotes = repo.list_all()
+        return [
+            {
+                "lote_id": l.lote_id,
+                "folio_lote": l.folio_lote,
+                "origen": l.origen,
+                "total_folios": l.total_folios,
+                "folios_procesados": l.folios_procesados,
+                "estado_codigo": l.estado.codigo if l.estado else "NUEVO"
+            }
+            for l in lotes
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/cancun/lotes/{lote_id}/detalles")
+def get_cancun_lote_detalles(lote_id: int, db: Session = Depends(get_db)):
+    """Retorna la métrica y lista de folios de un lote específico de Cancún."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository
+        repo = LoteFolioRepository(db)
+        lote = repo.get_by_id(lote_id)
+        if not lote:
+            raise HTTPException(status_code=404, detail="Lote no encontrado")
+        
+        folios_data = []
+        for folio in lote.folios:
+            f_text = folio.folio_electronico if folio.tipo_folio == "ELECTRONICO" else folio.folio_pase_caja
+            folios_data.append({
+                "folio_id": folio.folio_id,
+                "folio_texto": f_text,
+                "tipo_folio": folio.tipo_folio,
+                "intentos": folio.intentos,
+                "estado_codigo": folio.estado.codigo if folio.estado else "PENDIENTE"
+            })
+            
+        return {
+            "lote_id": lote.lote_id,
+            "total_folios": lote.total_folios,
+            "folios_procesados": lote.folios_procesados,
+            "folios_error": lote.folios_error,
+            "folios": folios_data
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/cancun/bot-config")
+def get_cancun_bot_config(db: Session = Depends(get_db)):
+    """Retorna la configuración y localizadores requeridos para el bot R2F Cancún."""
+    try:
+        from sar.src.storage.repositories import ConfigRepository
+        config_repo = ConfigRepository(db)
+        portal_url = config_repo.get_parametro("CANCUN_PORTAL_RECIBO_URL") or "https://recibo.tesoreriacancun.com"
+        max_retries = int(config_repo.get_parametro("CANCUN_MAX_REINTENTOS") or 3)
+        output_dir_raw = config_repo.get_parametro("CANCUN_PDF_BASE_PATH") or "Y:\\R2F\\Recibos"
+        timeout_ms = int(config_repo.get_parametro("CANCUN_BOT_TIMEOUT_MS") or 30000)
+
+        db_locators = config_repo.get_localizadores_portal("CANCUN_RECIBO")
+        locators = {}
+        for k, v in db_locators.items():
+            locators[k] = {
+                "estrategia_selector": v.estrategia_selector,
+                "valor_selector": v.valor_selector
+            }
+        return {
+            "portal_url": portal_url,
+            "max_retries": max_retries,
+            "output_dir_raw": output_dir_raw,
+            "timeout_ms": timeout_ms,
+            "locators": locators
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener configuración de Cancún Bot: {str(e)}")
+
+@router.post("/cancun/lotes/{lote_id}/iniciar")
+def iniciar_cancun_lote(lote_id: int, db: Session = Depends(get_db)):
+    """Marca un lote como EN_PROCESO y devuelve los folios pendientes."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository, FolioCancunRepository
+        lote_repo = LoteFolioRepository(db)
+        folio_repo = FolioCancunRepository(db)
+
+        lote = lote_repo.get_by_id(lote_id)
+        if not lote:
+            raise HTTPException(status_code=404, detail=f"El lote con ID {lote_id} no existe.")
+
+        lote.estado_id = lote_repo._get_estado_id("lote_folio", "EN_PROCESO")
+        db.commit()
+
+        st_pending_id = folio_repo._get_estado_id("folio_cancun", "PENDIENTE")
+        folios_pendientes = []
+        for f in lote.folios:
+            if f.estado_id == st_pending_id:
+                folios_pendientes.append({
+                    "folio_id": f.folio_id,
+                    "tipo_folio": f.tipo_folio,
+                    "folio_electronico": f.folio_electronico,
+                    "folio_pase_caja": f.folio_pase_caja,
+                    "intentos": f.intentos,
+                    "rfc_id": f.rfc_id,
+                    "desarrollo_nombre": f.desarrollo_asoc.nombre if f.desarrollo_asoc else None
+                })
+        return {"success": True, "lote_id": lote_id, "folios_pendientes": folios_pendientes}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al iniciar lote: {str(e)}")
+
+@router.post("/cancun/rfc/resolver")
+def resolver_cancun_rfc(request: CancunResolverRfcRequest, db: Session = Depends(get_db)):
+    """Resuelve dinámicamente un rfc_id a partir del RFC extraído o la razón social."""
+    try:
+        rfc_pdf = (request.rfc_pdf or "").strip().upper()
+        rfc_id_final = request.rfc_id_base
+        error_rfc_detectado = False
+        mensaje = ""
+        rfc_texto_resuelto = None
+
+        es_generico = rfc_pdf in ("XAXX010101000", "XEXX010101000")
+
+        if rfc_pdf and not es_generico:
+            db_rfc_row = db.execute(
+                text("SELECT rfc_id FROM sar_catalogo.rfc WHERE rfc = :r AND activo = true"),
+                {"r": rfc_pdf}
+            ).fetchone()
+            rfc_id_catalogo = db_rfc_row[0] if db_rfc_row else None
+
+            if rfc_id_catalogo:
+                if rfc_id_final != rfc_id_catalogo:
+                    mensaje = f"Corrigiendo RFC: De base {rfc_id_final} a real {rfc_pdf} ({rfc_id_catalogo})."
+                    rfc_id_final = rfc_id_catalogo
+            else:
+                error_rfc_detectado = True
+                mensaje = f"El RFC '{rfc_pdf}' extraído del PDF no está catalogado en SAR."
+        else:
+            nombre_limpio = (request.nombre_contribuyente or "").strip()
+            rfc_id_resuelto = None
+
+            if nombre_limpio and nombre_limpio != "CONTRIBUYENTE GENERAL":
+                db_match = db.execute(
+                    text("""
+                        SELECT rfc_id, rfc, razon_social 
+                        FROM sar_catalogo.rfc 
+                        WHERE (razon_social ILIKE :n OR :n_clean ILIKE '%' || razon_social || '%')
+                          AND activo = true
+                        LIMIT 1
+                    """),
+                    {"n": f"%{nombre_limpio}%", "n_clean": nombre_limpio}
+                ).fetchone()
+
+                if db_match:
+                    rfc_id_resuelto = db_match[0]
+                    rfc_texto_resuelto = db_match[1]
+                    mensaje = f"RFC resuelto por Nombre: '{nombre_limpio}' -> {rfc_texto_resuelto} ({db_match[2]})"
+
+            if rfc_id_resuelto:
+                rfc_id_final = rfc_id_resuelto
+            else:
+                mensaje = f"RFC no especificado y no resuelto por nombre '{nombre_limpio}'."
+                rfc_id_final = None
+
+        return {
+            "rfc_id_final": rfc_id_final,
+            "rfc_texto_resuelto": rfc_texto_resuelto,
+            "error_rfc_detectado": error_rfc_detectado,
+            "mensaje": mensaje
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al resolver RFC: {str(e)}")
+
+@router.post("/cancun/folios/{folio_id}/resultado")
+def registrar_resultado_folio(folio_id: int, request: CancunFolioResultadoRequest, db: Session = Depends(get_db)):
+    """Registra el resultado del procesamiento de un folio de Cancún."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import FolioCancunRepository, ReciboCancunRepository
+        from cancunbot.src.storage.cancunbot_models import FolioCancun
+
+        f_repo = FolioCancunRepository(db)
+        r_repo = ReciboCancunRepository(db)
+
+        if request.estado_codigo == "DESCARGANDO":
+            f_repo.update_status(folio_id, "DESCARGANDO")
+            db.commit()
+            return {"success": True}
+
+        if request.estado_codigo == "ERROR_RFC_NO_CATALOGADO":
+            f_repo.update_status(folio_id, "ERROR_RFC_NO_CATALOGADO", error_msg=request.error_msg)
+            db.commit()
+            return {"success": True}
+
+        if request.estado_codigo == "RECIBO_OK" and request.dict_recibo:
+            rec = r_repo.save_extracted_receipt(folio_id, request.dict_recibo)
+            db_folio = db.get(FolioCancun, folio_id)
+            if db_folio:
+                if request.folio_electronico:
+                    db_folio.folio_electronico = request.folio_electronico
+                if request.folio_pase_caja:
+                    db_folio.folio_pase_caja = request.folio_pase_caja
+                if request.rfc_id_final is not None:
+                    db_folio.rfc_id = request.rfc_id_final
+
+            r_repo.update_status(rec.recibo_id, "PENDIENTE_FACTURAR")
+            f_repo.update_status(folio_id, "RECIBO_OK")
+            db.commit()
+            return {"success": True}
+
+        # Cualquier otro estado de error
+        f_repo.update_status(folio_id, request.estado_codigo, error_msg=request.error_msg)
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al registrar resultado del folio: {str(e)}")
+
+@router.post("/cancun/lotes/{lote_id}/finalizar")
+def finalizar_cancun_lote(lote_id: int, db: Session = Depends(get_db)):
+    """Actualiza métricas y estado final de un lote de Cancún."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository
+        lote_repo = LoteFolioRepository(db)
+        lote_repo.update_metrics_and_status(lote_id)
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al finalizar lote: {str(e)}")
+
+@router.post("/cancun/lotes/{lote_id}/reactivar-errores")
+def reactivar_errores_cancun_lote(lote_id: int, db: Session = Depends(get_db)):
+    """Reactiva los folios en estado de error de descarga a PENDIENTE para su reintento."""
+    try:
+        st_pendiente = db.execute(
+            text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'folio_cancun' AND codigo = 'PENDIENTE'")
+        ).scalar()
+        st_error = db.execute(
+            text("SELECT estado_id FROM sar_catalogo.estado_sistema WHERE entidad = 'folio_cancun' AND codigo = 'ERROR_DESCARGA'")
+        ).scalar()
+
+        db.execute(
+            text("""
+                UPDATE cancunbot_produccion.folio_cancun 
+                SET estado_id = :st_p, ultimo_error = NULL
+                WHERE lote_id = :lid AND estado_id = :st_e
+            """),
+            {"st_p": st_pendiente, "lid": lote_id, "st_e": st_error}
+        )
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al reactivar errores del lote: {str(e)}")
+
+@router.post("/cancun/lotes/importar-pdf")
+def importar_cancun_lote_pdf(request: CancunImportarPdfRequest, db: Session = Depends(get_db)):
+    """Crea un nuevo Lote de Cancún a partir de folios extraídos de un archivo PDF omitiendo duplicados en BD."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository, FolioCancunRepository
+        from cancunbot.src.storage.cancunbot_models import FolioCancun
+        from sqlalchemy import select
+
+        # Obtener folios ya existentes en la BD para evitar duplicados
+        db_pases = set(db.scalars(select(FolioCancun.folio_pase_caja).where(FolioCancun.folio_pase_caja.isnot(None))).all())
+        db_elecs = set(db.scalars(select(FolioCancun.folio_electronico).where(FolioCancun.folio_electronico.isnot(None))).all())
+
+        # Cargar mapa de RFCs activos para resolución directa de rfc_id vía API
+        rfc_rows = db.execute(text("SELECT UPPER(rfc), rfc_id FROM sar_catalogo.rfc WHERE activo = true")).fetchall()
+        rfc_map = {r[0]: r[1] for r in rfc_rows}
+
+        folios_validos_nuevos = []
+        folios_vistos_sesion = set()
+        duplicados_omitidos = 0
+
+        for item in request.folios:
+            val = item.folio_pase_caja.strip() if item.folio_pase_caja else (item.folio_electronico.strip() if item.folio_electronico else None)
+            if not val:
+                continue
+
+            if val in folios_vistos_sesion:
+                duplicados_omitidos += 1
+                continue
+
+            if item.tipo_folio == "PASE_CAJA" and val in db_pases:
+                duplicados_omitidos += 1
+                continue
+
+            if item.tipo_folio == "ELECTRONICO" and val in db_elecs:
+                duplicados_omitidos += 1
+                continue
+
+            folios_vistos_sesion.add(val)
+
+            # Validar RFC enviado contra el catálogo de la BD
+            raw_rfc = item.rfc.strip().upper() if item.rfc else None
+            rfc_id_val = rfc_map.get(raw_rfc) if raw_rfc else None
+
+            folios_validos_nuevos.append({
+                "tipo_folio": item.tipo_folio,
+                "folio_pase_caja": item.folio_pase_caja,
+                "folio_electronico": item.folio_electronico,
+                "rfc_id": rfc_id_val,
+                "desarrollo_id": request.desarrollo_id
+            })
+
+        if not folios_validos_nuevos:
+            raise HTTPException(status_code=400, detail="No hay folios nuevos para importar. Todos ya existen en la base de datos o están duplicados.")
+
+        lote_repo = LoteFolioRepository(db)
+        folio_repo = FolioCancunRepository(db)
+
+        origen_valid = request.origen if request.origen in ("EXCEL", "MANUAL") else "MANUAL"
+        lote = lote_repo.create(
+            usuario_id=request.usuario_id,
+            origen=origen_valid,
+            descripcion=request.descripcion or "Importación automática desde PDF"
+        )
+
+        inserted = folio_repo.create_bulk(lote.lote_id, folios_validos_nuevos)
+        lote_repo.update_metrics_and_status(lote.lote_id)
+        db.commit()
+
+        return {
+            "success": True,
+            "lote_id": lote.lote_id,
+            "folio_lote": lote.folio_lote,
+            "total_folios": inserted,
+            "duplicados_omitidos": duplicados_omitidos
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al importar lote desde PDF: {str(e)}")
+
+@router.get("/cancun/desarrollos")
+def get_cancun_desarrollos(db: Session = Depends(get_db)):
+    """Retorna la lista de desarrollos inmobiliarios activos del catálogo maestro."""
+    try:
+        rows = db.execute(
+            text("SELECT desarrollo_id, nombre FROM sar_catalogo.desarrollo WHERE activo = true ORDER BY nombre ASC")
+        ).fetchall()
+        return [{"desarrollo_id": r[0], "nombre": r[1]} for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener desarrollos: {str(e)}")
+
+
+

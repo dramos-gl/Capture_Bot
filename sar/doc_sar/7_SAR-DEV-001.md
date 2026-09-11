@@ -373,6 +373,13 @@ SAR podrá liberarse cuando:
 •	Descarga PDF validada.
 •	Dashboard operativo validado.
 ________________________________________
+21. Estándar de Transporte Híbrido y Transparencia (CONNECT_VIA_API)
+El sistema SAR implementa una arquitectura híbrida desacoplada gobernada por la bandera de configuración `CONNECT_VIA_API`:
+•	**Transparencia Total de Vistas**: Las vistas de interfaz de usuario (`PySide6`) no deben ejecutar lógica de acceso a datos directa ni asumir un protocolo de red exclusivo. Deben consumir interfaces unificadas de servicio (`*UIService`).
+•	**Simetría Funcional (Zero Divergence)**: Todo servicio en la capa de presentación debe implementar de forma idéntica la consulta/persistencia local directa (`db_connector` / SQLAlchemy) y la alternativa distribuida REST API (`api_client` / FastAPI).
+•	**Serialización Homogénea**: Los endpoints del servidor central (`ops_router`, `docs_router`, `admin_router`, `auth_router`) deben estructurar y exponer exactamente los mismos diccionarios y modelos de datos (Pydantic / JSON) que los repositorios de acceso local.
+•	**Regla de No-Regresión**: Cualquier modificación o nuevo requerimiento funcional debe ser probado y validado con `CONNECT_VIA_API: true` y `CONNECT_VIA_API: false`.
+________________________________________
 Estado Documental
 Documento | Nombre Formal | Categoría | Estado
 --- | --- | --- | ---

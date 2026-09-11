@@ -77,25 +77,18 @@ cancunbot/
     ├── services/                   # Servicios de negocio
     │   ├── __init__.py
     │   ├── pdf_extractor.py        # Extracción de campos del PDF de recibo
-    │   ├── file_manager.py         # Renombrado y organización de PDFs
-    │   ├── excel_importer.py       # Importación de folios desde Excel
-    │   └── settings.py             # Lectura de settings.json y .env
-    │
-    ├── ui/                         # GUI PySide6 — Atomic Design
-    │   ├── __init__.py
-    │   ├── assets/                 # Íconos e imágenes
-    │   ├── design_system/
-    │   │   ├── atoms/              # Botones, labels, inputs
-    │   │   ├── molecules/          # Dialogs, cards, tablas
-    │   │   └── organisms/          # Barras de herramientas, paneles
-    │   └── views/
-    │       ├── main_view.py        # Vista principal / shell
-    │       ├── solicitudes_view.py # Vista de gestión de solicitudes
-    │       ├── bot_a_view.py       # Vista del Bot A (descarga)
-    │       ├── bot_c_view.py       # Vista del Bot C (facturación)
-    │       └── configuracion_view.py  # Vista de configuración y localizadores
-    │
-    └── paths.py                    # Constantes de rutas del proyecto
+    │   ├── core/                       # Hilos de procesamiento y workers
+    │   │   ├── __init__.py
+    │   │   └── bot_recibo_worker.py    # QThread Playwright worker (Descargas Recibos)
+    │   │
+    │   ├── ui/                         # GUI PySide6 — Atomic Design
+    │   │   ├── __init__.py
+    │   │   ├── assets/                 # Íconos e imágenes
+    │   │   └── views/
+    │   │       ├── r2f_cancun_view.py  # Dashboard unificado R2F-Cancún (Recibos / Facturas)
+    │   │       └── r2f_control_view.py # Panel de control administrativo modal R2F
+    │   │
+    │   └── paths.py                    # Constantes de rutas del proyecto
 ```
 
 ---

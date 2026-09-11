@@ -173,7 +173,10 @@ En la carpeta de instalación de cada cliente de escritorio (junto al ejecutable
   "DB_NAME": "db_sar"
 }
 ```
-* **`CONNECT_VIA_API`**: Interruptor de seguridad. Si se establece en `false`, el cliente se conecta de forma directa a la base de datos local (comportamiento legacy). Si se cambia a `true`, la autenticación se conmuta automáticamente a la API REST.
+* **`CONNECT_VIA_API`**: Interruptor de transporte y arquitectura.
+  - `false`: El cliente se conecta de forma directa a la Base de Datos PostgreSQL mediante SQLAlchemy y repositorios locales (ideal para entornos LAN directos o mono-estación).
+  - `true`: El cliente conmuta todas las operaciones de datos, catálogos, autenticación y generación hacia la API REST central (FastAPI) mediante `APIClient`.
+  - **Transparencia Total**: Todos los módulos, vistas y diálogos del sistema operan con paridad funcional simétrica e idéntica en ambas modalidades.
 
 ---
 

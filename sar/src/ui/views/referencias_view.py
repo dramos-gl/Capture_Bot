@@ -1,8 +1,10 @@
 """Referencias View."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QScrollArea
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from sar.src.services.referencias_service import ReferenciasService
+from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox,
     CustomLabel, KeepOpenMenu, GLMessageBox as QMessageBox
@@ -53,7 +55,27 @@ class ReferenciasView(QWidget):
         self.db_connector = db_connector
         self.referencias_service = ReferenciasService(self.db_connector)
         
-        self.layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QWidget#referenciasScrollContent {
+                background-color: transparent;
+            }
+        """)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("referenciasScrollContent")
+        self.layout = QVBoxLayout(scroll_content)
         self.layout.setContentsMargins(24, 24, 24, 24)
         self.layout.setSpacing(24)
         
@@ -121,16 +143,44 @@ class ReferenciasView(QWidget):
         actions_layout = QHBoxLayout()
         actions_layout.addStretch()
         
-        self.btn_marcar_visibles = CustomButton("Marcar Visibles", is_secondary=True)
+        self.btn_marcar_visibles = CustomButton(
+            "Marcar Visibles",
+            is_secondary=True,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            parent=self
+        )
+        self.btn_marcar_visibles.setIcon(Icons.checkbox(Colors.TEXT_LIGHT_PRIMARY))
+        self.btn_marcar_visibles.setToolTip("Marcar o desmarcar todos los derechos visibles en la página")
         self.btn_marcar_visibles.clicked.connect(self._on_marcar_visibles)
         
-        self.btn_estado = CustomButton("Cambiar Estado")
+        self.btn_estado = CustomButton(
+            "Cambiar Estado",
+            is_secondary=False,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            parent=self
+        )
+        self.btn_estado.setIcon(Icons.actualizar("#FFFFFF"))
+        self.btn_estado.setToolTip("Cambiar estado de los derechos seleccionados")
         self.btn_estado.clicked.connect(self._on_cambiar_estado)
         
-        self.btn_detalle = CustomButton("Ver Detalle", is_secondary=True)
+        self.btn_detalle = CustomButton(
+            "Ver Detalle",
+            is_secondary=True,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            parent=self
+        )
+        self.btn_detalle.setIcon(Icons.buscar(Colors.TEXT_LIGHT_PRIMARY))
+        self.btn_detalle.setToolTip("Ver información detallada del derecho seleccionado")
         self.btn_detalle.clicked.connect(self._on_ver_detalle)
         
-        self.btn_pdf = CustomButton("Ver PDF", is_secondary=True)
+        self.btn_pdf = CustomButton(
+            "Ver PDF",
+            is_secondary=True,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            parent=self
+        )
+        self.btn_pdf.setIcon(Icons.pdf())
+        self.btn_pdf.setToolTip("Ver comprobante PDF del derecho seleccionado")
         self.btn_pdf.clicked.connect(self._on_ver_pdf)
         
         actions_layout.addWidget(self.btn_marcar_visibles)
@@ -140,6 +190,9 @@ class ReferenciasView(QWidget):
         
         self.card.layout.addLayout(actions_layout)
         self.layout.addWidget(self.card)
+
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area)
         
         self._current_search_text = ""
         self._current_estado_filter = "Todos"
@@ -148,11 +201,10 @@ class ReferenciasView(QWidget):
         self.is_custom_filter = False
         
         # Add order filter button to FilterBar layout
-        from sar.src.ui.design_system.utils.icons import Icons
-        self.btn_filter_orden = CustomButton("", is_secondary=True)
-        self.btn_filter_orden.setIcon(Icons.filter_icon("#475569"))
+        self.btn_filter_orden = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
         self.btn_filter_orden.setFixedSize(36, 36)
-        self.btn_filter_orden.setToolTip("Filtrar por Orden")
+        self.btn_filter_orden.setToolTip("Filtrar derechos por orden de generación")
         self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
         
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.btn_filter_orden, alignment=Qt.AlignmentFlag.AlignBottom)
@@ -165,6 +217,7 @@ class ReferenciasView(QWidget):
         self.table.itemChanged.connect(self._on_table_item_changed)
         
         self._load_available_orders()
+        self._update_order_filter_title()
         self._apply_permissions()
         self.refresh_data()
         
@@ -290,8 +343,10 @@ class ReferenciasView(QWidget):
                     break
         if any_checked:
             self.btn_marcar_visibles.setText("Desmarcar Visibles")
+            self.btn_marcar_visibles.setToolTip("Desmarcar todos los derechos visibles en la página")
         else:
             self.btn_marcar_visibles.setText("Marcar Visibles")
+            self.btn_marcar_visibles.setToolTip("Marcar todos los derechos visibles en la página")
 
     def _on_cambiar_estado(self):
         """
@@ -586,6 +641,7 @@ class ReferenciasView(QWidget):
             print("Error loading available orders for references:", e)
             self.todas_las_ordenes = []
             self.selected_orden_ids = []
+        self._update_order_filter_title()
 
     def _show_order_filter_menu(self):
         from PySide6.QtGui import QAction
@@ -622,6 +678,7 @@ class ReferenciasView(QWidget):
                 act.blockSignals(False)
                 
             self.current_page = 1
+            self._update_order_filter_title()
             self.refresh_data()
             
         action_all.triggered.connect(toggle_all)
@@ -648,6 +705,7 @@ class ReferenciasView(QWidget):
                             self.selected_orden_ids.remove(target_oid)
                     update_all_action_state()
                     self.current_page = 1
+                    self._update_order_filter_title()
                     self.refresh_data()
                 return handler
                 
@@ -656,3 +714,50 @@ class ReferenciasView(QWidget):
             
         # Display the menu directly under the filter button
         menu.exec(self.btn_filter_orden.mapToGlobal(self.btn_filter_orden.rect().bottomLeft()))
+
+    def _get_active_orders_formatted_text(self) -> str:
+        """Genera el texto HTML formateado de las órdenes activas en el filtro."""
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            return '<span style="color: #EF4444; font-weight: bold;">(Ninguna orden seleccionada)</span>'
+        elif num_selected == total_orders:
+            return '<span style="color: #10B981; font-weight: bold;">Todas las órdenes</span>'
+        else:
+            from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            if len(selected_objs) <= 3:
+                names = []
+                for o in selected_objs:
+                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=25)
+                    parts = label.split(" - ", 1)
+                    if len(parts) == 2:
+                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
+                    else:
+                        names.append(f"<b>{label}</b>")
+                return ", ".join(names)
+            else:
+                names = []
+                for o in selected_objs[:2]:
+                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=20)
+                    parts = label.split(" - ", 1)
+                    if len(parts) == 2:
+                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
+                    else:
+                        names.append(f"<b>{label}</b>")
+                remaining = len(selected_objs) - 2
+                names_str = ", ".join(names)
+                return f'{names_str} y <span style="color: #2563EB; font-weight: bold;">+{remaining} órdenes más</span>'
+
+    def _update_order_filter_title(self):
+        """Actualiza el título de la tarjeta principal con el estado de las órdenes activas."""
+        if hasattr(self, "card") and hasattr(self.card, "header"):
+            order_text = self._get_active_orders_formatted_text()
+            self.card.header.setText(
+                f"Producción de Derechos &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+            )

@@ -1,14 +1,22 @@
 SAR-CODE-001
 Estructura Base del Repositorio (Módulo sar/)
 sar/
-├── main.py                     # Punto de entrada / Bootstrapper de la app SAR
+├── main.py                     # Punto de entrada / Bootstrapper de la app SAR Desktop
+├── main_api.py                 # Servidor Central API REST (FastAPI)
 └── src/
+     ├── api/                   # Routers y controladores REST API (FastAPI)
      ├── core/                  # Inicialización y ciclo de vida de Playwright
      ├── pages/                 # Page Object Model (POM) para Portales
-     ├── storage/               # Capa de persistencia (PostgreSQL + Excel Handler)
-     ├── services/              # Servicios de soporte de negocio
-     ├── ui/                    # Capa de Interfaz de Usuario (Atomic Design)
+     ├── storage/               # Capa de persistencia (PostgreSQL + APIClient + Repositorios)
+     ├── services/              # Capa de Servicios de Negocio y Fachadas UI (*UIService)
+     ├── ui/                    # Capa de Interfaz de Usuario (Atomic Design / PySide6)
      └── paths.py               # Constantes de rutas de archivos relativas
+
+Patrón de Conexión Híbrida y Transparencia de Transporte (CONNECT_VIA_API)
+Toda interacción entre la interfaz gráfica (`sar/src/ui/`) y los datos debe canalizarse exclusivamente a través de servicios `*UIService` (ej. `OrdenesUIService`, `InventarioUIService`), asegurando simetría funcional absoluta:
+1. Conexión Directa (`CONNECT_VIA_API: false`): El servicio consume `DatabaseConnector` y `Repositories` (SQLAlchemy / PostgreSQL LAN).
+2. Conexión API REST (`CONNECT_VIA_API: true`): El servicio consume `APIClient` invocando los endpoints en `sar/src/api/routers/`.
+3. Contratos de Datos Idénticos: Ambas rutas deben procesar y devolver las mismas estructuras de datos y tipos sin que la UI perciba diferencias.
 DDL PostgreSQL v1.0
 Creación de Esquemas
 CREATE SCHEMA sar_seguridad;

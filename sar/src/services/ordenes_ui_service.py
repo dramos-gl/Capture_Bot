@@ -32,12 +32,12 @@ class OrdenesUIService:
                 raise ValueError("db_connector is required when connect_via_api is False")
             with self.db_connector.get_session() as session:
                 repo = CatalogoRepository(session)
-                rfcs = [(r.rfc_id, r.rfc) for r in repo.get_rfcs_activos()]
+                rfcs = [(r.rfc_id, r.rfc, r.alias, r.razon_social) for r in repo.get_rfcs_activos()]
                 conceptos = [(c.concepto_id, c.nombre) for c in repo.get_conceptos_activos()]
                 delegaciones = [(d.delegacion_id, d.nombre) for d in repo.get_delegaciones_activas()]
                 municipios = [{"nombre": m.nombre, "municipio_id": m.municipio_id, "activo": m.activo} for m in repo.get_all_municipios() if m.activo]
                 return {
-                    "rfcs": [{"rfc_id": r[0], "rfc": r[1]} for r in rfcs],
+                    "rfcs": [{"rfc_id": r[0], "rfc": r[1], "alias": r[2], "razon_social": r[3]} for r in rfcs],
                     "conceptos": [{"concepto_id": c[0], "nombre": c[1]} for c in conceptos],
                     "delegaciones": [{"delegacion_id": d[0], "nombre": d[1]} for d in delegaciones],
                     "municipios": municipios

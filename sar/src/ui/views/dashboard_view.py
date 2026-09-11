@@ -92,7 +92,7 @@ class DashboardView(QWidget):
 
         scroll_area = QScrollArea(self)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setStyleSheet("""
             QScrollArea {
@@ -316,6 +316,7 @@ class DashboardView(QWidget):
         main_layout.addWidget(scroll_area)
 
         self._load_available_orders()
+        self._update_order_filter_title()
         self.refresh_data()
         
     def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
@@ -614,6 +615,7 @@ class DashboardView(QWidget):
             print("Error loading available orders for dashboard:", e)
             self.todas_las_ordenes = []
             self.selected_orden_ids = []
+        self._update_order_filter_title()
 
     def _show_filter_menu(self):
         from PySide6.QtGui import QAction
@@ -649,6 +651,7 @@ class DashboardView(QWidget):
                 act.setChecked(checked)
                 act.blockSignals(False)
                 
+            self._update_order_filter_title()
             self.refresh_data()
             
         action_all.triggered.connect(toggle_all)
@@ -674,6 +677,7 @@ class DashboardView(QWidget):
                         if target_oid in self.selected_orden_ids:
                             self.selected_orden_ids.remove(target_oid)
                     update_all_action_state()
+                    self._update_order_filter_title()
                     self.refresh_data()
                 return handler
                 
@@ -682,6 +686,53 @@ class DashboardView(QWidget):
             
         # Display the menu directly under the filter button
         menu.exec(self.btn_filter.mapToGlobal(self.btn_filter.rect().bottomLeft()))
+
+    def _get_active_orders_formatted_text(self) -> str:
+        """Genera el texto HTML formateado de las órdenes activas en el filtro."""
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            return '<span style="color: #EF4444; font-weight: bold;">(Ninguna orden seleccionada)</span>'
+        elif num_selected == total_orders:
+            return '<span style="color: #10B981; font-weight: bold;">Todas las órdenes</span>'
+        else:
+            from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            if len(selected_objs) <= 3:
+                names = []
+                for o in selected_objs:
+                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=25)
+                    parts = label.split(" - ", 1)
+                    if len(parts) == 2:
+                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
+                    else:
+                        names.append(f"<b>{label}</b>")
+                return ", ".join(names)
+            else:
+                names = []
+                for o in selected_objs[:2]:
+                    label = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=20)
+                    parts = label.split(" - ", 1)
+                    if len(parts) == 2:
+                        names.append(f"<b>{parts[0]}</b> ({parts[1]})")
+                    else:
+                        names.append(f"<b>{label}</b>")
+                remaining = len(selected_objs) - 2
+                names_str = ", ".join(names)
+                return f'{names_str} y <span style="color: #2563EB; font-weight: bold;">+{remaining} órdenes más</span>'
+
+    def _update_order_filter_title(self):
+        """Actualiza el título de la sección de actividad con el estado de las órdenes activas."""
+        if hasattr(self, "lbl_table_title"):
+            order_text = self._get_active_orders_formatted_text()
+            self.lbl_table_title.setText(
+                f"Últimos derechos generados &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Órdenes activas en filtro: <b>{order_text}</b></span>"
+            )
 
 
 class ErrorDetailDialog(QDialog):

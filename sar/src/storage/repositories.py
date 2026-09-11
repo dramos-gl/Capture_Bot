@@ -1784,7 +1784,7 @@ class InventarioRepository(BaseRepository):
         """Returns active RFCs that have at least one reference in 'FACTURADA' state."""
         from sqlalchemy import text
         stmt = text("""
-            SELECT DISTINCT rfc.rfc_id, rfc.razon_social
+            SELECT DISTINCT rfc.rfc_id, rfc.rfc, rfc.alias, rfc.razon_social
             FROM sar_catalogo.rfc rfc
             JOIN sar_produccion.grupo_referencia gr ON rfc.rfc_id = gr.rfc_id
             JOIN sar_produccion.referencia r ON gr.grupo_id = r.grupo_id
@@ -1799,7 +1799,15 @@ class InventarioRepository(BaseRepository):
             ORDER BY rfc.razon_social
         """)
         results = self.session.execute(stmt).all()
-        return [{"rfc_id": row.rfc_id, "razon_social": row.razon_social} for row in results]
+        return [
+            {
+                "rfc_id": row.rfc_id,
+                "rfc": row.rfc,
+                "alias": row.alias,
+                "razon_social": row.razon_social
+            }
+            for row in results
+        ]
 
 
     def get_desarrollos_activos_para_apartar(self) -> List[dict]:
@@ -1826,6 +1834,8 @@ class InventarioRepository(BaseRepository):
                 "delegacion_id": row[1].delegacion_id,
                 "es_default": row[1].es_default,
                 "rfc_razon_social": row[3].razon_social,
+                "rfc": row[3].rfc,
+                "alias": row[3].alias,
                 "delegacion_nombre": row[2].nombre,
             }
             for row in results
@@ -1853,6 +1863,8 @@ class InventarioRepository(BaseRepository):
                 seen.add(rfc_obj.rfc_id)
                 out.append({
                     "rfc_id": rfc_obj.rfc_id,
+                    "rfc": rfc_obj.rfc,
+                    "alias": rfc_obj.alias,
                     "razon_social": rfc_obj.razon_social,
                     "es_default": es_default
                 })

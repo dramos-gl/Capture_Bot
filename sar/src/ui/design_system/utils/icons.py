@@ -189,8 +189,8 @@ class Icons:
 
     # Custom/Special icons keeping backwards compatibility
     _SHIELD_LOCK_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#2C3E50" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><rect x="9" y="11" width="6" height="4" rx="1"></rect><path d="M10 11V9a2 2 0 1 1 4 0v2"></path></svg>'''
-    _EXCEL_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M8 13h2v5H8z"></path><path d="M12 15h2v3h-2z"></path><path d="M16 12h2v6h-2z"></path></svg>'''
-    _PDF_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="M9 15h1.5a1.5 1.5 0 0 0 0-3H9v6"></path><path d="M12 12v6h1.5a3 3 0 0 0 0-6H12z"></path><path d="M16 18V12h3"></path><path d="M16 15h2.5"></path></svg>'''
+    _EXCEL_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" fill="#107C41" fill-opacity="0.12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 12.5l3 4.5M11 12.5l-3 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 13.5h3M14 15.5h2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'''
+    _PDF_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" fill="#DC2626" fill-opacity="0.12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 13h1.8a1.2 1.2 0 0 1 0 2.4H8v1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 13v4h1.2a1.8 1.8 0 0 0 0-4H13z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>'''
     _DOT_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="5" fill="currentColor"/></svg>'''
     _HOLLOW_DOT_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/></svg>'''
 
@@ -362,17 +362,29 @@ class Icons:
 
     @classmethod
     def file_excel(cls, color: str = None) -> QIcon:
-        return cls._create_icon(cls._EXCEL_SVG, color)
+        return cls._create_icon(cls._EXCEL_SVG, color or "#107C41")
+
+    @classmethod
+    def excel(cls, color: str = None) -> QIcon:
+        return cls._create_icon(cls._EXCEL_SVG, color or "#107C41")
 
     @classmethod
     def file_pdf(cls, color: str = None) -> QIcon:
-        return cls._create_icon(cls._PDF_SVG, color)
+        return cls._create_icon(cls._PDF_SVG, color or "#DC2626")
+
+    @classmethod
+    def pdf(cls, color: str = None) -> QIcon:
+        return cls._create_icon(cls._PDF_SVG, color or "#DC2626")
 
 
     # --- NEW CONVENIENCE CLASSMETHODS (Generated dynamically/statically for ease of use) ---
     # Acción Principal
     @classmethod
+    def guardar(cls, color: str = None) -> QIcon: return cls.get_icon("guardar", color=color)
+    @classmethod
     def guardar_nuevo(cls, color: str = None) -> QIcon: return cls.get_icon("guardar_nuevo", color=color)
+    @classmethod
+    def editar(cls, color: str = None) -> QIcon: return cls.get_icon("editar", color=color)
     @classmethod
     def cancelar(cls, color: str = None) -> QIcon: return cls.get_icon("cancelar", color=color)
     @classmethod
