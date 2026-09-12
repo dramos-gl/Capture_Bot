@@ -18,10 +18,25 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configurar middleware de CORS para permitir conexiones desde la red local
+# Configurar middleware de CORS permitiendo orígenes configurables o toda la red local
+from sar.src.paths import get_settings_path
+import json
+
+cors_origins = ["*"]
+try:
+    settings_path = get_settings_path()
+    if os.path.exists(settings_path):
+        with open(settings_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+            custom_origins = cfg.get("CORS_ORIGINS")
+            if custom_origins and isinstance(custom_origins, list):
+                cors_origins = custom_origins
+except Exception:
+    cors_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,6 +58,35 @@ def read_root():
         "status": "online",
         "app": "SAR - Servidor API",
         "version": "1.0.0"
+    }
+
+@app.get("/health")
+def read_health():
+    """Endpoint de diagnóstico profundo para validar conectividad con PostgreSQL."""
+    import time
+    from sqlalchemy import text
+    
+    t_start = time.perf_counter()
+    db_status = "connected"
+    db_error = None
+    latency_ms = 0.0
+    
+    try:
+        with db_connector.get_session() as session:
+            session.execute(text("SELECT 1")).scalar()
+        latency_ms = round((time.perf_counter() - t_start) * 1000, 2)
+    except Exception as e:
+        db_status = "disconnected"
+        db_error = str(e)
+        latency_ms = round((time.perf_counter() - t_start) * 1000, 2)
+        
+    return {
+        "status": "online" if db_status == "connected" else "degraded",
+        "app": "SAR - Servidor API",
+        "version": "1.0.0",
+        "database": db_status,
+        "db_latency_ms": latency_ms,
+        "db_error": db_error
     }
 
 if __name__ == "__main__":

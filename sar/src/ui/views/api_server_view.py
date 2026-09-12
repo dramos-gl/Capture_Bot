@@ -5,12 +5,15 @@ import sys
 import subprocess
 import socket
 import datetime
+import urllib.request
+import json
+import time
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLabel, QMainWindow, 
     QApplication, QTextEdit, QPushButton, QFontDialog, QTableWidget, 
     QTableWidgetItem, QHeaderView, QLineEdit, QFormLayout, QDialog
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QThread
+from PySide6.QtCore import Qt, Signal, QTimer, QThread, QProcess
 from PySide6.QtGui import QIcon, QFont
 
 from sar.src.ui.design_system.theme_manager import ThemeManager
@@ -39,16 +42,18 @@ class ServiceControlWorker(QThread):
                     text=True,
                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 )
-                if "RUNNING" in result.stdout:
-                    self.finished.emit("RUNNING", result.stdout)
-                elif "STOPPED" in result.stdout:
-                    self.finished.emit("STOPPED", result.stdout)
-                elif "PAUSED" in result.stdout:
-                    self.finished.emit("PAUSED", result.stdout)
+                stdout = result.stdout or ""
+                if "RUNNING" in stdout:
+                    self.finished.emit("RUNNING", stdout)
+                elif "STOPPED" in stdout:
+                    self.finished.emit("STOPPED", stdout)
+                elif "PAUSED" in stdout:
+                    self.finished.emit("PAUSED", stdout)
+                elif "1060" in stdout or "does not exist" in stdout.lower() or "no existe" in stdout.lower():
+                    self.finished.emit("NOT_INSTALLED", "Servicio no instalado en el sistema.")
                 else:
-                    self.finished.emit("UNKNOWN", result.stdout or result.stderr)
+                    self.finished.emit("UNKNOWN", stdout or result.stderr)
             elif self.action in ["start", "stop"]:
-                # Request elevation if needed, but we'll try standard command first
                 cmd = ["sc", self.action, self.service_name]
                 result = subprocess.run(
                     cmd,
@@ -62,10 +67,126 @@ class ServiceControlWorker(QThread):
                     err_msg = result.stderr or result.stdout
                     if "5" in err_msg or "Access is denied" in err_msg or "acceso denegado" in err_msg.lower():
                         self.finished.emit("ERROR_ELEVATION", "Acceso Denegado. Por favor ejecute esta aplicación como Administrador para controlar los servicios de Windows.")
+                    elif "1060" in err_msg or "does not exist" in err_msg.lower() or "no existe" in err_msg.lower():
+                        self.finished.emit("NOT_INSTALLED", "El servicio 'SAR_API' no está instalado en este equipo Windows.")
                     else:
                         self.finished.emit("ERROR", f"Error al ejecutar '{self.action}': {err_msg}")
         except Exception as e:
             self.finished.emit("EXCEPTION", f"Excepción durante control de servicio: {str(e)}")
+
+
+class SystemHealthCheckWorker(QThread):
+    """Diagnóstico asíncrono triple: Servicio Windows/Local + Endpoint HTTP FastAPI + PostgreSQL Ping."""
+    finished = Signal(dict)
+    
+    def __init__(self, db_connector, api_url, is_local_running=False, service_name="SAR_API"):
+        super().__init__()
+        self.db_connector = db_connector
+        self.api_url = api_url.rstrip("/") if api_url else "http://127.0.0.1:8000"
+        self.is_local_running = is_local_running
+        self.service_name = service_name
+        
+    def run(self):
+        from sqlalchemy import text
+        
+        result = {
+            "service_status": "UNKNOWN",
+            "service_detail": "",
+            "api_status": "OFFLINE",
+            "api_latency_ms": 0.0,
+            "api_detail": "",
+            "db_status": "DESCONECTADA",
+            "db_latency_ms": 0.0,
+            "db_detail": ""
+        }
+        
+        # 1. Estado de Servicio
+        if self.is_local_running:
+            result["service_status"] = "LOCAL_RUNNING"
+            result["service_detail"] = "Proceso Uvicorn ejecutándose localmente en esta aplicación."
+        else:
+            try:
+                res = subprocess.run(
+                    ["sc", "query", self.service_name],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                )
+                stdout = res.stdout or ""
+                if "RUNNING" in stdout:
+                    result["service_status"] = "RUNNING"
+                    result["service_detail"] = "Servicio Windows activo y en ejecución."
+                elif "STOPPED" in stdout:
+                    result["service_status"] = "STOPPED"
+                    result["service_detail"] = "Servicio Windows detenido."
+                elif "1060" in stdout or "does not exist" in stdout.lower() or "no existe" in stdout.lower():
+                    result["service_status"] = "NOT_INSTALLED"
+                    result["service_detail"] = "Servicio Windows no está registrado en el sistema."
+                else:
+                    result["service_status"] = "UNKNOWN"
+                    result["service_detail"] = stdout.strip() or res.stderr.strip()
+            except Exception as e:
+                result["service_status"] = "UNKNOWN"
+                result["service_detail"] = str(e)
+                
+        # 2. Endpoint HTTP de la API (FastAPI)
+        t_api_start = time.perf_counter()
+        health_url = f"{self.api_url}/health"
+        try:
+            req = urllib.request.Request(
+                health_url,
+                headers={"User-Agent": "SAR-Server-Monitor/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                elapsed_ms = round((time.perf_counter() - t_api_start) * 1000, 1)
+                result["api_latency_ms"] = elapsed_ms
+                if resp.status == 200:
+                    body = json.loads(resp.read().decode("utf-8"))
+                    result["api_status"] = "ONLINE"
+                    result["api_detail"] = f"Online ({elapsed_ms} ms)"
+                    if body.get("database") == "connected":
+                        result["api_db_status"] = "CONECTADA"
+                    else:
+                        result["api_db_status"] = "DEGRADADA"
+                else:
+                    result["api_status"] = "DEGRADED"
+                    result["api_detail"] = f"HTTP {resp.status}"
+        except Exception:
+            # Si /health no responde, intentar con /
+            try:
+                t_root_start = time.perf_counter()
+                req_root = urllib.request.Request(
+                    f"{self.api_url}/",
+                    headers={"User-Agent": "SAR-Server-Monitor/1.0"}
+                )
+                with urllib.request.urlopen(req_root, timeout=2.0) as resp_root:
+                    elapsed_ms = round((time.perf_counter() - t_root_start) * 1000, 1)
+                    result["api_latency_ms"] = elapsed_ms
+                    if resp_root.status == 200:
+                        result["api_status"] = "ONLINE"
+                        result["api_detail"] = f"Online ({elapsed_ms} ms)"
+                    else:
+                        result["api_status"] = "OFFLINE"
+                        result["api_detail"] = f"HTTP {resp_root.status}"
+            except Exception:
+                result["api_status"] = "OFFLINE"
+                result["api_detail"] = "Sin respuesta (Puerto 8000 cerrado)"
+
+        # 3. Base de Datos PostgreSQL Directa
+        if self.db_connector:
+            t_db_start = time.perf_counter()
+            try:
+                with self.db_connector.get_session() as session:
+                    session.execute(text("SELECT 1")).scalar()
+                elapsed_db = round((time.perf_counter() - t_db_start) * 1000, 1)
+                result["db_status"] = "CONECTADA"
+                result["db_latency_ms"] = elapsed_db
+                result["db_detail"] = f"SELECT 1 OK ({elapsed_db} ms)"
+            except Exception as e:
+                result["db_status"] = "DESCONECTADA"
+                result["db_detail"] = f"Error: {str(e)[:60]}"
+                
+        self.finished.emit(result)
 
 class APIServerWindow(QMainWindow):
     """Dedicated Control Panel Window for the API_SAR Application Server."""
@@ -78,14 +199,17 @@ class APIServerWindow(QMainWindow):
         self.current_usuario_id = current_usuario_id
         self.current_sesion_id = current_sesion_id
         self._logging_out = False
+        self.local_process = None
         
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
         self.active_workers = []
         
-        # Window setup
+        # Window setup: Habilitar maximizar, minimizar y tamaño responsivo
         self.setWindowTitle("Servidor de Aplicaciones API_SAR")
-        self.resize(800, 470)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        self.setMinimumSize(760, 440)
+        self.resize(860, 500)
         
         # Main Layout
         self.central_widget = QWidget()
@@ -116,13 +240,13 @@ class APIServerWindow(QMainWindow):
         # Apply fonts and logs timer
         self.console_font = QFont("Consolas", 10)
         
-        # Auto-query service status
+        # Auto-query health status (cada 6 segundos)
         self.query_timer = QTimer(self)
-        self.query_timer.timeout.connect(self._query_service_status)
-        self.query_timer.start(5000) # Every 5 seconds
+        self.query_timer.timeout.connect(self._run_health_check)
+        self.query_timer.start(6000)
         
         # Delay initial query
-        QTimer.singleShot(100, self._query_service_status)
+        QTimer.singleShot(150, self._run_health_check)
         
         # Set default active tab
         self._change_tab("General")
@@ -146,6 +270,7 @@ class APIServerWindow(QMainWindow):
         layout.addWidget(brand_lbl)
         
         self.main_layout.addWidget(self.header_widget)
+
     def _setup_sidebar(self):
         self.sidebar_card = CustomCard(parent=self)
         self.sidebar_card.setFixedWidth(175)
@@ -218,7 +343,7 @@ class APIServerWindow(QMainWindow):
         layout = QVBoxLayout(widget)
         layout.setSpacing(10)
         
-        title = CustomLabel("Información General del Servidor", variant="header")
+        title = CustomLabel("Información y Diagnóstico de Salud del Servidor", variant="header")
         layout.addWidget(title)
         
         self.general_info_card = CustomCard()
@@ -240,10 +365,19 @@ class APIServerWindow(QMainWindow):
             ip = "127.0.0.1"
             
         self.lbl_ip_addr = CustomLabel(ip, variant="body")
-        info_layout.addRow("Dirección IP:", self.lbl_ip_addr)
+        info_layout.addRow("Dirección IP Local:", self.lbl_ip_addr)
         
-        self.lbl_service_status = CustomLabel("Verificando...", variant="body")
-        info_layout.addRow("Estado del Servicio Windows (SAR_API):", self.lbl_service_status)
+        # 1. Servicio Windows
+        self.lbl_service_status = CustomLabel("Diagnosticando...", variant="body")
+        info_layout.addRow("Servicio de Windows (SAR_API):", self.lbl_service_status)
+        
+        # 2. Servidor API REST FastAPI (HTTP Ping)
+        self.lbl_api_status = CustomLabel("Diagnosticando...", variant="body")
+        info_layout.addRow("Servidor API REST (FastAPI):", self.lbl_api_status)
+        
+        # 3. Conexión Directa a PostgreSQL (DB Ping)
+        self.lbl_db_status = CustomLabel("Diagnosticando...", variant="body")
+        info_layout.addRow("Base de Datos (PostgreSQL):", self.lbl_db_status)
         
         self.lbl_api_url = CustomLabel(self.api_client.api_url, variant="body")
         info_layout.addRow("URL de API REST:", self.lbl_api_url)
@@ -251,10 +385,19 @@ class APIServerWindow(QMainWindow):
         # Database Info
         db_info = f"Host: {self.api_client.settings_data.get('DB_HOST', '127.0.0.1')} | DB: {self.api_client.settings_data.get('DB_NAME', 'db_sar')}"
         self.lbl_db_info = CustomLabel(db_info, variant="body")
-        info_layout.addRow("Base de Datos:", self.lbl_db_info)
+        info_layout.addRow("Detalle Base de Datos:", self.lbl_db_info)
         
         self.general_info_card.add_widget(info_widget)
         layout.addWidget(self.general_info_card)
+        
+        # Barra de acciones de la pestaña general
+        actions_bar = QHBoxLayout()
+        actions_bar.addStretch()
+        self.btn_diag_now = CustomButton("Diagnosticar Ahora", is_secondary=True)
+        self.btn_diag_now.clicked.connect(self._run_health_check)
+        actions_bar.addWidget(self.btn_diag_now)
+        layout.addLayout(actions_bar)
+        
         layout.addStretch()
         self.stacked_widget.addWidget(widget)
         
@@ -317,7 +460,7 @@ class APIServerWindow(QMainWindow):
         buttons_layout.setSpacing(8)
         buttons_layout.addSpacing(25)
         
-        btn_limpiar = CustomButton("Limpiar", is_secondary=True)
+        btn_limpiar = CustomButton("Limpiar Consola", is_secondary=True)
         btn_limpiar.clicked.connect(self._clear_console)
         buttons_layout.addWidget(btn_limpiar)
         
@@ -325,7 +468,12 @@ class APIServerWindow(QMainWindow):
         btn_fuente.clicked.connect(self._change_font)
         buttons_layout.addWidget(btn_fuente)
         
-        buttons_layout.addSpacing(15)
+        buttons_layout.addSpacing(10)
+        
+        # Grupo Servicio Windows
+        grp_win_lbl = CustomLabel("Servicio Windows:", variant="caption")
+        grp_win_lbl.setStyleSheet("color: #64748B; font-weight: bold;")
+        buttons_layout.addWidget(grp_win_lbl)
         
         self.btn_iniciar = CustomButton("Iniciar Servicio", is_secondary=False)
         self.btn_iniciar.clicked.connect(self._start_service)
@@ -336,9 +484,25 @@ class APIServerWindow(QMainWindow):
         self.btn_detener.clicked.connect(self._stop_service)
         buttons_layout.addWidget(self.btn_detener)
         
-        buttons_layout.addSpacing(15)
+        buttons_layout.addSpacing(10)
         
-        btn_leer_archivo = CustomButton("Cargar Archivo Log", is_secondary=True)
+        # Grupo Servidor Local (Uvicorn)
+        grp_local_lbl = CustomLabel("Modo Local (Uvicorn):", variant="caption")
+        grp_local_lbl.setStyleSheet("color: #64748B; font-weight: bold;")
+        buttons_layout.addWidget(grp_local_lbl)
+        
+        self.btn_iniciar_local = CustomButton("Iniciar Local", is_secondary=True)
+        self.btn_iniciar_local.clicked.connect(self._start_local_server)
+        buttons_layout.addWidget(self.btn_iniciar_local)
+        
+        self.btn_detener_local = CustomButton("Detener Local", is_secondary=True)
+        self.btn_detener_local.setObjectName("dangerBtn")
+        self.btn_detener_local.clicked.connect(self._stop_local_server)
+        buttons_layout.addWidget(self.btn_detener_local)
+        
+        buttons_layout.addSpacing(10)
+        
+        btn_leer_archivo = CustomButton("Cargar Log...", is_secondary=True)
         btn_leer_archivo.clicked.connect(self._read_external_log_file)
         buttons_layout.addWidget(btn_leer_archivo)
         
@@ -509,7 +673,7 @@ class APIServerWindow(QMainWindow):
             if code == "Usuarios":
                 self._refresh_users()
             elif code == "General":
-                self._query_service_status()
+                self._run_health_check()
                 
     def _toggle_autoscroll(self):
         if self.chk_autoscroll.isChecked():
@@ -545,9 +709,9 @@ class APIServerWindow(QMainWindow):
         upper_text = text.upper()
         if "ERROR" in upper_text or "DENIED" in upper_text or "FAIL" in upper_text or "EXCEPCIÓN" in upper_text or "ERR" in upper_text:
             level = "ERROR"
-        elif "ÉXITO" in upper_text or "SUCCESS" in upper_text or "RUNNING" in upper_text or "GUARDAD" in upper_text or "ACTUALIZAD" in upper_text:
+        elif "ÉXITO" in upper_text or "SUCCESS" in upper_text or "RUNNING" in upper_text or "GUARDAD" in upper_text or "ACTUALIZAD" in upper_text or "200 OK" in upper_text:
             level = "SUCCESS"
-        elif "ADVERTENCIA" in upper_text or "WARN" in upper_text or "STOPPED" in upper_text or "DETENID" in upper_text:
+        elif "ADVERTENCIA" in upper_text or "WARN" in upper_text or "STOPPED" in upper_text or "DETENID" in upper_text or "404 NOT FOUND" in upper_text:
             level = "WARN"
 
         lvl_color = colors.get(level, colors["INFO"])
@@ -616,43 +780,156 @@ class APIServerWindow(QMainWindow):
             except Exception as e:
                 self._write_log(f"Error al leer archivo de log: {e}", level="ERROR")
 
-    def _query_service_status(self):
-        worker = ServiceControlWorker("query")
-        worker.finished.connect(self._on_status_retrieved)
+    def _is_local_server_running(self):
+        return self.local_process is not None and self.local_process.state() != QProcess.NotRunning
+
+    def _run_health_check(self):
+        """Ejecuta diagnóstico asíncrono triple (Servicio Windows/Local + FastAPI HTTP + PostgreSQL)."""
+        for w in list(self.active_workers):
+            if isinstance(w, SystemHealthCheckWorker) and w.isRunning():
+                return
+                
+        is_local = self._is_local_server_running()
+        worker = SystemHealthCheckWorker(
+            db_connector=self.db_connector,
+            api_url=self.api_client.api_url,
+            is_local_running=is_local,
+            service_name="SAR_API"
+        )
+        worker.finished.connect(self._on_health_check_retrieved)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.active_workers.append(worker)
         worker.start()
-        
-    def _on_status_retrieved(self, status, detail):
-        if status == "RUNNING":
-            self.lbl_service_status.setText("ACTIVO (RUNNING)")
+
+    def _on_health_check_retrieved(self, data):
+        """Actualiza los indicadores de salud con formato semántico de colores y latencias."""
+        svc = data.get("service_status", "UNKNOWN")
+        if svc == "RUNNING":
+            self.lbl_service_status.setText("ACTIVO (RUNNING - Servicio Windows)")
             self.lbl_service_status.setStyleSheet("color: #16A34A; font-weight: bold;")
-        elif status == "STOPPED":
+        elif svc == "LOCAL_RUNNING":
+            self.lbl_service_status.setText("ACTIVO (PROCESO LOCAL UVICORN)")
+            self.lbl_service_status.setStyleSheet("color: #2563EB; font-weight: bold;")
+        elif svc == "STOPPED":
             self.lbl_service_status.setText("DETENIDO (STOPPED)")
             self.lbl_service_status.setStyleSheet("color: #EF4444; font-weight: bold;")
-        else:
-            self.lbl_service_status.setText("DESCONOCIDO o NO INSTALADO")
+        elif svc == "NOT_INSTALLED":
+            self.lbl_service_status.setText("NO INSTALADO EN WINDOWS (Modo Local Disponible)")
             self.lbl_service_status.setStyleSheet("color: #D97706; font-weight: bold;")
-            
+        else:
+            self.lbl_service_status.setText(f"DESCONOCIDO ({data.get('service_detail', '')[:35]})")
+            self.lbl_service_status.setStyleSheet("color: #64748B; font-weight: bold;")
+
+        # API REST Status
+        api_st = data.get("api_status", "OFFLINE")
+        latency = data.get("api_latency_ms", 0.0)
+        if api_st == "ONLINE":
+            self.lbl_api_status.setText(f"ONLINE ({latency} ms - HTTP 200)")
+            self.lbl_api_status.setStyleSheet("color: #16A34A; font-weight: bold;")
+        elif api_st == "DEGRADED":
+            self.lbl_api_status.setText(f"DEGRADADA ({latency} ms - {data.get('api_detail', '')})")
+            self.lbl_api_status.setStyleSheet("color: #D97706; font-weight: bold;")
+        else:
+            self.lbl_api_status.setText("OFFLINE (Sin respuesta en puerto 8000)")
+            self.lbl_api_status.setStyleSheet("color: #EF4444; font-weight: bold;")
+
+        # Base de Datos Status
+        db_st = data.get("db_status", "DESCONECTADA")
+        db_lat = data.get("db_latency_ms", 0.0)
+        if db_st == "CONECTADA":
+            self.lbl_db_status.setText(f"CONECTADA ({db_lat} ms - Ping SELECT 1 OK)")
+            self.lbl_db_status.setStyleSheet("color: #16A34A; font-weight: bold;")
+        else:
+            self.lbl_db_status.setText(f"ERROR: {data.get('db_detail', 'Fallo de conexión')}")
+            self.lbl_db_status.setStyleSheet("color: #EF4444; font-weight: bold;")
+
+        self._update_action_buttons()
+
+    def _update_action_buttons(self):
+        """Habilita o deshabilita botones según el estado actual."""
+        is_local = self._is_local_server_running()
+        if hasattr(self, 'btn_iniciar_local'):
+            self.btn_iniciar_local.setEnabled(not is_local)
+        if hasattr(self, 'btn_detener_local'):
+            self.btn_detener_local.setEnabled(is_local)
+
+    def _start_local_server(self):
+        if self._is_local_server_running():
+            self._write_log("El servidor local ya se encuentra en ejecución.", level="WARN")
+            return
+
+        self._write_log("Iniciando Servidor API localmente con Uvicorn...", level="INFO")
+        self.local_process = QProcess(self)
+        self.local_process.readyReadStandardOutput.connect(self._on_local_stdout)
+        self.local_process.readyReadStandardError.connect(self._on_local_stderr)
+        self.local_process.finished.connect(self._on_local_finished)
+
+        python_exe = sys.executable
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+        self.local_process.setWorkingDirectory(root_dir)
+
+        args = ["-m", "uvicorn", "sar.main_api:app", "--host", "0.0.0.0", "--port", "8000"]
+        self.local_process.start(python_exe, args)
+        
+        self._write_log(f"Comando lanzado: {python_exe} {' '.join(args)}", level="INFO")
+        self._update_action_buttons()
+        QTimer.singleShot(1200, self._run_health_check)
+
+    def _stop_local_server(self):
+        if not self._is_local_server_running():
+            self._write_log("No hay ningún servidor local en ejecución.", level="WARN")
+            return
+
+        self._write_log("Deteniendo Servidor API local...", level="WARN")
+        self.local_process.terminate()
+        if not self.local_process.waitForFinished(3000):
+            self.local_process.kill()
+        self._write_log("Servidor API local finalizado.", level="SUCCESS")
+        self._update_action_buttons()
+        self._run_health_check()
+
+    def _on_local_stdout(self):
+        if not self.local_process:
+            return
+        data = self.local_process.readAllStandardOutput().data().decode("utf-8", errors="replace")
+        for line in data.splitlines():
+            line_str = line.strip()
+            if line_str:
+                self._write_log(line_str)
+
+    def _on_local_stderr(self):
+        if not self.local_process:
+            return
+        data = self.local_process.readAllStandardError().data().decode("utf-8", errors="replace")
+        for line in data.splitlines():
+            line_str = line.strip()
+            if line_str:
+                self._write_log(line_str)
+
+    def _on_local_finished(self, exit_code, exit_status):
+        self._write_log(f"Proceso de servidor local finalizó (Código: {exit_code}).", level="INFO")
+        self._update_action_buttons()
+        self._run_health_check()
+
     def _start_service(self):
-        self._write_log("Enviando comando para Iniciar Servicio 'SAR_API'...")
+        self._write_log("Enviando comando para Iniciar Servicio Windows 'SAR_API'...")
         worker = ServiceControlWorker("start")
         worker.finished.connect(self._on_service_action_finished)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.active_workers.append(worker)
         worker.start()
-        
+
     def _stop_service(self):
-        self._write_log("Enviando comando para Detener Servicio 'SAR_API'...")
+        self._write_log("Enviando comando para Detener Servicio Windows 'SAR_API'...")
         worker = ServiceControlWorker("stop")
         worker.finished.connect(self._on_service_action_finished)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.active_workers.append(worker)
         worker.start()
-        
+
     def _on_service_action_finished(self, status, message):
         self._write_log(message)
-        self._query_service_status()
+        self._run_health_check()
         
     def _refresh_users(self):
         try:
@@ -800,6 +1077,12 @@ class APIServerWindow(QMainWindow):
                 worker.terminate()
                 worker.wait()
         self.active_workers.clear()
+        
+        # Cleanly terminate local server process if running
+        if getattr(self, "local_process", None) and self.local_process.state() != QProcess.NotRunning:
+            self.local_process.terminate()
+            if not self.local_process.waitForFinished(2000):
+                self.local_process.kill()
             
         if getattr(self, "_logging_out", False):
             event.accept()

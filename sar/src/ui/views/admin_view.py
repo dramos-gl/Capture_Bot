@@ -45,9 +45,23 @@ class AdminWindow(QMainWindow):
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
         
-        # Window setup
+        # Window setup: Habilitar maximizar, minimizar y dimensionado responsivo
         self.setWindowTitle("SAR - Administración")
-        self.resize(1000, 700)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            w = min(1080, int(avail.width() * 0.90))
+            h = min(720, int(avail.height() * 0.88))
+            self.setMinimumSize(880, 540)
+            self.resize(w, h)
+            x = avail.left() + (avail.width() - w) // 2
+            y = avail.top() + (avail.height() - h) // 2
+            self.move(x, y)
+        else:
+            self.setMinimumSize(880, 540)
+            self.resize(1000, 680)
         
         # RBAC permissions
         self.user_permissions = set()
@@ -168,43 +182,48 @@ class AdminWindow(QMainWindow):
         return (modulo, "CREAR") in self.user_permissions or (modulo, "EDITAR") in self.user_permissions
 
     def _setup_views(self):
-        current_user = self._get_current_user()
-        current_session = self._get_current_session()
+        """Prepares lazy factories for on-demand view instantiation to optimize startup time and memory."""
+        self.instantiated_views = {}
+        self.views = self.instantiated_views  # Backward compatibility reference
         
-        self.views = {
-            "usuarios": UsersView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
-            "roles": RolesView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
-            "permisos": PermissionsView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
-            "app_modulos": ModulesView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
-            "acciones": ActionsView(self.db_connector, current_user, current_session, self._can_edit("SEGURIDAD")),
-            "conceptos": CatalogsView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
-            "geografia": GeographyView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
-            "rfcs": RfcsView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
-            "estados": StatusView(self.db_connector, current_user, current_session, self._can_edit("CATALOGOS")),
-            "parametros": ParametersView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
-            "localizadores": LocalizersView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
-            "migracion": MigrationView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
-            "carga_masiva": BulkLoadView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
-            "update_facturas": UpdateFacturasView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION")),
-            "reserva_masiva": ReservasProcesoView(self.db_connector, current_user, current_session, self._can_edit("CONFIGURACION"))
+        # Mapping of view keys to factory functions (instantiated only when clicked)
+        self.view_factories = {
+            "usuarios": lambda: UsersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
+            "roles": lambda: RolesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
+            "permisos": lambda: PermissionsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
+            "app_modulos": lambda: ModulesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
+            "acciones": lambda: ActionsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
+            "conceptos": lambda: CatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS")),
+            "geografia": lambda: GeographyView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS")),
+            "rfcs": lambda: RfcsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS")),
+            "estados": lambda: StatusView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS")),
+            "parametros": lambda: ParametersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
+            "localizadores": lambda: LocalizersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
+            "migracion": lambda: MigrationView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
+            "carga_masiva": lambda: BulkLoadView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
+            "update_facturas": lambda: UpdateFacturasView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
+            "reserva_masiva": lambda: ReservasProcesoView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION"))
         }
         
-        # Add a default placeholder view
+        # Add a lightweight default placeholder view
         self.default_view = QWidget()
         l = QVBoxLayout(self.default_view)
-        lbl = CustomLabel("Seleccione una opción del menú superior.", variant="body")
+        lbl = CustomLabel("Seleccione una opción del menú superior para comenzar.", variant="body")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         l.addWidget(lbl)
         self.stacked_widget.addWidget(self.default_view)
-        
-        for view in self.views.values():
-            self.stacked_widget.addWidget(view)
-            
         self.stacked_widget.setCurrentWidget(self.default_view)
         
     def _change_view(self, view_name: str):
-        if view_name in self.views:
-            view = self.views[view_name]
+        """Loads and switches to the requested view lazily on-demand."""
+        if view_name not in self.instantiated_views and view_name in self.view_factories:
+            # Instantiate view on-demand for the first time
+            view_instance = self.view_factories[view_name]()
+            self.stacked_widget.addWidget(view_instance)
+            self.instantiated_views[view_name] = view_instance
+            
+        if view_name in self.instantiated_views:
+            view = self.instantiated_views[view_name]
             view.refresh_data()
             self.stacked_widget.setCurrentWidget(view)
 

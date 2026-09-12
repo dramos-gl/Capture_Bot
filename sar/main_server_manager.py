@@ -44,13 +44,18 @@ def main():
     # Instantiate standalone API Server Window
     window = APIServerWindow(db_connector)
     
-    # Center window on screen and show in normal size (no full screen/maximized)
-    window.resize(800, 470)
-    screen_geometry = QApplication.primaryScreen().geometry()
-    window_geometry = window.frameGeometry()
-    x = (screen_geometry.width() - window_geometry.width()) // 2
-    y = (screen_geometry.height() - window_geometry.height()) // 2
-    window.move(x, y)
+    # Center window responsively on screen using available geometry
+    screen = QApplication.primaryScreen()
+    if screen:
+        avail = screen.availableGeometry()
+        w = min(880, int(avail.width() * 0.85))
+        h = min(540, int(avail.height() * 0.85))
+        window.resize(w, h)
+        x = avail.left() + (avail.width() - w) // 2
+        y = avail.top() + (avail.height() - h) // 2
+        window.move(x, y)
+    else:
+        window.resize(860, 520)
     
     # Show normal
     window.show()

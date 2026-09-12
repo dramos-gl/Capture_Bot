@@ -9,10 +9,45 @@ from PySide6.QtWidgets import (
 )
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sqlalchemy import text
+
+class BulkImportWorker(QThread):
+    """Worker thread to execute bulk CSV reference import without freezing the UI."""
+    finished = Signal(bool, str)  # success, message
+    
+    def __init__(self, orden_id: int, file_path: str):
+        super().__init__()
+        self.orden_id = orden_id
+        self.file_path = file_path
+        
+    def run(self):
+        try:
+            import importlib.util
+            script_path = "sar/scripts/core/cargar_referencias_masivas.py"
+            if not os.path.exists(script_path):
+                # Intentar ruta absoluta relativa a la raíz
+                script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "sar", "scripts", "core", "cargar_referencias_masivas.py"))
+            
+            spec = importlib.util.spec_from_file_location("cargar_script", script_path)
+            if not spec or not spec.loader:
+                self.finished.emit(False, "No se encontró el script de carga masiva.")
+                return
+                
+            cargar_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(cargar_module)
+            
+            # Sobrescribir constantes del script
+            cargar_module.ORDEN_ID = self.orden_id
+            cargar_module.CSV_PATH = os.path.abspath(self.file_path)
+            
+            # Ejecutar main de importación
+            cargar_module.main()
+            self.finished.emit(True, "La carga masiva se completó con éxito.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
 class BulkLoadView(QWidget):
     """View to download the bulk load template and trigger the references load process for a selected Order."""
@@ -23,6 +58,7 @@ class BulkLoadView(QWidget):
         self.current_user_id = current_user_id
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
+        self.worker = None
         
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
@@ -227,21 +263,22 @@ class BulkLoadView(QWidget):
         if reply != QMessageBox.Yes:
             return
             
-        try:
-            # Reutilizar el script de carga masiva en runtime
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("cargar_script", "sar/scripts/core/cargar_referencias_masivas.py")
-            cargar_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(cargar_module)
-            
-            # Sobrescribir constantes del script
-            cargar_module.ORDEN_ID = orden_id
-            cargar_module.CSV_PATH = os.path.abspath(file_path)
-            
-            # Ejecutar main
-            cargar_module.main()
-            
-            QMessageBox.information(self, "Éxito", "La carga masiva se completó con éxito.")
+        # Deshabilitar controles para evitar dobles clics y mostrar feedback visual
+        self.btn_ejecutar.setEnabled(False)
+        self.btn_ejecutar.setText("Importando referencias...")
+        self.btn_generar.setEnabled(False)
+        
+        self.worker = BulkImportWorker(orden_id, file_path)
+        self.worker.finished.connect(self._on_carga_terminada)
+        self.worker.start()
+
+    def _on_carga_terminada(self, success: bool, msg: str):
+        self.btn_ejecutar.setEnabled(self.can_edit)
+        self.btn_ejecutar.setText("Ejecutar Carga Masiva")
+        self.btn_generar.setEnabled(True)
+        
+        if success:
+            QMessageBox.information(self, "Éxito", msg)
             self.refresh_data()
-        except Exception as e:
-            QMessageBox.critical(self, "Error de Carga", f"Error durante la carga masiva:\n\n{e}")
+        else:
+            QMessageBox.critical(self, "Error de Carga", f"Error durante la carga masiva:\n\n{msg}")

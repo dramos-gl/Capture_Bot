@@ -388,38 +388,51 @@ class ReservasProcesoView(QWidget):
             results_to_render = []
             has_valid = False
 
-            with self.db_connector.get_session() as session:
-                for row in rows[1:]:
-                    if len(row) <= max(ref_idx, est_idx):
-                        continue
-                    ref_val = str(row[ref_idx]).strip() if row[ref_idx] is not None else ""
-                    est_val = str(row[est_idx]).strip().upper() if row[est_idx] is not None else "RESERVADA"
+            # 1. Extraer todas las referencias del archivo en memoria
+            excel_entries = []
+            all_ref_strings = set()
+            for row in rows[1:]:
+                if len(row) <= max(ref_idx, est_idx):
+                    continue
+                ref_val = str(row[ref_idx]).strip() if row[ref_idx] is not None else ""
+                est_val = str(row[est_idx]).strip().upper() if row[est_idx] is not None else "RESERVADA"
 
-                    if not ref_val:
-                        continue
+                if not ref_val:
+                    continue
+                excel_entries.append((ref_val, est_val))
+                all_ref_strings.add(ref_val)
 
-                    # Validate reference existence in database
-                    ref_db = session.execute(
-                        select(Referencia).where(Referencia.referencia_portal == ref_val)
-                    ).scalars().first()
+            # 2. Consultar existencia en la base de datos en un solo batch eficiente
+            existing_refs = set()
+            if all_ref_strings:
+                with self.db_connector.get_session() as session:
+                    refs_list = list(all_ref_strings)
+                    chunk_size = 500
+                    for i in range(0, len(refs_list), chunk_size):
+                        chunk = refs_list[i:i + chunk_size]
+                        stmt = select(Referencia.referencia_portal).where(Referencia.referencia_portal.in_(chunk))
+                        chunk_existing = session.execute(stmt).scalars().all()
+                        existing_refs.update(chunk_existing)
 
-                    if not ref_db:
-                        results_to_render.append({
-                            "referencia": ref_val,
-                            "valido": False,
-                            "msg": "ERROR: La referencia no existe en el sistema."
-                        })
-                    else:
-                        has_valid = True
-                        results_to_render.append({
-                            "referencia": ref_val,
-                            "valido": True,
-                            "msg": f"VÁLIDA: Lista para asignación ({est_val})."
-                        })
-                        self.payload_validado.append({
-                            "referencia_portal": ref_val,
-                            "estado_codigo": est_val
-                        })
+            # 3. Clasificar y generar resultados en memoria O(1)
+            for ref_val, est_val in excel_entries:
+                if ref_val not in existing_refs:
+                    results_to_render.append({
+                        "referencia": ref_val,
+                        "valido": False,
+                        "msg": "ERROR: La referencia no existe en el sistema."
+                    })
+                else:
+                    has_valid = True
+                    results_to_render.append({
+                        "referencia": ref_val,
+                        "valido": True,
+                        "msg": f"VÁLIDA: Lista para asignación ({est_val})."
+                    })
+                    self.payload_validado.append({
+                        "referencia_portal": ref_val,
+                        "estado_codigo": est_val
+                    })
 
             # Render validation results
             self.table_res.setRowCount(0)
