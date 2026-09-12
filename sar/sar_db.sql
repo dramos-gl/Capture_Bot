@@ -659,7 +659,10 @@ CREATE INDEX IF NOT EXISTS idx_desarrollo_empresa_desarrollo_id ON sar_catalogo.
 CREATE INDEX IF NOT EXISTS idx_desarrollo_empresa_rfc_id        ON sar_catalogo.desarrollo_empresa (rfc_id);           -- FK join frecuente
 
 -- 3. Esquema: sar_produccion
+CREATE INDEX IF NOT EXISTS idx_orden_generacion_fecha          ON sar_produccion.orden_generacion (fecha_creacion DESC);  -- Acelera listado de ordenes en UI
 CREATE INDEX IF NOT EXISTS idx_grupo_referencia_orden_id      ON sar_produccion.grupo_referencia (orden_id);
+CREATE INDEX IF NOT EXISTS idx_grupo_referencia_rfc_id         ON sar_produccion.grupo_referencia (rfc_id);              -- FK / Acelera stock disponible por empresa
+CREATE INDEX IF NOT EXISTS idx_grupo_referencia_concepto_id    ON sar_produccion.grupo_referencia (concepto_id);         -- FK / Acelera stock disponible por concepto
 CREATE INDEX IF NOT EXISTS idx_grupo_referencia_estado_id     ON sar_produccion.grupo_referencia (estado_id);
 CREATE INDEX IF NOT EXISTS idx_solicitud_grupo_id             ON sar_produccion.solicitud (grupo_id);
 CREATE INDEX IF NOT EXISTS idx_solicitud_estado_id            ON sar_produccion.solicitud (estado_id);
@@ -670,6 +673,7 @@ CREATE INDEX IF NOT EXISTS idx_referencia_solicitud_id        ON sar_produccion.
 CREATE INDEX IF NOT EXISTS idx_referencia_estado_id           ON sar_produccion.referencia (estado_id);
 CREATE INDEX IF NOT EXISTS idx_referencia_fecha_vigencia      ON sar_produccion.referencia (fecha_vigencia);
 CREATE INDEX IF NOT EXISTS idx_referencia_grupo_estado        ON sar_produccion.referencia (grupo_id, estado_id);      -- Compuesto: filtro común grupo+estado
+CREATE INDEX IF NOT EXISTS idx_referencia_estado_fecha         ON sar_produccion.referencia (estado_id, fecha_generacion DESC, referencia_id DESC); -- Acelera paginacion visor inventario
 CREATE INDEX IF NOT EXISTS idx_referencia_portal_trgm         ON sar_produccion.referencia USING gin (referencia_portal gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_orden_folio_trgm               ON sar_produccion.orden_generacion USING gin (folio gin_trgm_ops);
 
@@ -682,10 +686,12 @@ CREATE INDEX IF NOT EXISTS idx_lote_asignacion_destino            ON sar_archivo
 CREATE INDEX IF NOT EXISTS idx_lote_asignacion_notaria            ON sar_archivo.lote_asignacion (notaria_id);
 CREATE INDEX IF NOT EXISTS idx_lote_asignacion_colaborador        ON sar_archivo.lote_asignacion (colaborador_id);
 CREATE INDEX IF NOT EXISTS idx_lote_asignacion_fecha              ON sar_archivo.lote_asignacion (fecha);
+CREATE INDEX IF NOT EXISTS idx_lote_asignacion_destino_fecha      ON sar_archivo.lote_asignacion (tipo_destino, fecha DESC); -- Acelera filtro y paginacion de lotes
 CREATE INDEX IF NOT EXISTS idx_lote_asignacion_usuario            ON sar_archivo.lote_asignacion (usuario_creacion);
 CREATE INDEX IF NOT EXISTS idx_ubicacion_desarrollo               ON sar_archivo.ubicacion (desarrollo_id);
 CREATE INDEX IF NOT EXISTS idx_lote_detalle_lote                  ON sar_archivo.lote_detalle (lote_asignacion_id);
 CREATE INDEX IF NOT EXISTS idx_lote_detalle_rfc                   ON sar_archivo.lote_detalle (rfc_id);                 -- FK: búsqueda por empresa
+CREATE INDEX IF NOT EXISTS idx_lote_detalle_concepto_id           ON sar_archivo.lote_detalle (concepto_id);            -- FK: validacion de reintentos por concepto
 CREATE INDEX IF NOT EXISTS idx_lote_detalle_desarrollo            ON sar_archivo.lote_detalle (desarrollo_id);          -- FK: búsqueda por desarrollo
 CREATE INDEX IF NOT EXISTS idx_asignacion_referencia_detalle      ON sar_archivo.asignacion_referencia (lote_detalle_id);
 CREATE INDEX IF NOT EXISTS idx_asignacion_referencia_ubicacion    ON sar_archivo.asignacion_referencia (ubicacion_id);
