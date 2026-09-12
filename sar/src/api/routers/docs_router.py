@@ -253,15 +253,7 @@ def get_metrics_summary(
 
         where_clause = " AND ".join(conditions)
 
-        # Totales globales
-        total_query = f"""
-            SELECT COUNT(referencia_id), COALESCE(SUM(importe), 0)
-            FROM sar_produccion.vw_metricas_referencias
-            WHERE {where_clause}
-        """
-        total_row = db.execute(text(total_query), params).fetchone()
-
-        # Desglose por estado
+        # Consulta única consolidada para desglose y totales
         estado_query = f"""
             SELECT estado_codigo, COUNT(referencia_id), COALESCE(SUM(importe), 0)
             FROM sar_produccion.vw_metricas_referencias
@@ -271,14 +263,21 @@ def get_metrics_summary(
         """
         estado_rows = db.execute(text(estado_query), params).fetchall()
 
-        por_estado = {
-            r[0]: {"total": r[1], "importe": float(r[2])}
-            for r in estado_rows
-        }
+        por_estado = {}
+        total_referencias = 0
+        importe_total = 0.0
+
+        for r in estado_rows:
+            codigo = r[0]
+            cnt = r[1]
+            imp = float(r[2]) if r[2] is not None else 0.0
+            por_estado[codigo] = {"total": cnt, "importe": imp}
+            total_referencias += cnt
+            importe_total += imp
 
         return {
-            "total_referencias": total_row[0] if total_row else 0,
-            "importe_total": float(total_row[1]) if total_row else 0.0,
+            "total_referencias": total_referencias,
+            "importe_total": importe_total,
             "por_estado": por_estado,
         }
     except HTTPException as he:

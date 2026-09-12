@@ -27,7 +27,7 @@ from sar.src.services.ordenes_ui_service import OrdenesUIService
 # ---------------------------------------------------------------------------
 
 class MetricsLoadWorker(QThread):
-    """Fetches aggregated metrics report (grouped table + charts)."""
+    """Fetches aggregated metrics report (grouped table + charts) asynchronously."""
     result_ready = Signal(list)
     error_occurred = Signal(str)
 
@@ -39,19 +39,27 @@ class MetricsLoadWorker(QThread):
         self.concepto_id = concepto_id
         self.delegacion_id = delegacion_id
         self.orden_ids = orden_ids
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
 
     def run(self):
         try:
+            if self._is_cancelled:
+                return
             data = self.service.get_metrics_report(
                 self.rfc_id, self.concepto_id, self.delegacion_id, self.orden_ids
             )
-            self.result_ready.emit(data)
+            if not self._is_cancelled:
+                self.result_ready.emit(data)
         except Exception as e:
-            self.error_occurred.emit(str(e))
+            if not self._is_cancelled:
+                self.error_occurred.emit(str(e))
 
 
 class MetricsSummaryWorker(QThread):
-    """Fetches KPI summary: total refs, total amount, and per-status breakdown."""
+    """Fetches KPI summary: total refs, total amount, and per-status breakdown asynchronously."""
     result_ready = Signal(dict)
     error_occurred = Signal(str)
 
@@ -63,15 +71,23 @@ class MetricsSummaryWorker(QThread):
         self.concepto_id = concepto_id
         self.delegacion_id = delegacion_id
         self.orden_ids = orden_ids
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
 
     def run(self):
         try:
+            if self._is_cancelled:
+                return
             data = self.service.get_metrics_summary(
                 self.rfc_id, self.concepto_id, self.delegacion_id, self.orden_ids
             )
-            self.result_ready.emit(data)
+            if not self._is_cancelled:
+                self.result_ready.emit(data)
         except Exception as e:
-            self.error_occurred.emit(str(e))
+            if not self._is_cancelled:
+                self.error_occurred.emit(str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +129,7 @@ class MetricsDashboardDialog(QWidget):
 
         self.active_report_worker = None
         self.active_summary_worker = None
+        self._last_metrics_args = None
         self.todas_las_ordenes: List[dict] = []
         self.selected_orden_ids: List[int] = list(initial_orden_ids) if initial_orden_ids else []
 
@@ -541,10 +558,44 @@ class MetricsDashboardDialog(QWidget):
         if deleg_id == 0:    deleg_id = None
         orden_ids = self.selected_orden_ids
 
-        # --- Report worker ---
+        current_args = (rfc_id, concepto_id, deleg_id, tuple(orden_ids or []))
+
+        # Evitar cancelar y relanzar si ya hay workers procesando exactamente los mismos parámetros
+        is_running = (
+            (self.active_report_worker and self.active_report_worker.isRunning()) or
+            (self.active_summary_worker and self.active_summary_worker.isRunning())
+        )
+        if is_running and getattr(self, "_last_metrics_args", None) == current_args:
+            return
+
+        self._last_metrics_args = current_args
+
+        # --- Cancelación cooperativa segura de workers previos ---
         if self.active_report_worker and self.active_report_worker.isRunning():
-            self.active_report_worker.terminate()
+            self.active_report_worker.cancel()
+            try:
+                self.active_report_worker.result_ready.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            try:
+                self.active_report_worker.error_occurred.disconnect()
+            except (RuntimeError, TypeError):
+                pass
             self.active_report_worker.wait()
+
+        if self.active_summary_worker and self.active_summary_worker.isRunning():
+            self.active_summary_worker.cancel()
+            try:
+                self.active_summary_worker.result_ready.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            try:
+                self.active_summary_worker.error_occurred.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            self.active_summary_worker.wait()
+
+        # --- Lanzamiento de Report worker ---
         self.active_report_worker = MetricsLoadWorker(
             self.service, rfc_id, concepto_id, deleg_id, orden_ids, self
         )
@@ -554,10 +605,7 @@ class MetricsDashboardDialog(QWidget):
         )
         self.active_report_worker.start()
 
-        # --- Summary worker ---
-        if self.active_summary_worker and self.active_summary_worker.isRunning():
-            self.active_summary_worker.terminate()
-            self.active_summary_worker.wait()
+        # --- Lanzamiento de Summary worker ---
         self.active_summary_worker = MetricsSummaryWorker(
             self.service, rfc_id, concepto_id, deleg_id, orden_ids, self
         )

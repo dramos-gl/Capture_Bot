@@ -536,47 +536,31 @@ class OperacionRepository(BaseRepository):
             return []
         
         # Get the ID of the 'FACTURADA' state for references precisely
-        try:
-            facturada_state_id = self.session.execute(
-                select(EstadoSistema.estado_id).where(
-                    EstadoSistema.entidad == "referencia",
-                    EstadoSistema.codigo == "FACTURADA"
-                )
-            ).scalar()
-        except Exception:
-            facturada_state_id = None
-
-        if facturada_state_id:
-            subquery_count = f"""
-                COALESCE((
-                    SELECT COUNT(*) 
-                    FROM sar_produccion.referencia 
-                    WHERE solicitud_id = v.solicitud_id AND estado_id = {facturada_state_id}
-                ), 0)
-            """
-        else:
-            subquery_count = """
-                COALESCE((
-                    SELECT COUNT(*) 
-                    FROM sar_produccion.referencia r 
-                    JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id 
-                    WHERE r.solicitud_id = v.solicitud_id AND esr.codigo = 'FACTURADA'
-                ), 0)
-            """
+        fact_join = """
+            LEFT JOIN (
+                SELECT r.solicitud_id, COUNT(r.referencia_id) AS cant_fact
+                FROM sar_produccion.referencia r
+                JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id
+                WHERE esr.entidad = 'referencia' AND esr.codigo = 'FACTURADA'
+                GROUP BY r.solicitud_id
+            ) fact ON v.solicitud_id = fact.solicitud_id
+        """
 
         if orden_ids:
             stmt = text(f"""
-                SELECT v.*, {subquery_count} AS cantidad_facturada
+                SELECT v.*, COALESCE(fact.cant_fact, 0) AS cantidad_facturada
                 FROM sar_produccion.vw_solicitudes_detalle v
                 JOIN sar_produccion.grupo_referencia gr ON v.grupo_id = gr.grupo_id
+                {fact_join}
                 WHERE gr.orden_id IN :orden_ids_param
                 ORDER BY v.grupo_id ASC, v.solicitud_id ASC
             """)
             result = self.session.execute(stmt, {"orden_ids_param": tuple(orden_ids)})
         else:
             stmt = text(f"""
-                SELECT v.*, {subquery_count} AS cantidad_facturada
+                SELECT v.*, COALESCE(fact.cant_fact, 0) AS cantidad_facturada
                 FROM sar_produccion.vw_solicitudes_detalle v
+                {fact_join}
                 ORDER BY v.grupo_id ASC, v.solicitud_id ASC
             """)
             result = self.session.execute(stmt)
@@ -864,7 +848,7 @@ class ProduccionRepository(BaseRepository):
 
     def get_referencias_paginated(self, limit: int = 200, offset: int = 0, search_text: str = "", estado_filter: str = "Todos", orden_ids: list = None) -> tuple:
         """
-        Returns a paginated list of references and the total count matching the filters.
+        Returns a paginated list of references and the total count matching the filters using CTE deferred pagination.
         """
         from sqlalchemy import text
         
@@ -873,44 +857,77 @@ class ProduccionRepository(BaseRepository):
         if orden_ids is not None and len(orden_ids) == 0:
             return [], 0
             
-        # Build base WHERE clause
-        conditions = []
         params = {"lim": limit, "off": offset}
+        cte_joins = []
+        cte_conditions = []
         
         if orden_ids:
-            conditions.append("grupo_id IN (SELECT g_ref.grupo_id FROM sar_produccion.grupo_referencia g_ref WHERE g_ref.orden_id IN :orden_ids_param)")
+            cte_joins.append("JOIN sar_produccion.grupo_referencia gr_filter ON r.grupo_id = gr_filter.grupo_id")
+            cte_conditions.append("gr_filter.orden_id IN :orden_ids_param")
             params["orden_ids_param"] = tuple(orden_ids)
             
         if estado_filter and estado_filter != "Todos":
-            conditions.append("estado_codigo = :estado")
+            cte_joins.append("JOIN sar_catalogo.estado_sistema es_filter ON r.estado_id = es_filter.estado_id")
+            cte_conditions.append("es_filter.codigo = :estado")
             params["estado"] = estado_filter
             
         if search_text:
             if search_text.isdigit():
-                search_conds = [
-                    "referencia_id = :search_int",
-                    "consecutivo_grupo = :search_int"
-                ]
+                cte_conditions.append("(r.referencia_id = :search_int OR r.consecutivo_grupo = :search_int)")
                 params["search_int"] = int(search_text)
             else:
-                search_conds = [
-                    "estado_codigo ILIKE :search"
-                ]
-            conditions.append(f"({' OR '.join(search_conds)})")
-            params["search"] = f"%{search_text}%"
-            
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+                if not any("es_filter" in j for j in cte_joins):
+                    cte_joins.append("JOIN sar_catalogo.estado_sistema es_filter ON r.estado_id = es_filter.estado_id")
+                cte_conditions.append("es_filter.codigo ILIKE :search")
+                params["search"] = f"%{search_text}%"
+
+        cte_joins_str = "\n            ".join(cte_joins)
+        cte_where_str = f"WHERE {' AND '.join(cte_conditions)}" if cte_conditions else ""
         
-        # Query total count
-        count_stmt = text(f"SELECT COUNT(*) FROM sar_produccion.vw_referencias_detalle {where_clause}")
-        total_count = self.session.execute(count_stmt, params).scalar()
+        # Conteo optimizado sobre tablas base con índices
+        count_stmt = text(f"""
+            SELECT COUNT(r.referencia_id) 
+            FROM sar_produccion.referencia r
+            {cte_joins_str}
+            {cte_where_str}
+        """)
+        total_count = self.session.execute(count_stmt, params).scalar() or 0
         
-        # Query page records
+        # Paginación diferida (CTE): filtra y pagina IDs primero, luego une 200 filas con catálogos
         query_stmt = text(f"""
-            SELECT * FROM sar_produccion.vw_referencias_detalle 
-            {where_clause} 
-            ORDER BY fecha_generacion DESC, referencia_id DESC
-            LIMIT :lim OFFSET :off
+            WITH paged_ids AS (
+                SELECT r.referencia_id
+                FROM sar_produccion.referencia r
+                {cte_joins_str}
+                {cte_where_str}
+                ORDER BY r.fecha_generacion DESC, r.referencia_id DESC
+                LIMIT :lim OFFSET :off
+            )
+            SELECT 
+                r.referencia_id,
+                r.referencia_portal,
+                r.consecutivo_grupo,
+                r.importe,
+                r.fecha_generacion,
+                r.fecha_vigencia,
+                og.folio AS folio_orden,
+                r.grupo_id,
+                rfc.razon_social AS rfc_razon_social,
+                c.nombre AS concepto_nombre,
+                d.nombre AS delegacion_nombre,
+                es.codigo AS estado_codigo,
+                u.nombre AS usuario_asignado_nombre
+            FROM paged_ids p
+            JOIN sar_produccion.referencia r ON p.referencia_id = r.referencia_id
+            JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+            JOIN sar_produccion.orden_generacion og ON gr.orden_id = og.orden_id
+            JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
+            JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+            JOIN sar_produccion.solicitud s ON r.solicitud_id = s.solicitud_id
+            LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            LEFT JOIN sar_seguridad.usuario u ON r.usuario_asignado = u.usuario_id
+            ORDER BY r.fecha_generacion DESC, r.referencia_id DESC
         """)
         result = self.session.execute(query_stmt, params)
         
@@ -940,26 +957,23 @@ class ProduccionRepository(BaseRepository):
             SELECT 
                 r.*, 
                 es.codigo AS estado_codigo,
-                (
-                    SELECT COUNT(ref.referencia_id)
-                    FROM sar_produccion.referencia ref
-                    JOIN sar_catalogo.estado_sistema es_ref ON ref.estado_id = es_ref.estado_id
-                    JOIN sar_produccion.grupo_referencia gr ON ref.grupo_id = gr.grupo_id
-                    LEFT JOIN sar_archivo.asignacion_referencia ar ON ref.referencia_id = ar.referencia_id
-                    WHERE es_ref.entidad = 'referencia' AND es_ref.codigo = 'FACTURADA' 
-                      AND ar.referencia_id IS NULL AND gr.orden_id = o.orden_id
-                ) AS total_disponibles,
-                (
-                    SELECT COUNT(ref.referencia_id)
-                    FROM sar_produccion.referencia ref
-                    JOIN sar_catalogo.estado_sistema es_ref ON ref.estado_id = es_ref.estado_id
-                    JOIN sar_produccion.grupo_referencia gr ON ref.grupo_id = gr.grupo_id
-                    WHERE es_ref.entidad = 'referencia' AND es_ref.codigo = 'PENDIENTE_AUTORIZACION'
-                      AND gr.orden_id = o.orden_id
-                ) AS total_pendiente_autorizacion
+                COALESCE(kpi.total_disponibles, 0) AS total_disponibles,
+                COALESCE(kpi.total_pendiente_autorizacion, 0) AS total_pendiente_autorizacion
             FROM sar_produccion.vw_ordenes_resumen r
             JOIN sar_produccion.orden_generacion o ON r.orden_id = o.orden_id
             JOIN sar_catalogo.estado_sistema es ON o.estado_id = es.estado_id
+            LEFT JOIN (
+                SELECT 
+                    gr.orden_id,
+                    COUNT(ref.referencia_id) FILTER (WHERE es_ref.codigo = 'FACTURADA' AND ar.referencia_id IS NULL) AS total_disponibles,
+                    COUNT(ref.referencia_id) FILTER (WHERE es_ref.codigo = 'PENDIENTE_AUTORIZACION') AS total_pendiente_autorizacion
+                FROM sar_produccion.referencia ref
+                JOIN sar_catalogo.estado_sistema es_ref ON ref.estado_id = es_ref.estado_id
+                JOIN sar_produccion.grupo_referencia gr ON ref.grupo_id = gr.grupo_id
+                LEFT JOIN sar_archivo.asignacion_referencia ar ON ref.referencia_id = ar.referencia_id
+                WHERE es_ref.entidad = 'referencia'
+                GROUP BY gr.orden_id
+            ) kpi ON o.orden_id = kpi.orden_id
             {where_filter}
             ORDER BY r.fecha_creacion DESC
         """)
@@ -1017,10 +1031,10 @@ class ProduccionRepository(BaseRepository):
                 s.cantidad_solicitada,
                 s.cantidad_generada,
                 es.codigo as solicitud_estado_codigo,
-                COALESCE((SELECT COUNT(*) FROM sar_produccion.referencia r JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id WHERE r.solicitud_id = s.solicitud_id AND esr.codigo = 'PENDIENTE_AUTORIZACION'), 0) as count_pendiente,
-                COALESCE((SELECT COUNT(*) FROM sar_produccion.referencia r JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id WHERE r.solicitud_id = s.solicitud_id AND esr.codigo = 'AUTORIZADA'), 0) as count_autorizada,
-                COALESCE((SELECT COUNT(*) FROM sar_produccion.referencia r JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id WHERE r.solicitud_id = s.solicitud_id AND esr.codigo = 'RECHAZADA'), 0) as count_rechazada,
-                COALESCE((SELECT COUNT(*) FROM sar_produccion.referencia r JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id WHERE r.solicitud_id = s.solicitud_id AND esr.codigo = 'FACTURADA'), 0) as count_facturada
+                COALESCE(kpi.count_pendiente, 0) as count_pendiente,
+                COALESCE(kpi.count_autorizada, 0) as count_autorizada,
+                COALESCE(kpi.count_rechazada, 0) as count_rechazada,
+                COALESCE(kpi.count_facturada, 0) as count_facturada
             FROM sar_produccion.solicitud s
             JOIN sar_produccion.grupo_referencia gr ON s.grupo_id = gr.grupo_id
             JOIN sar_produccion.orden_generacion o ON gr.orden_id = o.orden_id
@@ -1028,6 +1042,23 @@ class ProduccionRepository(BaseRepository):
             JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
             JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
             JOIN sar_catalogo.estado_sistema es ON s.estado_id = es.estado_id
+            LEFT JOIN (
+                SELECT 
+                    r.solicitud_id,
+                    COUNT(r.referencia_id) FILTER (WHERE esr.codigo = 'PENDIENTE_AUTORIZACION') AS count_pendiente,
+                    COUNT(r.referencia_id) FILTER (WHERE esr.codigo = 'AUTORIZADA') AS count_autorizada,
+                    COUNT(r.referencia_id) FILTER (WHERE esr.codigo = 'RECHAZADA') AS count_rechazada,
+                    COUNT(r.referencia_id) FILTER (WHERE esr.codigo = 'FACTURADA') AS count_facturada
+                FROM sar_produccion.referencia r
+                JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id
+                WHERE esr.entidad = 'referencia'
+                  AND r.grupo_id IN (
+                      SELECT g_sub.grupo_id 
+                      FROM sar_produccion.grupo_referencia g_sub 
+                      WHERE g_sub.orden_id = :orden_id
+                  )
+                GROUP BY r.solicitud_id
+            ) kpi ON s.solicitud_id = kpi.solicitud_id
             WHERE o.orden_id = :orden_id
             ORDER BY s.solicitud_id ASC
         """)
@@ -1618,8 +1649,7 @@ class ProduccionRepository(BaseRepository):
         return True
 
     def get_dashboard_kpis(self, orden_ids: list = None) -> dict:
-        from sqlalchemy import select, func
-        from sar.src.storage.models import GrupoReferencia
+        from sqlalchemy import text
         
         # Si se pasa explícitamente una lista vacía de órdenes (usuario desmarcó todas las órdenes),
         # retornar directamente todos los contadores en cero.
@@ -1633,89 +1663,52 @@ class ProduccionRepository(BaseRepository):
                 "invalidas": 0
             }
 
-        query_total = select(func.count(Referencia.referencia_id))
+        params = {}
+        join_clause = ""
+        where_conditions = []
+
         if orden_ids:
-            query_total = query_total.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
-            
-        total_generadas = self.session.execute(query_total).scalar_one()
-        
+            join_clause = "JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id"
+            where_conditions.append("gr.orden_id IN :orden_ids")
+            params["orden_ids"] = tuple(orden_ids)
+
+        where_clause = f"WHERE {' AND '.join(where_conditions)}" if where_conditions else ""
+
+        query = text(f"""
+            SELECT
+                COUNT(r.referencia_id) AS total_generadas,
+                COUNT(r.referencia_id) FILTER (WHERE es.codigo = 'PENDIENTE_AUTORIZACION') AS pendientes,
+                COUNT(r.referencia_id) FILTER (WHERE es.codigo = 'AUTORIZADA') AS autorizadas,
+                COUNT(r.referencia_id) FILTER (WHERE es.codigo IN ('ERROR', 'FALLIDO')) AS con_error,
+                COUNT(r.referencia_id) FILTER (WHERE es.codigo = 'RECHAZADA') AS rechazadas,
+                COUNT(r.referencia_id) FILTER (WHERE es.codigo = 'ERROR_VALIDACION') AS invalidas
+            FROM sar_produccion.referencia r
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            {join_clause}
+            {where_clause}
+        """)
+
         try:
-            # Estado estricto para pendientes de autorización
-            pdte_codes = ["PENDIENTE_AUTORIZACION"]
-            pdte_ids = []
-            for code in pdte_codes:
-                try:
-                    pdte_ids.append(self._get_estado_id("referencia", code))
-                except ValueError:
-                    pass
-                    
-            # Estado estricto para autorizadas por facturar
-            aut_codes = ["AUTORIZADA"]
-            aut_ids = []
-            for code in aut_codes:
-                try:
-                    aut_ids.append(self._get_estado_id("referencia", code))
-                except ValueError:
-                    pass
-                    
-            err_codes = ["ERROR", "FALLIDO"]
-            err_ids = []
-            for code in err_codes:
-                try:
-                    err_ids.append(self._get_estado_id("referencia", code))
-                except ValueError:
-                    pass
-            
-            rech_codes = ["RECHAZADA"]
-            rech_ids = []
-            for code in rech_codes:
-                try:
-                    rech_ids.append(self._get_estado_id("referencia", code))
-                except ValueError:
-                    pass
-            
-            invalid_codes = ["ERROR_VALIDACION"]
-            invalid_ids = []
-            for code in invalid_codes:
-                try:
-                    invalid_ids.append(self._get_estado_id("referencia", code))
-                except ValueError:
-                    pass
-            
-            query_pdte = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(pdte_ids))
-            query_aut = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(aut_ids))
-            query_err = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(err_ids))
-            query_rech = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(rech_ids))
-            query_invalid = select(func.count(Referencia.referencia_id)).where(Referencia.estado_id.in_(invalid_ids)) if invalid_ids else None
-            
-            if orden_ids:
-                query_pdte = query_pdte.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
-                query_aut = query_aut.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
-                query_err = query_err.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
-                query_rech = query_rech.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
-                if query_invalid is not None:
-                    query_invalid = query_invalid.join(GrupoReferencia).where(GrupoReferencia.orden_id.in_(orden_ids))
-                
-            pendientes = self.session.execute(query_pdte).scalar_one() if pdte_ids else 0
-            autorizadas = self.session.execute(query_aut).scalar_one() if aut_ids else 0
-            con_error = self.session.execute(query_err).scalar_one() if err_ids else 0
-            rechazadas = self.session.execute(query_rech).scalar_one() if rech_ids else 0
-            invalidas = self.session.execute(query_invalid).scalar_one() if (query_invalid is not None and invalid_ids) else 0
-        except Exception:
-            pendientes = 0
-            autorizadas = 0
-            con_error = 0
-            rechazadas = 0
-            invalidas = 0
-            
-        return {
-            "total_generadas": total_generadas,
-            "pendientes": pendientes,
-            "autorizadas": autorizadas,
-            "con_error": con_error,
-            "rechazadas": rechazadas,
-            "invalidas": invalidas
-        }
+            row = self.session.execute(query, params).fetchone()
+            return {
+                "total_generadas": row.total_generadas if row else 0,
+                "pendientes": row.pendientes if row else 0,
+                "autorizadas": row.autorizadas if row else 0,
+                "con_error": row.con_error if row else 0,
+                "rechazadas": row.rechazadas if row else 0,
+                "invalidas": row.invalidas if row else 0
+            }
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {
+                "total_generadas": 0,
+                "pendientes": 0,
+                "autorizadas": 0,
+                "con_error": 0,
+                "rechazadas": 0,
+                "invalidas": 0
+            }
 
     def get_orden_detalle_edicion(self, orden_id: int) -> dict:
         from sqlalchemy import text
@@ -2123,12 +2116,39 @@ class InventarioRepository(BaseRepository):
             
         where_clause = f"WHERE {' AND '.join(conditions_sql)}"
 
-        
-        count_stmt = text(f"SELECT COUNT(DISTINCT r.referencia_id) {sql_base} {where_clause}")
-        total_count = self.session.execute(count_stmt, params).scalar()
-        
+        # Optimization: Only join tables strictly required by filters to count or resolve IDs
+        if search_text or start_date or end_date:
+            filter_from = sql_base
+            count_select = "SELECT COUNT(DISTINCT r.referencia_id)"
+        else:
+            filter_tables = [
+                "FROM sar_produccion.referencia r",
+                "JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id"
+            ]
+            if filter_assigned == "Disponible":
+                filter_tables.append("LEFT JOIN sar_archivo.asignacion_referencia ar ON r.referencia_id = ar.referencia_id")
+            if concepto_id or rfc_id or orden_ids:
+                filter_tables.append("JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id")
+            if orden_ids:
+                filter_tables.append("JOIN sar_produccion.orden_generacion og ON gr.orden_id = og.orden_id")
+            filter_from = "\n            ".join(filter_tables)
+            count_select = "SELECT COUNT(r.referencia_id)"
+
+        count_stmt = text(f"{count_select} {filter_from} {where_clause}")
+        total_count = self.session.execute(count_stmt, params).scalar() or 0
+
+        # CTE High-Performance Pagination:
+        # 1. Resolve strictly the paged window of 200 IDs using B-Tree index scan
+        # 2. Join the descriptive display tables ONLY for those 200 rows
         query_stmt = text(f"""
-            SELECT DISTINCT
+            WITH paged_ref AS (
+                SELECT r.referencia_id
+                {filter_from}
+                {where_clause}
+                ORDER BY r.fecha_generacion DESC, r.referencia_id DESC
+                LIMIT :lim OFFSET :off
+            )
+            SELECT
                 r.referencia_id,
                 r.referencia_portal,
                 r.importe,
@@ -2163,10 +2183,24 @@ class InventarioRepository(BaseRepository):
                 ar.fecha_titulacion AS fecha_titulacion,
                 la.lote_asignacion_id AS lote_asignacion_id,
                 es.codigo AS estado_codigo
-            {sql_base}
-            {where_clause}
+            FROM paged_ref pr
+            JOIN sar_produccion.referencia r ON pr.referencia_id = r.referencia_id
+            JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+            JOIN sar_produccion.orden_generacion og ON gr.orden_id = og.orden_id
+            JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
+            JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+            JOIN sar_produccion.solicitud s ON r.solicitud_id = s.solicitud_id
+            LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            LEFT JOIN sar_seguridad.usuario u ON r.usuario_asignado = u.usuario_id
+            LEFT JOIN sar_archivo.asignacion_referencia ar ON r.referencia_id = ar.referencia_id
+            LEFT JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
+            LEFT JOIN sar_archivo.lote_asignacion la ON ld.lote_asignacion_id = la.lote_asignacion_id
+            LEFT JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
+            LEFT JOIN sar_catalogo.colaborador col ON la.colaborador_id = col.colaborador_id
+            LEFT JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
+            LEFT JOIN sar_archivo.ubicacion ubi ON ar.ubicacion_id = ubi.ubicacion_id
             ORDER BY r.fecha_generacion DESC, r.referencia_id DESC
-            LIMIT :lim OFFSET :off
         """)
         
         result = self.session.execute(query_stmt, params)
@@ -2781,7 +2815,7 @@ class InventarioRepository(BaseRepository):
         Used for real-time UI feedback without side effects.
         """
         from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto
-        from sqlalchemy import select, func
+        from sqlalchemy import select, func, exists
 
         if orden_ids is not None and len(orden_ids) == 0:
             return 0
@@ -2812,9 +2846,7 @@ class InventarioRepository(BaseRepository):
                 GrupoReferencia.rfc_id == rfc_id,
                 Concepto.alias.in_(expected_aliases),
                 Solicitud.delegacion_id == delegacion_id,
-                ~Referencia.referencia_id.in_(
-                    select(AsignacionReferencia.referencia_id)
-                )
+                ~exists().where(AsignacionReferencia.referencia_id == Referencia.referencia_id)
             )
         )
         if orden_ids:
@@ -2880,9 +2912,7 @@ class InventarioRepository(BaseRepository):
                 GrupoReferencia.rfc_id == rfc_id,
                 Concepto.alias.in_(expected_aliases),
                 Solicitud.delegacion_id == delegacion_id,
-                ~Referencia.referencia_id.in_(
-                    select(AsignacionReferencia.referencia_id)
-                )
+                ~exists().where(AsignacionReferencia.referencia_id == Referencia.referencia_id)
             )
         )
         if orden_ids:
@@ -3462,7 +3492,7 @@ class InventarioRepository(BaseRepository):
     ) -> List[dict]:
         """Fetches available references matching criteria using FIFO order, returning lightweight dicts."""
         from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto
-        from sqlalchemy import select
+        from sqlalchemy import select, exists
 
         if orden_ids is not None and len(orden_ids) == 0:
             return []
@@ -3497,9 +3527,7 @@ class InventarioRepository(BaseRepository):
                 GrupoReferencia.rfc_id == rfc_id,
                 Concepto.alias.in_(expected_aliases),
                 Solicitud.delegacion_id == delegacion_id,
-                ~Referencia.referencia_id.in_(
-                    select(AsignacionReferencia.referencia_id)
-                )
+                ~exists().where(AsignacionReferencia.referencia_id == Referencia.referencia_id)
             )
             .order_by(Referencia.fecha_generacion.asc(), Referencia.referencia_id.asc())
             .limit(cantidad)

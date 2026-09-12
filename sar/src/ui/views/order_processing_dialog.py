@@ -2,7 +2,7 @@
 
 from typing import List
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFrame, QLineEdit, QComboBox, QCheckBox, QTableWidgetItem, QLabel, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QFrame, QLineEdit, QComboBox, QCheckBox, QTableWidgetItem, QLabel, QWidget, QApplication
 )
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components import (
@@ -13,6 +13,7 @@ from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import ProduccionRepository
 from sar.src.storage.api_client import APIClient
+from sar.src.utils.telemetry import track_perf
 
 class OrderProcessingDialog(QDialog):
     """Modal dialog to authorize or reject granular Solicitudes and references under an Order."""
@@ -26,8 +27,18 @@ class OrderProcessingDialog(QDialog):
         self.api_client = APIClient()
         
         self.setWindowTitle("Procesar Derechos por Solicitudes")
-        self.resize(1000, 680)
-        self.setMinimumSize(900, 600)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        self.setMinimumSize(700, 380)
+        
+        # Dimensionado responsivo adaptado a la resolución de pantalla activa (evita desborde en 1366x768 o menores)
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            w = min(1000, max(700, avail.width() - 40))
+            h = min(680, max(400, avail.height() - 60))
+            self.resize(w, h)
+        else:
+            self.resize(1000, 580)
         self.setObjectName("orderProcessingDialog")
 
         # Main Layout
@@ -228,27 +239,29 @@ class OrderProcessingDialog(QDialog):
 
     def _load_data(self):
         """Loads or refreshes solicitudes data for the order. Uses API or direct DB based on CONNECT_VIA_API."""
-        try:
-            if self.api_client.connect_via_api:
-                # Use dedicated API endpoints
-                self.solicitudes_data = self.api_client.request(
-                    "GET", f"/api/docs/ordenes/{self.orden_id}/solicitudes-detalle"
-                )
-                estado_resp = self.api_client.request(
-                    "GET", f"/api/docs/ordenes/{self.orden_id}/estado"
-                )
-                self.orden_estado = estado_resp.get("estado", "")
-            else:
-                with self.db_connector.get_session() as session:
-                    repo = ProduccionRepository(session)
-                    self.solicitudes_data = repo.get_solicitudes_detalle_by_orden(self.orden_id)
-                    self.orden_estado = repo.get_orden_estado(self.orden_id)
-                
-            self._populate_table()
-            self._update_metrics_and_summary()
-            self._apply_readonly_if_cancelled()
-        except Exception as e:
-            QMessageBox.critical(self, "Error al cargar datos", f"No se pudo obtener el detalle de las solicitudes:\n{str(e)}")
+        transport = "api" if self.api_client.connect_via_api else "local"
+        with track_perf("OrderProcessingDialog._load_data", transport=transport):
+            try:
+                if self.api_client.connect_via_api:
+                    # Use dedicated API endpoints
+                    self.solicitudes_data = self.api_client.request(
+                        "GET", f"/api/docs/ordenes/{self.orden_id}/solicitudes-detalle"
+                    )
+                    estado_resp = self.api_client.request(
+                        "GET", f"/api/docs/ordenes/{self.orden_id}/estado"
+                    )
+                    self.orden_estado = estado_resp.get("estado", "")
+                else:
+                    with self.db_connector.get_session() as session:
+                        repo = ProduccionRepository(session)
+                        self.solicitudes_data = repo.get_solicitudes_detalle_by_orden(self.orden_id)
+                        self.orden_estado = repo.get_orden_estado(self.orden_id)
+                    
+                self._populate_table()
+                self._update_metrics_and_summary()
+                self._apply_readonly_if_cancelled()
+            except Exception as e:
+                QMessageBox.critical(self, "Error al cargar datos", f"No se pudo obtener el detalle de las solicitudes:\n{str(e)}")
 
     def _populate_table(self):
         """Populates the StyledDataTable and sets checkboxes for PENDIENTE_AUTORIZACION states only."""

@@ -128,7 +128,13 @@ def get_dashboard_kpis(orden_ids: Optional[str] = None, db: Session = Depends(ge
     """Retorna los contadores KPI del tablero de control."""
     repo = ProduccionRepository(db)
     try:
-        parsed_ids = [int(x) for x in orden_ids.split(",")] if orden_ids else []
+        if orden_ids is not None and orden_ids.strip() != "":
+            if orden_ids.strip().lower() in ("none", "empty"):
+                parsed_ids = []
+            else:
+                parsed_ids = [int(x) for x in orden_ids.split(",") if x.strip()]
+        else:
+            parsed_ids = None
         kpis = repo.get_dashboard_kpis(parsed_ids)
         return kpis
     except Exception as e:

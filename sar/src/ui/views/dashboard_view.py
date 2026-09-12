@@ -120,6 +120,8 @@ class DashboardView(QWidget):
         self.selected_orden_ids = []
         self.todas_las_ordenes = []
         self.is_custom_filter = False
+        self._last_kpis_orden_ids = None
+        self._last_ref_args = None
         
         # Debounce timer for text search (350ms delay) to prevent database flooding while typing
         self.search_timer = QTimer(self)
@@ -405,33 +407,44 @@ class DashboardView(QWidget):
         self.lbl_datetime.setText(QDateTime.currentDateTime().toString("dd/MM/yyyy  hh:mm AP"))
         
         self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
-        
-        # Cancel active KPIs worker if running
-        if self.active_kpis_worker and self.active_kpis_worker.isRunning():
-            self.active_kpis_worker.cancel()
-            try:
-                self.active_kpis_worker.result_ready.disconnect()
-                self.active_kpis_worker.error_occurred.disconnect()
-            except RuntimeError:
-                pass
-            self.active_kpis_worker.wait()
 
-        # Set visual feedback to loading state for KPIs
-        self.card_generadas.set_value("...")
-        self.card_pendientes.set_value("...")
-        self.card_autorizadas.set_value("...")
-        self.card_rechazadas.set_value("...")
-        self.card_error.set_value("...")
-        self.card_invalidas.set_value("...")
-
-        # Start KPI background worker
-        self.active_kpis_worker = DashboardKPIsLoadWorker(
-            referencias_service=self.referencias_service,
-            orden_ids=self.selected_orden_ids
+        current_kpis_args = tuple(self.selected_orden_ids or [])
+        kpis_already_running = (
+            not force_reload_orders and
+            self.active_kpis_worker and
+            self.active_kpis_worker.isRunning() and
+            getattr(self, "_last_kpis_orden_ids", None) == current_kpis_args
         )
-        self.active_kpis_worker.result_ready.connect(self._on_kpis_loaded)
-        self.active_kpis_worker.error_occurred.connect(self._on_kpis_error)
-        self.active_kpis_worker.start()
+
+        if not kpis_already_running:
+            self._last_kpis_orden_ids = current_kpis_args
+
+            # Cancel active KPIs worker if running
+            if self.active_kpis_worker and self.active_kpis_worker.isRunning():
+                self.active_kpis_worker.cancel()
+                try:
+                    self.active_kpis_worker.result_ready.disconnect()
+                    self.active_kpis_worker.error_occurred.disconnect()
+                except RuntimeError:
+                    pass
+                self.active_kpis_worker.wait()
+
+            # Set visual feedback to loading state for KPIs
+            self.card_generadas.set_value("...")
+            self.card_pendientes.set_value("...")
+            self.card_autorizadas.set_value("...")
+            self.card_rechazadas.set_value("...")
+            self.card_error.set_value("...")
+            self.card_invalidas.set_value("...")
+
+            # Start KPI background worker
+            self.active_kpis_worker = DashboardKPIsLoadWorker(
+                referencias_service=self.referencias_service,
+                orden_ids=self.selected_orden_ids
+            )
+            self.active_kpis_worker.result_ready.connect(self._on_kpis_loaded)
+            self.active_kpis_worker.error_occurred.connect(self._on_kpis_error)
+            self.active_kpis_worker.start()
             
         self.refresh_data_references()
 
@@ -454,6 +467,16 @@ class DashboardView(QWidget):
 
     def refresh_data_references(self):
         """Starts background thread to fetch dashboard references."""
+        search_text = self.search_input.text().strip()
+        offset = (self.current_page - 1) * self.page_size
+        worker_args = (self.page_size, offset, search_text, tuple(self.selected_orden_ids or []))
+
+        # Evitar cancelar y relanzar si ya hay un worker corriendo con exactamente los mismos argumentos
+        if self.active_worker and self.active_worker.isRunning() and getattr(self, "_last_ref_args", None) == worker_args:
+            return
+
+        self._last_ref_args = worker_args
+
         # Cancel active thread if running safely
         if self.active_worker and self.active_worker.isRunning():
             self.active_worker.cancel()
@@ -467,9 +490,6 @@ class DashboardView(QWidget):
         self.lbl_pagination_info.setText("Cargando derechos...")
         self.pagination_widget.setEnabled(False)
         self.cb_page_size.setEnabled(False)
-
-        search_text = self.search_input.text().strip()
-        offset = (self.current_page - 1) * self.page_size
 
         self.active_worker = DashboardReferencesLoadWorker(
             referencias_service=self.referencias_service,

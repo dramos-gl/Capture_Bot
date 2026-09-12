@@ -75,6 +75,48 @@ class InventoryLoadWorker(QThread):
                 self.error_occurred.emit(str(e))
 
 
+class LotesLoadWorker(QThread):
+    """Worker en segundo plano para cargar lotes de asignación de forma asíncrona sin bloquear la UI."""
+    result_ready = Signal(list, int)  # lotes, total
+    error_occurred = Signal(str)
+
+    def __init__(self, inventario_ui_service, search: str, tipo_destino: str, limit: int, offset: int, start_date: str, end_date: str, orden_ids: list):
+        super().__init__()
+        self.inventario_ui_service = inventario_ui_service
+        self.search = search
+        self.tipo_destino = tipo_destino
+        self.limit = limit
+        self.offset = offset
+        self.start_date = start_date
+        self.end_date = end_date
+        self.orden_ids = orden_ids
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        try:
+            if self._is_cancelled:
+                return
+            lotes, total = self.inventario_ui_service.get_lotes_asignacion_filtered(
+                search=self.search,
+                tipo_destino=self.tipo_destino,
+                limit=self.limit,
+                offset=self.offset,
+                start_date=self.start_date,
+                end_date=self.end_date,
+                orden_ids=self.orden_ids
+            )
+            if not self._is_cancelled:
+                self.result_ready.emit(lotes, total)
+        except Exception as e:
+            if not self._is_cancelled:
+                import traceback
+                traceback.print_exc()
+                self.error_occurred.emit(str(e))
+
+
 class AvailabilityWorker(QThread):
     """Lightweight worker to fetch disponibles count for a single grid row without blocking UI."""
     result_ready = Signal(object, int)  # row_widget, count
@@ -978,6 +1020,7 @@ class InventoryView(QWidget):
         self.total_items = 0
         self.selected_ref_map = {}
         self.active_worker = None
+        self._last_worker_args = None
         self._current_search_text = ""
         self._current_estado_filter = "Todos"
         self._current_concepto_id = None
@@ -1001,6 +1044,23 @@ class InventoryView(QWidget):
         self.refresh_visor_data(force_reload_orders=True)
 
     def refresh_visor_data(self, force_reload_orders: bool = False):
+        offset = (self.current_page - 1) * self.page_size
+        worker_args = (
+            self.page_size,
+            offset,
+            self._current_search_text,
+            self._current_concepto_id,
+            self._current_rfc_id,
+            self._current_estado_filter,
+            tuple(self.selected_orden_ids or [])
+        )
+
+        # Evitar cancelar y relanzar el worker si ya se encuentra procesando exactamente los mismos parámetros
+        if not force_reload_orders and self.active_worker and self.active_worker.isRunning() and getattr(self, "_last_worker_args", None) == worker_args:
+            return
+
+        self._last_worker_args = worker_args
+
         if self.active_worker and self.active_worker.isRunning():
             self.active_worker.cancel()
             try:
@@ -1017,8 +1077,6 @@ class InventoryView(QWidget):
         
         self.lbl_pagination_info.setText("Cargando inventario...")
         self.pagination_widget.setEnabled(False)
-
-        offset = (self.current_page - 1) * self.page_size
         
         self.active_worker = InventoryLoadWorker(
             inventario_ui_service=self.inventario_ui_service,
@@ -1470,6 +1528,16 @@ class InventoryView(QWidget):
             return
             
         ref_dict = self.visible_table_data[row]
+        referencia_id = ref_dict.get("referencia_id")
+        referencia_portal = ref_dict.get("referencia_portal", "")
+        if referencia_id:
+            self._on_ver_pdf_factura(referencia_id, referencia_portal)
+
+    def _on_abrir_detalle_o_asignacion(self, row: int):
+        if row < 0 or row >= len(self.visible_table_data):
+            return
+            
+        ref_dict = self.visible_table_data[row]
         estado_codigo = (ref_dict.get("estado_codigo") or "").strip().upper()
         is_asignada = ref_dict.get("asignada", False) or estado_codigo in ("ASIGNADA", "RESERVADA")
 
@@ -1545,12 +1613,22 @@ class InventoryView(QWidget):
 
         menu = QMenu(self)
 
-        # --- Acción: Ver PDF de Factura ---
+        # --- Acción 1: Ver PDF de Factura ---
         act_pdf = QAction(Icons.pdf() if hasattr(Icons, 'pdf') else menu.style().standardIcon(menu.style().SP_FileIcon),
                           "🗂  Ver PDF de Factura", menu)
         act_pdf.setToolTip(f"Abrir PDF de la factura del derecho {referencia_portal}")
         act_pdf.triggered.connect(lambda: self._on_ver_pdf_factura(referencia_id, referencia_portal))
         menu.addAction(act_pdf)
+
+        # --- Acción 2: Ver Detalle o Asignar Derecho ---
+        estado_codigo = (ref_dict.get("estado_codigo") or "").strip().upper()
+        is_asignada = ref_dict.get("asignada", False) or estado_codigo in ("ASIGNADA", "RESERVADA")
+        asig_label = "📋  Detalle de Asignación" if is_asignada else "👤  Asignar Derecho"
+        act_asig = QAction(Icons.usuario() if hasattr(Icons, 'usuario') else menu.style().standardIcon(menu.style().SP_FileDialogContentsView),
+                           asig_label, menu)
+        act_asig.setToolTip("Abrir formulario de asignación o consultar detalle")
+        act_asig.triggered.connect(lambda: self._on_abrir_detalle_o_asignacion(row))
+        menu.addAction(act_asig)
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
@@ -3213,6 +3291,8 @@ class InventoryView(QWidget):
         self._current_search_text_lotes = ""
         self._current_tipo_destino_lotes = "Todos"
         self._current_rfc_id_lotes = None
+        self.active_lotes_worker = None
+        self._last_lotes_worker_args = None
 
         # Debounce timer para búsqueda en Lotes (700 ms)
         self._search_lotes_timer = QTimer(self)
@@ -3328,11 +3408,9 @@ class InventoryView(QWidget):
         self._update_order_filter_banners()
 
     def refresh_lotes_data(self):
-        """Loads assignments from service with active filters and populates the table."""
+        """Loads assignments from service asynchronously with active filters and populates the table."""
         if not hasattr(self, 'table_lotes'):
             return
-        self.lbl_pagination_info_lotes.setText("Cargando asignaciones...")
-        self.pagination_widget_lotes.setEnabled(False)
 
         tipo_destino = self._current_tipo_destino_lotes if self._current_tipo_destino_lotes != "Todos" else None
         search = self._current_search_text_lotes or None
@@ -3342,22 +3420,59 @@ class InventoryView(QWidget):
         
         offset = (self.current_page_lotes - 1) * self.page_size_lotes
 
-        try:
-            lotes, total = self.inventario_ui_service.get_lotes_asignacion_filtered(
-                search=search,
-                tipo_destino=tipo_destino,
-                limit=self.page_size_lotes,
-                offset=offset,
-                start_date=start_date,
-                end_date=end_date,
-                orden_ids=self.selected_orden_ids
-            )
-            self.all_lotes_data = lotes
-            self.total_lotes = total
-            self._populate_lotes_table()
-        except Exception as e:
-            self.lbl_pagination_info_lotes.setText(f"Error al cargar asignaciones: {e}")
-            print("[GestionAsignaciones] Error:", e)
+        worker_args = (
+            search,
+            tipo_destino,
+            self.page_size_lotes,
+            offset,
+            start_date,
+            end_date,
+            tuple(self.selected_orden_ids or [])
+        )
+
+        # Evitar cancelar y relanzar el worker si ya se encuentra procesando exactamente los mismos parámetros
+        if self.active_lotes_worker and self.active_lotes_worker.isRunning() and getattr(self, "_last_lotes_worker_args", None) == worker_args:
+            return
+
+        self._last_lotes_worker_args = worker_args
+
+        if self.active_lotes_worker and self.active_lotes_worker.isRunning():
+            self.active_lotes_worker.cancel()
+            try:
+                self.active_lotes_worker.result_ready.disconnect(self._on_lotes_data_loaded)
+            except RuntimeError:
+                pass
+            try:
+                self.active_lotes_worker.error_occurred.disconnect(self._on_lotes_load_error)
+            except RuntimeError:
+                pass
+            self.active_lotes_worker.wait()
+
+        self.lbl_pagination_info_lotes.setText("Cargando asignaciones...")
+        self.pagination_widget_lotes.setEnabled(False)
+
+        self.active_lotes_worker = LotesLoadWorker(
+            inventario_ui_service=self.inventario_ui_service,
+            search=search,
+            tipo_destino=tipo_destino,
+            limit=self.page_size_lotes,
+            offset=offset,
+            start_date=start_date,
+            end_date=end_date,
+            orden_ids=self.selected_orden_ids
+        )
+        self.active_lotes_worker.result_ready.connect(self._on_lotes_data_loaded)
+        self.active_lotes_worker.error_occurred.connect(self._on_lotes_load_error)
+        self.active_lotes_worker.start()
+
+    def _on_lotes_data_loaded(self, lotes: list, total: int):
+        self.all_lotes_data = lotes
+        self.total_lotes = total
+        self._populate_lotes_table()
+
+    def _on_lotes_load_error(self, error_msg: str):
+        self.lbl_pagination_info_lotes.setText(f"Error al cargar asignaciones: {error_msg}")
+        self.pagination_widget_lotes.setEnabled(True)
 
 
     def _populate_lotes_table(self):
@@ -3597,16 +3712,16 @@ class ManualAssignmentDialog(QDialog):
             self.setWindowTitle("Detalle de Asignación de Derecho")
         else:
             self.setWindowTitle("Asignar Derechos")
-        self.setMinimumWidth(580)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        self.setMinimumSize(540, 380)
         
         # Dimensionado responsivo adaptado a la resolución de pantalla activa (evita desborde en 1366x768 o menores)
         screen = QApplication.primaryScreen()
         if screen:
             avail = screen.availableGeometry()
-            dialog_w = min(720, max(580, avail.width() - 40))
-            dialog_h = min(600, max(460, avail.height() - 70))
+            dialog_w = min(720, max(540, avail.width() - 40))
+            dialog_h = min(620, max(400, avail.height() - 60))
             self.resize(dialog_w, dialog_h)
-            self.setMaximumHeight(avail.height() - 30)
         else:
             self.resize(700, 580)
         
@@ -4634,8 +4749,18 @@ class LoteProcessingDialog(QDialog):
         self.detalles: list = []
 
         self.setWindowTitle(f"Detalle de Asignación #{lote_id}")
-        self.resize(1100, 680)
-        self.setMinimumSize(950, 600)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        self.setMinimumSize(680, 380)
+        
+        # Dimensionado responsivo adaptado a la resolución de pantalla activa (evita desborde en 1366x768 o menores)
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            w = min(1100, max(680, avail.width() - 40))
+            h = min(680, max(400, avail.height() - 60))
+            self.resize(w, h)
+        else:
+            self.resize(1000, 580)
         
         # Main Layout following design_system spacing
         root = QVBoxLayout(self)
@@ -4703,7 +4828,7 @@ class LoteProcessingDialog(QDialog):
         self.table_detalles = StyledDataTable(headers, parent=self)
         self.table_detalles.setColumnHidden(1, True)  # ID interno
         self.table_detalles.setColumnHidden(2, True)  # Ref ID
-        self.table_detalles.setMinimumHeight(300)
+        self.table_detalles.setMinimumHeight(150)
         root.addWidget(self.table_detalles)
 
         # ── Buttons ──────────────────────────────────────────────────────────

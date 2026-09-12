@@ -3,6 +3,7 @@
 from typing import List, Tuple, Dict, Any
 from sar.src.storage.api_client import APIClient
 from sar.src.storage.repositories import ProduccionRepository
+from sar.src.utils.telemetry import track_perf
 
 class ReferenciasService:
     """Service layer to manage reference operations using either API or DB Repository."""
@@ -15,29 +16,31 @@ class ReferenciasService:
         self, limit: int, offset: int, search_text: str, estado_filter: str, orden_ids: list = None
     ) -> Tuple[List[Dict[str, Any]], int]:
         """Fetches paginated references based on filters."""
-        if self.api_client.connect_via_api:
-            orden_ids_str = ",".join([str(x) for x in orden_ids]) if orden_ids else None
-            payload = {
-                "limit": limit,
-                "offset": offset,
-                "search_text": search_text,
-                "estado_filter": estado_filter,
-                "orden_ids": orden_ids_str
-            }
-            res = self.api_client.request("GET", "/api/docs/referencias", data=payload)
-            return res["records"], res["total_count"]
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                return repo.get_referencias_paginated(
-                    limit=limit,
-                    offset=offset,
-                    search_text=search_text,
-                    estado_filter=estado_filter,
-                    orden_ids=orden_ids
-                )
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("ReferenciasService.get_referencias_paginated", transport=transport):
+            if self.api_client.connect_via_api:
+                orden_ids_str = ",".join([str(x) for x in orden_ids]) if orden_ids else None
+                payload = {
+                    "limit": limit,
+                    "offset": offset,
+                    "search_text": search_text,
+                    "estado_filter": estado_filter,
+                    "orden_ids": orden_ids_str
+                }
+                res = self.api_client.request("GET", "/api/docs/referencias", data=payload)
+                return res["records"], res["total_count"]
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    return repo.get_referencias_paginated(
+                        limit=limit,
+                        offset=offset,
+                        search_text=search_text,
+                        estado_filter=estado_filter,
+                        orden_ids=orden_ids
+                    )
 
     def get_ordenes(self, include_rejected: bool = False) -> List[Dict[str, Any]]:
         """Fetches available orders, excluding rejected/cancelled orders by default."""
@@ -112,15 +115,17 @@ class ReferenciasService:
 
     def get_dashboard_kpis(self, orden_ids: list = None) -> Dict[str, Any]:
         """Fetches dashboard KPI metrics."""
-        if self.api_client.connect_via_api:
-            orden_ids_str = ",".join([str(x) for x in orden_ids]) if orden_ids else ""
-            return self.api_client.request("GET", "/api/ops/dashboard-kpis", data={"orden_ids": orden_ids_str})
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                return repo.get_dashboard_kpis(orden_ids)
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("ReferenciasService.get_dashboard_kpis", transport=transport):
+            if self.api_client.connect_via_api:
+                orden_ids_str = ",".join([str(x) for x in orden_ids]) if orden_ids else ""
+                return self.api_client.request("GET", "/api/ops/dashboard-kpis", data={"orden_ids": orden_ids_str})
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    return repo.get_dashboard_kpis(orden_ids)
 
     def get_metrics_report(self, rfc_id: int = None, concepto_id: int = None, delegacion_id: int = None, orden_ids: list = None) -> List[Dict[str, Any]]:
         """Retrieves aggregated metrics using the vw_metricas_referencias view.
@@ -131,124 +136,128 @@ class ReferenciasService:
         if orden_ids is not None and len(orden_ids) == 0:
             return []
 
-        if self.api_client.connect_via_api:
-            payload = {}
-            if rfc_id: payload["rfc_id"] = rfc_id
-            if concepto_id: payload["concepto_id"] = concepto_id
-            if delegacion_id: payload["delegacion_id"] = delegacion_id
-            if orden_ids: payload["orden_ids"] = ",".join(str(x) for x in orden_ids)
-            try:
-                return self.api_client.request("GET", "/api/docs/referencias/metrics", data=payload)
-            except Exception:
-                return []
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            from sqlalchemy import text
-            with self.db_connector.get_session() as session:
-                # Build dynamic WHERE using the view columns
-                conditions = ["1=1"]
-                params = {}
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("ReferenciasService.get_metrics_report", transport=transport):
+            if self.api_client.connect_via_api:
+                payload = {}
+                if rfc_id: payload["rfc_id"] = rfc_id
+                if concepto_id: payload["concepto_id"] = concepto_id
+                if delegacion_id: payload["delegacion_id"] = delegacion_id
+                if orden_ids: payload["orden_ids"] = ",".join(str(x) for x in orden_ids)
+                try:
+                    return self.api_client.request("GET", "/api/docs/referencias/metrics", data=payload)
+                except Exception:
+                    return []
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                from sqlalchemy import text
+                with self.db_connector.get_session() as session:
+                    # Build dynamic WHERE using the view columns
+                    conditions = ["1=1"]
+                    params = {}
 
-                if orden_ids:
-                    conditions.append("orden_id IN :orden_ids")
-                    params["orden_ids"] = tuple(orden_ids)
-                if rfc_id:
-                    conditions.append("rfc_id = :rfc_id")
-                    params["rfc_id"] = rfc_id
-                if concepto_id:
-                    conditions.append("concepto_id = :concepto_id")
-                    params["concepto_id"] = concepto_id
-                if delegacion_id:
-                    conditions.append("delegacion_id = :delegacion_id")
-                    params["delegacion_id"] = delegacion_id
+                    if orden_ids:
+                        conditions.append("orden_id IN :orden_ids")
+                        params["orden_ids"] = tuple(orden_ids)
+                    if rfc_id:
+                        conditions.append("rfc_id = :rfc_id")
+                        params["rfc_id"] = rfc_id
+                    if concepto_id:
+                        conditions.append("concepto_id = :concepto_id")
+                        params["concepto_id"] = concepto_id
+                    if delegacion_id:
+                        conditions.append("delegacion_id = :delegacion_id")
+                        params["delegacion_id"] = delegacion_id
 
-                where_clause = " AND ".join(conditions)
+                    where_clause = " AND ".join(conditions)
 
-                query = f"""
-                    SELECT
-                        rfc_nombre                         AS rfc_name,
-                        concepto_nombre                    AS concepto_name,
-                        COALESCE(delegacion_nombre, 'Sin Delegacion') AS delegacion_name,
-                        COUNT(referencia_id)               AS total_referencias,
-                        COALESCE(SUM(importe), 0)          AS importe_total
-                    FROM sar_produccion.vw_metricas_referencias
-                    WHERE {where_clause}
-                    GROUP BY rfc_nombre, concepto_nombre, delegacion_nombre
-                    ORDER BY rfc_nombre, concepto_nombre, delegacion_nombre
-                """
+                    query = f"""
+                        SELECT
+                            rfc_nombre                         AS rfc_name,
+                            concepto_nombre                    AS concepto_name,
+                            COALESCE(delegacion_nombre, 'Sin Delegacion') AS delegacion_name,
+                            COUNT(referencia_id)               AS total_referencias,
+                            COALESCE(SUM(importe), 0)          AS importe_total
+                        FROM sar_produccion.vw_metricas_referencias
+                        WHERE {where_clause}
+                        GROUP BY rfc_nombre, concepto_nombre, delegacion_nombre
+                        ORDER BY rfc_nombre, concepto_nombre, delegacion_nombre
+                    """
 
-                rows = session.execute(text(query), params).fetchall()
-                return [
-                    {
-                        "rfc_name": r[0],
-                        "concepto_name": r[1],
-                        "delegacion_name": r[2],
-                        "total_referencias": r[3],
-                        "importe_total": float(r[4])
-                    }
-                    for r in rows
-                ]
+                    rows = session.execute(text(query), params).fetchall()
+                    return [
+                        {
+                            "rfc_name": r[0],
+                            "concepto_name": r[1],
+                            "delegacion_name": r[2],
+                            "total_referencias": r[3],
+                            "importe_total": float(r[4])
+                        }
+                        for r in rows
+                    ]
 
     def get_metrics_summary(self, rfc_id: int = None, concepto_id: int = None, delegacion_id: int = None, orden_ids: list = None) -> Dict[str, Any]:
         """Returns KPI summary from vw_metricas_referencias: total amount, total refs, and count/amount per estado_codigo."""
         if orden_ids is not None and len(orden_ids) == 0:
             return {"total_referencias": 0, "importe_total": 0.0, "por_estado": {}}
 
-        if self.api_client.connect_via_api:
-            try:
-                payload = {}
-                if rfc_id: payload["rfc_id"] = rfc_id
-                if concepto_id: payload["concepto_id"] = concepto_id
-                if delegacion_id: payload["delegacion_id"] = delegacion_id
-                if orden_ids: payload["orden_ids"] = ",".join(str(x) for x in orden_ids)
-                return self.api_client.request("GET", "/api/docs/referencias/metrics-summary", data=payload)
-            except Exception:
-                return {"total_referencias": 0, "importe_total": 0.0, "por_estado": {}}
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            from sqlalchemy import text
-            with self.db_connector.get_session() as session:
-                conditions = ["1=1"]
-                params = {}
-                if orden_ids:
-                    conditions.append("orden_id IN :orden_ids")
-                    params["orden_ids"] = tuple(orden_ids)
-                if rfc_id:
-                    conditions.append("rfc_id = :rfc_id")
-                    params["rfc_id"] = rfc_id
-                if concepto_id:
-                    conditions.append("concepto_id = :concepto_id")
-                    params["concepto_id"] = concepto_id
-                if delegacion_id:
-                    conditions.append("delegacion_id = :delegacion_id")
-                    params["delegacion_id"] = delegacion_id
-                where_clause = " AND ".join(conditions)
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("ReferenciasService.get_metrics_summary", transport=transport):
+            if self.api_client.connect_via_api:
+                try:
+                    payload = {}
+                    if rfc_id: payload["rfc_id"] = rfc_id
+                    if concepto_id: payload["concepto_id"] = concepto_id
+                    if delegacion_id: payload["delegacion_id"] = delegacion_id
+                    if orden_ids: payload["orden_ids"] = ",".join(str(x) for x in orden_ids)
+                    return self.api_client.request("GET", "/api/docs/referencias/metrics-summary", data=payload)
+                except Exception:
+                    return {"total_referencias": 0, "importe_total": 0.0, "por_estado": {}}
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                from sqlalchemy import text
+                with self.db_connector.get_session() as session:
+                    conditions = ["1=1"]
+                    params = {}
+                    if orden_ids:
+                        conditions.append("orden_id IN :orden_ids")
+                        params["orden_ids"] = tuple(orden_ids)
+                    if rfc_id:
+                        conditions.append("rfc_id = :rfc_id")
+                        params["rfc_id"] = rfc_id
+                    if concepto_id:
+                        conditions.append("concepto_id = :concepto_id")
+                        params["concepto_id"] = concepto_id
+                    if delegacion_id:
+                        conditions.append("delegacion_id = :delegacion_id")
+                        params["delegacion_id"] = delegacion_id
+                    where_clause = " AND ".join(conditions)
 
-                # Global totals
-                total_row = session.execute(text(f"""
-                    SELECT COUNT(referencia_id), COALESCE(SUM(importe), 0)
-                    FROM sar_produccion.vw_metricas_referencias
-                    WHERE {where_clause}
-                """), params).fetchone()
+                    # Single consolidated grouped query for breakdown and totals
+                    estado_rows = session.execute(text(f"""
+                        SELECT estado_codigo, COUNT(referencia_id), COALESCE(SUM(importe), 0)
+                        FROM sar_produccion.vw_metricas_referencias
+                        WHERE {where_clause}
+                        GROUP BY estado_codigo
+                        ORDER BY estado_codigo
+                    """), params).fetchall()
 
-                # Per-status breakdown
-                estado_rows = session.execute(text(f"""
-                    SELECT estado_codigo, COUNT(referencia_id), COALESCE(SUM(importe), 0)
-                    FROM sar_produccion.vw_metricas_referencias
-                    WHERE {where_clause}
-                    GROUP BY estado_codigo
-                    ORDER BY estado_codigo
-                """), params).fetchall()
+                    por_estado = {}
+                    total_referencias = 0
+                    importe_total = 0.0
 
-                por_estado = {
-                    r[0]: {"total": r[1], "importe": float(r[2])}
-                    for r in estado_rows
-                }
+                    for r in estado_rows:
+                        codigo = r[0]
+                        cnt = r[1]
+                        imp = float(r[2]) if r[2] is not None else 0.0
+                        por_estado[codigo] = {"total": cnt, "importe": imp}
+                        total_referencias += cnt
+                        importe_total += imp
 
-                return {
-                    "total_referencias": total_row[0] if total_row else 0,
-                    "importe_total": float(total_row[1]) if total_row else 0.0,
-                    "por_estado": por_estado,
-                }
+                    return {
+                        "total_referencias": total_referencias,
+                        "importe_total": importe_total,
+                        "por_estado": por_estado,
+                    }

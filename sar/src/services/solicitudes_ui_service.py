@@ -3,6 +3,7 @@
 from typing import List, Dict, Any
 from sar.src.storage.api_client import APIClient
 from sar.src.storage.repositories import OperacionRepository, ProduccionRepository, ConfigRepository, UsuarioRepository
+from sar.src.utils.telemetry import track_perf
 
 class SolicitudesUIService:
     """Service layer for the UI to manage solicitud operations using either API or local DB."""
@@ -13,32 +14,36 @@ class SolicitudesUIService:
 
     def get_solicitudes(self, orden_ids: List[int] = None) -> List[Dict[str, Any]]:
         """Fetches the list of solicitudes."""
-        if self.api_client.connect_via_api:
-            payload = {"orden_ids": ",".join([str(x) for x in orden_ids])} if orden_ids else {}
-            return self.api_client.request("GET", "/api/docs/solicitudes", data=payload)
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = OperacionRepository(session)
-                return repo.get_solicitudes(orden_ids=orden_ids)
+        transport = "api" if self.api_client.connect_via_api else "local"
+        with track_perf("SolicitudesUIService.get_solicitudes", transport=transport):
+            if self.api_client.connect_via_api:
+                payload = {"orden_ids": ",".join([str(x) for x in orden_ids])} if orden_ids else {}
+                return self.api_client.request("GET", "/api/docs/solicitudes", data=payload)
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = OperacionRepository(session)
+                    return repo.get_solicitudes(orden_ids=orden_ids)
 
     def get_ordenes(self, include_rejected: bool = False) -> List[Dict[str, Any]]:
         """Fetches available orders, excluding rejected/cancelled orders by default."""
-        if self.api_client.connect_via_api:
-            res = self.api_client.request("GET", "/api/ops/ordenes")
-            if not include_rejected and res:
-                return [
-                    ord for ord in res
-                    if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
-                ]
-            return res
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = ProduccionRepository(session)
-                return repo.get_ordenes(include_rejected=include_rejected)
+        transport = "api" if self.api_client.connect_via_api else "local"
+        with track_perf("SolicitudesUIService.get_ordenes", transport=transport):
+            if self.api_client.connect_via_api:
+                res = self.api_client.request("GET", "/api/ops/ordenes")
+                if not include_rejected and res:
+                    return [
+                        ord for ord in res
+                        if str(ord.get("estado", "") or ord.get("estado_codigo", "")).upper() not in ("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+                    ]
+                return res
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    return repo.get_ordenes(include_rejected=include_rejected)
 
     def get_orden_id_by_solicitud(self, sol_id: int) -> int:
         """Fetches parent orden_id for a given solicitud."""

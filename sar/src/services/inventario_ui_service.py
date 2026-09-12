@@ -3,6 +3,7 @@
 from typing import List, Dict, Any
 from sar.src.storage.api_client import APIClient
 from sar.src.storage.repositories import InventarioRepository
+from sar.src.utils.telemetry import track_perf
 
 class InventarioUIService:
     """Service layer for the UI to manage inventory operations using either API or local DB."""
@@ -13,73 +14,77 @@ class InventarioUIService:
 
     def get_referencias_facturadas_paginated(self, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str, start_date: str = None, end_date: str = None, orden_ids: list = None) -> Dict[str, Any]:
         """Fetches paginated facturadas references."""
-        if self.api_client.connect_via_api:
-            payload = {
-                "limit": limit,
-                "offset": offset,
-                "search_text": search_text,
-                "filter_assigned": filter_assigned
-            }
-            if concepto_id:
-                payload["concepto_id"] = concepto_id
-            if rfc_id:
-                payload["rfc_id"] = rfc_id
-            if start_date:
-                payload["start_date"] = start_date
-            if end_date:
-                payload["end_date"] = end_date
-            if orden_ids is not None:
-                payload["orden_ids"] = orden_ids
-            res = self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas", data=payload)
-            return {"records": res["records"], "total_count": res["total_count"]}
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                res, total_count = repo.get_referencias_facturadas_paginated(
-                    limit=limit,
-                    offset=offset,
-                    search_text=search_text,
-                    concepto_id=concepto_id,
-                    rfc_id=rfc_id,
-                    filter_assigned=filter_assigned,
-                    start_date=start_date,
-                    end_date=end_date,
-                    orden_ids=orden_ids
-                )
-                return {"records": res, "total_count": total_count}
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_referencias_facturadas_paginated", transport=transport):
+            if self.api_client.connect_via_api:
+                payload = {
+                    "limit": limit,
+                    "offset": offset,
+                    "search_text": search_text,
+                    "filter_assigned": filter_assigned
+                }
+                if concepto_id:
+                    payload["concepto_id"] = concepto_id
+                if rfc_id:
+                    payload["rfc_id"] = rfc_id
+                if start_date:
+                    payload["start_date"] = start_date
+                if end_date:
+                    payload["end_date"] = end_date
+                if orden_ids is not None:
+                    payload["orden_ids"] = orden_ids
+                res = self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas", data=payload)
+                return {"records": res["records"], "total_count": res["total_count"]}
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    res, total_count = repo.get_referencias_facturadas_paginated(
+                        limit=limit,
+                        offset=offset,
+                        search_text=search_text,
+                        concepto_id=concepto_id,
+                        rfc_id=rfc_id,
+                        filter_assigned=filter_assigned,
+                        start_date=start_date,
+                        end_date=end_date,
+                        orden_ids=orden_ids
+                    )
+                    return {"records": res, "total_count": total_count}
 
     def get_inventario_summary(self, search_text: str = "", concepto_id: int = None, rfc_id: int = None, start_date: str = None, end_date: str = None, orden_ids: list = None) -> Dict[str, Any]:
         """Fetches inventory counts (disponibles, asignadas) under active filters."""
-        if self.api_client.connect_via_api:
-            payload = {}
-            if search_text:
-                payload["search_text"] = search_text
-            if concepto_id:
-                payload["concepto_id"] = concepto_id
-            if rfc_id:
-                payload["rfc_id"] = rfc_id
-            if start_date:
-                payload["start_date"] = start_date
-            if end_date:
-                payload["end_date"] = end_date
-            if orden_ids is not None:
-                payload["orden_ids"] = orden_ids
-            return self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas-summary", data=payload)
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                return repo.get_inventario_summary(
-                    search_text=search_text,
-                    concepto_id=concepto_id,
-                    rfc_id=rfc_id,
-                    start_date=start_date,
-                    end_date=end_date,
-                    orden_ids=orden_ids
-                )
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_inventario_summary", transport=transport):
+            if self.api_client.connect_via_api:
+                payload = {}
+                if search_text:
+                    payload["search_text"] = search_text
+                if concepto_id:
+                    payload["concepto_id"] = concepto_id
+                if rfc_id:
+                    payload["rfc_id"] = rfc_id
+                if start_date:
+                    payload["start_date"] = start_date
+                if end_date:
+                    payload["end_date"] = end_date
+                if orden_ids is not None:
+                    payload["orden_ids"] = orden_ids
+                return self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas-summary", data=payload)
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_inventario_summary(
+                        search_text=search_text,
+                        concepto_id=concepto_id,
+                        rfc_id=rfc_id,
+                        start_date=start_date,
+                        end_date=end_date,
+                        orden_ids=orden_ids
+                    )
 
     def get_notarias(self) -> List[Dict[str, Any]]:
         """Fetches notarias."""
@@ -118,45 +123,49 @@ class InventarioUIService:
         """Returns the count of FACTURADA references available for the given (rfc, concepto, delegacion).
         Used by the real-time availability column in the InteractiveGrid.
         """
-        if self.api_client.connect_via_api:
-            try:
-                params = {"rfc_id": rfc_id, "concepto_id": concepto_id, "delegacion_id": delegacion_id}
-                if orden_ids:
-                    params["orden_ids"] = orden_ids
-                result = self.api_client.request(
-                    "GET", "/api/docs/inventario/disponibles",
-                    data=params
-                )
-                return result.get("count", 0) if isinstance(result, dict) else 0
-            except Exception:
-                return 0
-        else:
-            if not self.db_connector:
-                return 0
-            try:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    return repo.count_referencias_disponibles(rfc_id, concepto_id, delegacion_id, orden_ids=orden_ids)
-            except Exception:
-                return 0
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_disponibles_count", transport=transport):
+            if self.api_client.connect_via_api:
+                try:
+                    params = {"rfc_id": rfc_id, "concepto_id": concepto_id, "delegacion_id": delegacion_id}
+                    if orden_ids:
+                        params["orden_ids"] = orden_ids
+                    result = self.api_client.request(
+                        "GET", "/api/docs/inventario/disponibles",
+                        data=params
+                    )
+                    return result.get("count", 0) if isinstance(result, dict) else 0
+                except Exception:
+                    return 0
+            else:
+                if not self.db_connector:
+                    return 0
+                try:
+                    with self.db_connector.get_session() as session:
+                        repo = InventarioRepository(session)
+                        return repo.count_referencias_disponibles(rfc_id, concepto_id, delegacion_id, orden_ids=orden_ids)
+                except Exception:
+                    return 0
 
     def get_rfcs_con_stock_facturadas(self) -> List[Dict[str, Any]]:
         """Returns active RFCs that have at least one reference in 'FACTURADA' state."""
-        if self.api_client.connect_via_api:
-            try:
-                return self.api_client.request("GET", "/api/docs/inventario/rfcs-con-stock")
-            except Exception:
-                return []
-        else:
-            if not self.db_connector:
-                return []
-            try:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    return repo.get_rfcs_con_stock_facturadas()
-            except Exception as e:
-                print(f"Error get_rfcs_con_stock_facturadas: {e}")
-                return []
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_rfcs_con_stock_facturadas", transport=transport):
+            if self.api_client.connect_via_api:
+                try:
+                    return self.api_client.request("GET", "/api/docs/inventario/rfcs-con-stock")
+                except Exception:
+                    return []
+            else:
+                if not self.db_connector:
+                    return []
+                try:
+                    with self.db_connector.get_session() as session:
+                        repo = InventarioRepository(session)
+                        return repo.get_rfcs_con_stock_facturadas()
+                except Exception as e:
+                    print(f"Error get_rfcs_con_stock_facturadas: {e}")
+                    return []
 
 
     def get_desarrollos_activos_para_apartar(self) -> List[Dict[str, Any]]:
@@ -217,24 +226,26 @@ class InventarioUIService:
 
     def get_conceptos_con_stock(self, rfc_id: int, delegacion_id: int) -> List[Dict[str, Any]]:
         """Returns concepts that have FACTURADA stock for the given rfc + delegacion."""
-        if self.api_client.connect_via_api:
-            try:
-                return self.api_client.request(
-                    "GET", "/api/docs/inventario/conceptos-con-stock",
-                    data={"rfc_id": rfc_id, "delegacion_id": delegacion_id}
-                )
-            except Exception:
-                return []
-        else:
-            if not self.db_connector:
-                return []
-            try:
-                with self.db_connector.get_session() as session:
-                    repo = InventarioRepository(session)
-                    return repo.get_conceptos_con_stock(rfc_id, delegacion_id)
-            except Exception as e:
-                print(f"Error get_conceptos_con_stock: {e}")
-                return []
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_conceptos_con_stock", transport=transport):
+            if self.api_client.connect_via_api:
+                try:
+                    return self.api_client.request(
+                        "GET", "/api/docs/inventario/conceptos-con-stock",
+                        data={"rfc_id": rfc_id, "delegacion_id": delegacion_id}
+                    )
+                except Exception:
+                    return []
+            else:
+                if not self.db_connector:
+                    return []
+                try:
+                    with self.db_connector.get_session() as session:
+                        repo = InventarioRepository(session)
+                        return repo.get_conceptos_con_stock(rfc_id, delegacion_id)
+                except Exception as e:
+                    print(f"Error get_conceptos_con_stock: {e}")
+                    return []
 
 
     def get_catalogos_data(self) -> Dict[str, Any]:
@@ -393,35 +404,37 @@ class InventarioUIService:
         orden_ids: list = None
     ):
         """Fetches paginated, filterable lotes. Returns (list, total_count)."""
-        if self.api_client.connect_via_api:
-            # API mode: pass filters as query params
-            params = {"limit": limit, "offset": offset}
-            if search:
-                params["search"] = search
-            if tipo_destino:
-                params["tipo_destino"] = tipo_destino
-            if start_date:
-                params["start_date"] = start_date
-            if end_date:
-                params["end_date"] = end_date
-            if orden_ids:
-                params["orden_ids"] = orden_ids
-            result = self.api_client.request("GET", "/api/docs/inventario/lotes/filtrados", data=params)
-            return result.get("lotes", []), result.get("total", 0)
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                return repo.get_lotes_asignacion_filtered(
-                    search=search,
-                    tipo_destino=tipo_destino,
-                    limit=limit,
-                    offset=offset,
-                    start_date=start_date,
-                    end_date=end_date,
-                    orden_ids=orden_ids
-                )
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_lotes_asignacion_filtered", transport=transport):
+            if self.api_client.connect_via_api:
+                # API mode: pass filters as query params
+                params = {"limit": limit, "offset": offset}
+                if search:
+                    params["search"] = search
+                if tipo_destino:
+                    params["tipo_destino"] = tipo_destino
+                if start_date:
+                    params["start_date"] = start_date
+                if end_date:
+                    params["end_date"] = end_date
+                if orden_ids:
+                    params["orden_ids"] = orden_ids
+                result = self.api_client.request("GET", "/api/docs/inventario/lotes/filtrados", data=params)
+                return result.get("lotes", []), result.get("total", 0)
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_lotes_asignacion_filtered(
+                        search=search,
+                        tipo_destino=tipo_destino,
+                        limit=limit,
+                        offset=offset,
+                        start_date=start_date,
+                        end_date=end_date,
+                        orden_ids=orden_ids
+                    )
 
     def get_lote_detalles(self, lote_id: int) -> List[Dict[str, Any]]:
         """Fetches details of an assignment lote."""
@@ -447,14 +460,16 @@ class InventarioUIService:
 
     def get_facturas_by_referencia_id(self, referencia_id: int) -> List[Dict[str, Any]]:
         """Fetches invoices (facturas) associated with a reference ID."""
-        if self.api_client.connect_via_api:
-            return self.api_client.request("GET", f"/api/docs/inventario/referencias/{referencia_id}/facturas")
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                return repo.get_facturas_by_referencia_id(referencia_id)
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_facturas_by_referencia_id", transport=transport):
+            if self.api_client.connect_via_api:
+                return self.api_client.request("GET", f"/api/docs/inventario/referencias/{referencia_id}/facturas") or []
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_facturas_by_referencia_id(referencia_id)
 
     def get_ubicacion_by_coordenadas(
         self, desarrollo_id: int, mz: str, lote: str, edif: str = None, viv: str = None
@@ -526,49 +541,53 @@ class InventarioUIService:
         self, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int, orden_ids: list = None
     ) -> List[Dict[str, Any]]:
         """Fetches available references under given criteria using FIFO."""
-        if self.api_client.connect_via_api:
-            payload = {
-                "rfc_id": rfc_id,
-                "concepto_id": concepto_id,
-                "delegacion_id": delegacion_id,
-                "cantidad": cantidad
-            }
-            if orden_ids:
-                payload["orden_ids"] = orden_ids
-            return self.api_client.request("GET", "/api/docs/inventario/disponibles/filtro", data=payload)
-        else:
-            if not self.db_connector:
-                return []
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                return repo.get_referencias_disponibles_filtro(rfc_id, concepto_id, delegacion_id, cantidad, orden_ids=orden_ids)
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_referencias_disponibles_filtro", transport=transport):
+            if self.api_client.connect_via_api:
+                payload = {
+                    "rfc_id": rfc_id,
+                    "concepto_id": concepto_id,
+                    "delegacion_id": delegacion_id,
+                    "cantidad": cantidad
+                }
+                if orden_ids:
+                    payload["orden_ids"] = orden_ids
+                return self.api_client.request("GET", "/api/docs/inventario/disponibles/filtro", data=payload)
+            else:
+                if not self.db_connector:
+                    return []
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_referencias_disponibles_filtro(rfc_id, concepto_id, delegacion_id, cantidad, orden_ids=orden_ids)
 
     def asignar_referencias_directo(
         self, tipo_destino: str, destino_id: int, usuario_id: int, referencias_data: List[dict],
         solicitante_externo: Optional[str] = None, observaciones: Optional[str] = None
     ) -> int:
         """Assigns selected references directly to Notaria or Colaborador."""
-        if self.api_client.connect_via_api:
-            payload = {
-                "tipo_destino": tipo_destino,
-                "destino_id": destino_id,
-                "usuario_id": usuario_id,
-                "referencias": referencias_data,
-                "solicitante_externo": solicitante_externo,
-                "observaciones": observaciones
-            }
-            res = self.api_client.request("POST", "/api/docs/inventario/lotes/asignar-directo", data=payload)
-            return res.get("lote_id", 0)
-        else:
-            if not self.db_connector:
-                return 0
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                lote_id = repo.asignar_referencias_directo(
-                    tipo_destino, destino_id, usuario_id, referencias_data, solicitante_externo, observaciones
-                )
-                session.commit()
-                return lote_id
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.asignar_referencias_directo", transport=transport):
+            if self.api_client.connect_via_api:
+                payload = {
+                    "tipo_destino": tipo_destino,
+                    "destino_id": destino_id,
+                    "usuario_id": usuario_id,
+                    "referencias": referencias_data,
+                    "solicitante_externo": solicitante_externo,
+                    "observaciones": observaciones
+                }
+                res = self.api_client.request("POST", "/api/docs/inventario/lotes/asignar-directo", data=payload)
+                return res.get("lote_id", 0)
+            else:
+                if not self.db_connector:
+                    return 0
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    lote_id = repo.asignar_referencias_directo(
+                        tipo_destino, destino_id, usuario_id, referencias_data, solicitante_externo, observaciones
+                    )
+                    session.commit()
+                    return lote_id
 
     def update_asignacion_referencia(
         self, asignacion_referencia_id: int, datos: dict, usuario_id: Optional[int] = None
@@ -589,15 +608,3 @@ class InventarioUIService:
                 session.commit()
                 return res
 
-    def get_facturas_by_referencia_id(self, referencia_id: int) -> List[Dict[str, Any]]:
-        """Returns all invoice records (with pdf_path and pdf2_path) for a given referencia_id."""
-        if self.api_client.connect_via_api:
-            return self.api_client.request(
-                "GET", f"/api/docs/inventario/referencias/{referencia_id}/facturas"
-            ) or []
-        else:
-            if not self.db_connector:
-                return []
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                return repo.get_facturas_by_referencia_id(referencia_id)
