@@ -328,7 +328,22 @@ def main():
         except Exception as e:
             print("Error setting AppUserModelID:", e)
 
+    # Configure clean Qt message handler to suppress benign internal stylesheet/geometry cascade warnings
+    from PySide6.QtCore import qInstallMessageHandler, QtMsgType
+    def _qt_message_handler(mode, context, message):
+        if "setPointSize: Point size <= 0" in message:
+            return
+        if "Unable to set geometry" in message:
+            return
+        if mode in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
+            sys.stderr.write(f"{message}\n")
+    qInstallMessageHandler(_qt_message_handler)
+
     app = QApplication(sys.argv)
+    
+    # Establish default application font with valid point size
+    from PySide6.QtGui import QFont
+    app.setFont(QFont("Segoe UI", 10))
     
     # Apply global window icon (compatible con modo script y compilado PyInstaller)
     base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
