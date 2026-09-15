@@ -13,7 +13,7 @@ class ReferenciasService:
         self.api_client = APIClient()
 
     def get_referencias_paginated(
-        self, limit: int, offset: int, search_text: str, estado_filter: str, orden_ids: list = None
+        self, limit: int = 200, offset: int = 0, search_text: str = "", estado_filter: str = "Todos", orden_ids: list = None
     ) -> Tuple[List[Dict[str, Any]], int]:
         """Fetches paginated references based on filters."""
         transport = "API" if self.api_client.connect_via_api else "LOCAL"
@@ -41,6 +41,29 @@ class ReferenciasService:
                         estado_filter=estado_filter,
                         orden_ids=orden_ids
                     )
+
+    def get_referencias_por_estados(
+        self, states: List[str], orden_ids: list = None
+    ) -> List[Dict[str, Any]]:
+        """Fetches references matching the specified list of states (e.g. ERROR, FALLIDO or ERROR_VALIDACION)."""
+        if not states:
+            return []
+
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("ReferenciasService.get_referencias_por_estados", transport=transport):
+            if self.api_client.connect_via_api:
+                params = {
+                    "states": ",".join(states)
+                }
+                if orden_ids:
+                    params["orden_ids"] = ",".join(map(str, orden_ids))
+                return self.api_client.request("GET", "/api/docs/referencias/por-estados", params=params)
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = ProduccionRepository(session)
+                    return repo.get_referencias_por_estados(states=states, orden_ids=orden_ids)
 
     def get_ordenes(self, include_rejected: bool = False) -> List[Dict[str, Any]]:
         """Fetches available orders, excluding rejected/cancelled orders by default."""
@@ -261,3 +284,54 @@ class ReferenciasService:
                         "importe_total": importe_total,
                         "por_estado": por_estado,
                     }
+
+    def get_rfcs_by_orden_ids(self, orden_ids: list = None) -> List[Dict[str, Any]]:
+        """Returns the distinct RFCs (companies) that have references in the given orders.
+
+        Used to dynamically filter the Empresa combo box so only companies with
+        actual derechos linked to the active orden selection are shown.
+
+        Returns a list of dicts with keys: rfc_id, rfc, razon_social, alias.
+        An empty orden_ids list returns an empty list (no orders → no companies).
+        A None orden_ids means no filter (all companies with any references).
+        """
+        if orden_ids is not None and len(orden_ids) == 0:
+            return []
+
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("ReferenciasService.get_rfcs_by_orden_ids", transport=transport):
+            if self.api_client.connect_via_api:
+                payload = {}
+                if orden_ids:
+                    payload["orden_ids"] = ",".join(str(x) for x in orden_ids)
+                try:
+                    return self.api_client.request("GET", "/api/docs/referencias/rfcs-by-orden", data=payload)
+                except Exception:
+                    return []
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                from sqlalchemy import text
+                with self.db_connector.get_session() as session:
+                    conditions = ["v.rfc_id IS NOT NULL"]
+                    params = {}
+                    if orden_ids:
+                        conditions.append("v.orden_id IN :orden_ids")
+                        params["orden_ids"] = tuple(orden_ids)
+                    where_clause = " AND ".join(conditions)
+                    rows = session.execute(text(f"""
+                        SELECT DISTINCT v.rfc_id, v.rfc_nombre, v.rfc_razon_social, rc.alias
+                        FROM sar_produccion.vw_metricas_referencias v
+                        JOIN sar_catalogo.rfc rc ON rc.rfc_id = v.rfc_id
+                        WHERE {where_clause}
+                        ORDER BY v.rfc_nombre
+                    """), params).fetchall()
+                    return [
+                        {
+                            "rfc_id":     r[0],
+                            "rfc":        r[1],
+                            "razon_social": r[2],
+                            "alias":      r[3],
+                        }
+                        for r in rows
+                    ]

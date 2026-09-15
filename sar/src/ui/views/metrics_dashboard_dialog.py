@@ -208,15 +208,24 @@ class MetricsDashboardDialog(QWidget):
         
         fl = QHBoxLayout()
         fl.setSpacing(14)
+        fl.setAlignment(Qt.AlignTop)
+
+        CONTROL_H = 34
+        LBL_H = 18
+        # Ajuste de hoja de estilo para que QComboBox mida exactamente 34px como los botones QPushButton
+        combo_style = "QComboBox { min-height: 28px; max-height: 28px; padding: 2px 8px; }"
 
         # Orden
         v = QVBoxLayout()
         v.setSpacing(4)
-        v.addWidget(CustomLabel("Orden / Folio:", variant="body"))
+        v.setContentsMargins(0, 0, 0, 0)
+        lbl_orden = CustomLabel("Orden / Folio:", variant="body")
+        lbl_orden.setFixedHeight(LBL_H)
+        v.addWidget(lbl_orden)
         self.btn_orden_filter = QPushButton("  Seleccionar Orden")
         self.btn_orden_filter.setObjectName("secondaryBtn")
         self.btn_orden_filter.setIcon(Icons.filter_icon(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_orden_filter.setFixedHeight(32)
+        self.btn_orden_filter.setFixedHeight(CONTROL_H)
         self.btn_orden_filter.clicked.connect(self._show_orden_filter_menu)
         v.addWidget(self.btn_orden_filter)
         fl.addLayout(v, stretch=1)
@@ -224,9 +233,13 @@ class MetricsDashboardDialog(QWidget):
         # RFC
         v2 = QVBoxLayout()
         v2.setSpacing(4)
-        v2.addWidget(CustomLabel("Empresa (RFC):", variant="body"))
+        v2.setContentsMargins(0, 0, 0, 0)
+        lbl_rfc = CustomLabel("Empresa (RFC):", variant="body")
+        lbl_rfc.setFixedHeight(LBL_H)
+        v2.addWidget(lbl_rfc)
         self.cb_rfc = CustomComboBox(self)
-        self.cb_rfc.setFixedHeight(32)
+        self.cb_rfc.setStyleSheet(combo_style)
+        self.cb_rfc.setFixedHeight(CONTROL_H)
         self.cb_rfc.currentIndexChanged.connect(self.refresh_metrics)
         v2.addWidget(self.cb_rfc)
         fl.addLayout(v2, stretch=1)
@@ -234,9 +247,13 @@ class MetricsDashboardDialog(QWidget):
         # Concepto
         v3 = QVBoxLayout()
         v3.setSpacing(4)
-        v3.addWidget(CustomLabel("Concepto:", variant="body"))
+        v3.setContentsMargins(0, 0, 0, 0)
+        lbl_concepto = CustomLabel("Concepto:", variant="body")
+        lbl_concepto.setFixedHeight(LBL_H)
+        v3.addWidget(lbl_concepto)
         self.cb_concepto = CustomComboBox(self)
-        self.cb_concepto.setFixedHeight(32)
+        self.cb_concepto.setStyleSheet(combo_style)
+        self.cb_concepto.setFixedHeight(CONTROL_H)
         self.cb_concepto.currentIndexChanged.connect(self.refresh_metrics)
         v3.addWidget(self.cb_concepto)
         fl.addLayout(v3, stretch=1)
@@ -244,9 +261,13 @@ class MetricsDashboardDialog(QWidget):
         # Delegación
         v4 = QVBoxLayout()
         v4.setSpacing(4)
-        v4.addWidget(CustomLabel("Delegación:", variant="body"))
+        v4.setContentsMargins(0, 0, 0, 0)
+        lbl_deleg = CustomLabel("Delegación:", variant="body")
+        lbl_deleg.setFixedHeight(LBL_H)
+        v4.addWidget(lbl_deleg)
         self.cb_deleg = CustomComboBox(self)
-        self.cb_deleg.setFixedHeight(32)
+        self.cb_deleg.setStyleSheet(combo_style)
+        self.cb_deleg.setFixedHeight(CONTROL_H)
         self.cb_deleg.currentIndexChanged.connect(self.refresh_metrics)
         v4.addWidget(self.cb_deleg)
         fl.addLayout(v4, stretch=1)
@@ -254,9 +275,12 @@ class MetricsDashboardDialog(QWidget):
         # Reset — usando patrón is_clean_btn del Design System (ícono + estilo correcto)
         v_reset = QVBoxLayout()
         v_reset.setSpacing(4)
-        v_reset.addWidget(CustomLabel("", variant="body"))  # spacer label para alinear con combos
+        v_reset.setContentsMargins(0, 0, 0, 0)
+        lbl_reset = CustomLabel("\u00A0", variant="body")  # spacer label tipográfico exacto para alinear con los otros campos
+        lbl_reset.setFixedHeight(LBL_H)
+        v_reset.addWidget(lbl_reset)
         btn_reset = CustomButton("Limpiar Filtros", is_clean_btn=True)
-        btn_reset.setFixedHeight(32)
+        btn_reset.setFixedHeight(CONTROL_H)
         btn_reset.setMinimumWidth(140)
         btn_reset.clicked.connect(self._reset_filters)
         v_reset.addWidget(btn_reset)
@@ -428,15 +452,15 @@ class MetricsDashboardDialog(QWidget):
     # Data loading
     # =========================================================================
     def _load_filters_data(self):
+        """Carga inicial de catálogos (Concepto, Delegación) y órdenes.
+        El combo de Empresa (RFC) se puebla dinámicamente vía _refresh_rfc_combo.
+        """
         try:
-            self.cb_rfc.blockSignals(True)
             self.cb_concepto.blockSignals(True)
             self.cb_deleg.blockSignals(True)
 
             data = self.ordenes_service.get_catalogos()
-            self.cb_rfc.addItem("Todas las Empresas", 0)
-            for r in data.get("rfcs", []):
-                self.cb_rfc.addItem(r["rfc"], r["rfc_id"])
+            # Concepto y Delegación se cargan una sola vez desde el catálogo global
             self.cb_concepto.addItem("Todos los Conceptos", 0)
             for c in data.get("conceptos", []):
                 self.cb_concepto.addItem(c["nombre"], c["concepto_id"])
@@ -446,7 +470,6 @@ class MetricsDashboardDialog(QWidget):
         except Exception as e:
             print("Error loading catalogs in metrics dialog:", e)
         finally:
-            self.cb_rfc.blockSignals(False)
             self.cb_concepto.blockSignals(False)
             self.cb_deleg.blockSignals(False)
 
@@ -463,7 +486,46 @@ class MetricsDashboardDialog(QWidget):
             self.todas_las_ordenes = []
 
         self._update_orden_filter_label()
+        # Poblar Empresa filtrado por las órdenes seleccionadas inicialmente
+        self._refresh_rfc_combo()
         self.refresh_metrics()
+
+    def _refresh_rfc_combo(self):
+        """Repuebla cb_rfc con solo las empresas que tienen derechos en las órdenes activas.
+
+        Preserva la selección actual si el RFC todavía está disponible, de lo contrario
+        regresa a 'Todas las Empresas' para no filtrar con un valor inválido.
+        """
+        # Guardar RFC seleccionado actualmente
+        prev_rfc_id = self.cb_rfc.currentData()
+
+        self.cb_rfc.blockSignals(True)
+        try:
+            self.cb_rfc.clear()
+            self.cb_rfc.addItem("Todas las Empresas", 0)
+            try:
+                rfcs = self.service.get_rfcs_by_orden_ids(self.selected_orden_ids)
+                for r in rfcs:
+                    alias = r.get("alias") or ""
+                    rfc   = r.get("rfc", "")
+                    # Mismo formato que módulo "Capturar Nueva Orden"
+                    label = f"{alias.strip()} | {rfc}" if alias.strip() else rfc
+                    self.cb_rfc.addItem(label, r["rfc_id"])
+            except Exception as e:
+                print("Error refreshing RFC combo:", e)
+
+            # Restaurar selección previa si aún existe
+            if prev_rfc_id and prev_rfc_id != 0:
+                idx = self.cb_rfc.findData(prev_rfc_id)
+                if idx >= 0:
+                    self.cb_rfc.setCurrentIndex(idx)
+                else:
+                    # RFC previo ya no está disponible → resetear a "Todas"
+                    self.cb_rfc.setCurrentIndex(0)
+            else:
+                self.cb_rfc.setCurrentIndex(0)
+        finally:
+            self.cb_rfc.blockSignals(False)
 
     def _update_orden_filter_label(self):
         if not self.todas_las_ordenes:
@@ -515,6 +577,7 @@ class MetricsDashboardDialog(QWidget):
                 act.blockSignals(False)
 
             self._update_orden_filter_label()
+            self._refresh_rfc_combo()
             self.refresh_metrics()
 
         action_all.triggered.connect(toggle_all)
@@ -538,6 +601,7 @@ class MetricsDashboardDialog(QWidget):
                             self.selected_orden_ids.remove(target_oid)
                     update_all_action_state()
                     self._update_orden_filter_label()
+                    self._refresh_rfc_combo()
                     self.refresh_metrics()
                 return handler
 
@@ -673,7 +737,7 @@ class MetricsDashboardDialog(QWidget):
     # Reset
     # =========================================================================
     def _reset_filters(self):
-        for cb in (self.cb_rfc, self.cb_concepto, self.cb_deleg):
+        for cb in (self.cb_concepto, self.cb_deleg):
             cb.blockSignals(True)
             cb.setCurrentIndex(0)
             cb.blockSignals(False)
@@ -681,6 +745,8 @@ class MetricsDashboardDialog(QWidget):
             [self.todas_las_ordenes[0]["orden_id"]] if self.todas_las_ordenes else []
         )
         self._update_orden_filter_label()
+        # Repoblar Empresa con las compañías de la orden inicial
+        self._refresh_rfc_combo()
         self.refresh_metrics()
 
     # =========================================================================

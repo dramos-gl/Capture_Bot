@@ -165,30 +165,8 @@ class ReferenciasView(QWidget):
         self.btn_estado.setToolTip("Cambiar estado de los derechos seleccionados")
         self.btn_estado.clicked.connect(self._on_cambiar_estado)
         
-        self.btn_detalle = CustomButton(
-            "Ver Detalle",
-            is_secondary=True,
-            min_width=CustomButton.DEFAULT_MIN_WIDTH,
-            parent=self
-        )
-        self.btn_detalle.setIcon(Icons.buscar(Colors.TEXT_LIGHT_PRIMARY))
-        self.btn_detalle.setToolTip("Ver información detallada del derecho seleccionado")
-        self.btn_detalle.clicked.connect(self._on_ver_detalle)
-        
-        self.btn_pdf = CustomButton(
-            "Ver PDF",
-            is_secondary=True,
-            min_width=CustomButton.DEFAULT_MIN_WIDTH,
-            parent=self
-        )
-        self.btn_pdf.setIcon(Icons.pdf())
-        self.btn_pdf.setToolTip("Ver comprobante PDF del derecho seleccionado")
-        self.btn_pdf.clicked.connect(self._on_ver_pdf)
-        
         actions_layout.addWidget(self.btn_marcar_visibles)
         actions_layout.addWidget(self.btn_estado)
-        actions_layout.addWidget(self.btn_detalle)
-        actions_layout.addWidget(self.btn_pdf)
         
         self.card.layout.addLayout(actions_layout)
         self.layout.addWidget(self.card)
@@ -440,30 +418,7 @@ class ReferenciasView(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error al cambiar estado: {str(e)}")
 
-    def _on_ver_detalle(self):
-        if not (self._check_permission("DERECHOS", "LEER") or self._check_permission("DASHBOARD", "LEER")):
-            QMessageBox.warning(
-                self,
-                "Acceso Denegado",
-                "No tiene permisos suficientes para ver el detalle del derecho (DERECHOS:LEER)."
-            )
-            return
-        ref_ids = self._get_selected_referencia_ids()
-        if not ref_ids: return
-        QMessageBox.information(self, "Detalle", f"Detalles del derecho ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")
-        
-    def _on_ver_pdf(self):
-        if not (self._check_permission("DERECHOS", "LEER") or self._check_permission("DASHBOARD", "LEER")):
-            QMessageBox.warning(
-                self,
-                "Acceso Denegado",
-                "No tiene permisos suficientes para ver el documento PDF del derecho (DERECHOS:LEER)."
-            )
-            return
-        ref_ids = self._get_selected_referencia_ids()
-        if not ref_ids: return
-        QMessageBox.information(self, "PDF", f"Abriendo visor PDF para el derecho ID: {ref_ids[0]}\n(Funcionalidad en desarrollo)")
-        
+
     def _on_manual_refresh(self):
         """Fuerza actualización fresca de órdenes y derechos."""
         self.refresh_data(force_reload_orders=True)

@@ -47,6 +47,33 @@ def get_catalogos(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener catálogos: {str(e)}")
 
+@router.get("/rfcs-detalle")
+def get_rfcs_detalle(db: Session = Depends(get_db)):
+    """Retorna los RFCs activos con información fiscal completa (domicilio, etc)."""
+    repo = CatalogoRepository(db)
+    try:
+        rfcs = repo.get_rfcs_activos()
+        return [
+            {
+                "rfc_id": r.rfc_id,
+                "rfc": r.rfc,
+                "razon_social": r.razon_social,
+                "alias": r.alias,
+                "calle": r.calle,
+                "no_exterior": r.no_exterior,
+                "no_interior": r.no_interior,
+                "colonia": r.colonia,
+                "codigo_postal": r.codigo_postal,
+                "localidad": r.localidad,
+                "municipio": r.municipio,
+                "estado": r.estado,
+                "activo": r.activo
+            }
+            for r in rfcs
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener detalle de RFCs: {str(e)}")
+
 # Endpoints de Órdenes
 @router.get("/ordenes")
 def list_ordenes(db: Session = Depends(get_db)):

@@ -486,22 +486,6 @@ class APIServerWindow(QMainWindow):
         
         buttons_layout.addSpacing(10)
         
-        # Grupo Servidor Local (Uvicorn)
-        grp_local_lbl = CustomLabel("Modo Local (Uvicorn):", variant="caption")
-        grp_local_lbl.setStyleSheet("color: #64748B; font-weight: bold;")
-        buttons_layout.addWidget(grp_local_lbl)
-        
-        self.btn_iniciar_local = CustomButton("Iniciar Local", is_secondary=True)
-        self.btn_iniciar_local.clicked.connect(self._start_local_server)
-        buttons_layout.addWidget(self.btn_iniciar_local)
-        
-        self.btn_detener_local = CustomButton("Detener Local", is_secondary=True)
-        self.btn_detener_local.setObjectName("dangerBtn")
-        self.btn_detener_local.clicked.connect(self._stop_local_server)
-        buttons_layout.addWidget(self.btn_detener_local)
-        
-        buttons_layout.addSpacing(10)
-        
         btn_leer_archivo = CustomButton("Cargar Log...", is_secondary=True)
         btn_leer_archivo.clicked.connect(self._read_external_log_file)
         buttons_layout.addWidget(btn_leer_archivo)
@@ -780,20 +764,16 @@ class APIServerWindow(QMainWindow):
             except Exception as e:
                 self._write_log(f"Error al leer archivo de log: {e}", level="ERROR")
 
-    def _is_local_server_running(self):
-        return self.local_process is not None and self.local_process.state() != QProcess.NotRunning
-
     def _run_health_check(self):
-        """Ejecuta diagnóstico asíncrono triple (Servicio Windows/Local + FastAPI HTTP + PostgreSQL)."""
+        """Ejecuta diagnóstico asíncrono (Servicio Windows SAR_API + FastAPI HTTP + PostgreSQL)."""
         for w in list(self.active_workers):
             if isinstance(w, SystemHealthCheckWorker) and w.isRunning():
                 return
                 
-        is_local = self._is_local_server_running()
         worker = SystemHealthCheckWorker(
             db_connector=self.db_connector,
             api_url=self.api_client.api_url,
-            is_local_running=is_local,
+            is_local_running=False,
             service_name="SAR_API"
         )
         worker.finished.connect(self._on_health_check_retrieved)
@@ -807,14 +787,11 @@ class APIServerWindow(QMainWindow):
         if svc == "RUNNING":
             self.lbl_service_status.setText("ACTIVO (RUNNING - Servicio Windows)")
             self.lbl_service_status.setStyleSheet("color: #16A34A; font-weight: bold;")
-        elif svc == "LOCAL_RUNNING":
-            self.lbl_service_status.setText("ACTIVO (PROCESO LOCAL UVICORN)")
-            self.lbl_service_status.setStyleSheet("color: #2563EB; font-weight: bold;")
         elif svc == "STOPPED":
             self.lbl_service_status.setText("DETENIDO (STOPPED)")
             self.lbl_service_status.setStyleSheet("color: #EF4444; font-weight: bold;")
         elif svc == "NOT_INSTALLED":
-            self.lbl_service_status.setText("NO INSTALADO EN WINDOWS (Modo Local Disponible)")
+            self.lbl_service_status.setText("NO INSTALADO EN WINDOWS")
             self.lbl_service_status.setStyleSheet("color: #D97706; font-weight: bold;")
         else:
             self.lbl_service_status.setText(f"DESCONOCIDO ({data.get('service_detail', '')[:35]})")
@@ -843,73 +820,25 @@ class APIServerWindow(QMainWindow):
             self.lbl_db_status.setText(f"ERROR: {data.get('db_detail', 'Fallo de conexión')}")
             self.lbl_db_status.setStyleSheet("color: #EF4444; font-weight: bold;")
 
-        self._update_action_buttons()
+        self._update_action_buttons(svc)
 
-    def _update_action_buttons(self):
-        """Habilita o deshabilita botones según el estado actual."""
-        is_local = self._is_local_server_running()
-        if hasattr(self, 'btn_iniciar_local'):
-            self.btn_iniciar_local.setEnabled(not is_local)
-        if hasattr(self, 'btn_detener_local'):
-            self.btn_detener_local.setEnabled(is_local)
-
-    def _start_local_server(self):
-        if self._is_local_server_running():
-            self._write_log("El servidor local ya se encuentra en ejecución.", level="WARN")
-            return
-
-        self._write_log("Iniciando Servidor API localmente con Uvicorn...", level="INFO")
-        self.local_process = QProcess(self)
-        self.local_process.readyReadStandardOutput.connect(self._on_local_stdout)
-        self.local_process.readyReadStandardError.connect(self._on_local_stderr)
-        self.local_process.finished.connect(self._on_local_finished)
-
-        python_exe = sys.executable
-        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-        self.local_process.setWorkingDirectory(root_dir)
-
-        args = ["-m", "uvicorn", "sar.main_api:app", "--host", "0.0.0.0", "--port", "8000"]
-        self.local_process.start(python_exe, args)
-        
-        self._write_log(f"Comando lanzado: {python_exe} {' '.join(args)}", level="INFO")
-        self._update_action_buttons()
-        QTimer.singleShot(1200, self._run_health_check)
-
-    def _stop_local_server(self):
-        if not self._is_local_server_running():
-            self._write_log("No hay ningún servidor local en ejecución.", level="WARN")
-            return
-
-        self._write_log("Deteniendo Servidor API local...", level="WARN")
-        self.local_process.terminate()
-        if not self.local_process.waitForFinished(3000):
-            self.local_process.kill()
-        self._write_log("Servidor API local finalizado.", level="SUCCESS")
-        self._update_action_buttons()
-        self._run_health_check()
-
-    def _on_local_stdout(self):
-        if not self.local_process:
-            return
-        data = self.local_process.readAllStandardOutput().data().decode("utf-8", errors="replace")
-        for line in data.splitlines():
-            line_str = line.strip()
-            if line_str:
-                self._write_log(line_str)
-
-    def _on_local_stderr(self):
-        if not self.local_process:
-            return
-        data = self.local_process.readAllStandardError().data().decode("utf-8", errors="replace")
-        for line in data.splitlines():
-            line_str = line.strip()
-            if line_str:
-                self._write_log(line_str)
-
-    def _on_local_finished(self, exit_code, exit_status):
-        self._write_log(f"Proceso de servidor local finalizó (Código: {exit_code}).", level="INFO")
-        self._update_action_buttons()
-        self._run_health_check()
+    def _update_action_buttons(self, service_status=None):
+        """Habilita o deshabilita botones según el estado actual del Servicio Windows."""
+        if service_status == "RUNNING":
+            if hasattr(self, 'btn_iniciar'):
+                self.btn_iniciar.setEnabled(False)
+            if hasattr(self, 'btn_detener'):
+                self.btn_detener.setEnabled(True)
+        elif service_status == "STOPPED":
+            if hasattr(self, 'btn_iniciar'):
+                self.btn_iniciar.setEnabled(True)
+            if hasattr(self, 'btn_detener'):
+                self.btn_detener.setEnabled(False)
+        elif service_status == "NOT_INSTALLED":
+            if hasattr(self, 'btn_iniciar'):
+                self.btn_iniciar.setEnabled(False)
+            if hasattr(self, 'btn_detener'):
+                self.btn_detener.setEnabled(False)
 
     def _start_service(self):
         self._write_log("Enviando comando para Iniciar Servicio Windows 'SAR_API'...")

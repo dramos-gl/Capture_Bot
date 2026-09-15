@@ -188,7 +188,7 @@ class ThemeManager:
             subcontrol-position: top left;
             left: 8px;
             padding: 0 4px;
-            background-color: transparent;
+            background-color: {surf};
         }}
         QGroupBox#labeledGroup QComboBox {{
             border: none;
@@ -866,6 +866,28 @@ class ThemeManager:
             background-color: {"#EFF6FF" if not is_dark else "#1E293B"};
             color: {"#2563EB" if not is_dark else "#60A5FA"};
             font-weight: bold;
+        }}
+
+        /* Table CheckBox Indicators */
+        QTableWidget::indicator, QTableView::indicator {{
+            width: 16px;
+            height: 16px;
+            border: 1.5px solid {"#94A3B8" if not is_dark else "#475569"};
+            border-radius: 4px;
+            background-color: {surf};
+        }}
+        QTableWidget::indicator:hover, QTableView::indicator:hover {{
+            border-color: {Colors.ACCENT};
+            background-color: {"#F8FAFC" if not is_dark else "#334155"};
+        }}
+        QTableWidget::indicator:checked, QTableView::indicator:checked {{
+            background-color: {Colors.ACCENT};
+            border-color: {Colors.ACCENT};
+            image: url({check_path});
+        }}
+        QTableWidget::indicator:disabled, QTableView::indicator:disabled {{
+            border-color: {"#CBD5E1" if not is_dark else "#334155"};
+            background-color: {"#F1F5F9" if not is_dark else "#0F172A"};
         }}
 
         /* Table Corner Button (Top-Left corner) */

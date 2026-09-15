@@ -41,6 +41,11 @@ class RegistrarPdfRequest(BaseModel):
     hash_sha256: str
     tamano_bytes: int
 
+class ReferenciasEstadoMasivoRequest(BaseModel):
+    referencia_ids: List[int]
+    estado: str
+    rechazar_restantes: bool = False
+
 class CancunResolverRfcRequest(BaseModel):
     rfc_pdf: Optional[str] = None
     nombre_contribuyente: Optional[str] = None
@@ -154,6 +159,21 @@ def get_referencias_paginated(
         return {"records": records, "total_count": total_count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener referencias: {str(e)}")
+
+@router.get("/referencias/por-estados")
+def get_referencias_por_estados(
+    states: str = Query(..., description="Lista de códigos de estado separados por comas"),
+    orden_ids: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Retorna las referencias correspondientes a los estados indicados (ej. ERROR,FALLIDO o ERROR_VALIDACION)."""
+    repo = ProduccionRepository(db)
+    try:
+        parsed_states = [s.strip() for s in states.split(",") if s.strip()]
+        parsed_orden_ids = [int(x.strip()) for x in orden_ids.split(",") if x.strip().isdigit()] if orden_ids else None
+        return repo.get_referencias_por_estados(parsed_states, parsed_orden_ids)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener referencias por estados: {str(e)}")
 
 @router.get("/referencias/metrics")
 def get_metrics_report(
@@ -285,7 +305,54 @@ def get_metrics_summary(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener resumen de métricas: {str(e)}")
 
+
+@router.get("/referencias/rfcs-by-orden")
+def get_rfcs_by_orden(
+    orden_ids: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Retorna los RFCs distintos (empresas) que tienen derechos en las órdenes indicadas.
+
+    Parámetros:
+    - orden_ids: lista de IDs de orden separados por comas (ej. '1,2,3').
+      Si se omite, devuelve todos los RFCs con al menos una referencia.
+      Si se envía vacío o sin ningún ID válido, devuelve lista vacía.
+    """
+    try:
+        conditions = ["v.rfc_id IS NOT NULL"]
+        params = {}
+
+        if orden_ids is not None:
+            try:
+                parsed_ids = tuple(int(x) for x in orden_ids.split(",") if x.strip())
+            except ValueError:
+                raise HTTPException(status_code=400, detail="El parámetro orden_ids debe ser una lista de enteros separados por comas.")
+            if not parsed_ids:
+                return []
+            conditions.append("v.orden_id IN :orden_ids")
+            params["orden_ids"] = parsed_ids
+
+        where_clause = " AND ".join(conditions)
+        rows = db.execute(text(f"""
+            SELECT DISTINCT v.rfc_id, v.rfc_nombre, v.rfc_razon_social, rc.alias
+            FROM sar_produccion.vw_metricas_referencias v
+            JOIN sar_catalogo.rfc rc ON rc.rfc_id = v.rfc_id
+            WHERE {where_clause}
+            ORDER BY v.rfc_nombre
+        """), params).fetchall()
+
+        return [
+            {"rfc_id": r[0], "rfc": r[1], "razon_social": r[2], "alias": r[3]}
+            for r in rows
+        ]
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener RFCs por orden: {str(e)}")
+
+
 @router.post("/referencias")
+
 def registrar_referencia(request: RegistrarReferenciaRequest, db: Session = Depends(get_db)):
     """Registra una referencia generada por el Bot."""
     from datetime import datetime
@@ -335,6 +402,51 @@ def registrar_pdf_metadata(referencia_id: int, request: RegistrarPdfRequest, db:
         return {"archivo_id": pdf_meta.archivo_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al registrar metadatos PDF: {str(e)}")
+
+@router.get("/referencias/pending-stats")
+def get_pending_authorization_stats(referencia_ids: str = Query(""), db: Session = Depends(get_db)):
+    """Retorna las solicitudes asociadas y el total de referencias pendientes de autorización."""
+    if not referencia_ids:
+        return {"sol_ids": [], "total_pendientes": 0}
+    try:
+        ref_id_list = [int(x.strip()) for x in referencia_ids.split(",") if x.strip().isdigit()]
+    except Exception:
+        ref_id_list = []
+
+    if not ref_id_list:
+        return {"sol_ids": [], "total_pendientes": 0}
+
+    stmt_sols = text("""
+        SELECT DISTINCT solicitud_id FROM sar_produccion.referencia
+        WHERE referencia_id IN :ref_ids
+    """)
+    sol_rows = db.execute(stmt_sols, {"ref_ids": tuple(ref_id_list)}).fetchall()
+    sol_ids = [r[0] for r in sol_rows if r[0]]
+
+    if not sol_ids:
+        return {"sol_ids": [], "total_pendientes": 0}
+
+    stmt_pending = text("""
+        SELECT COUNT(*) FROM sar_produccion.referencia r
+        JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+        WHERE r.solicitud_id IN :sol_ids AND es.codigo = 'PENDIENTE_AUTORIZACION'
+    """)
+    total_pendientes = db.execute(stmt_pending, {"sol_ids": tuple(sol_ids)}).scalar() or 0
+    return {"sol_ids": sol_ids, "total_pendientes": total_pendientes}
+
+@router.post("/referencias/cambiar-estado-masivo")
+def cambiar_estado_masivo_referencias(request: ReferenciasEstadoMasivoRequest, db: Session = Depends(get_db)):
+    """Actualiza el estado de un conjunto de referencias de forma masiva."""
+    if not request.referencia_ids:
+        return {"status": "ok", "updated": 0}
+    try:
+        repo = ProduccionRepository(db)
+        repo.update_referencias_estado_masivo(request.referencia_ids, request.estado, request.rechazar_restantes)
+        db.commit()
+        return {"status": "ok", "updated": len(request.referencia_ids)}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al cambiar estado masivo de referencias: {str(e)}")
 
 @router.get("/solicitudes/references-metadata")
 def get_references_metadata(solicitud_ids: str, db: Session = Depends(get_db)):
@@ -980,6 +1092,8 @@ def get_disponibles_count(
     Used for real-time UI feedback in the Apartar Referencias grid.
     """
     from sar.src.storage.repositories import InventarioRepository
+    if orden_ids is not None and not isinstance(orden_ids, (list, tuple)):
+        orden_ids = None
     try:
         count = InventarioRepository(db).count_referencias_disponibles(rfc_id, concepto_id, delegacion_id, orden_ids=orden_ids)
         return {"count": count}
@@ -1036,6 +1150,14 @@ def get_rfcs_con_stock_facturadas(db: Session = Depends(get_db)):
     from sar.src.storage.repositories import InventarioRepository
     try:
         return InventarioRepository(db).get_rfcs_con_stock_facturadas()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/rfcs-con-stock-inventario")
+def get_rfcs_con_stock_inventario(db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        return InventarioRepository(db).get_rfcs_con_stock_inventario()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1126,20 +1248,55 @@ def api_get_facturas_by_referencia(
 
 @router.get("/inventario/referencias-facturadas")
 def get_referencias_facturadas(
-    limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None, filter_assigned: str = "Todos",
+    limit: Optional[int] = 200, offset: int = 0, search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None, filter_assigned: str = "Todos",
     start_date: Optional[str] = None, end_date: Optional[str] = None,
+    orden_ids: Optional[List[int]] = Query(None),
+    delegacion_nombre: Optional[str] = None,
+    empresa_nombre: Optional[str] = None,
+    concepto_nombre: Optional[str] = None,
+    desarrollo_nombre: Optional[str] = None,
+    destino_nombre: Optional[str] = None,
+    asignado_a: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    from sar.src.storage.repositories import InventarioRepository
+    if orden_ids is not None and not isinstance(orden_ids, (list, tuple)):
+        orden_ids = None
+    repo = InventarioRepository(db)
+    records, total = repo.get_referencias_facturadas_paginated(
+        limit=limit, offset=offset, search_text=search_text, concepto_id=concepto_id, rfc_id=rfc_id, filter_assigned=filter_assigned,
+        start_date=start_date, end_date=end_date, orden_ids=orden_ids, delegacion_nombre=delegacion_nombre,
+        empresa_nombre=empresa_nombre, concepto_nombre=concepto_nombre, desarrollo_nombre=desarrollo_nombre,
+        destino_nombre=destino_nombre, asignado_a=asignado_a
+    )
+    return {"records": records, "total_count": total}
+
+@router.get("/inventario/dimensiones-con-stock")
+def get_dimensiones_con_stock_facturadas(
+    filter_assigned: str = "Disponible",
     orden_ids: Optional[List[int]] = Query(None),
     db: Session = Depends(get_db)
 ):
     from sar.src.storage.repositories import InventarioRepository
+    if orden_ids is not None and not isinstance(orden_ids, (list, tuple)):
+        orden_ids = None
     repo = InventarioRepository(db)
-    records, total = repo.get_referencias_facturadas_paginated(
-        limit=limit, offset=offset, search_text=search_text, concepto_id=concepto_id, rfc_id=rfc_id, filter_assigned=filter_assigned,
-        start_date=start_date, end_date=end_date, orden_ids=orden_ids
-    )
-    return {"records": records, "total_count": total}
+    return repo.get_dimensiones_con_stock_facturadas(filter_assigned=filter_assigned, orden_ids=orden_ids)
+
+@router.get("/inventario/delegaciones-con-stock")
+def get_delegaciones_con_stock_facturadas(
+    filter_assigned: str = "Disponible",
+    orden_ids: Optional[List[int]] = Query(None),
+    db: Session = Depends(get_db)
+):
+    from sar.src.storage.repositories import InventarioRepository
+    if orden_ids is not None and not isinstance(orden_ids, (list, tuple)):
+        orden_ids = None
+    repo = InventarioRepository(db)
+    return repo.get_delegaciones_con_stock_facturadas(filter_assigned=filter_assigned, orden_ids=orden_ids)
 
 @router.get("/inventario/referencias-facturadas-summary")
+@router.get("/inventario/summary")
 def get_referencias_facturadas_summary(
     search_text: str = "", concepto_id: Optional[int] = None, rfc_id: Optional[int] = None,
     start_date: Optional[str] = None, end_date: Optional[str] = None,
@@ -1147,6 +1304,8 @@ def get_referencias_facturadas_summary(
     db: Session = Depends(get_db)
 ):
     from sar.src.storage.repositories import InventarioRepository
+    if orden_ids is not None and not isinstance(orden_ids, (list, tuple)):
+        orden_ids = None
     repo = InventarioRepository(db)
     return repo.get_inventario_summary(
         search_text=search_text, concepto_id=concepto_id, rfc_id=rfc_id,
@@ -1302,6 +1461,8 @@ def get_referencias_disponibles_filtro(
     db: Session = Depends(get_db)
 ):
     from sar.src.storage.repositories import InventarioRepository
+    if orden_ids is not None and not isinstance(orden_ids, (list, tuple)):
+        orden_ids = None
     try:
         repo = InventarioRepository(db)
         return repo.get_referencias_disponibles_filtro(rfc_id, concepto_id, delegacion_id, cantidad, orden_ids=orden_ids)
@@ -1320,6 +1481,8 @@ def get_lotes_asignacion_filtered(
     db: Session = Depends(get_db)
 ):
     from sar.src.storage.repositories import InventarioRepository
+    if orden_ids is not None and not isinstance(orden_ids, (list, tuple)):
+        orden_ids = None
     try:
         repo = InventarioRepository(db)
         lotes, total = repo.get_lotes_asignacion_filtered(

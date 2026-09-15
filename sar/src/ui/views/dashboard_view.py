@@ -72,6 +72,32 @@ class DashboardReferencesLoadWorker(QThread):
                 traceback.print_exc()
                 self.error_occurred.emit(str(e))
 
+class ErrorDetailsLoadWorker(QThread):
+    """Background worker thread to fetch error or validation details without blocking UI."""
+    result_ready = Signal(list)
+    error_occurred = Signal(str)
+
+    def __init__(self, referencias_service, states: list, orden_ids: list = None):
+        super().__init__()
+        self.referencias_service = referencias_service
+        self.states = states
+        self.orden_ids = orden_ids
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        try:
+            if self._is_cancelled:
+                return
+            data = self.referencias_service.get_referencias_por_estados(self.states, self.orden_ids)
+            if not self._is_cancelled:
+                self.result_ready.emit(data)
+        except Exception as e:
+            if not self._is_cancelled:
+                self.error_occurred.emit(str(e))
+
 class DashboardView(QWidget):
     """Refactored Dashboard View reflecting the high-fidelity UI design mockup."""
     
@@ -236,12 +262,13 @@ class DashboardView(QWidget):
         self.table_header_layout.addWidget(self.lbl_table_title)
         self.table_header_layout.addStretch()
         
-        # Search Box
+        # Search Box (Replicated sizing & elasticity from Inventory module)
         self.search_input = QLineEdit(self)
-        self.search_input.setPlaceholderText("Buscar derecho, estado...")
-        self.search_input.setMinimumWidth(140)
-        self.search_input.setMaximumWidth(240)
-        self.search_input.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.search_input.setPlaceholderText("Buscar por referencia, consecutivo, estado...")
+        self.search_input.setMinimumWidth(320)
+        self.search_input.setMaximumWidth(520)
+        self.search_input.setFixedHeight(36)
+        self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input.setClearButtonEnabled(True)
         self.search_input.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
         self.search_input.returnPressed.connect(self._on_search_trigger)
@@ -371,10 +398,10 @@ class DashboardView(QWidget):
             )
             return
         dialog = ErrorDetailDialog(
-            db_connector=self.db_connector,
+            referencias_service=self.referencias_service,
             title="Detalle de Derechos con Error",
             states=["ERROR", "FALLIDO"],
-            orden_ids=list(self.selected_orden_ids),
+            orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None,
             parent=self
         )
         dialog.exec()
@@ -389,10 +416,10 @@ class DashboardView(QWidget):
             )
             return
         dialog = ErrorDetailDialog(
-            db_connector=self.db_connector,
+            referencias_service=self.referencias_service,
             title="Detalle de Derechos Invalidados",
             states=["ERROR_VALIDACION"],
-            orden_ids=list(self.selected_orden_ids),
+            orden_ids=list(self.selected_orden_ids) if self.selected_orden_ids else None,
             parent=self
         )
         dialog.exec()
@@ -788,17 +815,19 @@ class DashboardView(QWidget):
 
 
 class ErrorDetailDialog(QDialog):
-    def __init__(self, db_connector, title: str, states: list, orden_ids: list = None, parent=None):
+    def __init__(self, referencias_service=None, db_connector=None, title: str = "", states: list = None, orden_ids: list = None, parent=None):
         super().__init__(parent)
-        self.db_connector = db_connector
+        self.referencias_service = referencias_service or getattr(parent, 'referencias_service', None) or ReferenciasService(db_connector)
         self.title_text = title
-        self.states = states
+        self.states = states or []
         self.orden_ids = orden_ids
         self.raw_data = []
+        self.active_worker = None
         self.setWindowTitle(title)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
         self.resize(1000, 600)
         self._setup_ui()
-        self._load_data()
+        self._start_loading()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -809,12 +838,15 @@ class ErrorDetailDialog(QDialog):
         lbl_title = CustomLabel(self.title_text, variant="subheader")
         layout.addWidget(lbl_title)
 
-        # Header Row: Search and Export
+        # Header Row: Search, Status and Export
         header_layout = QHBoxLayout()
         self.txt_search = QLineEdit(self)
         self.txt_search.setPlaceholderText("🔍 Buscar referencia, RFC o empresa...")
         self.txt_search.textChanged.connect(self._on_search_changed)
         header_layout.addWidget(self.txt_search)
+
+        self.lbl_status = CustomLabel("Cargando derechos...", variant="caption")
+        header_layout.addWidget(self.lbl_status)
 
         btn_export = CustomButton("Exportar Excel", is_secondary=True)
         btn_export.setIcon(Icons.file_excel("#16A34A"))
@@ -828,67 +860,63 @@ class ErrorDetailDialog(QDialog):
         self.table = StyledDataTable(headers, parent=self)
         layout.addWidget(self.table)
 
-    def _load_data(self):
-        from sqlalchemy import select
-        from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, Solicitud, Concepto, Rfc, Delegacion
+    def _start_loading(self):
+        self.lbl_status.setText("Cargando derechos en segundo plano...")
+        self.active_worker = ErrorDetailsLoadWorker(self.referencias_service, self.states, self.orden_ids)
+        self.active_worker.result_ready.connect(self._on_data_loaded)
+        self.active_worker.error_occurred.connect(self._on_data_error)
+        self.active_worker.start()
 
-        self.raw_data = []
-        try:
-            with self.db_connector.get_session() as session:
-                stmt = (
-                    select(
-                        Referencia.referencia_portal,
-                        Rfc.rfc,
-                        Rfc.razon_social,
-                        Concepto.nombre.label("concepto_nombre"),
-                        Delegacion.nombre.label("delegacion_nombre"),
-                        EstadoSistema.codigo.label("estado_codigo"),
-                        Referencia.importe,
-                        Referencia.fecha_generacion
-                    )
-                    .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
-                    .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
-                    .join(Rfc, GrupoReferencia.rfc_id == Rfc.rfc_id)
-                    .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
-                    .join(Solicitud, Referencia.solicitud_id == Solicitud.solicitud_id)
-                    .join(Delegacion, Solicitud.delegacion_id == Delegacion.delegacion_id)
-                    .where(EstadoSistema.codigo.in_(self.states))
-                )
-                if self.orden_ids:
-                    stmt = stmt.where(GrupoReferencia.orden_id.in_(self.orden_ids))
+    def _on_data_loaded(self, data):
+        self.raw_data = data
+        self._populate_table(self.raw_data)
+        count = len(self.raw_data)
+        self.lbl_status.setText(f"{count} derecho(s) encontrado(s)")
+        if self.active_worker:
+            self.active_worker.deleteLater()
+            self.active_worker = None
 
-                stmt = stmt.order_by(Referencia.fecha_generacion.desc())
-                results = session.execute(stmt).all()
+    def _on_data_error(self, err_msg):
+        self.lbl_status.setText(f"Error al cargar: {err_msg}")
+        if self.active_worker:
+            self.active_worker.deleteLater()
+            self.active_worker = None
 
-                for r in results:
-                    self.raw_data.append({
-                        "referencia_portal": r.referencia_portal,
-                        "rfc": r.rfc,
-                        "razon_social": r.razon_social,
-                        "concepto_nombre": r.concepto_nombre,
-                        "delegacion_nombre": r.delegacion_nombre,
-                        "estado_codigo": r.estado_codigo,
-                        "importe": r.importe,
-                        "fecha_generacion": r.fecha_generacion
-                    })
-            self._populate_table(self.raw_data)
-        except Exception as e:
-            print("Error loading details for ErrorDetailDialog:", e)
+    def closeEvent(self, event):
+        if self.active_worker and self.active_worker.isRunning():
+            self.active_worker.cancel()
+            self.active_worker.wait(500)
+        super().closeEvent(event)
 
     def _populate_table(self, data_list):
-        table_rows = []
-        for r in data_list:
-            table_rows.append([
-                r["referencia_portal"],
-                r["rfc"],
-                r["razon_social"],
-                r["concepto_nombre"],
-                r["delegacion_nombre"],
-                r["estado_codigo"],
-                f"${float(r['importe']):,.2f}" if r.get("importe") is not None else "$0.00",
-                r["fecha_generacion"].strftime("%Y-%m-%d %H:%M:%S") if r.get("fecha_generacion") else ""
-            ])
-        self.table.populate_rows(table_rows)
+        self.table.setUpdatesEnabled(False)
+        try:
+            table_rows = []
+            for r in data_list:
+                f_gen = r.get("fecha_generacion") or ""
+                if hasattr(f_gen, "strftime"):
+                    f_gen_str = f_gen.strftime("%d/%m/%Y %H:%M")
+                elif isinstance(f_gen, str) and len(f_gen) >= 10:
+                    f_gen_str = f_gen.split()[0]
+                else:
+                    f_gen_str = str(f_gen)
+
+                imp = r.get("importe", 0.0)
+                imp_str = f"${float(imp):,.2f}" if imp is not None else "$0.00"
+
+                table_rows.append([
+                    str(r.get("referencia_portal") or ""),
+                    str(r.get("rfc") or ""),
+                    str(r.get("razon_social") or ""),
+                    str(r.get("concepto_nombre") or ""),
+                    str(r.get("delegacion_nombre") or ""),
+                    str(r.get("estado_codigo") or ""),
+                    imp_str,
+                    f_gen_str
+                ])
+            self.table.populate_rows(table_rows)
+        finally:
+            self.table.setUpdatesEnabled(True)
 
     def _on_search_changed(self, text):
         query = text.strip().lower()
@@ -898,11 +926,11 @@ class ErrorDetailDialog(QDialog):
 
         filtered = []
         for r in self.raw_data:
-            if (query in r["referencia_portal"].lower() or 
-                query in r["rfc"].lower() or 
-                query in r["razon_social"].lower() or 
-                query in r["concepto_nombre"].lower() or 
-                query in r["delegacion_nombre"].lower()):
+            if (query in (r.get("referencia_portal") or "").lower() or 
+                query in (r.get("rfc") or "").lower() or 
+                query in (r.get("razon_social") or "").lower() or 
+                query in (r.get("concepto_nombre") or "").lower() or 
+                query in (r.get("delegacion_nombre") or "").lower()):
                 filtered.append(r)
         self._populate_table(filtered)
 
@@ -926,15 +954,18 @@ class ErrorDetailDialog(QDialog):
             ws.append(headers)
 
             for r in self.raw_data:
+                f_gen = r.get("fecha_generacion") or ""
+                f_gen_str = f_gen.strftime("%Y-%m-%d %H:%M:%S") if hasattr(f_gen, "strftime") else str(f_gen)
+                imp = r.get("importe", 0.0)
                 ws.append([
-                    r["referencia_portal"],
-                    r["rfc"],
-                    r["razon_social"],
-                    r["concepto_nombre"],
-                    r["delegacion_nombre"],
-                    r["estado_codigo"],
-                    float(r["importe"]) if r["importe"] is not None else 0.0,
-                    r["fecha_generacion"].strftime("%Y-%m-%d %H:%M:%S") if r["fecha_generacion"] else ""
+                    r.get("referencia_portal") or "",
+                    r.get("rfc") or "",
+                    r.get("razon_social") or "",
+                    r.get("concepto_nombre") or "",
+                    r.get("delegacion_nombre") or "",
+                    r.get("estado_codigo") or "",
+                    float(imp) if imp is not None else 0.0,
+                    f_gen_str
                 ])
 
             wb.save(file_path)

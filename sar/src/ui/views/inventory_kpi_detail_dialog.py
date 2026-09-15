@@ -6,7 +6,7 @@ from typing import Optional, List, Dict, Any
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QFrame,
-    QLabel, QLineEdit, QPushButton, QFileDialog
+    QLabel, QLineEdit, QPushButton, QFileDialog, QApplication, QStyle, QSizePolicy
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer
 from PySide6.QtGui import QColor, QAction
@@ -33,6 +33,10 @@ class KPIDetailLoadWorker(QThread):
         self, inventario_ui_service, filter_assigned: str,
         concepto_id: Optional[int], rfc_id: Optional[int],
         orden_ids: Optional[list], search_text: str = "",
+        delegacion_nombre: Optional[str] = None,
+        empresa_nombre: Optional[str] = None,
+        concepto_nombre: Optional[str] = None,
+        desarrollo_nombre: Optional[str] = None,
         start_date: Optional[str] = None, end_date: Optional[str] = None
     ):
         super().__init__()
@@ -42,6 +46,10 @@ class KPIDetailLoadWorker(QThread):
         self.rfc_id = rfc_id
         self.orden_ids = orden_ids
         self.search_text = search_text
+        self.delegacion_nombre = delegacion_nombre
+        self.empresa_nombre = empresa_nombre
+        self.concepto_nombre = concepto_nombre
+        self.desarrollo_nombre = desarrollo_nombre
         self.start_date = start_date
         self.end_date = end_date
         self._is_cancelled = False
@@ -53,7 +61,7 @@ class KPIDetailLoadWorker(QThread):
         try:
             if self._is_cancelled:
                 return
-            # Load all matching records up to 10,000 for drill-down view
+            # Load matching records up to 10,000 for drill-down view
             res = self.inventario_ui_service.get_referencias_facturadas_paginated(
                 limit=10000,
                 offset=0,
@@ -61,6 +69,10 @@ class KPIDetailLoadWorker(QThread):
                 concepto_id=self.concepto_id,
                 rfc_id=self.rfc_id,
                 filter_assigned=self.filter_assigned,
+                delegacion_nombre=self.delegacion_nombre,
+                empresa_nombre=self.empresa_nombre,
+                concepto_nombre=self.concepto_nombre,
+                desarrollo_nombre=self.desarrollo_nombre,
                 start_date=self.start_date,
                 end_date=self.end_date,
                 orden_ids=self.orden_ids
@@ -83,8 +95,10 @@ class KPIDetailLoadWorker(QThread):
 
 
 class KPIDetailExcelWorker(QThread):
-    """Background worker thread to build and save styled Excel workbook without freezing UI."""
-    finished_success = Signal(str)
+    """Background worker thread to build and save styled Excel workbook without freezing UI.
+    If inventario_ui_service and fetch_params are provided, retrieves 100% of matching records from DB/API.
+    """
+    finished_success = Signal(str, int)  # (save_path, total_rows_exported)
     error_occurred = Signal(str)
 
     def __init__(
@@ -92,20 +106,83 @@ class KPIDetailExcelWorker(QThread):
         title_text: str, rfc_nombre: str, concepto_nombre: str,
         desarrollo_nombre: str = "Todos los desarrollos",
         delegacion_nombre: str = "Todas las delegaciones",
-        destino_nombre: str = "Todos los destinos"
+        destino_nombre: str = "Todos los destinos",
+        asignado_a_nombre: Optional[str] = None,
+        inventario_ui_service = None,
+        fetch_params: dict = None
     ):
         super().__init__()
         self.save_path = save_path
-        self.filtered_records = filtered_records
+        self.filtered_records = filtered_records or []
         self.title_text = title_text
         self.rfc_nombre = rfc_nombre
         self.concepto_nombre = concepto_nombre
         self.desarrollo_nombre = desarrollo_nombre
         self.delegacion_nombre = delegacion_nombre
         self.destino_nombre = destino_nombre
+        self.asignado_a_nombre = asignado_a_nombre
+        self.inventario_ui_service = inventario_ui_service
+        self.fetch_params = fetch_params
 
     def run(self):
         try:
+            # If full dataset needs to be pulled from DB/API (exceeding initial UI buffer):
+            if self.inventario_ui_service and self.fetch_params:
+                p = self.fetch_params
+                res = self.inventario_ui_service.get_referencias_facturadas_paginated(
+                    limit=None,
+                    offset=0,
+                    search_text=p.get("search_text", ""),
+                    concepto_id=p.get("concepto_id"),
+                    rfc_id=p.get("rfc_id"),
+                    filter_assigned=p.get("filter_assigned", "Todos"),
+                    start_date=p.get("start_date"),
+                    end_date=p.get("end_date"),
+                    orden_ids=p.get("orden_ids"),
+                    delegacion_nombre=p.get("delegacion_nombre"),
+                    empresa_nombre=p.get("empresa_nombre"),
+                    concepto_nombre=p.get("concepto_nombre"),
+                    desarrollo_nombre=p.get("desarrollo_nombre"),
+                    destino_nombre=p.get("destino_nombre"),
+                    asignado_a=p.get("asignado_a")
+                )
+                raw_records = res.get("records", [])
+                
+                # Apply client-side text search if provided
+                client_search = p.get("client_search", "").strip().upper()
+                asig_filter = (p.get("asignado_a") or "").strip().upper()
+                is_asig_filtering = bool(asig_filter and not (asig_filter.startswith("TODO") or asig_filter.startswith("TODA")))
+                if client_search or is_asig_filtering:
+                    records_to_export = []
+                    for r in raw_records:
+                        if is_asig_filtering:
+                            if (r.get("asignado_a") or "").strip().upper() != asig_filter:
+                                continue
+                        if client_search:
+                            haystack = " ".join([
+                                str(r.get("referencia_portal", "")),
+                                str(r.get("folio_orden", "")),
+                                str(r.get("empresa", "")),
+                                str(r.get("concepto", "")),
+                                str(r.get("delegacion", "")),
+                                str(r.get("cliente", "")),
+                                str(r.get("credito_titular", "")),
+                                str(r.get("desarrollo", "")),
+                                str(r.get("folio_electronico", "")),
+                                str(r.get("no_oficial", "")),
+                                str(r.get("pa", "")),
+                                str(r.get("asignado_a", "")),
+                                str(r.get("solicitante_externo", "")),
+                                str(r.get("comentarios", "")),
+                                str(r.get("intento", ""))
+                            ]).upper()
+                            if client_search not in haystack:
+                                continue
+                        records_to_export.append(r)
+                    self.filtered_records = records_to_export
+                else:
+                    self.filtered_records = raw_records
+
             import openpyxl
             from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
             from openpyxl.utils import get_column_letter
@@ -141,12 +218,17 @@ class KPIDetailExcelWorker(QThread):
             ws["A1"] = f"SISTEMA DE ADMINISTRACIÓN DE REFERENCIAS (SAR) — {self.title_text.upper()}"
             ws["A1"].font = font_title
             
-            filter_summary = (
-                f"Generado: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-                f"Empresa: {self.rfc_nombre} | Concepto: {self.concepto_nombre} | "
-                f"Desarrollo: {self.desarrollo_nombre} | Delegación: {self.delegacion_nombre} | "
+            summary_parts = [
+                f"Generado: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"Empresa: {self.rfc_nombre}",
+                f"Concepto: {self.concepto_nombre}",
+                f"Desarrollo: {self.desarrollo_nombre}",
+                f"Delegación: {self.delegacion_nombre}",
                 f"Destino: {self.destino_nombre}"
-            )
+            ]
+            if self.asignado_a_nombre and not (self.asignado_a_nombre.strip().upper().startswith("TODO") or self.asignado_a_nombre.strip().upper().startswith("TODA")):
+                summary_parts.append(f"Asignado a: {self.asignado_a_nombre}")
+            filter_summary = " | ".join(summary_parts)
             ws["A2"] = filter_summary
             ws["A2"].font = font_sub
 
@@ -262,7 +344,7 @@ class KPIDetailExcelWorker(QThread):
                 ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
 
             wb.save(self.save_path)
-            self.finished_success.emit(self.save_path)
+            self.finished_success.emit(self.save_path, len(self.filtered_records))
         except Exception as e:
             self.error_occurred.emit(str(e))
 
@@ -296,6 +378,7 @@ class InventoryKPIDetailDialog(QDialog):
 
         self.all_records: List[Dict[str, Any]] = []
         self.filtered_records: List[Dict[str, Any]] = []
+        self.total_db_count: int = 0
         self.active_worker: Optional[KPIDetailLoadWorker] = None
 
         # Debounce timer para búsqueda en Detalle KPI (700 ms)
@@ -327,13 +410,31 @@ class InventoryKPIDetailDialog(QDialog):
             self.icon_name = "file_text"
 
         self.setWindowTitle(self.title_text)
-        self.resize(1380, 800)
-        self.setMinimumSize(1150, 650)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
+        self.setMinimumSize(860, 460)
+
+        # Dimensionado responsivo adaptado a la resolución de pantalla activa (evita desborde en 1366x768 o menores)
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            # En 1366x768: w = min(1300, 1366 - 36) = 1300px; h = min(740, 720 - 48) = 672px
+            w = min(1300, max(860, avail.width() - 36))
+            h = min(740, max(460, avail.height() - 48))
+            self.resize(w, h)
+            # Centrar automáticamente en el área visible de la pantalla activa
+            self.setGeometry(
+                avail.x() + (avail.width() - w) // 2,
+                avail.y() + (avail.height() - h) // 2,
+                w,
+                h
+            )
+        else:
+            self.resize(1200, 680)
 
         # Main Layout
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(10)
 
         # ── 1. Header Section ────────────────────────────────────────────────
         header_layout = QHBoxLayout()
@@ -382,8 +483,8 @@ class InventoryKPIDetailDialog(QDialog):
             }
         """)
         metric_layout = QHBoxLayout(self.metric_frame)
-        metric_layout.setContentsMargins(16, 8, 16, 8)
-        metric_layout.setSpacing(24)
+        metric_layout.setContentsMargins(14, 6, 14, 6)
+        metric_layout.setSpacing(20)
 
         self.lbl_metric_count = CustomLabel("Total Registros: 0", variant="body")
         self.lbl_metric_count.setStyleSheet("font-weight: bold; color: #1E293B;")
@@ -405,87 +506,134 @@ class InventoryKPIDetailDialog(QDialog):
 
         root.addWidget(self.metric_frame)
 
-        # ── 3. Advanced Multi-Criteria Filter Bar (Horizontal, Uniform 36px) ───
+        # ── 3. Advanced Multi-Criteria Filter Bar (Ergonomic 2-Row Responsive Layout) ───
+        # ── 3. Advanced Multi-Criteria Filter Bar (Parametric Categorical Selectors) ───
         filter_bar_frame = QFrame(self)
         filter_bar_frame.setObjectName("filterBarFrame")
-        filter_layout = QHBoxLayout(filter_bar_frame)
-        filter_layout.setContentsMargins(12, 8, 12, 8)
-        filter_layout.setSpacing(8)
+        filter_box_layout = QVBoxLayout(filter_bar_frame)
+        filter_box_layout.setContentsMargins(10, 8, 10, 8)
+        filter_box_layout.setSpacing(6)
 
-        # 1. Search Box
+        # ── Fila 1 de Filtros: Clasificación Principal ──
+        filters_row1 = QHBoxLayout()
+        filters_row1.setContentsMargins(0, 0, 0, 0)
+        filters_row1.setSpacing(8)
+
+        # 1. Combo Empresa
+        self.labeled_empresa = LabeledComboBox("Empresa", ["Todas las empresas"])
+        self.cb_empresa = self.labeled_empresa.combo
+        self.cb_empresa.currentTextChanged.connect(self._on_dimension_filter_changed)
+        filters_row1.addWidget(self.labeled_empresa, stretch=3)
+
+        # 2. Combo Concepto
+        self.labeled_concepto = LabeledComboBox("Concepto", ["Todos los conceptos"])
+        self.cb_concepto = self.labeled_concepto.combo
+        self.cb_concepto.currentTextChanged.connect(self._on_dimension_filter_changed)
+        filters_row1.addWidget(self.labeled_concepto, stretch=3)
+
+        # 3. Combo Desarrollo
+        self.labeled_desarrollo = LabeledComboBox("Desarrollo", ["Todos los desarrollos"])
+        self.cb_desarrollo = self.labeled_desarrollo.combo
+        self.cb_desarrollo.currentTextChanged.connect(self._on_dimension_filter_changed)
+        filters_row1.addWidget(self.labeled_desarrollo, stretch=3)
+
+        filter_box_layout.addLayout(filters_row1)
+
+        # ── Fila 2 de Filtros: Segmentación Territorial y Destino Asignado ──
+        filters_row2 = QHBoxLayout()
+        filters_row2.setContentsMargins(0, 0, 0, 0)
+        filters_row2.setSpacing(8)
+
+        # 4. Combo Delegación
+        self.labeled_delegacion = LabeledComboBox("Delegación", ["Todas las delegaciones"])
+        self.cb_delegacion = self.labeled_delegacion.combo
+        self.cb_delegacion.currentTextChanged.connect(self._on_dimension_filter_changed)
+        filters_row2.addWidget(self.labeled_delegacion, stretch=3)
+
+        # 5. Combo Destino Asignado
+        initial_destino_items = ["No aplica (Disponibles)"] if self.kpi_type == "disponibles" else ["Todos los destinos", "NOTARIA", "COLABORADOR", "SIN ASIGNAR"]
+        self.labeled_destino = LabeledComboBox("Destino Asignado", initial_destino_items)
+        self.cb_destino = self.labeled_destino.combo
+        if self.kpi_type == "disponibles":
+            self.cb_destino.setEnabled(False)
+            self.labeled_destino.setEnabled(False)
+        self.cb_destino.currentTextChanged.connect(self._on_destino_changed)
+        filters_row2.addWidget(self.labeled_destino, stretch=3)
+
+        # 6. Combo Dinámico Destinatario (Notaría / Colaborador) dependiente de Destino
+        self.labeled_asignado_a = LabeledComboBox("Destinatario", ["Todos"])
+        self.cb_asignado_a = self.labeled_asignado_a.combo
+        self.cb_asignado_a.currentTextChanged.connect(self._on_filter_changed)
+        self.labeled_asignado_a.setVisible(False)
+        filters_row2.addWidget(self.labeled_asignado_a, stretch=3)
+
+        filter_box_layout.addLayout(filters_row2)
+
+        root.addWidget(filter_bar_frame)
+
+        # ── 4. Table Header Layout (Title + Search + Actions - Identical to Inventory Module) ──
+        self.table_header_layout = QHBoxLayout()
+        self.table_header_layout.setContentsMargins(0, 4, 0, 4)
+        self.table_header_layout.setSpacing(10)
+
+        # Section Icon & Title
+        self.lbl_table_icon = QLabel(self)
+        self.lbl_table_icon.setPixmap(Icons.file_text(Colors.PRIMARY).pixmap(18, 18))
+        self.lbl_table_icon.setStyleSheet("background: transparent;")
+
+        self.lbl_table_title = CustomLabel("Registros del Inventario", variant="subheader")
+        self.lbl_table_title.setStyleSheet("font-weight: bold; font-size: 14px; color: #1E293B;")
+
+        self.table_header_layout.addWidget(self.lbl_table_icon)
+        self.table_header_layout.addWidget(self.lbl_table_title)
+        self.table_header_layout.addStretch()
+
+        # Search Box inside Table Header (Responsive & Elastic)
         self.search_input = QLineEdit(self)
         self.search_input.setObjectName("filterBarSearch")
-        self.search_input.setPlaceholderText("Buscar derecho, cliente, folio...")
-        self.search_input.setMinimumWidth(220)
-        self.search_input.setFixedHeight(36)
+        self.search_input.setPlaceholderText("Buscar por referencia, cliente, MZ, LT, EDIF, VIV...")
+        self.search_input.setMinimumWidth(280)
+        self.search_input.setMaximumWidth(480)
+        self.search_input.setFixedHeight(34)
+        self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input.setClearButtonEnabled(True)
         self.search_input.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
         self.search_input.textChanged.connect(self._on_search_text_changed)
         self.search_input.returnPressed.connect(self._on_search_trigger)
-        filter_layout.addWidget(self.search_input, stretch=1)
+        self.table_header_layout.addWidget(self.search_input)
 
-        # Botón Buscar
+        # Botón Buscar explícito
         self.btn_buscar_kpi = QPushButton(self)
         self.btn_buscar_kpi.setObjectName("secondaryBtn")
         self.btn_buscar_kpi.setIcon(Icons.buscar("#FFFFFF") if ThemeManager.is_dark_active() else Icons.buscar("#334155"))
-        self.btn_buscar_kpi.setFixedSize(36, 36)
+        self.btn_buscar_kpi.setFixedSize(34, 34)
         self.btn_buscar_kpi.setToolTip("Buscar (o presione Enter)")
         self.btn_buscar_kpi.clicked.connect(self._on_search_trigger)
-        filter_layout.addWidget(self.btn_buscar_kpi)
+        self.table_header_layout.addWidget(self.btn_buscar_kpi)
 
-        # 2. Combo Empresa
-        self.labeled_empresa = LabeledComboBox("Empresa", ["Todas las empresas"])
-        self.cb_empresa = self.labeled_empresa.combo
-        self.cb_empresa.currentTextChanged.connect(self._on_filter_changed)
-        filter_layout.addWidget(self.labeled_empresa)
+        # Botón Recargar datos (Refresh)
+        self.btn_refresh = QPushButton(self)
+        self.btn_refresh.setObjectName("filterBarActionBtn")
+        self.btn_refresh.setFixedSize(34, 34)
+        self.btn_refresh.setIcon(Icons.actualizar("#FFFFFF"))
+        self.btn_refresh.setIconSize(QSize(18, 18))
+        self.btn_refresh.setToolTip("Recargar datos desde BD")
+        self.btn_refresh.clicked.connect(self._load_data)
+        self.table_header_layout.addWidget(self.btn_refresh)
 
-        # 3. Combo Concepto
-        self.labeled_concepto = LabeledComboBox("Concepto", ["Todos los conceptos"])
-        self.cb_concepto = self.labeled_concepto.combo
-        self.cb_concepto.currentTextChanged.connect(self._on_filter_changed)
-        filter_layout.addWidget(self.labeled_concepto)
-
-        # 4. Combo Desarrollo
-        self.labeled_desarrollo = LabeledComboBox("Desarrollo", ["Todos los desarrollos"])
-        self.cb_desarrollo = self.labeled_desarrollo.combo
-        self.cb_desarrollo.currentTextChanged.connect(self._on_filter_changed)
-        filter_layout.addWidget(self.labeled_desarrollo)
-
-        # 5. Combo Delegación
-        self.labeled_delegacion = LabeledComboBox("Delegación", ["Todas las delegaciones"])
-        self.cb_delegacion = self.labeled_delegacion.combo
-        self.cb_delegacion.currentTextChanged.connect(self._on_filter_changed)
-        filter_layout.addWidget(self.labeled_delegacion)
-
-        # 6. Combo Destino Asignado
-        self.labeled_destino = LabeledComboBox("Destino Asignado", ["Todos los destinos", "NOTARIA", "COLABORADOR", "SIN ASIGNAR"])
-        self.cb_destino = self.labeled_destino.combo
-        self.cb_destino.currentTextChanged.connect(self._on_filter_changed)
-        filter_layout.addWidget(self.labeled_destino)
-
-        # 7. Botón Filtro Órdenes (Embudo)
+        # Botón Filtro Órdenes (Embudo) - Ubicado inmediatamente al lado del botón Exportar Excel
         self.btn_filter_orden = QPushButton(self)
         self.btn_filter_orden.setObjectName("secondaryBtn")
         self.btn_filter_orden.setIcon(Icons.filter_icon("#475569"))
-        self.btn_filter_orden.setFixedSize(36, 36)
-        self.btn_filter_orden.setToolTip("Filtrar por Órdenes")
+        self.btn_filter_orden.setFixedSize(34, 34)
+        self.btn_filter_orden.setToolTip("Filtrar por Órdenes de Generación")
         self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
-        filter_layout.addWidget(self.btn_filter_orden)
+        self.table_header_layout.addWidget(self.btn_filter_orden)
 
-        # 8. Refresh Button
-        self.btn_refresh = QPushButton(self)
-        self.btn_refresh.setObjectName("filterBarActionBtn")
-        self.btn_refresh.setFixedSize(36, 36)
-        self.btn_refresh.setIcon(Icons.actualizar("#FFFFFF"))
-        self.btn_refresh.setIconSize(QSize(20, 20))
-        self.btn_refresh.setToolTip("Recargar datos desde BD")
-        self.btn_refresh.clicked.connect(self._load_data)
-        filter_layout.addWidget(self.btn_refresh)
-
-        # 9. Excel Button
+        # Botón Exportar a Excel
         self.btn_excel = CustomButton("Exportar Excel", is_secondary=False)
         self.btn_excel.setIcon(Icons.file_excel("#FFFFFF"))
-        self.btn_excel.setFixedHeight(36)
+        self.btn_excel.setFixedHeight(34)
         self.btn_excel.setStyleSheet("""
             QPushButton {
                 background-color: #16A34A;
@@ -500,9 +648,9 @@ class InventoryKPIDetailDialog(QDialog):
             }
         """)
         self.btn_excel.clicked.connect(self._on_export_excel)
-        filter_layout.addWidget(self.btn_excel)
+        self.table_header_layout.addWidget(self.btn_excel)
 
-        root.addWidget(filter_bar_frame)
+        root.addLayout(self.table_header_layout)
 
         # ── 4. Main Data Table with all asignacion_referencia fields ──────────
         headers = [
@@ -515,7 +663,8 @@ class InventoryKPIDetailDialog(QDialog):
             "Fecha Asignación", "Comentarios"
         ]
         self.table = StyledDataTable(headers, parent=self)
-        self.table.setMinimumHeight(350)
+        self.table.setMinimumHeight(240)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         root.addWidget(self.table)
 
         # ── 5. Footer Layout ─────────────────────────────────────────────────
@@ -535,16 +684,48 @@ class InventoryKPIDetailDialog(QDialog):
         QTimer.singleShot(50, self._load_data)
 
     def _populate_filter_dropdowns(self):
-        """Populates the combo boxes dynamically from active records while maintaining selection."""
+        """Populates the combo boxes dynamically with all dimensions that have stock in DB
+        under the active KPI state and selected orders, while preserving user selections.
+        """
         cur_emp = self.cb_empresa.currentText()
         cur_con = self.cb_concepto.currentText()
         cur_des = self.cb_desarrollo.currentText()
         cur_del = self.cb_delegacion.currentText()
 
-        empresas = sorted({str(r.get("empresa") or "").strip() for r in self.all_records if r.get("empresa")})
-        conceptos = sorted({str(r.get("concepto") or "").strip() for r in self.all_records if r.get("concepto")})
-        desarrollos = sorted({str(r.get("desarrollo") or "").strip() for r in self.all_records if r.get("desarrollo")})
-        delegaciones = sorted({str(r.get("delegacion") or "").strip() for r in self.all_records if r.get("delegacion")})
+        # Sets iniciales basados en los registros cargados en memoria
+        empresas_set = {str(r.get("empresa") or "").strip() for r in self.all_records if r.get("empresa")}
+        conceptos_set = {str(r.get("concepto") or "").strip() for r in self.all_records if r.get("concepto")}
+        desarrollos_set = {str(r.get("desarrollo") or "").strip() for r in self.all_records if r.get("desarrollo")}
+        delegaciones_set = {str(r.get("delegacion") or "").strip() for r in self.all_records if r.get("delegacion")}
+
+        # Si aún no hemos cargado las dimensiones completas desde la BD para este estado/órdenes, consultarlas
+        if not hasattr(self, "_dimensiones_stock") or self._dimensiones_stock is None:
+            try:
+                self._dimensiones_stock = self.inventario_ui_service.get_dimensiones_con_stock_facturadas(
+                    filter_assigned=self.state_filter,
+                    orden_ids=self.selected_orden_ids
+                )
+            except Exception as e:
+                print(f"Advertencia al consultar dimensiones con stock: {e}")
+                self._dimensiones_stock = {}
+
+        for emp in self._dimensiones_stock.get("empresas", []):
+            if emp and emp.strip():
+                empresas_set.add(emp.strip())
+        for con in self._dimensiones_stock.get("conceptos", []):
+            if con and con.strip():
+                conceptos_set.add(con.strip())
+        for des in self._dimensiones_stock.get("desarrollos", []):
+            if des and des.strip():
+                desarrollos_set.add(des.strip())
+        for d in self._dimensiones_stock.get("delegaciones", []):
+            if d and d.strip():
+                delegaciones_set.add(d.strip())
+
+        empresas = sorted(empresas_set)
+        conceptos = sorted(conceptos_set)
+        desarrollos = sorted(desarrollos_set)
+        delegaciones = sorted(delegaciones_set)
 
         self.cb_empresa.blockSignals(True)
         self.cb_empresa.clear()
@@ -582,6 +763,47 @@ class InventoryKPIDetailDialog(QDialog):
             self.cb_delegacion.setCurrentText(cur_del)
         self.cb_delegacion.blockSignals(False)
 
+        # 6. Manejo dinámico de Destino Asignado según tipo de KPI
+        self.cb_destino.blockSignals(True)
+        cur_dest = self.cb_destino.currentText()
+        self.cb_destino.clear()
+        if self.kpi_type == "disponibles":
+            # Por lógica de negocio, los derechos disponibles no cuentan con destino asignado
+            self.cb_destino.addItem("No aplica (Disponibles)")
+            self.cb_destino.setCurrentIndex(0)
+            self.cb_destino.setEnabled(False)
+            self.labeled_destino.setEnabled(False)
+        else:
+            self.cb_destino.setEnabled(True)
+            self.labeled_destino.setEnabled(True)
+            # Extraer los destinos asignados reales presentes en los registros o catálogo
+            destinos_encontrados = set()
+            for r in self.all_records:
+                tipo = str(r.get("tipo_asignacion") or "").strip().upper()
+                if tipo:
+                    destinos_encontrados.add(tipo)
+            
+            destinos_opciones = ["Todos los destinos"]
+            # Añadir opciones estándar si existen o están en el catálogo
+            for d_opt in ["NOTARIA", "COLABORADOR", "SIN ASIGNAR"]:
+                if d_opt in destinos_encontrados or self.kpi_type == "total":
+                    if d_opt not in destinos_opciones:
+                        destinos_opciones.append(d_opt)
+            # Agregar cualquier otro destino encontrado no estándar
+            for d_custom in sorted(destinos_encontrados):
+                if d_custom not in destinos_opciones:
+                    destinos_opciones.append(d_custom)
+
+            self.cb_destino.addItems(destinos_opciones)
+            if cur_dest in destinos_opciones:
+                self.cb_destino.setCurrentText(cur_dest)
+            else:
+                self.cb_destino.setCurrentIndex(0)
+        self.cb_destino.blockSignals(False)
+
+        # 7. Actualizar combo dinámico de destinatario según el destino seleccionado
+        self._update_dynamic_asignado_combo(preserve_selection=True)
+
     def _show_order_filter_menu(self):
         """Displays the popup menu for selecting orders."""
         if not self.todas_las_ordenes:
@@ -613,16 +835,17 @@ class InventoryKPIDetailDialog(QDialog):
                 act.blockSignals(False)
 
             self.lbl_metric_ordenes.setText(f"Órdenes: {len(self.selected_orden_ids)} sel.")
+            self._dimensiones_stock = None
             self._load_data()
 
-        action_all.triggered.connect(toggle_all)
+        action_all.toggled.connect(toggle_all)
         menu.addAction(action_all)
         menu.addSeparator()
 
-        for ord in self.todas_las_ordenes:
-            oid = ord["orden_id"]
-            label = format_orden_filter_label(ord.get("folio", ""), ord.get("descripcion", ""))
-            action = QAction(label, menu, checkable=True)
+        for ord_info in self.todas_las_ordenes:
+            oid = ord_info["orden_id"]
+            label_text = format_orden_filter_label(ord_info)
+            action = QAction(label_text, menu, checkable=True)
             action.setChecked(oid in self.selected_orden_ids)
             order_actions[oid] = action
 
@@ -636,6 +859,7 @@ class InventoryKPIDetailDialog(QDialog):
                             self.selected_orden_ids.remove(target_oid)
                     update_all_action_state()
                     self.lbl_metric_ordenes.setText(f"Órdenes: {len(self.selected_orden_ids)} sel.")
+                    self._dimensiones_stock = None
                     self._load_data()
                 return handler
 
@@ -643,6 +867,15 @@ class InventoryKPIDetailDialog(QDialog):
             menu.addAction(action)
 
         menu.exec(self.btn_filter_orden.mapToGlobal(self.btn_filter_orden.rect().bottomLeft()))
+
+    def _on_dimension_filter_changed(self, text: str = ""):
+        """Invoked when user chooses a specific dimension (empresa, concepto, desarrollo, delegacion).
+        Re-queries from server to retrieve 100% of matching records directly from DB/API, avoiding 10k truncation.
+        """
+        self._load_data()
+
+    def _on_delegacion_changed(self, text: str = ""):
+        self._on_dimension_filter_changed(text)
 
     def _load_data(self):
         """Asynchronously queries references from the database."""
@@ -652,13 +885,29 @@ class InventoryKPIDetailDialog(QDialog):
 
         self._loading_dialog = GLLoadingDialog("Cargando registros\ndel inventario...", self)
 
+        cur_del = self.cb_delegacion.currentText()
+        delegacion_param = cur_del if (cur_del and cur_del != "Todas las delegaciones") else None
+
+        cur_emp = self.cb_empresa.currentText()
+        empresa_param = cur_emp if (cur_emp and cur_emp != "Todas las empresas") else None
+
+        cur_con = self.cb_concepto.currentText()
+        concepto_param = cur_con if (cur_con and cur_con != "Todos los conceptos") else None
+
+        cur_des = self.cb_desarrollo.currentText()
+        desarrollo_param = cur_des if (cur_des and cur_des != "Todos los desarrollos") else None
+
         self.active_worker = KPIDetailLoadWorker(
             inventario_ui_service=self.inventario_ui_service,
             filter_assigned=self.state_filter,
-            concepto_id=None, # We load broad matching and filter in UI for maximum flexibility
+            concepto_id=None,
             rfc_id=None,
             orden_ids=self.selected_orden_ids,
             search_text="",
+            delegacion_nombre=delegacion_param,
+            empresa_nombre=empresa_param,
+            concepto_nombre=concepto_param,
+            desarrollo_nombre=desarrollo_param,
             start_date=self.start_date,
             end_date=self.end_date
         )
@@ -672,6 +921,7 @@ class InventoryKPIDetailDialog(QDialog):
             self._loading_dialog.accept()
 
         self.all_records = records
+        self.total_db_count = total_count
         self._populate_filter_dropdowns()
         self._apply_filter_and_populate()
 
@@ -698,6 +948,59 @@ class InventoryKPIDetailDialog(QDialog):
     def _on_filter_changed(self, _text: str = ""):
         self._apply_filter_and_populate()
 
+    def _on_destino_changed(self, _text: str = ""):
+        self._update_dynamic_asignado_combo(preserve_selection=False)
+        self._apply_filter_and_populate()
+
+    def _update_dynamic_asignado_combo(self, preserve_selection: bool = True):
+        """Dynamically populates cb_asignado_a depending on cb_destino selection (NOTARIA / COLABORADOR).
+        If NOTARIA is chosen, shows notarías from loaded records.
+        If COLABORADOR is chosen, shows colaboradores from loaded records.
+        Otherwise, hides the combo box.
+        """
+        dest_val = self.cb_destino.currentText().strip().upper()
+        cur_selection = self.cb_asignado_a.currentText().strip() if preserve_selection else ""
+
+        self.cb_asignado_a.blockSignals(True)
+        self.cb_asignado_a.clear()
+
+        if dest_val == "NOTARIA":
+            self.labeled_asignado_a.setTitle("Notaría")
+            notarias = set()
+            for r in self.all_records:
+                if str(r.get("tipo_asignacion") or "").strip().upper() == "NOTARIA":
+                    asig_name = (r.get("asignado_a") or "").strip()
+                    if asig_name:
+                        notarias.add(asig_name)
+            items = ["Todas las notarías"] + sorted(notarias)
+            self.cb_asignado_a.addItems(items)
+            if cur_selection in items:
+                self.cb_asignado_a.setCurrentText(cur_selection)
+            else:
+                self.cb_asignado_a.setCurrentIndex(0)
+            self.labeled_asignado_a.setVisible(True)
+        elif dest_val == "COLABORADOR":
+            self.labeled_asignado_a.setTitle("Colaborador")
+            colaboradores = set()
+            for r in self.all_records:
+                if str(r.get("tipo_asignacion") or "").strip().upper() == "COLABORADOR":
+                    asig_name = (r.get("asignado_a") or "").strip()
+                    if asig_name:
+                        colaboradores.add(asig_name)
+            items = ["Todos los colaboradores"] + sorted(colaboradores)
+            self.cb_asignado_a.addItems(items)
+            if cur_selection in items:
+                self.cb_asignado_a.setCurrentText(cur_selection)
+            else:
+                self.cb_asignado_a.setCurrentIndex(0)
+            self.labeled_asignado_a.setVisible(True)
+        else:
+            self.cb_asignado_a.addItem("Todos")
+            self.cb_asignado_a.setCurrentIndex(0)
+            self.labeled_asignado_a.setVisible(False)
+
+        self.cb_asignado_a.blockSignals(False)
+
     def _apply_filter_and_populate(self):
         query = self.search_input.text().strip().upper()
         emp_filter = self.cb_empresa.currentText()
@@ -705,6 +1008,8 @@ class InventoryKPIDetailDialog(QDialog):
         des_filter = self.cb_desarrollo.currentText()
         del_filter = self.cb_delegacion.currentText()
         dest_filter = self.cb_destino.currentText()
+        is_asig_active = not self.labeled_asignado_a.isHidden()
+        asig_filter = self.cb_asignado_a.currentText().strip() if is_asig_active else ""
 
         self.filtered_records = []
         for r in self.all_records:
@@ -721,14 +1026,23 @@ class InventoryKPIDetailDialog(QDialog):
             if del_filter != "Todas las delegaciones" and (r.get("delegacion") or "").strip() != del_filter:
                 continue
             # Check Destino Asignado
-            if dest_filter == "NOTARIA":
-                if str(r.get("tipo_asignacion") or "").upper() != "NOTARIA":
-                    continue
-            elif dest_filter == "COLABORADOR":
-                if str(r.get("tipo_asignacion") or "").upper() != "COLABORADOR":
-                    continue
-            elif dest_filter == "SIN ASIGNAR":
-                if r.get("asignada") or r.get("tipo_asignacion"):
+            if dest_filter and dest_filter not in ("Todos los destinos", "No aplica (Disponibles)"):
+                if dest_filter == "NOTARIA":
+                    if str(r.get("tipo_asignacion") or "").upper() != "NOTARIA":
+                        continue
+                elif dest_filter == "COLABORADOR":
+                    if str(r.get("tipo_asignacion") or "").upper() != "COLABORADOR":
+                        continue
+                elif dest_filter == "SIN ASIGNAR":
+                    if r.get("asignada") or r.get("tipo_asignacion"):
+                        continue
+                else:
+                    if str(r.get("tipo_asignacion") or "").upper() != dest_filter.upper():
+                        continue
+
+            # Check Destinatario Asignado Dinámico (Notaría / Colaborador)
+            if asig_filter and not (asig_filter.upper().startswith("TODO") or asig_filter.upper().startswith("TODA")):
+                if (r.get("asignado_a") or "").strip().upper() != asig_filter.upper():
                     continue
 
             # Text search filter
@@ -766,7 +1080,12 @@ class InventoryKPIDetailDialog(QDialog):
 
         self.lbl_metric_count.setText(f"Total Registros: {len(self.filtered_records):,}")
         self.lbl_metric_monto.setText(f"Importe Total: ${total_monto:,.2f}")
-        self.lbl_footer_info.setText(f"Mostrando {len(self.filtered_records)} de {len(self.all_records)} registros")
+        if self.total_db_count > len(self.all_records):
+            self.lbl_footer_info.setText(
+                f"Mostrando {len(self.filtered_records)} de {len(self.all_records)} cargados (Total en BD: {self.total_db_count:,})"
+            )
+        else:
+            self.lbl_footer_info.setText(f"Mostrando {len(self.filtered_records)} de {len(self.all_records)} registros")
 
         # Populate table
         table_rows = []
@@ -832,7 +1151,9 @@ class InventoryKPIDetailDialog(QDialog):
             return False
 
     def _on_export_excel(self):
-        """Asynchronously generates an official styled Excel spreadsheet with the filtered records and displays a loading spinner."""
+        """Asynchronously generates an official styled Excel spreadsheet with the filtered records and displays a loading spinner.
+        If total database records exceed the initial memory buffer (10k), fetches the 100% complete dataset directly from DB/API.
+        """
         if not (self._check_permission("CTRL:INVENTARIO", "EJECUTAR") or self._check_permission("REFERENCIAS", "EJECUTAR")):
             QMessageBox.warning(
                 self,
@@ -844,6 +1165,41 @@ class InventoryKPIDetailDialog(QDialog):
             QMessageBox.warning(self, "Sin Registros", "No hay registros disponibles para exportar.")
             return
 
+        # Determine total records to export and prepare confirmation prompt
+        needs_full_fetch = (self.total_db_count > len(self.all_records))
+        records_to_export_count = self.total_db_count if needs_full_fetch else len(self.filtered_records)
+
+        # Build confirmation message detailing scope and active filters
+        confirm_lines = [
+            f"¿Desea exportar el reporte de {self.title_text} a Excel?",
+            "",
+            f"• Registros a exportar: {records_to_export_count:,}",
+            f"• Empresa: {self.cb_empresa.currentText()}",
+            f"• Concepto: {self.cb_concepto.currentText()}",
+            f"• Delegación: {self.cb_delegacion.currentText()}",
+            f"• Desarrollo: {self.cb_desarrollo.currentText()}",
+            f"• Destino: {self.cb_destino.currentText()}",
+        ]
+        is_asig_active = not self.labeled_asignado_a.isHidden()
+        if is_asig_active and not (self.cb_asignado_a.currentText().strip().upper().startswith("TODO") or self.cb_asignado_a.currentText().strip().upper().startswith("TODA")):
+            confirm_lines.append(f"• {self.labeled_asignado_a.title()}: {self.cb_asignado_a.currentText()}")
+        if self.selected_orden_ids:
+            confirm_lines.append(f"• Órdenes seleccionadas: {len(self.selected_orden_ids)}")
+        search_query = self.search_input.text().strip()
+        if search_query:
+            confirm_lines.append(f"• Texto de búsqueda: \"{search_query}\"")
+
+        confirm_msg = "\n".join(confirm_lines)
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Exportación a Excel",
+            confirm_msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if reply != QMessageBox.Yes:
+            return
+
         default_filename = f"Reporte_{self.kpi_type}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
         save_path, _ = QFileDialog.getSaveFileName(
             self, "Guardar Reporte Excel", default_filename, "Archivos de Excel (*.xlsx)"
@@ -851,29 +1207,71 @@ class InventoryKPIDetailDialog(QDialog):
         if not save_path:
             return
 
-        self._export_loading_dialog = GLLoadingDialog("Generando y formateando\nreporte de Excel...", self)
+        fetch_params = None
+        service_for_worker = None
+
+        cur_asig = self.cb_asignado_a.currentText().strip() if is_asig_active else None
+        asig_param = cur_asig if (cur_asig and not (cur_asig.upper().startswith("TODO") or cur_asig.upper().startswith("TODA"))) else None
+
+        if needs_full_fetch:
+            self._export_loading_dialog = GLLoadingDialog(
+                f"Descargando {self.total_db_count:,} registros y\ngenerando reporte de Excel...", self
+            )
+            cur_del = self.cb_delegacion.currentText()
+            del_param = cur_del if (cur_del and cur_del != "Todas las delegaciones") else None
+            cur_emp = self.cb_empresa.currentText()
+            emp_param = cur_emp if (cur_emp and cur_emp != "Todas las empresas") else None
+            cur_con = self.cb_concepto.currentText()
+            con_param = cur_con if (cur_con and cur_con != "Todos los conceptos") else None
+            cur_des = self.cb_desarrollo.currentText()
+            des_param = cur_des if (cur_des and cur_des != "Todos los desarrollos") else None
+            cur_dest = self.cb_destino.currentText()
+            dest_param = cur_dest if (cur_dest and cur_dest not in ("Todos los destinos", "No aplica (Disponibles)")) else None
+
+            fetch_params = {
+                "filter_assigned": self.state_filter,
+                "concepto_id": None,
+                "rfc_id": None,
+                "orden_ids": self.selected_orden_ids,
+                "search_text": "",
+                "delegacion_nombre": del_param,
+                "empresa_nombre": emp_param,
+                "concepto_nombre": con_param,
+                "desarrollo_nombre": des_param,
+                "destino_nombre": dest_param,
+                "asignado_a": asig_param,
+                "start_date": self.start_date,
+                "end_date": self.end_date,
+                "client_search": self.search_input.text().strip()
+            }
+            service_for_worker = self.inventario_ui_service
+        else:
+            self._export_loading_dialog = GLLoadingDialog("Generando y formateando\nreporte de Excel...", self)
 
         self._export_worker = KPIDetailExcelWorker(
             save_path=save_path,
-            filtered_records=list(self.filtered_records),
+            filtered_records=list(self.filtered_records) if not needs_full_fetch else [],
             title_text=self.title_text,
             rfc_nombre=self.cb_empresa.currentText(),
             concepto_nombre=self.cb_concepto.currentText(),
             desarrollo_nombre=self.cb_desarrollo.currentText(),
             delegacion_nombre=self.cb_delegacion.currentText(),
-            destino_nombre=self.cb_destino.currentText()
+            destino_nombre=self.cb_destino.currentText(),
+            asignado_a_nombre=asig_param,
+            inventario_ui_service=service_for_worker,
+            fetch_params=fetch_params
         )
         self._export_worker.finished_success.connect(self._on_export_success)
         self._export_worker.error_occurred.connect(self._on_export_error)
         self._export_worker.start()
         self._export_loading_dialog.exec()
 
-    def _on_export_success(self, save_path: str):
+    def _on_export_success(self, save_path: str, total_exported: int):
         if hasattr(self, "_export_loading_dialog") and self._export_loading_dialog:
             self._export_loading_dialog.accept()
         QMessageBox.information(
             self, "Exportación Exitosa",
-            f"El reporte se ha generado exitosamente en:\n{save_path}"
+            f"El reporte con {total_exported:,} registros se ha generado exitosamente en:\n{save_path}"
         )
 
     def _on_export_error(self, error_msg: str):

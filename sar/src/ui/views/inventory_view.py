@@ -140,6 +140,36 @@ class AvailabilityWorker(QThread):
 
 from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
 
+class SearchReferencesWorker(QThread):
+    """Worker to fetch available references in background without blocking GUI."""
+    results_ready = Signal(list)
+    error_occurred = Signal(str)
+
+    def __init__(self, service, grid_data, orden_ids, get_delegacion_text_fn):
+        super().__init__()
+        self.service = service
+        self.grid_data = grid_data
+        self.orden_ids = orden_ids
+        self.get_delegacion_text_fn = get_delegacion_text_fn
+
+    def run(self):
+        try:
+            all_refs = []
+            for row in self.grid_data:
+                refs = self.service.get_referencias_disponibles_filtro(
+                    row["rfc_id"], row["concepto_id"], row["delegacion_id"], row["cantidad"],
+                    orden_ids=self.orden_ids
+                )
+                deleg_name = self.get_delegacion_text_fn(row["delegacion_id"]) or "Delegación"
+                for r in refs:
+                    r["desarrollo_id"] = None
+                    r["delegacion_id"] = row["delegacion_id"]
+                    r["delegacion_nombre"] = deleg_name
+                    all_refs.append(r)
+            self.results_ready.emit(all_refs)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
 class ExcelWorker(QThread):
     finished = Signal(bool, str)  # success, message/error
 
@@ -430,8 +460,8 @@ class BatchConfirmationWorker(QThread):
                             "cliente": det.get("cliente"),
                             "desarrollo": det.get("desarrollo"),
                             "desarrollo_id": det.get("desarrollo_id"),
-                            "concepto_solicitado": det.get("concepto_solicitado"),
-                            "referencia_asignada": det.get("referencia_asignada"),
+                            "concepto_solicitado": det.get("concepto_solicitado") or det.get("concepto") or "MASIVO",
+                            "referencia_asignada": det.get("referencia_asignada") or det.get("referencia_portal") or det.get("referencia") or "",
                             "referencia_id": det.get("referencia_id"),
                             "mz": det.get("mz"),
                             "lote": det.get("lote"),
@@ -908,10 +938,10 @@ class InventoryView(QWidget):
         
         # Search Box inside Table Header
         self.search_input_visor = QLineEdit(self)
-        self.search_input_visor.setPlaceholderText("Buscar derecho, cliente, desarrollo, folio...")
-        self.search_input_visor.setMinimumWidth(140)
-        self.search_input_visor.setMaximumWidth(260)
-        self.search_input_visor.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.search_input_visor.setPlaceholderText("Buscar por referencia, cliente, desarrollo, MZ, LT, EDIF, VIV...")
+        self.search_input_visor.setMinimumWidth(320)
+        self.search_input_visor.setMaximumWidth(520)
+        self.search_input_visor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input_visor.setClearButtonEnabled(True)
         self.search_input_visor.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
         self.search_input_visor.returnPressed.connect(self._on_search_visor_trigger)
@@ -2030,6 +2060,9 @@ class InventoryView(QWidget):
         if not file_path:
             return
             
+        # Limpiar registros previos y tabla antes de cargar el nuevo archivo
+        self._on_limpiar_preview()
+
         self.lbl_excel_path.setText(os.path.basename(file_path))
         self._excel_file_path = file_path
 
@@ -2151,7 +2184,7 @@ class InventoryView(QWidget):
             QMessageBox.warning(self, "Falta Acreditación", "Ingresa el nombre del Solicitante Externo (ej. Pedro Gómez) para la Notaría.")
             return
 
-        observaciones = self.txt_obs_masivo.toPlainText().strip()
+        observaciones = self.txt_obs_masivo.text().strip()
 
         # Filter only correct or warned records
         valid_details = []
@@ -2493,42 +2526,53 @@ class InventoryView(QWidget):
                 return
 
 
+        self.btn_buscar_ind.setEnabled(False)
         self._pending_ind_refs = []
-        try:
-            for row in grid_data:
-                refs = self.inventario_ui_service.get_referencias_disponibles_filtro(
-                    row["rfc_id"], row["concepto_id"], row["delegacion_id"], row["cantidad"],
-                    orden_ids=self.selected_orden_ids
-                )
-                for r in refs:
-                    r["desarrollo_id"] = None
-                    r["delegacion_id"] = row["delegacion_id"]
-                    r["delegacion_nombre"] = self.grid_individual.get_delegacion_text(row["delegacion_id"]) or "Delegación"
-                    self._pending_ind_refs.append(r)
-            
-            table_rows = []
-            for item in self._pending_ind_refs:
-                table_rows.append([
-                    "",  # checked column
-                    str(item["referencia_id"]),
-                    item["referencia_portal"],
-                    item.get("concepto_nombre", ""),
-                    item.get("empresa_nombre", ""),
-                    f"${float(item['importe']):,.2f}" if item.get("importe") else "$0.00",
-                    item["delegacion_nombre"]
-                ])
-            
-            self.table_preview_ind.blockSignals(True)
-            self.table_preview_ind.populate_rows(table_rows, checkable_first_col=True)
-            for r in range(self.table_preview_ind.rowCount()):
-                self.table_preview_ind.item(r, 0).setCheckState(Qt.CheckState.Checked)
-            self.table_preview_ind.blockSignals(False)
 
-            self.btn_confirmar_ind.setEnabled(len(self._pending_ind_refs) > 0)
-            if not self._pending_ind_refs:
-                QMessageBox.information(self, "Sin Coincidencias", "No se encontraron referencias físicas FACTURADAS disponibles con los filtros especificados.")
-        except Exception as e:
-            QMessageBox.critical(self, "Error al Consultar", f"Ocurrió un error al buscar referencias en la BD:\n{str(e)}")
+        self._search_loading_dialog = GLLoadingDialog("Buscando derechos disponibles...", self)
+        self._search_worker = SearchReferencesWorker(
+            service=self.inventario_ui_service,
+            grid_data=grid_data,
+            orden_ids=self.selected_orden_ids,
+            get_delegacion_text_fn=self.grid_individual.get_delegacion_text
+        )
+        self._search_worker.results_ready.connect(self._on_search_refs_success)
+        self._search_worker.error_occurred.connect(self._on_search_refs_error)
+        self._search_worker.finished.connect(lambda: self.btn_buscar_ind.setEnabled(True))
+        self._search_worker.start()
+        self._search_loading_dialog.exec()
+
+    def _on_search_refs_success(self, all_refs):
+        if hasattr(self, "_search_loading_dialog") and self._search_loading_dialog:
+            self._search_loading_dialog.accept()
+
+        self._pending_ind_refs = all_refs
+        table_rows = []
+        for item in self._pending_ind_refs:
+            table_rows.append([
+                "",  # checked column
+                str(item["referencia_id"]),
+                item["referencia_portal"],
+                item.get("concepto_nombre", ""),
+                item.get("empresa_nombre", ""),
+                f"${float(item['importe']):,.2f}" if item.get("importe") else "$0.00",
+                item["delegacion_nombre"]
+            ])
+
+        self.table_preview_ind.blockSignals(True)
+        self.table_preview_ind.populate_rows(table_rows, checkable_first_col=True)
+        for r in range(self.table_preview_ind.rowCount()):
+            self.table_preview_ind.item(r, 0).setCheckState(Qt.CheckState.Checked)
+        self.table_preview_ind.blockSignals(False)
+
+        self.btn_confirmar_ind.setEnabled(len(self._pending_ind_refs) > 0)
+        if not self._pending_ind_refs:
+            QMessageBox.information(self, "Sin Coincidencias", "No se encontraron referencias físicas FACTURADAS disponibles con los filtros especificados.")
+
+    def _on_search_refs_error(self, error_msg):
+        if hasattr(self, "_search_loading_dialog") and self._search_loading_dialog:
+            self._search_loading_dialog.accept()
+        QMessageBox.critical(self, "Error al Consultar", f"Ocurrió un error al buscar referencias en la BD:\n{error_msg}")
 
     def _on_confirmar_asignacion_ind(self):
         if not self._check_permission("CTRL:ASIGNAR_DERECHO", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
@@ -2612,11 +2656,12 @@ class InventoryView(QWidget):
             desarrollos = data["desarrollos"]
             concepts_list = data["conceptos"]
             delegations_list = data["delegaciones"]
-            rfcs_list = data["rfcs"]
+            rfcs_list = self.inventario_ui_service.get_rfcs_con_stock_inventario()
             
             self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
             self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
             self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in desarrollos}
+            self._desarrollos_list = desarrollos
             self._delegations_map = {dg["nombre"] if isinstance(dg, dict) else dg.nombre: dg["delegacion_id"] if isinstance(dg, dict) else dg.delegacion_id for dg in delegations_list}
             self._concepts_map = {cp["nombre"] if isinstance(cp, dict) else cp.nombre: cp["concepto_id"] if isinstance(cp, dict) else cp.concepto_id for cp in concepts_list}
             self._rfcs_map = {r["razon_social"] if isinstance(r, dict) else r.razon_social: r["rfc_id"] if isinstance(r, dict) else r.rfc_id for r in rfcs_list}
@@ -2669,6 +2714,7 @@ class InventoryView(QWidget):
             # Populate grid_apartar in CASCADE MODE using desarrollos_empresa data
             desarrollos_activos_para_apartar = self.inventario_ui_service.get_desarrollos_activos_para_apartar()
             self._cascade_desarrollos_entries = desarrollos_activos_para_apartar  # cache for new rows
+            self._desarrollos_activos_para_apartar = desarrollos_activos_para_apartar
             self.grid_apartar.set_has_desarrollo(True)
             self.grid_apartar.set_cascade_mode(True, desarrollos_activos_para_apartar)
             if not self.grid_apartar.rows:
@@ -2690,7 +2736,7 @@ class InventoryView(QWidget):
                 return
             data = self.inventario_ui_service.get_filtros_data()
             concepts_list = data["conceptos"]
-            rfcs_list = data["rfcs"]
+            rfcs_list = self.inventario_ui_service.get_rfcs_con_stock_inventario()
             
             self._concepts_map = {cp["nombre"] if isinstance(cp, dict) else cp.nombre: cp["concepto_id"] if isinstance(cp, dict) else cp.concepto_id for cp in concepts_list}
             self._rfcs_map = {r["razon_social"] if isinstance(r, dict) else r.razon_social: r["rfc_id"] if isinstance(r, dict) else r.rfc_id for r in rfcs_list}
@@ -3589,7 +3635,13 @@ class InventoryView(QWidget):
 
     def _on_exportar_lote_seleccionado(self):
         """Export the selected lote to Excel via ExportLotesDialog pre-filtered."""
-        if not self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") and not self._check_permission("REFERENCIAS", "EJECUTAR"):
+        can_exec = self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") or self._check_permission("REFERENCIAS", "EJECUTAR")
+        if not can_exec:
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes (CTRL:GESTION_LOTES o REFERENCIAS:EJECUTAR) para exportar asignaciones."
+            )
             return
         selected = self.table_lotes.selectedItems()
         if not selected:
@@ -3643,7 +3695,7 @@ class ManualAssignmentDialog(QDialog):
         self.is_read_only = is_read_only
         self.can_edit = can_edit
         self._is_editing_existing = False
-        self.inventario_ui_service = InventarioUIService(self.db_connector)
+        self.inventario_ui_service = getattr(parent, "inventario_ui_service", None) or InventarioUIService(self.db_connector)
 
         self.total_refs = len(self.ref_ids)
         self.current_idx = 0
@@ -4358,24 +4410,31 @@ class ManualAssignmentDialog(QDialog):
 
     def _load_catalogs(self):
         try:
-            notarias = self.inventario_ui_service.get_notarias()
-            colaboradores = self.inventario_ui_service.get_colaboradores()
-            self._desarrollos_list = self.inventario_ui_service.get_desarrollos()
+            p = self.parent()
+            if p and getattr(p, "_notarias_map", None):
+                self._notarias_map = dict(p._notarias_map)
+                self._colaboradores_map = dict(getattr(p, "_colaboradores_map", {}))
+                self._desarrollos_map = dict(getattr(p, "_desarrollos_map", {}))
+                self._desarrollos_list = getattr(p, "_desarrollos_list", None) or self.inventario_ui_service.get_desarrollos()
+            else:
+                notarias = self.inventario_ui_service.get_notarias()
+                colaboradores = self.inventario_ui_service.get_colaboradores()
+                self._desarrollos_list = self.inventario_ui_service.get_desarrollos()
 
-            self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
-            self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
-            self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in self._desarrollos_list}
+                self._notarias_map = {n["nombre"]: n["notaria_id"] for n in notarias}
+                self._colaboradores_map = {c["nombre"]: c["colaborador_id"] for c in colaboradores}
+                self._desarrollos_map = {d["nombre"]: d["desarrollo_id"] for d in self._desarrollos_list}
 
             self.cb_notarias.clear()
             self.cb_notarias.addItem("-- Seleccione Notaría --", None)
-            for n in notarias:
-                self.cb_notarias.addItem(n["nombre"], n["notaria_id"])
+            for nombre, n_id in self._notarias_map.items():
+                self.cb_notarias.addItem(nombre, n_id)
             self.cb_notarias.setCurrentIndex(0)
 
             self.cb_colaboradores.clear()
             self.cb_colaboradores.addItem("-- Seleccione Colaborador --", None)
-            for c in colaboradores:
-                self.cb_colaboradores.addItem(c["nombre"], c["colaborador_id"])
+            for nombre, c_id in self._colaboradores_map.items():
+                self.cb_colaboradores.addItem(nombre, c_id)
             self.cb_colaboradores.setCurrentIndex(0)
 
         except Exception as e:
@@ -4398,7 +4457,8 @@ class ManualAssignmentDialog(QDialog):
                         delegacion_id = delegacion_id or row.get("delegacion_id")
 
             try:
-                desarrollo_empresas = self.inventario_ui_service.get_desarrollos_activos_para_apartar()
+                p = self.parent()
+                desarrollo_empresas = getattr(p, "_desarrollos_activos_para_apartar", None) or self.inventario_ui_service.get_desarrollos_activos_para_apartar()
             except Exception:
                 desarrollo_empresas = []
 
@@ -4643,7 +4703,7 @@ class ExportLotesDialog(QDialog):
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
-        self.inventario_ui_service = InventarioUIService(self.db_connector)
+        self.inventario_ui_service = getattr(parent, 'inventario_ui_service', None) or InventarioUIService(self.db_connector)
         
         self.setWindowTitle("Exportar Reporte de Asignación")
         self.setMinimumSize(600, 400)
@@ -4744,7 +4804,8 @@ class LoteProcessingDialog(QDialog):
         super().__init__(parent)
         self.db_connector = db_connector
         self.lote_id = lote_id
-        self.inventario_ui_service = InventarioUIService(self.db_connector)
+        self.inventario_ui_service = getattr(parent, 'inventario_ui_service', None) or InventarioUIService(self.db_connector)
+        self.api_client = getattr(parent, 'api_client', None) or getattr(self.inventario_ui_service, 'api_client', None) or APIClient()
         self.header_data: dict = {}
         self.detalles: list = []
 
@@ -4925,7 +4986,10 @@ class LoteProcessingDialog(QDialog):
         return selected
 
     def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
-        """Verifies RBAC permissions for dialog actions."""
+        """Verifies RBAC permissions for dialog actions supporting both Direct DB and REST API."""
+        if self.parent() and hasattr(self.parent(), '_check_permission'):
+            return self.parent()._check_permission(modulo_codigo, accion_codigo)
+
         parent_window = self.window()
         usuario_id = getattr(parent_window, 'current_usuario_id', None)
         if not usuario_id and hasattr(self.parent(), 'window'):
@@ -4933,24 +4997,30 @@ class LoteProcessingDialog(QDialog):
         if not usuario_id:
             return True
         try:
-            with self.db_connector.get_session() as session:
-                from sar.src.services.security_service import SecurityService
-                sec_service = SecurityService(session)
-                has_perm = sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
-                if not has_perm:
-                    QMessageBox.warning(
-                        self,
-                        "Acceso Denegado",
-                        f"No tiene permisos suficientes ({modulo_codigo}:{accion_codigo}) para realizar esta acción."
-                    )
-                return has_perm
+            api_client = getattr(self, 'api_client', None) or getattr(self.inventario_ui_service, 'api_client', None)
+            if api_client and getattr(api_client, 'connect_via_api', False):
+                perms = api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                return perms.get(modulo_codigo, {}).get(accion_codigo, False)
+            else:
+                if not self.db_connector:
+                    return False
+                with self.db_connector.get_session() as session:
+                    from sar.src.services.security_service import SecurityService
+                    sec_service = SecurityService(session)
+                    return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
         except Exception as e:
             print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
             return False
 
     # ── Excel generation ─────────────────────────────────────────────────────
     def _on_generate_excel(self):
-        if not self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") and not self._check_permission("REFERENCIAS", "EJECUTAR"):
+        can_exec = self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") or self._check_permission("REFERENCIAS", "EJECUTAR")
+        if not can_exec:
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes (CTRL:GESTION_LOTES o REFERENCIAS:EJECUTAR) para generar el archivo Excel."
+            )
             return
         selected = self._get_selected_details()
         if not selected:
@@ -5000,7 +5070,13 @@ class LoteProcessingDialog(QDialog):
 
     # ── PDF generation ───────────────────────────────────────────────────────
     def _on_generate_pdf(self):
-        if not self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") and not self._check_permission("REFERENCIAS", "EJECUTAR"):
+        can_exec = self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") or self._check_permission("REFERENCIAS", "EJECUTAR")
+        if not can_exec:
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes (CTRL:GESTION_LOTES o REFERENCIAS:EJECUTAR) para generar los archivos PDF."
+            )
             return
         selected = self._get_selected_details()
         if not selected:
@@ -5025,8 +5101,12 @@ class LoteProcessingDialog(QDialog):
             error = result["error"]
             
             msg = f"PDFs generados exitosamente: {success}\n"
-            if missing: msg += f"Referencias sin archivos: {missing}\n"
-            if error:   msg += f"Errores al procesar: {error}\n"
+            if missing:
+                msg += f"Referencias sin archivos o inaccesibles: {missing}\n"
+            if error:
+                msg += f"Errores al procesar: {error}\n"
+            if success == 0 and missing > 0:
+                msg += "\nNota: Asegúrese de contar con acceso a la unidad o ruta de red donde se almacenan los archivos de facturas."
             QMessageBox.information(self, "Generación de PDFs Finalizada", msg)
             self.pdf_worker.deleteLater()
 

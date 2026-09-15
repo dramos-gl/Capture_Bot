@@ -1,9 +1,47 @@
 """Inventario UI Service to decouple inventory view from direct SQL/APIClient."""
 
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Optional
 from sar.src.storage.api_client import APIClient
 from sar.src.storage.repositories import InventarioRepository
 from sar.src.utils.telemetry import track_perf
+
+
+def _parse_ubicacion_search(text: str) -> str:
+    """
+    Normaliza el texto de búsqueda libre para campos de ubicación (Mz, Lt, Edif, Viv).
+
+    Detecta tokens de dirección (e.g. "MZ 5", "LOTE 12", "EDIF B") y los
+    transforma al formato compacto que usa CONCAT_WS en el repositorio:
+    "MZ5 LT12 EDIF B" -> "MZ5 LT12 EDIF B" (ya es compatible con ILIKE).
+
+    Si el texto no contiene tokens de ubicación reconocibles, lo devuelve
+    sin modificar para que la búsqueda normal (referencia, cliente, desarrollo...)
+    continúe funcionando exactamente igual que antes.
+    """
+    if not text or not text.strip():
+        return text
+
+    text_upper = text.upper()
+
+    # Mapa de prefijos largos a cortos (normalización para CONCAT_WS)
+    alias_map = {
+        r"\bMANZANA\b": "MZ",
+        r"\bLOTE\b": "LT",
+        r"\bEDIFICIO\b": "EDIF",
+        r"\bVIVIENDA\b": "VIV",
+        r"\bDEPTO\b": "VIV",
+        r"\bDEPARTAMENTO\b": "VIV",
+    }
+    normalized = text_upper
+    for pattern, replacement in alias_map.items():
+        normalized = re.sub(pattern, replacement, normalized)
+
+    # Compactar "MZ 5" → "MZ5", "LT 12" → "LT12", "EDIF B" → "EDIF B" (edif/viv pueden tener espacios)
+    normalized = re.sub(r"\b(MZ|LT)\s+([A-Z0-9]+)", r"\1\2", normalized)
+
+    return normalized.strip()
+
 
 class InventarioUIService:
     """Service layer for the UI to manage inventory operations using either API or local DB."""
@@ -11,9 +49,59 @@ class InventarioUIService:
     def __init__(self, db_connector=None):
         self.db_connector = db_connector
         self.api_client = APIClient()
+        self._cache_notarias = None
+        self._cache_colaboradores = None
+        self._cache_desarrollos = None
+        self._cache_desarrollos_apartar = None
 
-    def get_referencias_facturadas_paginated(self, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str, start_date: str = None, end_date: str = None, orden_ids: list = None) -> Dict[str, Any]:
+    def clear_catalogs_cache(self):
+        """Invalidates in-memory catalog cache."""
+        self._cache_notarias = None
+        self._cache_colaboradores = None
+        self._cache_desarrollos = None
+        self._cache_desarrollos_apartar = None
+
+    def get_dimensiones_con_stock_facturadas(self, filter_assigned: str = "Disponible", orden_ids: list = None) -> Dict[str, List[str]]:
+        """Fetches distinct dimension names (empresas, conceptos, delegaciones, desarrollos)
+        with stock under given filter and orders.
+        """
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_dimensiones_con_stock_facturadas", transport=transport):
+            if self.api_client.connect_via_api:
+                payload = {"filter_assigned": filter_assigned}
+                if orden_ids is not None:
+                    payload["orden_ids"] = orden_ids
+                try:
+                    res = self.api_client.request("GET", "/api/docs/inventario/dimensiones-con-stock", data=payload)
+                    return res if isinstance(res, dict) else {"empresas": [], "conceptos": [], "delegaciones": [], "desarrollos": []}
+                except Exception as e:
+                    print(f"Error get_dimensiones_con_stock_facturadas API: {e}")
+                    return {"empresas": [], "conceptos": [], "delegaciones": [], "desarrollos": []}
+            else:
+                if not self.db_connector:
+                    return {"empresas": [], "conceptos": [], "delegaciones": [], "desarrollos": []}
+                try:
+                    with self.db_connector.get_session() as session:
+                        repo = InventarioRepository(session)
+                        return repo.get_dimensiones_con_stock_facturadas(filter_assigned=filter_assigned, orden_ids=orden_ids)
+                except Exception as e:
+                    print(f"Error get_dimensiones_con_stock_facturadas LOCAL: {e}")
+                    return {"empresas": [], "conceptos": [], "delegaciones": [], "desarrollos": []}
+
+    def get_delegaciones_con_stock_facturadas(self, filter_assigned: str = "Disponible", orden_ids: list = None) -> List[str]:
+        """Fetches distinct delegation names with stock under given filter and orders."""
+        dims = self.get_dimensiones_con_stock_facturadas(filter_assigned=filter_assigned, orden_ids=orden_ids)
+        return dims.get("delegaciones", [])
+
+    def get_referencias_facturadas_paginated(
+        self, limit: Optional[int], offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str,
+        start_date: str = None, end_date: str = None, orden_ids: list = None, delegacion_nombre: str = None,
+        empresa_nombre: str = None, concepto_nombre: str = None, desarrollo_nombre: str = None, destino_nombre: str = None,
+        asignado_a: str = None
+    ) -> Dict[str, Any]:
         """Fetches paginated facturadas references."""
+        # Normalizar tokens de ubicación (MZ, LT, EDIF, VIV) antes de enviar a cualquier transporte
+        search_text = _parse_ubicacion_search(search_text)
         transport = "API" if self.api_client.connect_via_api else "LOCAL"
         with track_perf("InventarioUIService.get_referencias_facturadas_paginated", transport=transport):
             if self.api_client.connect_via_api:
@@ -33,6 +121,18 @@ class InventarioUIService:
                     payload["end_date"] = end_date
                 if orden_ids is not None:
                     payload["orden_ids"] = orden_ids
+                if delegacion_nombre and delegacion_nombre != "Todas las delegaciones":
+                    payload["delegacion_nombre"] = delegacion_nombre
+                if empresa_nombre and empresa_nombre != "Todas las empresas":
+                    payload["empresa_nombre"] = empresa_nombre
+                if concepto_nombre and concepto_nombre != "Todos los conceptos":
+                    payload["concepto_nombre"] = concepto_nombre
+                if desarrollo_nombre and desarrollo_nombre != "Todos los desarrollos":
+                    payload["desarrollo_nombre"] = desarrollo_nombre
+                if destino_nombre and destino_nombre not in ("Todos los destinos", "No aplica (Disponibles)"):
+                    payload["destino_nombre"] = destino_nombre
+                if asignado_a and not (asignado_a.strip().upper().startswith("TODO") or asignado_a.strip().upper().startswith("TODA")):
+                    payload["asignado_a"] = asignado_a.strip()
                 res = self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas", data=payload)
                 return {"records": res["records"], "total_count": res["total_count"]}
             else:
@@ -49,18 +149,24 @@ class InventarioUIService:
                         filter_assigned=filter_assigned,
                         start_date=start_date,
                         end_date=end_date,
-                        orden_ids=orden_ids
+                        orden_ids=orden_ids,
+                        delegacion_nombre=delegacion_nombre,
+                        empresa_nombre=empresa_nombre,
+                        concepto_nombre=concepto_nombre,
+                        desarrollo_nombre=desarrollo_nombre,
+                        destino_nombre=destino_nombre,
+                        asignado_a=asignado_a
                     )
                     return {"records": res, "total_count": total_count}
 
     def get_inventario_summary(self, search_text: str = "", concepto_id: int = None, rfc_id: int = None, start_date: str = None, end_date: str = None, orden_ids: list = None) -> Dict[str, Any]:
         """Fetches inventory counts (disponibles, asignadas) under active filters."""
+        # Normalizar tokens de ubicación (MZ, LT, EDIF, VIV) antes de enviar a cualquier transporte
+        search_text = _parse_ubicacion_search(search_text)
         transport = "API" if self.api_client.connect_via_api else "LOCAL"
         with track_perf("InventarioUIService.get_inventario_summary", transport=transport):
             if self.api_client.connect_via_api:
-                payload = {}
-                if search_text:
-                    payload["search_text"] = search_text
+                payload = {"search_text": search_text}
                 if concepto_id:
                     payload["concepto_id"] = concepto_id
                 if rfc_id:
@@ -71,7 +177,7 @@ class InventarioUIService:
                     payload["end_date"] = end_date
                 if orden_ids is not None:
                     payload["orden_ids"] = orden_ids
-                return self.api_client.request("GET", "/api/docs/inventario/referencias-facturadas-summary", data=payload)
+                return self.api_client.request("GET", "/api/docs/inventario/summary", data=payload)
             else:
                 if not self.db_connector:
                     raise ValueError("db_connector is required when connect_via_api is False")
@@ -86,38 +192,56 @@ class InventarioUIService:
                         orden_ids=orden_ids
                     )
 
-    def get_notarias(self) -> List[Dict[str, Any]]:
-        """Fetches notarias."""
+    def get_notarias(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """Fetches notarias with in-memory caching."""
+        if not force_refresh and self._cache_notarias is not None:
+            return self._cache_notarias
         if self.api_client.connect_via_api:
-            return self.api_client.request("GET", "/api/docs/inventario/notarias")
+            res = self.api_client.request("GET", "/api/docs/inventario/notarias")
+            self._cache_notarias = res
+            return res
         else:
             if not self.db_connector:
                 raise ValueError("db_connector is required when connect_via_api is False")
             with self.db_connector.get_session() as session:
                 repo = InventarioRepository(session)
-                return repo.get_notarias()
+                res = repo.get_notarias()
+                self._cache_notarias = res
+                return res
 
-    def get_colaboradores(self) -> List[Dict[str, Any]]:
-        """Fetches colaboradores."""
+    def get_colaboradores(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """Fetches colaboradores with in-memory caching."""
+        if not force_refresh and self._cache_colaboradores is not None:
+            return self._cache_colaboradores
         if self.api_client.connect_via_api:
-            return self.api_client.request("GET", "/api/docs/inventario/colaboradores")
+            res = self.api_client.request("GET", "/api/docs/inventario/colaboradores")
+            self._cache_colaboradores = res
+            return res
         else:
             if not self.db_connector:
                 raise ValueError("db_connector is required when connect_via_api is False")
             with self.db_connector.get_session() as session:
                 repo = InventarioRepository(session)
-                return repo.get_colaboradores()
+                res = repo.get_colaboradores()
+                self._cache_colaboradores = res
+                return res
 
-    def get_desarrollos(self) -> List[Dict[str, Any]]:
-        """Fetches desarrollos."""
+    def get_desarrollos(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """Fetches desarrollos with in-memory caching."""
+        if not force_refresh and self._cache_desarrollos is not None:
+            return self._cache_desarrollos
         if self.api_client.connect_via_api:
-            return self.api_client.request("GET", "/api/docs/inventario/desarrollos")
+            res = self.api_client.request("GET", "/api/docs/inventario/desarrollos")
+            self._cache_desarrollos = res
+            return res
         else:
             if not self.db_connector:
                 raise ValueError("db_connector is required when connect_via_api is False")
             with self.db_connector.get_session() as session:
                 repo = InventarioRepository(session)
-                return repo.get_desarrollos()
+                res = repo.get_desarrollos()
+                self._cache_desarrollos = res
+                return res
 
     def get_disponibles_count(self, rfc_id: int, concepto_id: int, delegacion_id: int, orden_ids: list = None) -> int:
         """Returns the count of FACTURADA references available for the given (rfc, concepto, delegacion).
@@ -167,12 +291,36 @@ class InventarioUIService:
                     print(f"Error get_rfcs_con_stock_facturadas: {e}")
                     return []
 
+    def get_rfcs_con_stock_inventario(self) -> List[Dict[str, Any]]:
+        """Returns active RFCs that have at least one reference in inventory (FACTURADA, ASIGNADA, RESERVADA)."""
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_rfcs_con_stock_inventario", transport=transport):
+            if self.api_client.connect_via_api:
+                try:
+                    return self.api_client.request("GET", "/api/docs/inventario/rfcs-con-stock-inventario")
+                except Exception:
+                    return []
+            else:
+                if not self.db_connector:
+                    return []
+                try:
+                    with self.db_connector.get_session() as session:
+                        repo = InventarioRepository(session)
+                        return repo.get_rfcs_con_stock_inventario()
+                except Exception as e:
+                    print(f"Error get_rfcs_con_stock_inventario: {e}")
+                    return []
 
-    def get_desarrollos_activos_para_apartar(self) -> List[Dict[str, Any]]:
-        """Returns all active desarrollo_empresa entries (desarrollo+rfc+delegacion) for cascade population."""
+
+    def get_desarrollos_activos_para_apartar(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """Returns all active desarrollo_empresa entries (desarrollo+rfc+delegacion) for cascade population with caching."""
+        if not force_refresh and self._cache_desarrollos_apartar is not None:
+            return self._cache_desarrollos_apartar
         if self.api_client.connect_via_api:
             try:
-                return self.api_client.request("GET", "/api/docs/inventario/desarrollos-activos-apartar")
+                res = self.api_client.request("GET", "/api/docs/inventario/desarrollos-activos-apartar")
+                self._cache_desarrollos_apartar = res
+                return res
             except Exception:
                 return []
         else:
@@ -181,7 +329,9 @@ class InventarioUIService:
             try:
                 with self.db_connector.get_session() as session:
                     repo = InventarioRepository(session)
-                    return repo.get_desarrollos_activos_para_apartar()
+                    res = repo.get_desarrollos_activos_para_apartar()
+                    self._cache_desarrollos_apartar = res
+                    return res
             except Exception as e:
                 print(f"Error get_desarrollos_activos_para_apartar: {e}")
                 return []
@@ -249,12 +399,15 @@ class InventarioUIService:
 
 
     def get_catalogos_data(self) -> Dict[str, Any]:
-        """Fetches all catalogs required for the inventory view."""
+        """Fetches all catalogs required for the inventory view and populates cache."""
         if self.api_client.connect_via_api:
             notarias = self.api_client.request("GET", "/api/docs/inventario/notarias")
             colaboradores = self.api_client.request("GET", "/api/docs/inventario/colaboradores")
             desarrollos = self.api_client.request("GET", "/api/docs/inventario/desarrollos")
             cats = self.api_client.request("GET", "/api/ops/catalogos")
+            self._cache_notarias = notarias
+            self._cache_colaboradores = colaboradores
+            self._cache_desarrollos = desarrollos
             return {
                 "notarias": notarias,
                 "colaboradores": colaboradores,
@@ -348,10 +501,18 @@ class InventarioUIService:
         """Registers a new assignment lote."""
         if self.api_client.connect_via_api:
             detalles_payload = []
+            date_fields = ("fecha_solicitud", "fecha_reporte_notaria", "fecha_ingreso_rpp", "fecha_escritura", "fecha_titulacion")
             for det in detalles_list:
                 det_dict = dict(det)
-                if det_dict.get("fecha_solicitud") and not isinstance(det_dict["fecha_solicitud"], str):
-                    det_dict["fecha_solicitud"] = det_dict["fecha_solicitud"].strftime("%Y-%m-%d")
+                for df in date_fields:
+                    val = det_dict.get(df)
+                    if val is not None:
+                        if hasattr(val, "strftime"):
+                            det_dict[df] = val.strftime("%Y-%m-%d")
+                        elif isinstance(val, str) and val.strip():
+                            det_dict[df] = val.strip().split()[0]
+                        else:
+                            det_dict[df] = None
                 detalles_payload.append(det_dict)
 
             payload = {

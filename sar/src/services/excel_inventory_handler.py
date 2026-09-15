@@ -85,20 +85,39 @@ class ExcelInventoryHandler:
                     pass
             return date_token
 
+        def _normalize_cell_str(val) -> str:
+            if val is None:
+                return ""
+            if isinstance(val, bool):
+                return str(val)
+            if isinstance(val, int):
+                return str(val)
+            if isinstance(val, float):
+                if val.is_integer():
+                    return str(int(val))
+                return str(val).strip()
+            val_str = str(val).strip()
+            # If string ends with .0 and the prefix is an integer (e.g., '3.0' or '-5.0')
+            if val_str.endswith(".0"):
+                prefix = val_str[:-2].strip()
+                if prefix.lstrip("-").isdigit():
+                    return prefix
+            return val_str
+
         # Process data rows
         for row_num, row in enumerate(rows[1:], start=2):
             # Skip empty rows
             if not row or all(v is None for v in row):
                 continue
                 
-            cliente = str(row[idx_cliente]).strip() if idx_cliente != -1 and row[idx_cliente] is not None else ""
-            desarrollo = str(row[idx_desarrollo]).strip().upper() if idx_desarrollo != -1 and row[idx_desarrollo] is not None else ""
-            empresa = str(row[idx_empresa]).strip().upper() if idx_empresa != -1 and row[idx_empresa] is not None else ""
+            cliente = _normalize_cell_str(row[idx_cliente]) if idx_cliente != -1 else ""
+            desarrollo = _normalize_cell_str(row[idx_desarrollo]).upper() if idx_desarrollo != -1 else ""
+            empresa = _normalize_cell_str(row[idx_empresa]).upper() if idx_empresa != -1 else ""
 
             # Check if row has at least one concept reference
             has_reference = False
             for col_idx in concept_cols.values():
-                if col_idx != -1 and row[col_idx] is not None and str(row[col_idx]).strip() != "":
+                if col_idx != -1 and row[col_idx] is not None and _normalize_cell_str(row[col_idx]) != "":
                     has_reference = True
                     break
 
@@ -112,12 +131,12 @@ class ExcelInventoryHandler:
             f_titulacion = _normalize_date_str(row[idx_fecha_titulacion]) if idx_fecha_titulacion != -1 else None
 
             # Location fields
-            mz = str(row[idx_mz]).strip() if idx_mz != -1 and row[idx_mz] is not None else ""
-            lote = str(row[idx_lote]).strip() if idx_lote != -1 and row[idx_lote] is not None else ""
-            edif = str(row[idx_edif]).strip() if idx_edif != -1 and row[idx_edif] is not None else ""
-            viv = str(row[idx_viv]).strip() if idx_viv != -1 and row[idx_viv] is not None else ""
+            mz = _normalize_cell_str(row[idx_mz]) if idx_mz != -1 else ""
+            lote = _normalize_cell_str(row[idx_lote]) if idx_lote != -1 else ""
+            edif = _normalize_cell_str(row[idx_edif]) if idx_edif != -1 else ""
+            viv = _normalize_cell_str(row[idx_viv]) if idx_viv != -1 else ""
             
-            raw_ubicacion = str(row[idx_ubicacion]).strip() if idx_ubicacion != -1 and row[idx_ubicacion] is not None else ""
+            raw_ubicacion = _normalize_cell_str(row[idx_ubicacion]) if idx_ubicacion != -1 else ""
 
             # Parse fallback from UBICACION text column if mz/lote are empty
             if (not mz and not lote) and idx_ubicacion != -1 and row[idx_ubicacion] is not None:
@@ -133,17 +152,17 @@ class ExcelInventoryHandler:
                 if m_ed: edif = m_ed.group(1)
                 if m_vv: viv = m_vv.group(1)
 
-            folio = str(row[idx_folio]).strip() if idx_folio != -1 and row[idx_folio] is not None else ""
-            estatus_aviso = str(row[idx_estatus_aviso]).strip() if idx_estatus_aviso != -1 and row[idx_estatus_aviso] is not None else ""
-            credito_titular = str(row[idx_credito_titular]).strip() if idx_credito_titular != -1 and row[idx_credito_titular] is not None else ""
-            pa = str(row[idx_pa]).strip() if idx_pa != -1 and row[idx_pa] is not None else ""
-            comentarios = str(row[idx_comentarios]).strip() if idx_comentarios != -1 and row[idx_comentarios] is not None else ""
-            delegacion = str(row[idx_delegacion]).strip() if idx_delegacion != -1 and row[idx_delegacion] is not None else ""
+            folio = _normalize_cell_str(row[idx_folio]) if idx_folio != -1 else ""
+            estatus_aviso = _normalize_cell_str(row[idx_estatus_aviso]) if idx_estatus_aviso != -1 else ""
+            credito_titular = _normalize_cell_str(row[idx_credito_titular]) if idx_credito_titular != -1 else ""
+            pa = _normalize_cell_str(row[idx_pa]) if idx_pa != -1 else ""
+            comentarios = _normalize_cell_str(row[idx_comentarios]) if idx_comentarios != -1 else ""
+            delegacion = _normalize_cell_str(row[idx_delegacion]) if idx_delegacion != -1 else ""
 
             # Check each concept reference column
             for concept_name, col_idx in concept_cols.items():
                 if col_idx != -1 and row[col_idx] is not None:
-                    ref_val = str(row[col_idx]).strip()
+                    ref_val = _normalize_cell_str(row[col_idx])
                     # Skip empty/None references or headers accidentally repeated
                     if not ref_val or ref_val.upper() in ("NONE", "NULL", "-", ""):
                         continue

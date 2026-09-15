@@ -949,6 +949,59 @@ class ProduccionRepository(BaseRepository):
                 "procesado_por": row.usuario_asignado_nombre or "Sin Asignar"
             })
         return res, total_count
+
+    def get_referencias_por_estados(self, states: List[str], orden_ids: list = None) -> List[dict]:
+        """Retorna referencias en los estados especificados (ej. ERROR, FALLIDO, ERROR_VALIDACION) para el detalle del Dashboard."""
+        from sqlalchemy import select
+        from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, Solicitud, Concepto, Rfc, Delegacion
+
+        if not states:
+            return []
+
+        if orden_ids is not None:
+            if not isinstance(orden_ids, (list, tuple, set)):
+                orden_ids = None
+            elif len(orden_ids) == 0:
+                return []
+
+        stmt = (
+            select(
+                Referencia.referencia_portal,
+                Rfc.rfc,
+                Rfc.razon_social,
+                Concepto.nombre.label("concepto_nombre"),
+                Delegacion.nombre.label("delegacion_nombre"),
+                EstadoSistema.codigo.label("estado_codigo"),
+                Referencia.importe,
+                Referencia.fecha_generacion
+            )
+            .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+            .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
+            .join(Rfc, GrupoReferencia.rfc_id == Rfc.rfc_id)
+            .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
+            .join(Solicitud, Referencia.solicitud_id == Solicitud.solicitud_id)
+            .join(Delegacion, Solicitud.delegacion_id == Delegacion.delegacion_id)
+            .where(EstadoSistema.codigo.in_(states))
+        )
+        if orden_ids:
+            stmt = stmt.where(GrupoReferencia.orden_id.in_(tuple(orden_ids)))
+
+        stmt = stmt.order_by(Referencia.fecha_generacion.desc())
+        results = self.session.execute(stmt).all()
+
+        return [
+            {
+                "referencia_portal": r.referencia_portal,
+                "rfc": r.rfc,
+                "razon_social": r.razon_social,
+                "concepto_nombre": r.concepto_nombre,
+                "delegacion_nombre": r.delegacion_nombre,
+                "estado_codigo": r.estado_codigo,
+                "importe": float(r.importe) if r.importe is not None else 0.0,
+                "fecha_generacion": r.fecha_generacion.strftime("%Y-%m-%d %H:%M:%S") if r.fecha_generacion else ""
+            }
+            for r in results
+        ]
         
     def get_ordenes(self, include_rejected: bool = True) -> List[dict]:
         from sqlalchemy import text
@@ -1886,6 +1939,31 @@ class InventarioRepository(BaseRepository):
             for row in results
         ]
 
+    def get_rfcs_con_stock_inventario(self) -> List[dict]:
+        """Returns active RFCs that have at least one reference in 'FACTURADA', 'ASIGNADA', or 'RESERVADA' states."""
+        from sqlalchemy import text
+        stmt = text("""
+            SELECT DISTINCT rfc.rfc_id, rfc.rfc, rfc.alias, rfc.razon_social
+            FROM sar_catalogo.rfc rfc
+            JOIN sar_produccion.grupo_referencia gr ON rfc.rfc_id = gr.rfc_id
+            JOIN sar_produccion.referencia r ON gr.grupo_id = r.grupo_id
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            WHERE rfc.activo = TRUE
+              AND es.entidad = 'referencia'
+              AND es.codigo IN ('FACTURADA', 'ASIGNADA', 'RESERVADA')
+            ORDER BY rfc.razon_social
+        """)
+        results = self.session.execute(stmt).all()
+        return [
+            {
+                "rfc_id": row.rfc_id,
+                "rfc": row.rfc,
+                "alias": row.alias,
+                "razon_social": row.razon_social
+            }
+            for row in results
+        ]
+
 
     def get_desarrollos_activos_para_apartar(self) -> List[dict]:
         """Returns all active desarrollo_empresa records with their rfc and delegacion data.
@@ -2002,8 +2080,68 @@ class InventarioRepository(BaseRepository):
 
 
 
+    def get_delegaciones_con_stock_facturadas(self, filter_assigned: str = "Disponible", orden_ids: list = None) -> List[str]:
+        """Returns sorted unique delegation names that have references under the given filter and orders."""
+        dims = self.get_dimensiones_con_stock_facturadas(filter_assigned=filter_assigned, orden_ids=orden_ids)
+        return dims.get("delegaciones", [])
+
+    def get_dimensiones_con_stock_facturadas(self, filter_assigned: str = "Disponible", orden_ids: list = None) -> dict:
+        """Returns a dict with lists of distinct empresas, conceptos, delegaciones, and desarrollos
+        with active stock under the given filter and orders via a single-pass aggregate query.
+        """
+        from sqlalchemy import text
+        conds = []
+        params = {}
+        if filter_assigned == "Disponible":
+            conds.append("es.codigo = 'FACTURADA'")
+            conds.append("ar.referencia_id IS NULL")
+        elif filter_assigned == "Asignada":
+            conds.append("es.codigo = 'ASIGNADA'")
+        elif filter_assigned == "Reservada":
+            conds.append("es.codigo = 'RESERVADA'")
+        elif filter_assigned == "LotesControl":
+            conds.append("es.codigo IN ('ASIGNADA', 'RESERVADA')")
+        else:
+            conds.append("es.codigo IN ('FACTURADA', 'ASIGNADA', 'RESERVADA')")
+
+        if orden_ids:
+            conds.append("og.orden_id IN :orden_ids_param")
+            params["orden_ids_param"] = tuple(orden_ids)
+
+        where_clause = f"WHERE {' AND '.join(conds)}" if conds else ""
+        stmt = text(f"""
+            SELECT 
+                array_remove(array_agg(DISTINCT rfc.razon_social), NULL) AS empresas,
+                array_remove(array_agg(DISTINCT c.nombre), NULL) AS conceptos,
+                array_remove(array_agg(DISTINCT d.nombre), NULL) AS delegaciones,
+                array_remove(array_agg(DISTINCT des.nombre), NULL) AS desarrollos
+            FROM sar_produccion.referencia r
+            JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
+            JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+            JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
+            JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+            JOIN sar_produccion.solicitud s ON r.solicitud_id = s.solicitud_id
+            LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
+            LEFT JOIN sar_archivo.asignacion_referencia ar ON r.referencia_id = ar.referencia_id
+            LEFT JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
+            LEFT JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
+            LEFT JOIN sar_produccion.orden_generacion og ON gr.orden_id = og.orden_id
+            {where_clause}
+        """)
+        row = self.session.execute(stmt, params).fetchone()
+        if not row:
+            return {"empresas": [], "conceptos": [], "delegaciones": [], "desarrollos": []}
+        return {
+            "empresas": sorted([x for x in (row.empresas or []) if x and x.strip()]),
+            "conceptos": sorted([x for x in (row.conceptos or []) if x and x.strip()]),
+            "delegaciones": sorted([x for x in (row.delegaciones or []) if x and x.strip()]),
+            "desarrollos": sorted([x for x in (row.desarrollos or []) if x and x.strip()]),
+        }
+
     def get_referencias_facturadas_paginated(
-        self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, rfc_id: int = None, filter_assigned: str = "Todos", start_date: str = None, end_date: str = None, orden_ids: list = None
+        self, limit: int = 200, offset: int = 0, search_text: str = "", concepto_id: int = None, rfc_id: int = None, filter_assigned: str = "Todos", start_date: str = None, end_date: str = None, orden_ids: list = None, delegacion_nombre: str = None,
+        empresa_nombre: str = None, concepto_nombre: str = None, desarrollo_nombre: str = None, destino_nombre: str = None,
+        asignado_a: str = None
     ) -> tuple[List[dict], int]:
         from sqlalchemy import text
         
@@ -2011,7 +2149,10 @@ class InventarioRepository(BaseRepository):
             return [], 0
             
         conditions = []
-        params = {"lim": limit, "off": offset}
+        params = {}
+        if limit is not None and limit > 0:
+            params["lim"] = limit
+            params["off"] = offset
         
         # Only references in 'FACTURADA' state
         conditions.append("estado_codigo = 'FACTURADA'")
@@ -2092,6 +2233,38 @@ class InventarioRepository(BaseRepository):
         if rfc_id:
             conditions_sql.append("gr.rfc_id = :rfc_id")
             
+        if empresa_nombre and empresa_nombre != "Todas las empresas":
+            conditions_sql.append("rfc.razon_social = :empresa_param")
+            params["empresa_param"] = empresa_nombre.strip()
+
+        if concepto_nombre and concepto_nombre != "Todos los conceptos":
+            conditions_sql.append("c.nombre = :concepto_param")
+            params["concepto_param"] = concepto_nombre.strip()
+
+        if desarrollo_nombre and desarrollo_nombre != "Todos los desarrollos":
+            conditions_sql.append("des.nombre = :desarrollo_param")
+            params["desarrollo_param"] = desarrollo_nombre.strip()
+
+        if delegacion_nombre and delegacion_nombre != "Todas las delegaciones":
+            conditions_sql.append("d.nombre = :delegacion_param")
+            params["delegacion_param"] = delegacion_nombre.strip()
+
+        if destino_nombre and destino_nombre not in ("Todos los destinos", "No aplica (Disponibles)"):
+            dest_upper = destino_nombre.strip().upper()
+            if dest_upper == "NOTARIA":
+                conditions_sql.append("la.tipo_destino = 'NOTARIA'")
+            elif dest_upper == "COLABORADOR":
+                conditions_sql.append("la.tipo_destino = 'COLABORADOR'")
+            elif dest_upper == "SIN ASIGNAR":
+                conditions_sql.append("(ar.referencia_id IS NULL OR la.tipo_destino IS NULL)")
+            else:
+                conditions_sql.append("UPPER(la.tipo_destino) = :destino_param")
+                params["destino_param"] = dest_upper
+
+        if asignado_a and not (asignado_a.strip().upper().startswith("TODO") or asignado_a.strip().upper().startswith("TODA")):
+            conditions_sql.append("COALESCE(n.nombre, col.nombre, '') = :asignado_a_param")
+            params["asignado_a_param"] = asignado_a.strip()
+
         if start_date:
             conditions_sql.append("la.fecha::date >= :start_date")
         if end_date:
@@ -2110,14 +2283,23 @@ class InventarioRepository(BaseRepository):
                 "n.nombre ILIKE :search",
                 "col.nombre ILIKE :search",
                 "u.nombre ILIKE :search",
-                "d.nombre ILIKE :search"
+                "d.nombre ILIKE :search",
+                # Búsqueda por dirección: soporta "MZ5 LT12", "MZ5", "LT12 EDIF B VIV 301", etc.
+                "CONCAT_WS(' ', ubi.mz, ubi.lote, ubi.edif, ubi.viv) ILIKE :search"
             ]
             conditions_sql.append(f"({' OR '.join(search_conds)})")
             
         where_clause = f"WHERE {' AND '.join(conditions_sql)}"
 
         # Optimization: Only join tables strictly required by filters to count or resolve IDs
-        if search_text or start_date or end_date:
+        if (
+            search_text
+            or start_date
+            or end_date
+            or (desarrollo_nombre and desarrollo_nombre != "Todos los desarrollos")
+            or (destino_nombre and destino_nombre not in ("Todos los destinos", "No aplica (Disponibles)"))
+            or (asignado_a and not (asignado_a.strip().upper().startswith("TODO") or asignado_a.strip().upper().startswith("TODA")))
+        ):
             filter_from = sql_base
             count_select = "SELECT COUNT(DISTINCT r.referencia_id)"
         else:
@@ -2127,26 +2309,35 @@ class InventarioRepository(BaseRepository):
             ]
             if filter_assigned == "Disponible":
                 filter_tables.append("LEFT JOIN sar_archivo.asignacion_referencia ar ON r.referencia_id = ar.referencia_id")
-            if concepto_id or rfc_id or orden_ids:
+            if concepto_id or rfc_id or orden_ids or (empresa_nombre and empresa_nombre != "Todas las empresas") or (concepto_nombre and concepto_nombre != "Todos los conceptos"):
                 filter_tables.append("JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id")
+            if empresa_nombre and empresa_nombre != "Todas las empresas":
+                filter_tables.append("JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id")
+            if concepto_nombre and concepto_nombre != "Todos los conceptos":
+                filter_tables.append("JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id")
             if orden_ids:
                 filter_tables.append("JOIN sar_produccion.orden_generacion og ON gr.orden_id = og.orden_id")
+            if delegacion_nombre and delegacion_nombre != "Todas las delegaciones":
+                filter_tables.append("JOIN sar_produccion.solicitud s ON r.solicitud_id = s.solicitud_id")
+                filter_tables.append("LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id")
             filter_from = "\n            ".join(filter_tables)
             count_select = "SELECT COUNT(r.referencia_id)"
 
         count_stmt = text(f"{count_select} {filter_from} {where_clause}")
         total_count = self.session.execute(count_stmt, params).scalar() or 0
 
+        limit_clause = "LIMIT :lim OFFSET :off" if (limit is not None and limit > 0) else ""
+
         # CTE High-Performance Pagination:
-        # 1. Resolve strictly the paged window of 200 IDs using B-Tree index scan
-        # 2. Join the descriptive display tables ONLY for those 200 rows
+        # 1. Resolve strictly the paged window of IDs using B-Tree index scan
+        # 2. Join the descriptive display tables ONLY for those rows
         query_stmt = text(f"""
             WITH paged_ref AS (
                 SELECT r.referencia_id
                 {filter_from}
                 {where_clause}
                 ORDER BY r.fecha_generacion DESC, r.referencia_id DESC
-                LIMIT :lim OFFSET :off
+                {limit_clause}
             )
             SELECT
                 r.referencia_id,
@@ -2253,8 +2444,11 @@ class InventarioRepository(BaseRepository):
     ) -> dict:
         from sqlalchemy import text
         
-        if orden_ids is not None and len(orden_ids) == 0:
-            return {"disponibles": 0, "asignadas": 0, "reservadas": 0}
+        if orden_ids is not None:
+            if not isinstance(orden_ids, (list, tuple, set)):
+                orden_ids = None
+            elif len(orden_ids) == 0:
+                return {"disponibles": 0, "asignadas": 0, "reservadas": 0}
             
         params = {}
         if search_text:
@@ -2577,8 +2771,11 @@ class InventarioRepository(BaseRepository):
         """Returns paginated lotes with optional filters including date range. Returns (list_of_dicts, total_count)."""
         from sqlalchemy import text
 
-        if orden_ids is not None and len(orden_ids) == 0:
-            return [], 0
+        if orden_ids is not None:
+            if not isinstance(orden_ids, (list, tuple, set)):
+                orden_ids = None
+            elif len(orden_ids) == 0:
+                return [], 0
 
         where_clauses = []
         params = {"limit": limit, "offset": offset}
@@ -2817,8 +3014,11 @@ class InventarioRepository(BaseRepository):
         from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto
         from sqlalchemy import select, func, exists
 
-        if orden_ids is not None and len(orden_ids) == 0:
-            return 0
+        if orden_ids is not None:
+            if not isinstance(orden_ids, (list, tuple, set)):
+                orden_ids = None
+            elif len(orden_ids) == 0:
+                return 0
 
         conc = self.session.get(Concepto, concepto_id)
         if not conc:
@@ -2858,7 +3058,7 @@ class InventarioRepository(BaseRepository):
         self, notaria_id: int, rfc_id: int, concepto_id: int, delegacion_id: int, cantidad: int, usuario_id: int, desarrollo_id: Optional[int] = None, observaciones: Optional[str] = None, orden_ids: Optional[list] = None
     ) -> int:
         from sar.src.storage.models import LoteAsignacion, LoteDetalle, AsignacionReferencia, Referencia, EstadoSistema, Desarrollo, GrupoReferencia, Solicitud, Concepto
-        from sqlalchemy import select
+        from sqlalchemy import select, exists
 
         # If desarrollo_id is not specified (e.g. "Cualquier Desarrollo"), we find fallback development
         from sar.src.storage.models import DesarrolloEmpresa
@@ -3494,8 +3694,11 @@ class InventarioRepository(BaseRepository):
         from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto
         from sqlalchemy import select, exists
 
-        if orden_ids is not None and len(orden_ids) == 0:
-            return []
+        if orden_ids is not None:
+            if not isinstance(orden_ids, (list, tuple, set)):
+                orden_ids = None
+            elif len(orden_ids) == 0:
+                return []
 
         conc = self.session.get(Concepto, concepto_id)
         if not conc:
