@@ -207,6 +207,7 @@ class Concepto(Base):
     nombre: Mapped[str] = mapped_column(String(300), nullable=False)
     alias: Mapped[Optional[str]] = mapped_column(String(20))
     activo: Mapped[Optional[bool]] = mapped_column(Boolean, default=True)
+    es_cancelacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Relaciones
     grupos_referencia: Mapped[List["GrupoReferencia"]] = relationship(back_populates="concepto")
@@ -328,6 +329,7 @@ class OrdenGeneracion(Base):
     fecha_creacion: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     estado_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.estado_sistema.estado_id"), nullable=False)
     usuario_id: Mapped[int] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id"), nullable=False)
+    tipo_orden: Mapped[str] = mapped_column(String(30), default="ESTANDAR", nullable=False)
 
     # Relaciones
     municipio: Mapped["Municipio"] = relationship()

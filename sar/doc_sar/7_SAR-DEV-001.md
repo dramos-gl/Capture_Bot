@@ -378,7 +378,12 @@ El sistema SAR implementa una arquitectura híbrida desacoplada gobernada por la
 •	**Transparencia Total de Vistas**: Las vistas de interfaz de usuario (`PySide6`) no deben ejecutar lógica de acceso a datos directa ni asumir un protocolo de red exclusivo. Deben consumir interfaces unificadas de servicio (`*UIService`).
 •	**Simetría Funcional (Zero Divergence)**: Todo servicio en la capa de presentación debe implementar de forma idéntica la consulta/persistencia local directa (`db_connector` / SQLAlchemy) y la alternativa distribuida REST API (`api_client` / FastAPI).
 •	**Serialización Homogénea**: Los endpoints del servidor central (`ops_router`, `docs_router`, `admin_router`, `auth_router`) deben estructurar y exponer exactamente los mismos diccionarios y modelos de datos (Pydantic / JSON) que los repositorios de acceso local.
-•	**Regla de No-Regresión**: Cualquier modificación o nuevo requerimiento funcional debe ser probado y validado con `CONNECT_VIA_API: true` y `CONNECT_VIA_API: false`.
+________________________________________
+22. Estándar para Conceptos de Cancelación y Órdenes Anuales
+El sistema SAR incorpora el soporte para trámites esporádicos de Cancelación respetando los siguientes patrones:
+•	**Clasificación de Catálogo (`es_cancelacion`)**: En `sar_catalogo.concepto`, los conceptos de cancelación se identifican mediante la bandera `es_cancelacion = TRUE`. El servicio `OrdenesUIService.get_catalogos(es_cancelacion=...)` permite obtener el catálogo segmentado.
+•	**Orden Contenedora Anual (`tipo_orden = 'CANCELACION'`)**: Para evitar la proliferación de órdenes individuales por cada trámite ocasional, los trámites de cancelación se consolidan en una **Orden General Anual** por ejercicio fiscal (`ORD-CANCEL-YYYY`).
+•	**Autocreación y Reutilización**: El backend (`OrdenesService`) reutiliza la orden contenedora del año si ya existe, o solicita/crea automáticamente `ORD-CANCEL-YYYY` si es el primer trámite del año.
 ________________________________________
 Estado Documental
 Documento | Nombre Formal | Categoría | Estado

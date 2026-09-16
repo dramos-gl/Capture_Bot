@@ -21,6 +21,7 @@ class OrdenCrearRequest(BaseModel):
     descripcion: str
     municipio_id: int
     renglones: List[Dict[str, Any]]
+    tipo_orden: Optional[str] = "ESTANDAR"
 
 class EstadoChangeRequest(BaseModel):
     usuario_id: int
@@ -29,12 +30,12 @@ class EstadoChangeRequest(BaseModel):
 
 # Endpoints de Catálogos
 @router.get("/catalogos")
-def get_catalogos(db: Session = Depends(get_db)):
+def get_catalogos(es_cancelacion: Optional[bool] = None, db: Session = Depends(get_db)):
     """Retorna los catálogos activos (RFCs, Conceptos, Delegaciones, Municipios)."""
     repo = CatalogoRepository(db)
     try:
         rfcs = [{"rfc_id": r.rfc_id, "rfc": r.rfc, "alias": r.alias, "razon_social": r.razon_social} for r in repo.get_rfcs_activos()]
-        conceptos = [{"concepto_id": c.concepto_id, "nombre": c.nombre} for c in repo.get_conceptos_activos()]
+        conceptos = [{"concepto_id": c.concepto_id, "nombre": c.nombre, "es_cancelacion": getattr(c, "es_cancelacion", False)} for c in repo.get_conceptos_activos(es_cancelacion=es_cancelacion)]
         delegaciones = [{"delegacion_id": d.delegacion_id, "nombre": d.nombre} for d in repo.get_delegaciones_activas()]
         municipios = [{"municipio_id": m.municipio_id, "nombre": m.nombre, "activo": m.activo} for m in repo.get_all_municipios()]
         

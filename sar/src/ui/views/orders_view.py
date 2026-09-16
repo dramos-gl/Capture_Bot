@@ -1,11 +1,11 @@
 """Orders Management View."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QStackedWidget
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QStackedWidget, QCheckBox, QFrame
 )
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components import (
-    CustomCard, CustomLabel, CustomButton, InteractiveGrid, CustomInput, CustomComboBox, FilterBar,
+    CustomCard, CustomLabel, CustomButton, CustomCheckBox, InteractiveGrid, CustomInput, CustomComboBox, FilterBar,
     GLInfoBanner, GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.utils.icons import Icons
@@ -289,19 +289,24 @@ class OrdersView(QWidget):
                 )
                 self._on_cancelar_edicion()
             else:
+                tipo_ord = "CANCELACION" if self.chk_cancelaciones.isChecked() else "ESTANDAR"
                 folio = self.ordenes_ui_service.crear_orden_manual(
                     usuario_id=current_usuario_id,
                     sesion_id=current_sesion_id,
                     descripcion=desc,
                     municipio_id=municipio_id,
-                    renglones=data
+                    renglones=data,
+                    tipo_orden=tipo_ord
                 )
                 QMessageBox.information(
                     self, "Éxito", 
-                    f"Orden {folio} creada correctamente con {len(data)} grupos."
+                    f"Orden {folio} registrada correctamente con {len(data)} partidas."
                 )
                 # Reset Form
-                self.desc_input.setText("")
+                if self.chk_cancelaciones.isChecked():
+                    self.chk_cancelaciones.setChecked(False)
+                else:
+                    self.desc_input.setText("")
                 self.grid.clear()
                 self.grid.add_row()
                 
@@ -484,7 +489,15 @@ class OrdersView(QWidget):
         inputs_layout.addLayout(mun_layout, stretch=1)
         inputs_layout.addLayout(desc_layout, stretch=1)
         
+        # Checkbox Modo Cancelaciones (Design System Atom)
+        mode_layout = QHBoxLayout()
+        self.chk_cancelaciones = CustomCheckBox("Modo Cancelaciones (Orden Anual)")
+        self.chk_cancelaciones.toggled.connect(self._on_toggle_cancelaciones)
+        mode_layout.addWidget(self.chk_cancelaciones)
+        mode_layout.addStretch()
+
         card_layout.addLayout(inputs_layout)
+        card_layout.addLayout(mode_layout)
         
         # Divider line
         divider = QFrame()
@@ -516,9 +529,21 @@ class OrdersView(QWidget):
                 total_general += row.get("cantidad", 0)
         self.lbl_tot_val.setText(str(total_general))
             
-    def _load_catalogs(self):
+    def _on_toggle_cancelaciones(self, checked: bool):
+        from datetime import datetime
+        current_year = datetime.utcnow().year
+        if checked:
+            self._load_catalogs(es_cancelacion=True)
+            self.desc_input.setText(f"Orden Anual de Cancelaciones {current_year}")
+            self.desc_input.setReadOnly(True)
+        else:
+            self._load_catalogs(es_cancelacion=False)
+            self.desc_input.setText("")
+            self.desc_input.setReadOnly(False)
+
+    def _load_catalogs(self, es_cancelacion: bool = False):
         try:
-            data = self.ordenes_ui_service.get_catalogos()
+            data = self.ordenes_ui_service.get_catalogos(es_cancelacion=es_cancelacion)
             rfcs = [
                 (
                     r["rfc_id"],

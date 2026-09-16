@@ -47,10 +47,11 @@ class OrdenesService:
         sesion_id: Optional[int],
         descripcion: str,
         municipio_id: int,
-        renglones: List[Dict[str, Any]]
+        renglones: List[Dict[str, Any]],
+        tipo_orden: str = "ESTANDAR"
     ) -> OrdenGeneracion:
         """
-        Registers a new manual order.
+        Registers a new manual order or appends to an annual cancellation order.
         `renglones` format: [{'rfc_id': int, 'concepto_id': int, 'delegacion_id': int, 'cantidad': int}]
         """
         # Determine initial states
@@ -61,19 +62,41 @@ class OrdenesService:
         # Config parameter for max batch size of solicitudes
         lote_size = self.config_repo.get_lote_solicitud_size()
 
-        # Generate unique Folio (e.g. ORD-YYYYMMDD-HHMMSS)
-        folio_str = f"ORD-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
-
-        # 1. Create the Order
-        nueva_orden = OrdenGeneracion(
-            folio=folio_str,
-            descripcion=descripcion,
-            municipio_id=municipio_id,
-            estado_id=estado_orden_id,
-            usuario_id=usuario_id
-        )
-        self.session.add(nueva_orden)
-        self.session.flush()
+        if tipo_orden.upper() == "CANCELACION":
+            current_year = datetime.utcnow().year
+            folio_str = f"ORD-CANCEL-{current_year}"
+            
+            # Check if annual cancellation order already exists
+            from sqlalchemy import select
+            stmt = select(OrdenGeneracion).where(
+                OrdenGeneracion.folio == folio_str,
+                OrdenGeneracion.tipo_orden == "CANCELACION"
+            )
+            nueva_orden = self.session.execute(stmt).scalars().first()
+            if not nueva_orden:
+                nueva_orden = OrdenGeneracion(
+                    folio=folio_str,
+                    descripcion=descripcion or f"Orden Anual de Cancelaciones {current_year}",
+                    municipio_id=municipio_id,
+                    estado_id=estado_orden_id,
+                    usuario_id=usuario_id,
+                    tipo_orden="CANCELACION"
+                )
+                self.session.add(nueva_orden)
+                self.session.flush()
+        else:
+            # Generate unique Folio (e.g. ORD-YYYYMMDD-HHMMSS)
+            folio_str = f"ORD-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+            nueva_orden = OrdenGeneracion(
+                folio=folio_str,
+                descripcion=descripcion,
+                municipio_id=municipio_id,
+                estado_id=estado_orden_id,
+                usuario_id=usuario_id,
+                tipo_orden=tipo_orden.upper() if tipo_orden else "ESTANDAR"
+            )
+            self.session.add(nueva_orden)
+            self.session.flush()
 
         total_solicitudes_creadas = 0
         total_referencias_solicitadas = 0
@@ -89,20 +112,33 @@ class OrdenesService:
             
             total_referencias_solicitadas += int(row['cantidad'])
 
-        # 3. Create Groups and divide into Solicitudes
+        # 3. Create or update Groups and divide into Solicitudes
+        from sqlalchemy import select
         for (rfc_id, concepto_id), data in grupos_dict.items():
             cantidad_total = data['cantidad_total']
             
-            # Create ONE Group per RFC+Concepto combination
-            grupo = GrupoReferencia(
-                orden_id=nueva_orden.orden_id,
-                rfc_id=rfc_id,
-                concepto_id=concepto_id,
-                cantidad_solicitada=cantidad_total,
-                estado_id=estado_grupo_id
+            # Check if group already exists for this order
+            stmt = select(GrupoReferencia).where(
+                GrupoReferencia.orden_id == nueva_orden.orden_id,
+                GrupoReferencia.rfc_id == rfc_id,
+                GrupoReferencia.concepto_id == concepto_id
             )
-            self.session.add(grupo)
-            self.session.flush()
+            grupo = self.session.execute(stmt).scalars().first()
+            
+            if grupo:
+                consecutivo_actual = (grupo.ultimo_consecutivo or 0) + 1
+                grupo.cantidad_solicitada += cantidad_total
+            else:
+                consecutivo_actual = 1
+                grupo = GrupoReferencia(
+                    orden_id=nueva_orden.orden_id,
+                    rfc_id=rfc_id,
+                    concepto_id=concepto_id,
+                    cantidad_solicitada=cantidad_total,
+                    estado_id=estado_grupo_id
+                )
+                self.session.add(grupo)
+                self.session.flush()
 
             consecutivo_actual = 1
             

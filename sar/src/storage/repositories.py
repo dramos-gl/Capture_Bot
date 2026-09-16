@@ -353,8 +353,11 @@ class CatalogoRepository(BaseRepository):
         stmt = select(Rfc).where(Rfc.activo == True).order_by(Rfc.razon_social)
         return list(self.session.execute(stmt).scalars().all())
 
-    def get_conceptos_activos(self) -> List[Concepto]:
-        stmt = select(Concepto).where(Concepto.activo == True).order_by(Concepto.nombre)
+    def get_conceptos_activos(self, es_cancelacion: Optional[bool] = None) -> List[Concepto]:
+        stmt = select(Concepto).where(Concepto.activo == True)
+        if es_cancelacion is not None:
+            stmt = stmt.where(Concepto.es_cancelacion == es_cancelacion)
+        stmt = stmt.order_by(Concepto.nombre)
         return list(self.session.execute(stmt).scalars().all())
 
     def get_delegaciones_activas(self) -> List[Delegacion]:
@@ -370,8 +373,11 @@ class CatalogoRepository(BaseRepository):
         self.session.flush()
         return rfc
 
-    def get_all_conceptos(self) -> List[Concepto]:
-        stmt = select(Concepto).order_by(Concepto.nombre)
+    def get_all_conceptos(self, es_cancelacion: Optional[bool] = None) -> List[Concepto]:
+        stmt = select(Concepto)
+        if es_cancelacion is not None:
+            stmt = stmt.where(Concepto.es_cancelacion == es_cancelacion)
+        stmt = stmt.order_by(Concepto.nombre)
         return list(self.session.execute(stmt).scalars().all())
 
     def save_concepto(self, concepto: Concepto) -> Concepto:

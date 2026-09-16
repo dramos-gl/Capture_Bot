@@ -168,7 +168,8 @@ CREATE TABLE sar_catalogo.concepto (
     codigo_portal VARCHAR(300),
     nombre VARCHAR(300) NOT NULL,
     alias VARCHAR(20),
-    activo BOOLEAN DEFAULT TRUE
+    activo BOOLEAN DEFAULT TRUE,
+    es_cancelacion BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- Tabla: rfc
@@ -261,10 +262,13 @@ CREATE TABLE sar_produccion.orden_generacion (
     fecha_creacion TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     estado_id BIGINT NOT NULL,
     usuario_id BIGINT NOT NULL,
+    tipo_orden VARCHAR(30) NOT NULL DEFAULT 'ESTANDAR',
     FOREIGN KEY (municipio_id) REFERENCES sar_catalogo.municipio(municipio_id) ON DELETE RESTRICT,
     FOREIGN KEY (estado_id) REFERENCES sar_catalogo.estado_sistema(estado_id) ON DELETE RESTRICT,
     FOREIGN KEY (usuario_id) REFERENCES sar_seguridad.usuario(usuario_id) ON DELETE RESTRICT
 );
+
+CREATE INDEX IF NOT EXISTS idx_orden_generacion_tipo_orden ON sar_produccion.orden_generacion(tipo_orden);
 
 -- Tabla: grupo_referencia
 CREATE TABLE sar_produccion.grupo_referencia (

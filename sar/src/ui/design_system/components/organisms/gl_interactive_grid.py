@@ -542,6 +542,10 @@ class InteractiveGrid(QWidget):
         self._delegaciones = delegaciones
         if desarrollos:
             self._desarrollos = desarrollos
+        
+        for row in self.rows:
+            if not self._cascade_mode:
+                row.populate(self._rfcs, self._conceptos, self._delegaciones, self._desarrollos)
 
     def set_third_column_label(self, label: str):
         """Deprecated: kept for compatibility."""
