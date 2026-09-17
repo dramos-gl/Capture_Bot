@@ -1667,6 +1667,14 @@ class InventoryView(QWidget):
         single temporary file using pypdf, and opens it with the OS default PDF viewer.
         Shows a GLLoadingDialog (design system) while the operation runs in a background thread.
         """
+        if not (self._check_permission("CTRL:INVENTARIO", "LEER") or self._check_permission("DERECHOS", "LEER")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes para consultar los PDFs de facturas (CTRL:INVENTARIO:LEER)."
+            )
+            return
+
         if not referencia_id:
             QMessageBox.warning(self, "Sin Referencia", "No se pudo determinar el ID del derecho seleccionado.")
             return
@@ -3218,32 +3226,13 @@ class InventoryView(QWidget):
         filter_row.setContentsMargins(16, 12, 16, 12)
         filter_row.setSpacing(12)
 
-        # 1. Search Input
-        self.search_lotes = QLineEdit()
-        self.search_lotes.setObjectName("filterBarSearch")
-        self.search_lotes.setPlaceholderText("Buscar por ID, notaría, colaborador, solicitante...")
-        self.search_lotes.setFixedHeight(36)
-        self.search_lotes.setClearButtonEnabled(True)
-        self.search_lotes.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
-        self.search_lotes.textChanged.connect(self._on_search_lotes_text_changed)
-        self.search_lotes.returnPressed.connect(self._on_search_lotes_trigger)
-        filter_row.addWidget(self.search_lotes, stretch=1)
-
-        # Botón Buscar explícito para Lotes
-        self.btn_buscar_lotes = CustomButton("", is_secondary=True, parent=self)
-        self.btn_buscar_lotes.setIcon(Icons.buscar(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_buscar_lotes.setFixedSize(36, 36)
-        self.btn_buscar_lotes.setToolTip("Buscar asignaciones (o presione Enter)")
-        self.btn_buscar_lotes.clicked.connect(self._on_search_lotes_trigger)
-        filter_row.addWidget(self.btn_buscar_lotes)
-
-        # 2. Tipo Destino
+        # 1. Tipo Destino
         self.labeled_destino_lotes = LabeledComboBox("Tipo Destino", ["Todos", "NOTARIA", "COLABORADOR"])
         self.cb_destino_filter_lotes = self.labeled_destino_lotes.combo
         self.cb_destino_filter_lotes.currentTextChanged.connect(self._on_destino_filter_lotes)
         filter_row.addWidget(self.labeled_destino_lotes)
 
-        # 3. Date Filters (Atomic Design Molecules)
+        # 2. Date Filters (Atomic Design Molecules)
         self.group_start_date = LabeledDateEdit("Desde", parent=self)
         self.start_date_filter = self.group_start_date.date_edit
         self.group_start_date.setDate(QDate.currentDate().addMonths(-3))
@@ -3256,7 +3245,7 @@ class InventoryView(QWidget):
         self.end_date_filter.dateChanged.connect(self._on_date_changed_lotes)
         filter_row.addWidget(self.group_end_date)
 
-        # 4. Refresh button
+        # 3. Refresh button
         self.btn_refresh_lotes = CustomButton("", is_secondary=True, parent=self)
         self.btn_refresh_lotes.setObjectName("filterBarActionBtn")
         self.btn_refresh_lotes.setIcon(Icons.actualizar("#FFFFFF"))
@@ -3266,7 +3255,7 @@ class InventoryView(QWidget):
         self.btn_refresh_lotes.clicked.connect(self.refresh_lotes_data)
         filter_row.addWidget(self.btn_refresh_lotes)
 
-        # 5. Filter Button (Funnel) for Lotes
+        # 4. Filter Button (Funnel) for Lotes
         self.btn_filter_orden_lotes = CustomButton("", is_secondary=True, parent=self)
         self.btn_filter_orden_lotes.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
         self.btn_filter_orden_lotes.setFixedSize(36, 36)
@@ -3277,7 +3266,45 @@ class InventoryView(QWidget):
         layout.addWidget(filter_bar_frame)
 
         # --- Main Card & Table ---
-        self.card_lotes = CustomCard(title="Registro de Asignaciones", parent=self)
+        self.card_lotes = CustomCard(title="", parent=self)
+
+        # Table Header Layout (Title + Search)
+        self.table_header_layout_lotes = QHBoxLayout()
+        self.table_header_layout_lotes.setContentsMargins(0, 0, 0, 0)
+        self.table_header_layout_lotes.setSpacing(12)
+
+        self.lbl_table_icon_lotes = QLabel()
+        self.lbl_table_icon_lotes.setPixmap(Icons.file_text("#2563EB").pixmap(18, 18))
+        self.lbl_table_icon_lotes.setStyleSheet("background: transparent;")
+
+        self.lbl_table_title_lotes = CustomLabel("Asignaciones", variant="subheader")
+        self.lbl_table_title_lotes.setMinimumWidth(0)
+
+        self.table_header_layout_lotes.addWidget(self.lbl_table_icon_lotes)
+        self.table_header_layout_lotes.addWidget(self.lbl_table_title_lotes)
+        self.table_header_layout_lotes.addStretch()
+
+        # Search Input inside Table Header for Lotes
+        self.search_lotes = QLineEdit(self)
+        self.search_lotes.setPlaceholderText("Buscar por ID, notaría, colaborador, solicitante...")
+        self.search_lotes.setMinimumWidth(280)
+        self.search_lotes.setMaximumWidth(480)
+        self.search_lotes.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.search_lotes.setClearButtonEnabled(True)
+        self.search_lotes.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
+        self.search_lotes.textChanged.connect(self._on_search_lotes_text_changed)
+        self.search_lotes.returnPressed.connect(self._on_search_lotes_trigger)
+        self.table_header_layout_lotes.addWidget(self.search_lotes)
+
+        # Botón Buscar explícito para Lotes
+        self.btn_buscar_lotes = CustomButton("", is_secondary=True, parent=self)
+        self.btn_buscar_lotes.setIcon(Icons.buscar(Colors.TEXT_LIGHT_SECONDARY))
+        self.btn_buscar_lotes.setFixedSize(36, 36)
+        self.btn_buscar_lotes.setToolTip("Buscar asignaciones (o presione Enter)")
+        self.btn_buscar_lotes.clicked.connect(self._on_search_lotes_trigger)
+        self.table_header_layout_lotes.addWidget(self.btn_buscar_lotes)
+
+        self.card_lotes.layout.addLayout(self.table_header_layout_lotes)
 
         headers = ["ID", "Tipo Destino", "Asignado A", "Solicitante", "Fecha", "Total Refs", "Creado Por", "Observaciones"]
         self.table_lotes = StyledDataTable(headers, parent=self)
@@ -3418,11 +3445,11 @@ class InventoryView(QWidget):
             self.lbl_table_title.setToolTip(tooltip_text)
 
         # Título en Gestión de Asignaciones (tab_lotes - dentro de la tarjeta de la tabla)
-        if hasattr(self, "card_lotes") and hasattr(self.card_lotes, "header"):
-            self.card_lotes.header.setText(
+        if hasattr(self, "lbl_table_title_lotes"):
+            self.lbl_table_title_lotes.setText(
                 f"Asignaciones &nbsp;|&nbsp; <span style='font-size: 13px; font-weight: normal;'>Filtro: <b>{order_text}</b></span>"
             )
-            self.card_lotes.header.setToolTip(tooltip_text)
+            self.lbl_table_title_lotes.setToolTip(tooltip_text)
 
         # Título en Asignación de Derechos Directa (tab_individual)
         if hasattr(self, "lbl_card_title_ind"):
@@ -4462,16 +4489,25 @@ class ManualAssignmentDialog(QDialog):
             except Exception:
                 desarrollo_empresas = []
 
+            # 1. Nivel 1: Filtrar por RFC y Delegación juntos
             valid_desarrollo_ids = set()
-            for de in desarrollo_empresas:
-                if rfc_id and delegacion_id and de.get("rfc_id") == rfc_id and de.get("delegacion_id") == delegacion_id:
-                    valid_desarrollo_ids.add(de.get("desarrollo_id"))
+            if rfc_id and delegacion_id:
+                for de in desarrollo_empresas:
+                    if de.get("rfc_id") == rfc_id and de.get("delegacion_id") == delegacion_id:
+                        valid_desarrollo_ids.add(de.get("desarrollo_id"))
+
+            # 2. Nivel 2: Fallback a RFC si Nivel 1 no trajo desarrollos
+            if not valid_desarrollo_ids and rfc_id:
+                for de in desarrollo_empresas:
+                    if de.get("rfc_id") == rfc_id:
+                        valid_desarrollo_ids.add(de.get("desarrollo_id"))
 
             self.cb_desarrollo.clear()
             self.cb_desarrollo.addItem("-- Seleccione Desarrollo (Opcional) --", None)
             
+            # 3. Nivel 3: Si se encontraron IDs válidos por RFC/Delegación, filtrar; de lo contrario mostrar globales
             for d in self._desarrollos_list:
-                if not (rfc_id and delegacion_id) or d["desarrollo_id"] in valid_desarrollo_ids:
+                if not valid_desarrollo_ids or d["desarrollo_id"] in valid_desarrollo_ids:
                     self.cb_desarrollo.addItem(d["nombre"], d["desarrollo_id"])
             
             self.cb_desarrollo.setCurrentIndex(0)

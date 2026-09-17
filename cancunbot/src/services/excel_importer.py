@@ -28,13 +28,24 @@ class ExcelImporter:
         - CANCUN_EXCEL_COL_FOLIO_PASE_CAJA
     """
 
-    def __init__(self):
-        # Conectar dinámicamente a la BD del SAR para obtener las configuraciones reales
-        db = DatabaseConnector()
-        with db.get_session() as session:
-            repo = ConfigRepository(session)
-            self._col_electronico = repo.get_parametro("CANCUN_EXCEL_COL_FOLIO_ELECTRONICO") or "FOLIO_ELECTRONICO"
-            self._col_pase_caja = repo.get_parametro("CANCUN_EXCEL_COL_FOLIO_PASE_CAJA") or "FOLIO_PASE_CAJA"
+    def __init__(self, db_connector=None, api_client=None):
+        self.db_connector = db_connector
+        self.api_client = api_client
+        self._col_electronico = "FOLIO_ELECTRONICO"
+        self._col_pase_caja = "FOLIO_PASE_CAJA"
+
+        # Cargar configuración desde API o BD local sin fallar si es cliente distribuido
+        try:
+            if self.api_client and getattr(self.api_client, "connect_via_api", False):
+                cfg = self.api_client.request("GET", "/api/docs/cancun/bot-config") or {}
+                # Se puede tomar del diccionario o usar defaults si no viene especificado
+            elif self.db_connector:
+                with self.db_connector.get_session() as session:
+                    repo = ConfigRepository(session)
+                    self._col_electronico = repo.get_parametro("CANCUN_EXCEL_COL_FOLIO_ELECTRONICO") or "FOLIO_ELECTRONICO"
+                    self._col_pase_caja = repo.get_parametro("CANCUN_EXCEL_COL_FOLIO_PASE_CAJA") or "FOLIO_PASE_CAJA"
+        except Exception as e:
+            logger.debug(f"ExcelImporter init config fallback to defaults: {e}")
 
     def importar(self, ruta_excel: str) -> list[dict]:
         """
@@ -105,47 +116,58 @@ class ExcelImporter:
             )
 
         folios: list[dict] = []
-        db = DatabaseConnector()
-        with db.get_session() as session:
-            # Caché de catálogos en memoria para velocidad
-            res_rfc = session.execute(text("SELECT rfc_id, rfc FROM sar_catalogo.rfc WHERE activo = true")).fetchall()
-            rfc_cache = {row[1].strip().upper(): row[0] for row in res_rfc}
+        rfc_cache = {}
+        desarrollo_cache = {}
 
-            res_des = session.execute(text("SELECT desarrollo_id, nombre FROM sar_catalogo.desarrollo WHERE activo = true")).fetchall()
-            def _clean(val: str) -> str:
-                return val.strip().upper().replace(" ", "").replace("_", "").replace("-", "")
-            desarrollo_cache = {_clean(row[1]): row[0] for row in res_des}
+        def _clean(val: str) -> str:
+            return val.strip().upper().replace(" ", "").replace("_", "").replace("-", "")
 
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                if len(row) == 0:
-                    continue
-                folio_elec = str(row[idx_elec]).strip() if idx_elec is not None and row[idx_elec] is not None else None
-                folio_pase = str(row[idx_pase]).strip() if idx_pase is not None and row[idx_pase] is not None else None
+        try:
+            if self.api_client and getattr(self.api_client, "connect_via_api", False):
+                # Vía REST API
+                des_data = self.api_client.request("GET", "/api/docs/cancun/desarrollos") or []
+                for item in des_data:
+                    desarrollo_cache[_clean(item["nombre"])] = item["desarrollo_id"]
+            elif self.db_connector:
+                with self.db_connector.get_session() as session:
+                    res_rfc = session.execute(text("SELECT rfc_id, rfc FROM sar_catalogo.rfc WHERE activo = true")).fetchall()
+                    rfc_cache = {row[1].strip().upper(): row[0] for row in res_rfc}
 
-                # Saltar filas vacías
-                if not folio_elec and not folio_pase:
-                    continue
+                    res_des = session.execute(text("SELECT desarrollo_id, nombre FROM sar_catalogo.desarrollo WHERE activo = true")).fetchall()
+                    desarrollo_cache = {_clean(row[1]): row[0] for row in res_des}
+        except Exception as cache_err:
+            logger.debug(f"ExcelImporter catalog cache load warning: {cache_err}")
 
-                # Determinar tipo de folio
-                tipo = "ELECTRONICO" if folio_elec else "PASE_CAJA"
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if len(row) == 0:
+                continue
+            folio_elec = str(row[idx_elec]).strip() if idx_elec is not None and row[idx_elec] is not None else None
+            folio_pase = str(row[idx_pase]).strip() if idx_pase is not None and row[idx_pase] is not None else None
 
-                # Resolver RFC
-                rfc_val = str(row[idx_rfc]).strip().upper() if idx_rfc is not None and row[idx_rfc] is not None else None
-                rfc_id = rfc_cache.get(rfc_val) if rfc_val else None
+            # Saltar filas vacías
+            if not folio_elec and not folio_pase:
+                continue
 
-                # Resolver Desarrollo
-                des_val = str(row[idx_desarrollo]).strip() if idx_desarrollo is not None and row[idx_desarrollo] is not None else None
-                des_id = desarrollo_cache.get(_clean(des_val)) if des_val else None
+            # Determinar tipo de folio
+            tipo = "ELECTRONICO" if folio_elec else "PASE_CAJA"
 
-                folios.append({
-                    "folio_electronico": folio_elec,
-                    "folio_pase_caja": folio_pase,
-                    "tipo_folio": tipo,
-                    "rfc_id": rfc_id,
-                    "desarrollo_id": des_id,
-                    "excel_rfc": rfc_val,
-                    "excel_desarrollo": des_val
-                })
+            # Resolver RFC
+            rfc_val = str(row[idx_rfc]).strip().upper() if idx_rfc is not None and row[idx_rfc] is not None else None
+            rfc_id = rfc_cache.get(rfc_val) if rfc_val else None
+
+            # Resolver Desarrollo
+            des_val = str(row[idx_desarrollo]).strip() if idx_desarrollo is not None and row[idx_desarrollo] is not None else None
+            des_id = desarrollo_cache.get(_clean(des_val)) if des_val else None
+
+            folios.append({
+                "folio_electronico": folio_elec,
+                "folio_pase_caja": folio_pase,
+                "tipo_folio": tipo,
+                "rfc_id": rfc_id,
+                "desarrollo_id": des_id,
+                "excel_rfc": rfc_val,
+                "excel_desarrollo": des_val
+            })
 
         wb.close()
         logger.info(f"Importados {len(folios)} folios desde el Excel con resolución de catálogos.")

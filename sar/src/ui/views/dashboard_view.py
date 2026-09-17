@@ -389,7 +389,7 @@ class DashboardView(QWidget):
         self.show_metrics_requested.emit(list(self.selected_orden_ids))
 
     def _on_error_card_double_clicked(self, event):
-        if not (self._check_permission("DASHBOARD", "LEER") or self._check_permission("DERECHOS", "LEER")):
+        if not self._check_permission("DERECHOS", "LEER"):
             from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
             QMessageBox.warning(
                 self,
@@ -407,7 +407,7 @@ class DashboardView(QWidget):
         dialog.exec()
 
     def _on_invalidas_card_double_clicked(self, event):
-        if not (self._check_permission("DASHBOARD", "LEER") or self._check_permission("DERECHOS", "LEER")):
+        if not self._check_permission("DERECHOS", "LEER"):
             from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
             QMessageBox.warning(
                 self,
@@ -938,6 +938,15 @@ class ErrorDetailDialog(QDialog):
         from PySide6.QtWidgets import QFileDialog
         from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
         import openpyxl
+
+        if hasattr(self.parent(), "_check_permission"):
+            if not (self.parent()._check_permission("DASHBOARD", "EJECUTAR") or self.parent()._check_permission("DERECHOS", "LEER")):
+                QMessageBox.warning(
+                    self,
+                    "Acceso Denegado",
+                    "No tiene permisos para exportar reportes a Excel (DASHBOARD:EJECUTAR)."
+                )
+                return
 
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Exportar a Excel", f"{self.title_text}.xlsx", "Excel Files (*.xlsx)"

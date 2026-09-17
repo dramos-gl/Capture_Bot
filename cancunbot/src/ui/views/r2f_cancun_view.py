@@ -678,12 +678,22 @@ class R2FCancunView(QWidget):
         if not file_path:
             return
 
+        from sar.src.ui.design_system.components import GLLoadingDialog
+        from PySide6.QtCore import QCoreApplication
+
+        loading_dialog = GLLoadingDialog("Leyendo y analizando archivo Excel...", self)
+        loading_dialog.show()
+        QCoreApplication.processEvents()
+
         try:
             from cancunbot.src.services.excel_importer import ExcelImporter
-            importer = ExcelImporter()
+            importer = ExcelImporter(db_connector=self.db_connector, api_client=self.api_client)
 
             # Validar y cargar folios desde el archivo usando la lógica del servicio
-            lista_folios_dict = importer.importar(file_path)
+            try:
+                lista_folios_dict = importer.importar(file_path)
+            finally:
+                loading_dialog.close()
 
             if not lista_folios_dict:
                 QMessageBox.warning(self, "Archivo Vacío", "No se encontraron folios validos en el archivo de excel")
@@ -697,102 +707,160 @@ class R2FCancunView(QWidget):
             duplicados_db = 0
             total_leidos = len(lista_folios_dict)
             
-            # Obtener folios ya existentes en BD para omitir duplicados
-            with self.db_connector.get_session() as session:
-                from sqlalchemy import select
-                from cancunbot.src.storage.cancunbot_models import FolioCancun
-                
-                db_folios_elec = set(session.scalars(select(FolioCancun.folio_electronico).where(FolioCancun.folio_electronico.isnot(None))).all())
-                db_folios_pase = set(session.scalars(select(FolioCancun.folio_pase_caja).where(FolioCancun.folio_pase_caja.isnot(None))).all())
+            use_api = (self.api_client is not None and getattr(self.api_client, "connect_via_api", False))
 
-            for f in lista_folios_dict:
-                tipo = f["tipo_folio"]
-                val = f["folio_electronico"] if tipo == "ELECTRONICO" else f["folio_pase_caja"]
-                
-                # 1. Validar duplicados dentro del propio archivo Excel
-                if val in folios_texto_nuevos:
-                    duplicados_excel += 1
-                    continue
+            if use_api:
+                # Vía REST API: El servidor realiza el filtrado de duplicados e inserción transaccional
+                for f in lista_folios_dict:
+                    tipo = f["tipo_folio"]
+                    folios_mapeados.append({
+                        "folio_electronico": f.get("folio_electronico"),
+                        "folio_pase_caja": f.get("folio_pase_caja"),
+                        "tipo_folio": tipo,
+                        "rfc_id": f.get("rfc_id"),
+                        "desarrollo_id": f.get("desarrollo_id")
+                    })
+            else:
+                db_check_loading = GLLoadingDialog("Verificando duplicados en la Base de Datos...", self)
+                db_check_loading.show()
+                QCoreApplication.processEvents()
 
-                # 2. Validar duplicados contra la Base de Datos
-                if tipo == "ELECTRONICO" and val in db_folios_elec:
-                    duplicados_db += 1
-                    continue
-                if tipo == "PASE_CAJA" and val in db_folios_pase:
-                    duplicados_db += 1
-                    continue
+                try:
+                    # Obtener folios ya existentes en BD de forma directa para omitir duplicados
+                    with self.db_connector.get_session() as session:
+                        from sqlalchemy import select
+                        from cancunbot.src.storage.cancunbot_models import FolioCancun
+                        
+                        db_folios_elec = set(session.scalars(select(FolioCancun.folio_electronico).where(FolioCancun.folio_electronico.isnot(None))).all())
+                        db_folios_pase = set(session.scalars(select(FolioCancun.folio_pase_caja).where(FolioCancun.folio_pase_caja.isnot(None))).all())
 
-                folios_texto_nuevos.add(val)
-                folios_mapeados.append({
-                    "folio_electronico": f["folio_electronico"],
-                    "folio_pase_caja": f["folio_pase_caja"],
-                    "tipo_folio": tipo,
-                    "rfc_id": f.get("rfc_id"),
-                    "desarrollo_id": f.get("desarrollo_id")
-                })
+                    for f in lista_folios_dict:
+                        tipo = f["tipo_folio"]
+                        val = f["folio_electronico"] if tipo == "ELECTRONICO" else f["folio_pase_caja"]
+                        
+                        # 1. Validar duplicados dentro del propio archivo Excel
+                        if val in folios_texto_nuevos:
+                            duplicados_excel += 1
+                            continue
 
-            # Si no hay folios nuevos válidos que procesar
-            if not folios_mapeados:
-                msg_error = (
-                    f"No hay folios nuevos para importar.\n\n"
-                    f"• Total en Excel: {total_leidos}\n"
-                    f"• Duplicados en Excel: {duplicados_excel}\n"
-                    f"• Ya existentes en BD: {duplicados_db}"
-                )
-                QMessageBox.warning(self, "Importación Cancelada", msg_error)
-                return
+                        # 2. Validar duplicados contra la Base de Datos
+                        if tipo == "ELECTRONICO" and val in db_folios_elec:
+                            duplicados_db += 1
+                            continue
+                        if tipo == "PASE_CAJA" and val in db_folios_pase:
+                            duplicados_db += 1
+                            continue
+
+                        folios_texto_nuevos.add(val)
+                        folios_mapeados.append({
+                            "folio_electronico": f["folio_electronico"],
+                            "folio_pase_caja": f["folio_pase_caja"],
+                            "tipo_folio": tipo,
+                            "rfc_id": f.get("rfc_id"),
+                            "desarrollo_id": f.get("desarrollo_id")
+                        })
+                finally:
+                    db_check_loading.close()
+
+                # Si no hay folios nuevos válidos que procesar en modo LAN
+                if not folios_mapeados:
+                    msg_error = (
+                        f"No hay folios nuevos para importar.\n\n"
+                        f"• Total en Excel: {total_leidos}\n"
+                        f"• Duplicados en Excel: {duplicados_excel}\n"
+                        f"• Ya existentes en BD: {duplicados_db}"
+                    )
+                    QMessageBox.warning(self, "Importación Cancelada", msg_error)
+                    return
 
             # Contar resoluciones de catálogos
-            con_rfc = sum(1 for x in folios_mapeados if x["rfc_id"] is not None)
-            con_des = sum(1 for x in folios_mapeados if x["desarrollo_id"] is not None)
+            con_rfc = sum(1 for x in folios_mapeados if x.get("rfc_id") is not None)
+            con_des = sum(1 for x in folios_mapeados if x.get("desarrollo_id") is not None)
 
-            # 3. Cuadro de Confirmación detallado antes de insertar en BD
+            # 3. Cuadro de Confirmación estandarizado con GLMessageDialog del SAR Design System
+            desc_lote = f"Importado desde {Path(file_path).name}"
             confirm_msg = (
-                f"Resumen del archivo Excel:\n\n"
-                f"• Total de registros leídos: {total_leidos}\n"
-                f"• Duplicados dentro del Excel (se omitirán): {duplicados_excel}\n"
-                f"• Ya registrados en Base de Datos (se omitirán): {duplicados_db}\n"
-                f"• Folios nuevos a importar: {len(folios_mapeados)}\n\n"
-                f"Asociación con Catálogos de SAR:\n"
+                f"Resumen del archivo Excel a importar:\n\n"
+                f"• Registros leídos del archivo: {total_leidos}\n"
+                f"• Folios preparados para procesar: {len(folios_mapeados)}\n\n"
+                f"Asociación con Catálogos Maestros SAR:\n"
                 f"• RFCs vinculados: {con_rfc} de {len(folios_mapeados)}\n"
                 f"• Desarrollos vinculados: {con_des} de {len(folios_mapeados)}\n\n"
-                f"¿Deseas confirmar la inserción y crear un nuevo Lote en la Base de Datos?"
+                f"¿Deseas confirmar la inserción y crear un nuevo Lote de Folios?"
             )
             
-            btn_reply = QMessageBox.question(
-                self, "Confirmar Inserción", confirm_msg,
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            confirm_dialog = GLMessageDialog(
+                title="Confirmar Importación de Excel",
+                message=confirm_msg,
+                dialog_type=DialogType.QUESTION,
+                confirm_text="Importar y Crear Lote",
+                cancel_text="Cancelar",
+                parent=self
             )
             
-            if btn_reply != QMessageBox.Yes:
+            if confirm_dialog.exec() != QDialog.Accepted:
                 self._write_log("Importación cancelada por el usuario.")
                 return
 
-            # Proceder con la inserción física
-            with self.db_connector.get_session() as session:
-                lote_repo = LoteFolioRepository(session)
-                folio_repo = FolioCancunRepository(session)
+            # Mostrar nuevamente la ventana modal de carga durante la inserción física
+            save_loading = GLLoadingDialog("Creando Lote e insertando registros...", self)
+            save_loading.show()
+            QCoreApplication.processEvents()
 
-                lote = lote_repo.create(
-                    usuario_id=self.usuario_id,
-                    origen="EXCEL",
-                    descripcion=f"Importado desde {Path(file_path).name}",
-                    archivo_excel=file_path
-                )
-                
-                guardados = folio_repo.create_bulk(lote.lote_id, folios_mapeados)
-                lote_repo.update_metrics_and_status(lote.lote_id)
-                session.commit()
-                
-                # Extraer atributos perezosos (lazy) del modelo ORM antes de cerrar la sesión
-                folio_lote_nombre = lote.folio_lote
+            try:
+                if use_api:
+                    # Inserción vía REST API
+                    resp = self.api_client.request("POST", "/api/docs/cancun/lotes/importar-excel", json={
+                        "usuario_id": self.usuario_id,
+                        "origen": "EXCEL",
+                        "descripcion": desc_lote,
+                        "archivo_excel": file_path,
+                        "folios": folios_mapeados
+                    })
+                    save_loading.close()
+                    if resp and resp.get("lote_id"):
+                        folio_lote_nombre = resp.get("folio_lote", f"ID #{resp.get('lote_id')}")
+                        guardados = resp.get("total_folios", 0)
+                        dup_db = resp.get("duplicados_db", 0)
+                        dup_excel = resp.get("duplicados_excel", 0)
+                        extra_msg = f"\n(Omitidos: {dup_excel} duplicados en Excel, {dup_db} ya en BD)" if (dup_db + dup_excel) > 0 else ""
+                        
+                        QMessageBox.information(
+                            self, "Importación Completada", 
+                            f"Lote {folio_lote_nombre} creado con éxito vía API REST.\n"
+                            f"Se insertaron {guardados} folios nuevos.{extra_msg}"
+                        )
+                    else:
+                        QMessageBox.critical(self, "Error API", "No se pudo crear el lote desde el servidor API.")
+                else:
+                    # Inserción de forma directa en BD (modo LAN)
+                    with self.db_connector.get_session() as session:
+                        lote_repo = LoteFolioRepository(session)
+                        folio_repo = FolioCancunRepository(session)
 
-            QMessageBox.information(
-                self, "Importación Completada", 
-                f"Lote {folio_lote_nombre} creado con éxito.\n"
-                f"Se insertaron {guardados} folios nuevos."
-            )
-            self._refresh_lotes_table()
+                        lote = lote_repo.create(
+                            usuario_id=self.usuario_id,
+                            origen="EXCEL",
+                            descripcion=desc_lote,
+                            archivo_excel=file_path
+                        )
+                        
+                        guardados = folio_repo.create_bulk(lote.lote_id, folios_mapeados)
+                        lote_repo.update_metrics_and_status(lote.lote_id)
+                        session.commit()
+                        
+                        folio_lote_nombre = lote.folio_lote
+
+                    save_loading.close()
+                    QMessageBox.information(
+                        self, "Importación Completada", 
+                        f"Lote {folio_lote_nombre} creado con éxito.\n"
+                        f"Se insertaron {guardados} folios nuevos."
+                    )
+
+                self._refresh_lotes_table()
+            finally:
+                save_loading.close()
 
         except Exception as err:
             logger.error(f"Error importando lote desde Excel: {err}")

@@ -72,6 +72,20 @@ class CancunImportarPdfRequest(BaseModel):
     desarrollo_id: Optional[int] = None
     folios: List[CancunImportarPdfFolioItem]
 
+class CancunImportarExcelFolioItem(BaseModel):
+    tipo_folio: str
+    folio_pase_caja: Optional[str] = None
+    folio_electronico: Optional[str] = None
+    rfc_id: Optional[int] = None
+    desarrollo_id: Optional[int] = None
+
+class CancunImportarExcelRequest(BaseModel):
+    usuario_id: int
+    origen: str = "EXCEL"
+    descripcion: Optional[str] = None
+    archivo_excel: Optional[str] = None
+    folios: List[CancunImportarExcelFolioItem]
+
 # Endpoints de Solicitudes
 @router.get("/solicitudes")
 def list_solicitudes(orden_ids: Optional[str] = None, db: Session = Depends(get_db)):
@@ -1861,6 +1875,80 @@ def get_cancun_desarrollos(db: Session = Depends(get_db)):
         return [{"desarrollo_id": r[0], "nombre": r[1]} for r in rows]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener desarrollos: {str(e)}")
+
+@router.post("/cancun/lotes/importar-excel")
+def importar_cancun_lote_excel(request: CancunImportarExcelRequest, db: Session = Depends(get_db)):
+    """Crea un nuevo Lote de Cancún a partir de folios leídos de Excel omitiendo duplicados en BD."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository, FolioCancunRepository
+        from cancunbot.src.storage.cancunbot_models import FolioCancun
+        from sqlalchemy import select
+
+        db_pases = set(db.scalars(select(FolioCancun.folio_pase_caja).where(FolioCancun.folio_pase_caja.isnot(None))).all())
+        db_elecs = set(db.scalars(select(FolioCancun.folio_electronico).where(FolioCancun.folio_electronico.isnot(None))).all())
+
+        folios_validos_nuevos = []
+        folios_vistos_sesion = set()
+        duplicados_db = 0
+        duplicados_excel = 0
+
+        for item in request.folios:
+            val = item.folio_pase_caja.strip() if item.folio_pase_caja else (item.folio_electronico.strip() if item.folio_electronico else None)
+            if not val:
+                continue
+
+            if val in folios_vistos_sesion:
+                duplicados_excel += 1
+                continue
+
+            if item.tipo_folio == "PASE_CAJA" and val in db_pases:
+                duplicados_db += 1
+                continue
+
+            if item.tipo_folio == "ELECTRONICO" and val in db_elecs:
+                duplicados_db += 1
+                continue
+
+            folios_vistos_sesion.add(val)
+
+            folios_validos_nuevos.append({
+                "tipo_folio": item.tipo_folio,
+                "folio_pase_caja": item.folio_pase_caja,
+                "folio_electronico": item.folio_electronico,
+                "rfc_id": item.rfc_id,
+                "desarrollo_id": item.desarrollo_id
+            })
+
+        if not folios_validos_nuevos:
+            raise HTTPException(status_code=400, detail="No hay folios nuevos para importar. Todos ya existen en la base de datos o están duplicados.")
+
+        lote_repo = LoteFolioRepository(db)
+        folio_repo = FolioCancunRepository(db)
+
+        lote = lote_repo.create(
+            usuario_id=request.usuario_id,
+            origen="EXCEL",
+            descripcion=request.descripcion or "Importado desde Excel",
+            archivo_excel=request.archivo_excel
+        )
+
+        inserted = folio_repo.create_bulk(lote.lote_id, folios_validos_nuevos)
+        lote_repo.update_metrics_and_status(lote.lote_id)
+        db.commit()
+
+        return {
+            "success": True,
+            "lote_id": lote.lote_id,
+            "folio_lote": lote.folio_lote,
+            "total_folios": inserted,
+            "duplicados_excel": duplicados_excel,
+            "duplicados_db": duplicados_db
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al importar lote desde Excel: {str(e)}")
 
 
 

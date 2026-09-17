@@ -49,8 +49,8 @@ La tabla de módulos internos `sar_seguridad.modulo` incluye la columna **`orden
 
 #### 📊 Módulo [1] Inicio (`DASHBOARD`)
 * `LEER`: Acceso al tablero principal, búsqueda, filtros de fecha/orden y lectura de indicadores KPI.
-* `EJECUTAR`: Habilita la acción de **doble clic** en las StatCards de KPI (*Total Generadas*, *Pendientes*, *Autorizadas*, *Rechazadas*) para aperturar el módulo de *Métricas y Analítica Operativa (BI)*.
-* **Detalle de Errores e Invalidadas:** El **doble clic** en las StatCards de *Con Error* o *Invalidadas* requiere permisos de consulta de detalle (`DASHBOARD:LEER` o `DERECHOS:LEER`). En caso de falta de permisos, el sistema aplica la política de fallo seguro denegando el acceso e informando mediante `GLMessageBox.warning`.
+* `EJECUTAR`: Habilita la acción de **doble clic** en las StatCards de KPI (*Total Generadas*, *Pendientes*, *Autorizadas*, *Rechazadas*) para aperturar el módulo de *Métricas y Analítica Operativa (BI)*, así como la **Exportación a Excel** (`_export_to_excel`) desde el diálogo de detalle de errores/invalidados.
+* **Detalle de Errores e Invalidadas:** El **doble clic** en las StatCards de *Con Error* o *Invalidadas* requiere estrictamente permisos de consulta de detalle de derechos (`DERECHOS:LEER`). En caso de no contar con `DERECHOS:LEER`, el sistema bloquea la apertura del diálogo modal e informa al usuario mediante `GLMessageBox.warning("Acceso Denegado")`. Al aperturarse la ventana modal `ErrorDetailDialog`, la acción **"Exportar Excel"** valida los permisos `DASHBOARD:EJECUTAR` o `DERECHOS:LEER`.
 
 #### 📑 Módulo [2] Derechos (`DERECHOS`)
 * `LEER`: Visualización del listado general de referencias/facturas emitidas, paginación y activación de los botones **"Ver Detalle"** (`_on_ver_detalle`) y **"Ver PDF"** (`_on_ver_pdf`).
@@ -59,8 +59,8 @@ La tabla de módulos internos `sar_seguridad.modulo` incluye la columna **`orden
 #### 🔑 Módulo [3] Control de Derechos y Submódulos
 
 ##### [3.1] Inventario (`CTRL:INVENTARIO`)
-* `LEER`: Búsqueda de derechos en inventario, filtros por empresa/concepto, y apertura con **doble clic** del diálogo modal de detalle desde las StatCards KPI (`_open_kpi_detail` $\rightarrow$ `InventoryKPIDetailDialog`).
-* `ASIGNAR`: Habilita el botón **"Asignar Seleccionados"** (`_on_asignar_seleccionados`) y la acción de **doble clic** sobre las filas de la tabla (`_on_table_cell_double_clicked`) para aperturar el formulario de asignación a Notaría/Colaborador (`ManualAssignmentDialog`).
+* `LEER`: Búsqueda de derechos en inventario, filtros por empresa/concepto, apertura con **doble clic** o **clic derecho 🗂 "Ver PDF de Factura"** (`_on_ver_pdf_factura`) para visualizar la boleta/factura en el visor del sistema, y consulta del detalle de asignación existente.
+* `ASIGNAR`: Habilita el botón **"Asignar Seleccionados"** (`_on_asignar_seleccionados`) y las opciones del menú contextual de **clic derecho 👤 "Asignar Derecho"** (`_on_abrir_detalle_o_asignacion`) sobre derechos disponibles para aperturar el formulario de asignación a Notaría/Colaborador (`ManualAssignmentDialog`). En ausencia de permiso, deniega la acción e informa vía `QMessageBox.warning("Acceso Denegado")`.
 * `EJECUTAR`: Habilita el botón de redirección **"Ver Métricas y Analítica de Producción"** (`_on_open_metrics_requested`) y el botón **"Exportar a Excel"** (`_on_export_excel`) dentro del diálogo de detalle KPI. En caso de ausencia de permiso, el sistema aplica el fallo seguro denegando el acceso vía `QMessageBox.warning`.
 
 ##### [3.2] Asignar Derecho (`CTRL:ASIGNAR_DERECHO`)
@@ -98,28 +98,49 @@ La tabla de módulos internos `sar_seguridad.modulo` incluye la columna **`orden
 ## 3. Matriz de Roles Estándar de Fábrica
 
 ### 🛡️ Rol `ADMINISTRADOR` (Rol ID 1)
-* **Ámbito:** Acceso total y global.
-* **Permisos:** Posee **TODAS** las intersecciones Módulo x Acción en la base de datos.
+* **Ámbito:** Acceso total y global al sistema y administración de seguridad.
+* **Permisos RBAC:** Posee **TODAS** las intersecciones Módulo x Acción en la base de datos (102 permisos).
+* **Módulos App (`sar_seguridad.app_modulo`):** `ADMIN`, `CTRL_REF`, `BOT_FACE_A`, `BOT_C`.
 
 ### 👷 Rol `OPERADOR` (Rol ID 2)
-* **Ámbito:** Operación cotidiana de generación y scrapers.
-* **Permisos:** `DASHBOARD:LEER`, `ORDENES:LEER,CREAR`, `SOLICITUDES:LEER,EDITAR,EJECUTAR`, `DERECHOS:LEER`, `CTRL:INVENTARIO:LEER,ASIGNAR,EJECUTAR`.
-
-### 👤 Rol `OPERADOR DE ASIGNACIONES Y BOTS` (Rol ID 4)
-* **Ámbito:** Operación sin restricciones en bots y gestión controlada de asignación de derechos.
-* **1. Módulos de Aplicación (`sar_seguridad.app_modulo`):**
-  * `BOT_FACE_A` ("Bot-Pago de derechos"): **Acceso Completo Operativo**
-  * `BOT_C` ("Bot-Facturación"): **Acceso Completo Operativo**
-  * `CTRL_REF` ("Control de Referencias"): **Acceso Habilitado**
-* **2. Permisos Granulares RBAC Otorgados en BD:**
+* **Ámbito:** Operador con acceso completo a todas las funcionalidades del módulo *Control de Derechos* (y cada uno de sus submódulos) y módulos de Bot.
+* **Permisos RBAC:** 
   * `DASHBOARD`: `LEER`
-  * `DERECHOS`: `LEER` *(Lectura de tabla de derechos. Botones "Marcar Visibles" y "Cambiar Estado" deshabilitados al no tener EDITAR)*.
-  * `CTRL:INVENTARIO`: `LEER` *(Lectura y filtros. Botón "Asignar Seleccionados" deshabilitado y doble clic inactivo al no tener ASIGNAR)*.
-  * `CTRL:ASIGNAR_DERECHO`: `LEER`, `ASIGNAR` *(Pestaña y asignación directa habilitada)*.
-  * `CTRL:GESTION_LOTES`: `LEER`, `EJECUTAR` *(Pestaña y exportación a Excel/PDF de asignaciones habilitada)*.
-* **3. Submódulos Restringidos en Sidebar y UI:**
-  * 🛑 `CTRL:ASIGNAR_VALIDAR` ("Asignar/Validar por Lote"): **Oculto / Deshabilitado**.
-  * 🛑 `CTRL:RESERVA_DERECHO` ("Reserva de Derechos"): **Oculto / Deshabilitado**.
+  * `ORDENES`: `LEER`, `CREAR`, `EDITAR`, `EJECUTAR`
+  * `SOLICITUDES`: `LEER`, `ASIGNAR`, `EDITAR`, `EJECUTAR`
+  * `DERECHOS`: `LEER`
+  * `CONTROL_DERECHOS`: `LEER`
+  * `CTRL:INVENTARIO`: `LEER`, `ASIGNAR`, `EJECUTAR`
+  * `CTRL:ASIGNAR_DERECHO`: `LEER`, `ASIGNAR`
+  * `CTRL:ASIGNAR_VALIDAR`: `LEER`, `CREAR`, `ASIGNAR`
+  * `CTRL:RESERVA_DERECHO`: `LEER`, `ASIGNAR`
+  * `CTRL:GESTION_LOTES`: `LEER`, `EJECUTAR`
+* **Módulos App (`sar_seguridad.app_modulo`):** `CTRL_REF`, `BOT_FACE_A`, `BOT_C`.
+
+### 🤖 Rol `BOT` (Rol ID 3)
+* **Ámbito:** Perfil exclusivo para la operación de autómatas y scrapers (*Bot Face A - Pago de Derechos* y *Bot Face C - Facturación*).
+* **Permisos RBAC:**
+  * `ORDENES`: `LEER`, `EJECUTAR`
+  * `SOLICITUDES`: `LEER`, `EDITAR`, `EJECUTAR`
+* **Módulos App (`sar_seguridad.app_modulo`):** `BOT_FACE_A`, `BOT_C`.
+
+### 👤 Rol `GESTOR` (Rol ID 4)
+* **Ámbito:** Perfil de gestión controlada para asignación e inventario de derechos.
+* **Permisos RBAC:**
+  * `DASHBOARD`: `LEER`
+  * `CONTROL_DERECHOS`: `LEER`
+  * `CTRL:INVENTARIO`: `LEER`, `ASIGNAR`
+  * `CTRL:ASIGNAR_DERECHO`: `LEER`, `ASIGNAR`
+  * `CTRL:RESERVA_DERECHO`: `LEER`, `ASIGNAR`
+  * `CTRL:GESTION_LOTES`: `LEER`, `EJECUTAR`
+* **Módulos App (`sar_seguridad.app_modulo`):** `CTRL_REF`.
+
+### 🔍 Rol `CONSULTA` (Rol ID 5)
+* **Ámbito:** Exclusivo para la consulta de información y reportes del módulo de Derechos sin permisos de registro o modificación.
+* **Permisos RBAC:**
+  * `DASHBOARD`: `LEER`
+  * `DERECHOS`: `LEER`
+* **Módulos App (`sar_seguridad.app_modulo`):** `CTRL_REF`.
 
 ---
 

@@ -301,6 +301,13 @@ class RequestsView(QWidget):
         return ""
 
     def _on_generar_excel_lotes(self):
+        if not self._check_permission("SOLICITUDES", "EJECUTAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para ejecutar la generación masiva de Excel (SOLICITUDES:EJECUTAR)."
+            )
+            return
         sol_ids = self._get_selected_solicitud_ids()
         if not sol_ids: return
         
@@ -372,6 +379,13 @@ class RequestsView(QWidget):
             QMessageBox.critical(self, "Error - Generar Excel", f"Ocurrió un error al iniciar la generación de Excel:\n{str(e)}")
 
     def _on_generar_pdf_unificado(self):
+        if not self._check_permission("SOLICITUDES", "EJECUTAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para ejecutar la generación masiva de PDFs (SOLICITUDES:EJECUTAR)."
+            )
+            return
         sol_ids = self._get_selected_solicitud_ids()
         if not sol_ids: return
         

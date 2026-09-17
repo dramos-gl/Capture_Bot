@@ -1,7 +1,7 @@
-# 15_SAR-RPA-CANCUN-001: Arquitectura de Resiliencia, Bypass de Captcha y UX en Portal Cancún
+# 5_CANCUNBOT-RPA-001: Arquitectura de Resiliencia, Bypass de Captcha y UX en Portal Cancún
 
-**Sistema:** Sistema de Administración de Referencias (SAR) — Submódulo CancúnBot (R2F)  
-**Documento ID:** SAR-RPA-CANCUN-001  
+**Sistema:** Ecosistema CapturaBot — Submódulo CancúnBot (R2F)  
+**Documento ID:** CANCUNBOT-RPA-001  
 **Versión:** 2.0  
 **Estado:** Aprobado / Implementado en Producción  
 **Fecha:** 2026-09-09  
@@ -129,18 +129,14 @@ def _on_metric_updated(self, metric: str, value: int):
         self.box_pendientes.set_value(str(max(0, remaining)))
 ```
 
-### 4.3 Blindaje de Interfaz ante Errores Humanos (Estandarización Face A & Face C)
+### 4.4 Simetría de Transporte REST API en Importación de Excel y Confirmación Modal
 
-Siguiendo el estándar de diseño y comportamiento seguro de los Bots Face A (`bot_view.py`) y Face C (`billing_bot_view.py`), la vista R2F Cancún deshabilita de forma preventiva todos los controles interactivos que puedan interrumpir o desincronizar la ejecución RPA mientras el bot se encuentra en estado `ACTIVO`:
+Siguiendo el **Principio 3 de AGENTS.md (Transparencia de Transporte / CONNECT_VIA_API)**:
 
-* **Controles Deshabilitados al Iniciar (`_on_iniciar_bot`)**:
-  * Interruptor de Modo (`switch_modo`) y Modo Autónomo (`chk_autonomo`).
-  * Botones de Carga de Archivos (`btn_importar_excel`, `btn_importar_pdf`, `btn_descargar_plantilla`).
-  * Botón Selector de Ruta de Descarga (`btn_browse`).
-  * Botón Modal Administración (`btn_control_r2f`).
-  * Tablas de Selección e Interacción (`table_lotes`, `table_detalles`).
-* **Único Control Activo**: El botón principal se transforma en `⏹ Detener Bot` (`btn_iniciar` en color rojo de peligro `Colors.ERROR`), permitiendo únicamente una detención segura y ordenada del proceso.
-* **Restablecimiento Automatizado (`_on_worker_finished`)**: Al concluir o detenerse el hilo `QThread`, todos los componentes vuelven a su estado habilitado de forma segura.
+* **Soporte Símétrico REST API (`POST /api/docs/cancun/lotes/importar-excel`)**:
+  Al presionar **Importar Excel** en clientes distribuidos (`CONNECT_VIA_API: true`), la interfaz ya no intenta realizar llamadas directas a PostgreSQL (eliminando el error de socket/timeout a IP `10.11.8.150:5432`). En su lugar, consume el endpoint centralizado de la API REST que ejecuta la inserción y descarte de duplicados con control transaccional estricto.
+* **Confirmación Estándar con `GLMessageDialog`**:
+  Tanto la importación de Excel como la importación de PDF utilizan el componente atómico `GLMessageDialog` (`DialogType.QUESTION`) con el botón "Importar y Crear Lote", presentando un desglose detallado del número de folios leídos y la asociación con los Catálogos Maestros de SAR antes de realizar cualquier commit.
 
 ---
 
@@ -150,7 +146,8 @@ Siguiendo el estándar de diseño y comportamiento seguro de los Bots Face A (`b
 | :--- | :--- | :--- |
 | [`recibo_tesoreria_page.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/cancunbot/src/pages/recibo_tesoreria_page.py) | **Page Object Model** | Inyección de CSS anti-emergentes, parche JS a `Swal.fire`, bypass de `ejecutarCollapse` y detección prioritaria de la tabla `#prueba`. |
 | [`bot_recibo_worker.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/cancunbot/src/core/bot_recibo_worker.py) | **RPA QThread Worker** | Inclusión de pausas humanizadas aleatorias (2.5s - 4.0s) e integración de soporte multi-cliente (BD Directa / REST API). |
-| [`r2f_cancun_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/cancunbot/src/ui/views/r2f_cancun_view.py) | **Interfaz PySide6 (UI)** | Réplica exacta del patrón Face A/C: decremento en tiempo real de Pendientes y blindaje estricto de controles de UI ante errores humanos. |
+| [`r2f_cancun_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/cancunbot/src/ui/views/r2f_cancun_view.py) | **Interfaz PySide6 (UI)** | Réplica exacta del patrón Face A/C: decremento en tiempo real de Pendientes, soporte simétrico REST API para Excel (`CONNECT_VIA_API`), confirmación atómica con `GLMessageDialog` y blindaje de controles ante errores humanos. |
+| [`docs_router.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/api/routers/docs_router.py) | **API Central (FastAPI)** | Implementación del endpoint `POST /api/docs/cancun/lotes/importar-excel` con esquemas Pydantic `CancunImportarExcelRequest` para inserción distribuida. |
 
 ---
 
@@ -160,4 +157,6 @@ Siguiendo el estándar de diseño y comportamiento seguro de los Bots Face A (`b
 * **Compatibilidad de Red**: Probado y validado operando tanto en entornos de red LAN con conexión directa a PostgreSQL como en modalidad cliente distribuido REST API (`CONNECT_VIA_API=true`).
 * **Resiliencia de UX**: Confirmado el silenciamiento absoluto de cuadros emergentes y la continuidad ininterrumpida en la descarga de archivos PDF.
 * **Prueba de Errores Humanos**: Confirmado el bloqueo preventivo de tablas, selectores e importaciones durante la ejecución activa.
+* **Simetría REST API**: Validada la importación transparente de Excel sin llamadas a sockets PostgreSQL en clientes remotos.
+
 

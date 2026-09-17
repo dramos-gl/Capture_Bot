@@ -15,6 +15,7 @@
 | **CANCUNBOT-DB-001** | Diseño Físico de Base de Datos | Ingeniería de Datos | [2_CANCUNBOT-DB-001.md](2_CANCUNBOT-DB-001.md) |
 | **CANCUNBOT-DEV-001** | Guía de Desarrollo y Estándares | Ingeniería de Software | [3_CANCUNBOT-DEV-001.md](3_CANCUNBOT-DEV-001.md) |
 | **CANCUNBOT-TEC-001** | Arquitectura Técnica | Arquitectura de Solución | [4_CANCUNBOT-TEC-001.md](4_CANCUNBOT-TEC-001.md) |
+| **CANCUNBOT-RPA-001** | Resiliencia, Captcha & UX Portal Cancún | Automatización & RPA | [5_CANCUNBOT-RPA-001.md](5_CANCUNBOT-RPA-001.md) |
 
 ---
 
