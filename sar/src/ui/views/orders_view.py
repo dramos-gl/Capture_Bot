@@ -257,8 +257,50 @@ class OrdersView(QWidget):
                 if reply != QMessageBox.Yes:
                     return
         else:
-            action_title = "Confirmar Guardar"
-            action_msg = "¿Estás seguro de que deseas guardar esta orden?"
+            es_cancelacion = getattr(self, "chk_cancelaciones", None) and self.chk_cancelaciones.isChecked()
+            
+            # Construcción de los detalles de las solicitudes a incluir
+            item_details = []
+            for row in data:
+                rfc_txt = self.grid.get_rfc_text(row["rfc_id"]) or str(row["rfc_id"])
+                concept_txt = self.grid.get_concepto_text(row["concepto_id"]) or str(row["concepto_id"])
+                del_txt = self.grid.get_delegacion_text(row["delegacion_id"]) or str(row["delegacion_id"])
+                item_details.append(f"• {rfc_txt} - {concept_txt} ({del_txt}): Cantidad = {row['cantidad']}")
+            
+            details_str = "\n".join(item_details)
+
+            if es_cancelacion:
+                # Comprobar si ya existe la orden anual de cancelaciones del año en curso
+                from datetime import datetime
+                current_year = datetime.utcnow().year
+                folio_cancel = f"ORD-CANCEL-{current_year}"
+                
+                # Buscar en las órdenes cargadas si existe la orden anual de cancelaciones
+                all_ordenes = getattr(self, "_all_ordenes_data", [])
+                orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_cancel), None)
+                
+                action_title = "Confirmar Orden de Cancelación"
+                
+                if orden_existente:
+                    action_msg = (
+                        f"¿Estás seguro de que deseas actualizar la orden de cancelación de aviso con las siguientes partidas?\n\n"
+                        f"{details_str}\n\n"
+                        f"Descripción: {desc}"
+                    )
+                else:
+                    action_msg = (
+                        f"¿Estás seguro de que deseas guardar la orden Anual de cancelación de aviso con las siguientes partidas?\n\n"
+                        f"{details_str}\n\n"
+                        f"Descripción: {desc}"
+                    )
+            else:
+                action_title = "Confirmar Guardar Orden"
+                action_msg = (
+                    f"¿Estás seguro de que deseas guardar esta orden con las siguientes partidas?\n\n"
+                    f"{details_str}\n\n"
+                    f"Descripción: {desc}"
+                )
+                
             reply = QMessageBox.question(
                 self, action_title, action_msg,
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No
@@ -534,7 +576,7 @@ class OrdersView(QWidget):
         current_year = datetime.utcnow().year
         if checked:
             self._load_catalogs(es_cancelacion=True)
-            self.desc_input.setText(f"Orden Anual de Cancelaciones {current_year}")
+            self.desc_input.setText(f"Cancelación de Avisos {current_year}")
             self.desc_input.setReadOnly(True)
         else:
             self._load_catalogs(es_cancelacion=False)

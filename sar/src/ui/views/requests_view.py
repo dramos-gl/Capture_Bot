@@ -464,7 +464,7 @@ class RequestsView(QWidget):
                 "No tiene permisos para asignar usuarios a solicitudes (SOLICITUDES:ASIGNAR)."
             )
             return
-        sol_id = target_sol_id if target_sol_id is not None else self._get_selected_solicitud_id()
+        sol_id = self._get_selected_solicitud_id() if (target_sol_id is None or isinstance(target_sol_id, bool)) else target_sol_id
         if sol_id == -1: return
         
         try:

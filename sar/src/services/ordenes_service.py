@@ -126,7 +126,9 @@ class OrdenesService:
             grupo = self.session.execute(stmt).scalars().first()
             
             if grupo:
-                consecutivo_actual = (grupo.ultimo_consecutivo or 0) + 1
+                # Find maximum consecutivo_fin among existing solicitudes of this group, or fallback to ultimo_consecutivo
+                max_sol_consecutivo = max([s.consecutivo_fin for s in grupo.solicitudes], default=0)
+                consecutivo_actual = max(max_sol_consecutivo, grupo.ultimo_consecutivo or 0) + 1
                 grupo.cantidad_solicitada += cantidad_total
             else:
                 consecutivo_actual = 1
@@ -140,8 +142,6 @@ class OrdenesService:
                 self.session.add(grupo)
                 self.session.flush()
 
-            consecutivo_actual = 1
-            
             # Create Solicitudes for each row under this group
             for row in data['filas']:
                 delegacion_id = row.get('delegacion_id')
