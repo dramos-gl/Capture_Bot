@@ -153,9 +153,9 @@ Al ingresar, el sistema despliega por defecto el Tablero de Control Operativo (D
 | Sección | Descripción y funciones principales |
 | :--- | :--- |
 | **Dashboard** | Resumen operativo general: tarjetas de métricas en tiempo real (generados, pendientes, autorizados, errores) y tabla de últimos derechos generados. |
-| **Órdenes** | Gestión del ciclo de vida de órdenes: captura, consulta, edición, autorización/rechazo, asignación a responsables y exportación de archivos (Excel/PDF). |
-| **Derechos** | Consulta y seguimiento individual de los derechos procesados: detalle, validación de estatus y cambios de estado según reglas de negocio. |
-| **Control de Derechos** | Administración del inventario de derechos: consulta de disponibilidad, asignaciones individuales o masivas, apartados (notarías/colaboradores) y reportes. |
+| **Órdenes** | Gestión integral del ciclo de vida de órdenes de trabajo. Menú desplegable con 4 submódulos:<br>• **Capturar Nueva Orden:** Registro de nuevas solicitudes y conceptos por empresa.<br>• **Órdenes Capturadas:** Historial, edición, autorización/rechazo y expedición de lotes (Excel/PDF).<br>• **Solicitudes:** Monitoreo y control de la cola de trabajo de los bots de automatización.<br>• **Derechos:** Consulta y seguimiento individual de derechos generados, paginación y cambio de estado. |
+| **Control de Derechos** | Administración del inventario de derechos facturados. Menú desplegable con 5 submódulos:<br>• **Inventario:** Visor general de derechos disponibles y visor de facturas/boletas PDF.<br>• **Asignar Derechos:** Asignación individual manual a Notaría o Colaborador.<br>• **Asignar/Validar:** Asignación masiva por plantilla Excel y validación de expedientes.<br>• **Reserva de Derechos:** Apartado y bloqueo temporal de derechos por desarrollo.<br>• **Gestión de Asignaciones:** Historial y control de lotes asignados con exportación. |
+| **Administración** | Gestión de seguridad (RBAC), catálogos base y configuración general del sistema (solo perfiles con permisos administrativos). |
 | **Cambiar Tema** | Alterna la apariencia visual de la interfaz entre Modo claro y Modo oscuro sin alterar datos ni operaciones. |
 | **Cerrar Sesión** | Finaliza la sesión de trabajo liberando los bloqueos temporales del usuario activo. |
 

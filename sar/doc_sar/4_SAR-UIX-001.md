@@ -92,11 +92,19 @@ LOGIN (Ventana única de autenticación)
          │     ├── Catálogos (Conceptos, Geografía, RFCs, Estados)
          │     └── Configuración (Parámetros, Localizadores)
          │
-         ├── CTRL_REF       → Ventana: Control de Referencias (maximizada)
+         ├── CTRL_REF       → Ventana: Control de Derechos (maximizada)
          │     ├── Dashboard
          │     ├── Órdenes
-         │     ├── Solicitudes
-         │     └── Referencias
+         │     │     ├── Capturar Nueva Orden
+         │     │     ├── Órdenes Capturadas
+         │     │     ├── Solicitudes
+         │     │     └── Derechos
+         │     └── Control de Derechos (Inventario)
+         │           ├── Inventario
+         │           ├── Asignar Derechos
+         │           ├── Asignar/Validar
+         │           ├── Reserva de Derechos
+         │           └── Gestión de Asignaciones
          │
          ├── BOT_FACE_A     → Ventana: Bot Face A - Automatización (Fase A)
          │

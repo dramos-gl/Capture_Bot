@@ -101,6 +101,7 @@ class NavigationSidebar(QFrame):
         outer_layout.addWidget(self.footer_widget)
         
         self._setup_brand_area()
+        self._authorized_items = set()
         self._setup_navigation()
         self._setup_footer()
         
@@ -152,11 +153,10 @@ class NavigationSidebar(QFrame):
         self.brand_layout.addLayout(self.brand_info_layout)
         
     def _setup_navigation(self):
-        # 2. Navigation Button Group
+        # 2. Navigation Button Group (4 Secciones principales)
         self.menu_items = [
             ("Dashboard", "dashboard", "dashboard"),
             ("Órdenes", "ordenes", "list_icon"),
-            ("Derechos", "referencias", "database"),
             ("Control de Derechos", "inventario", "tabla"),
             ("Administración", "configuracion", "shield_lock")
         ]
@@ -173,31 +173,39 @@ class NavigationSidebar(QFrame):
         self.submenu_layout.setContentsMargins(0, 0, 0, 0)
         self.submenu_layout.setSpacing(4)
         
-        self.btn_ordenes_capturadas = QPushButton("Órdenes Capturadas")
-        self.btn_ordenes_capturadas.setObjectName("subNavBtn")
-        self.btn_ordenes_capturadas.setCheckable(True)
-        self.btn_ordenes_capturadas.setIcon(Icons.hollow_dot("#94A3B8"))
-        self.btn_ordenes_capturadas.setVisible(False)
-        
         self.btn_capturar_nueva = QPushButton("Capturar Nueva Orden")
         self.btn_capturar_nueva.setObjectName("subNavBtn")
         self.btn_capturar_nueva.setCheckable(True)
         self.btn_capturar_nueva.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_capturar_nueva.setVisible(False)
         
+        self.btn_ordenes_capturadas = QPushButton("Órdenes Capturadas")
+        self.btn_ordenes_capturadas.setObjectName("subNavBtn")
+        self.btn_ordenes_capturadas.setCheckable(True)
+        self.btn_ordenes_capturadas.setIcon(Icons.hollow_dot("#94A3B8"))
+        self.btn_ordenes_capturadas.setVisible(False)
+        
         self.btn_solicitudes = QPushButton("Solicitudes")
         self.btn_solicitudes.setObjectName("subNavBtn")
         self.btn_solicitudes.setCheckable(True)
         self.btn_solicitudes.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_solicitudes.setVisible(False)
+
+        self.btn_derechos = QPushButton("Derechos")
+        self.btn_derechos.setObjectName("subNavBtn")
+        self.btn_derechos.setCheckable(True)
+        self.btn_derechos.setIcon(Icons.hollow_dot("#94A3B8"))
+        self.btn_derechos.setVisible(False)
         
         self.submenu_layout.addWidget(self.btn_capturar_nueva)
         self.submenu_layout.addWidget(self.btn_ordenes_capturadas)
         self.submenu_layout.addWidget(self.btn_solicitudes)
+        self.submenu_layout.addWidget(self.btn_derechos)
         
-        self.buttons["ordenes_capturadas"] = self.btn_ordenes_capturadas
         self.buttons["capturar_orden"] = self.btn_capturar_nueva
+        self.buttons["ordenes_capturadas"] = self.btn_ordenes_capturadas
         self.buttons["solicitudes"] = self.btn_solicitudes
+        self.buttons["referencias"] = self.btn_derechos
  
         # --- SUBMENU 2: INVENTARIO ---
         self.inv_submenu_container = QWidget()
@@ -231,7 +239,7 @@ class NavigationSidebar(QFrame):
         self.btn_inv_catalogos.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_inv_catalogos.setVisible(False)
  
-        self.btn_inv_lotes = QPushButton("Gesti\u00f3n de Asignaciones")
+        self.btn_inv_lotes = QPushButton("Gestión de Asignaciones")
         self.btn_inv_lotes.setObjectName("subNavBtn")
         self.btn_inv_lotes.setCheckable(True)
         self.btn_inv_lotes.setIcon(Icons.hollow_dot("#94A3B8"))
@@ -304,9 +312,10 @@ class NavigationSidebar(QFrame):
             # Connect clicked handler
             btn.clicked.connect(lambda checked, k=key: self._on_main_nav_clicked(k))
             
-        self.btn_ordenes_capturadas.clicked.connect(lambda: self._on_sub_nav_clicked("ordenes_capturadas"))
         self.btn_capturar_nueva.clicked.connect(lambda: self._on_sub_nav_clicked("capturar_orden"))
+        self.btn_ordenes_capturadas.clicked.connect(lambda: self._on_sub_nav_clicked("ordenes_capturadas"))
         self.btn_solicitudes.clicked.connect(lambda: self._on_sub_nav_clicked("solicitudes"))
+        self.btn_derechos.clicked.connect(lambda: self._on_sub_nav_clicked("referencias"))
 
         self.btn_inv_facturas.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_facturas"))
         self.btn_inv_masivo.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_masivo"))
@@ -366,6 +375,20 @@ class NavigationSidebar(QFrame):
         
         self.footer_layout.addWidget(self.profile_widget)
 
+    def _get_first_visible_orden_sub(self) -> str:
+        """Retorna la primera opción autorizada y visible del submenú Órdenes."""
+        for key in ["capturar_orden", "ordenes_capturadas", "solicitudes", "referencias"]:
+            if key in self._authorized_items:
+                return key
+        return "capturar_orden"
+
+    def _get_first_visible_inv_sub(self) -> str:
+        """Retorna la primera opción autorizada y visible del submenú Control de Derechos."""
+        for key in ["inventario_facturas", "inventario_catalogos", "inventario_masivo", "inventario_apartar", "inventario_lotes"]:
+            if key in self._authorized_items:
+                return key
+        return "inventario_facturas"
+
     def _on_main_nav_clicked(self, clicked_key: str):
         if self.is_collapsed:
             self.toggle_collapse()
@@ -382,7 +405,8 @@ class NavigationSidebar(QFrame):
                 self.chevron_label.setPixmap(Icons.chevron_up(color).pixmap(12, 12))
             else:
                 self.chevron_label.setPixmap(Icons.chevron_down(color).pixmap(12, 12))
-            self._on_sub_nav_clicked("capturar_orden")
+            target_sub = self._get_first_visible_orden_sub()
+            self._on_sub_nav_clicked(target_sub)
             return
 
         if clicked_key == "inventario":
@@ -398,17 +422,18 @@ class NavigationSidebar(QFrame):
                 self.chevron_label2.setPixmap(Icons.chevron_up(color).pixmap(12, 12))
             else:
                 self.chevron_label2.setPixmap(Icons.chevron_down(color).pixmap(12, 12))
-            self._on_sub_nav_clicked("inventario_facturas")
+            target_sub = self._get_first_visible_inv_sub()
+            self._on_sub_nav_clicked(target_sub)
             return
+            
         # Regular main navigation click - Keep the submenus fixed
         for key, btn in self.buttons.items():
-            if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+            if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                 btn.setChecked(False)
                 btn.setIcon(Icons.hollow_dot("#94A3B8"))
             else:
                 btn.setChecked(key == clicked_key)
 
-                
         self.chevron_label.setPixmap(Icons.chevron_down("#475569").pixmap(12, 12))
         self.chevron_label2.setPixmap(Icons.chevron_down("#475569").pixmap(12, 12))
                 
@@ -416,7 +441,7 @@ class NavigationSidebar(QFrame):
         
     def _on_sub_nav_clicked(self, clicked_key: str):
         # 1. Handle Órdenes Submenu
-        if clicked_key in ["ordenes_capturadas", "capturar_orden", "solicitudes"]:
+        if clicked_key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias"]:
             self.buttons["ordenes"].setChecked(True)
             self.chevron_label.setPixmap(Icons.chevron_up("#2563EB").pixmap(12, 12))
             self.submenu_visible = True
@@ -424,13 +449,13 @@ class NavigationSidebar(QFrame):
             
             # Uncheck all other parent items except ordenes
             for key, btn in self.buttons.items():
-                if key not in ["ordenes", "ordenes_capturadas", "capturar_orden", "solicitudes"]:
+                if key not in ["ordenes", "ordenes_capturadas", "capturar_orden", "solicitudes", "referencias"]:
                     btn.setChecked(False)
                     if key in ["inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                         btn.setIcon(Icons.hollow_dot("#94A3B8"))
             
             # Handle Órdenes submenus check states
-            for key in ["ordenes_capturadas", "capturar_orden", "solicitudes"]:
+            for key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias"]:
                 btn = self.buttons[key]
                 if key == clicked_key:
                     btn.setChecked(True)
@@ -450,7 +475,7 @@ class NavigationSidebar(QFrame):
             for key, btn in self.buttons.items():
                 if key not in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                     btn.setChecked(False)
-                    if key in ["ordenes_capturadas", "capturar_orden", "solicitudes"]:
+                    if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias"]:
                         btn.setIcon(Icons.hollow_dot("#94A3B8"))
             
             # Handle Inventario submenus check states
@@ -463,26 +488,27 @@ class NavigationSidebar(QFrame):
                     btn.setChecked(False)
                     btn.setIcon(Icons.hollow_dot("#94A3B8"))
 
-                
         self.nav_selected.emit(clicked_key)
 
     def select_item(self, key: str):
         """Allows programmatically checking a navigation item button."""
-        if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+        if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
             self._on_sub_nav_clicked(key)
         elif key in self.buttons:
             self._on_main_nav_clicked(key)
-
             
     def hide_item(self, key: str):
         """Hides a specific navigation item by its key."""
+        if key in self._authorized_items:
+            self._authorized_items.remove(key)
         if key in self.buttons:
             self.buttons[key].setVisible(False)
 
     def show_item(self, key: str):
-        """Shows a specific navigation item by its key."""
+        """Shows a specific navigation item by its key (Fail-Closed)."""
+        self._authorized_items.add(key)
         if key in self.buttons:
-            if self.is_collapsed and key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+            if self.is_collapsed and key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                 self.buttons[key].setVisible(False)
             else:
                 self.buttons[key].setVisible(True)
@@ -515,7 +541,7 @@ class NavigationSidebar(QFrame):
             
             # Hide labels of parent buttons and center icons
             for key, btn in self.buttons.items():
-                if key not in ["ordenes_capturadas", "capturar_orden", "solicitudes", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+                if key not in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                     btn.setText("")
                     btn.setStyleSheet("padding: 12px 0px; text-align: center;")
                 else:
@@ -551,22 +577,21 @@ class NavigationSidebar(QFrame):
             self.chevron_label.show()
             self.chevron_label2.show()
             
-            # Restore submenu items if they were active
+            # Restore submenu items ONLY if authorized and parent was active
             if self.submenu_visible:
                 self.submenu_container.show()
-                self.btn_ordenes_capturadas.setVisible(True)
-                self.btn_capturar_nueva.setVisible(True)
-                self.btn_solicitudes.setVisible(True)
+                for k in ["capturar_orden", "ordenes_capturadas", "solicitudes", "referencias"]:
+                    if k in self._authorized_items and k in self.buttons:
+                        self.buttons[k].setVisible(True)
             if self.inv_submenu_visible:
                 self.inv_submenu_container.show()
-                self.btn_inv_facturas.setVisible(True)
-                self.btn_inv_catalogos.setVisible(True)
-                self.btn_inv_masivo.setVisible(True)
-                self.btn_inv_apartar.setVisible(True)
-                self.btn_inv_lotes.setVisible(True)
+                for k in ["inventario_facturas", "inventario_catalogos", "inventario_masivo", "inventario_apartar", "inventario_lotes"]:
+                    if k in self._authorized_items and k in self.buttons:
+                        self.buttons[k].setVisible(True)
                 
             self.theme_btn.setText("Cambiar Tema")
             self.theme_btn.setStyleSheet("")
             self.logout_btn.setText(" Cerrar Sesión")
             self.logout_btn.setStyleSheet("")
             self.profile_widget.show()
+

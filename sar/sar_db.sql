@@ -94,8 +94,11 @@ CREATE TABLE sar_seguridad.modulo (
     nombre VARCHAR(100) NOT NULL,
     orden NUMERIC(4,1) NOT NULL DEFAULT 1.0,
     descripcion VARCHAR(200),
-    activo BOOLEAN NOT NULL DEFAULT TRUE
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    app_modulo_id INTEGER REFERENCES sar_seguridad.app_modulo(app_modulo_id) ON DELETE SET NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_modulo_app_modulo ON sar_seguridad.modulo(app_modulo_id);
 
 -- Tabla: accion
 CREATE TABLE sar_seguridad.accion (
@@ -925,7 +928,7 @@ INSERT INTO sar_seguridad.app_modulo (codigo, nombre, activo) VALUES
 ('ADMIN',      'Administración',          TRUE),
 ('CTRL_REF',   'Control de Referencias',  TRUE),
 ('BOT_FACE_A', 'Bot-Pago de derechos',    TRUE),
-('BOT_C',      'Bot-Facturación',         TRUE)
+('BOT_FACE_C', 'Bot-Facturación',         TRUE)
 ON CONFLICT (codigo) DO NOTHING;
 
 -- Parámetros del Sistema
@@ -1071,11 +1074,11 @@ INSERT INTO sar_seguridad.rol_app_modulo (rol_id, app_modulo_id)
 SELECT (SELECT rol_id FROM sar_seguridad.rol WHERE codigo = 'ADMINISTRADOR'), app_modulo_id
 FROM sar_seguridad.app_modulo;
 
--- OPERADOR accede a CTRL_REF, BOT_FACE_A, BOT_C (no ADMIN)
+-- OPERADOR accede a CTRL_REF, BOT_FACE_A, BOT_FACE_C (no ADMIN)
 INSERT INTO sar_seguridad.rol_app_modulo (rol_id, app_modulo_id)
 SELECT (SELECT rol_id FROM sar_seguridad.rol WHERE codigo = 'OPERADOR'), app_modulo_id
 FROM sar_seguridad.app_modulo
-WHERE codigo IN ('CTRL_REF', 'BOT_FACE_A', 'BOT_C');
+WHERE codigo IN ('CTRL_REF', 'BOT_FACE_A', 'BOT_FACE_C');
 
 -- Usuario Administrador por Defecto
 INSERT INTO sar_seguridad.usuario (username, nombre, correo, password_hash, activo) VALUES

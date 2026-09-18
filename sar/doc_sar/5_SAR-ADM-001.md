@@ -41,16 +41,17 @@ El Módulo de Administración permitirá gestionar la información base de confi
 
 ---
 
-## 2. Seguridad y Modelo de Permisos (RBAC)
+## 2. Seguridad y Modelo de Permisos (RBAC) — Alternativa 2
 
-Se implementará un Control de Acceso Basado en Roles (RBAC) granular aprovechando la estructura de `Permiso` (Módulo + Acción).
+Se implementa un Control de Acceso Basado en Roles (RBAC) granular atómico de 2 niveles aprovechando la vinculación entre `app_modulo` (`ADMIN`, id=1) y `modulo`:
 
-*   **Módulo Administrador**: Se requiere un rol especial (e.g., `SUPERADMIN` o `ADMIN_SISTEMA`).
-*   **Permisos Base**: 
-    *   `MOD_SEGURIDAD` + `LEER` / `CREAR` / `EDITAR` / `DESACTIVAR`
-    *   `MOD_CATALOGOS` + `LEER` / `CREAR` / `EDITAR` / `DESACTIVAR`
-    *   `MOD_CONFIGURACION` + `LEER` / `EDITAR` (La creación suele estar restringida al desarrollador).
-*   Todo acceso a las vistas de administración validará estos permisos de forma cruzada contra la sesión activa en backend y en UI.
+*   **Acceso a Nivel 1 (Macro-App)**: Controlado en el Login mediante `rol_app_modulo` para el código `ADMIN`.
+*   **Acceso a Nivel 2 (Submódulos Atómicos)**:
+    *   **Sección Seguridad (`SEGURIDAD`)**: `ADM:USUARIOS`, `ADM:ROLES`, `ADM:PERMISOS`, `ADM:MODULOS`, `ADM:ACCIONES`.
+    *   **Sección Catálogos (`CATALOGOS`)**: `ADM:CAT_NEGOCIO`, `ADM:GEOGRAFIA`, `ADM:RFCS`, `ADM:ESTADOS`.
+    *   **Sección Configuración (`CONFIGURACION`)**: `ADM:PARAMETROS`, `ADM:LOCALIZADORES`.
+    *   **Sección Procesos Especiales (`PROCESOS_ESPECIALES`)**: `ADM:CARGA_MASIVA`, `ADM:MIGRACION`, `ADM:RESERVA_MASIVA`, `ADM:UPDATE_FACTURAS`.
+*   **Compatibilidad y Fail-Closed**: Todo acceso a cada submódulo en la barra `AdminMenuBar` evalúa primero el permiso atómico específico (`ADM:*`) y en fallback el permiso del módulo padre (`SEGURIDAD`, `CATALOGOS`, `CONFIGURACION`, `PROCESOS_ESPECIALES`), garantizando política de fallo seguro y desacoplamiento por perfil.
 
 ---
 

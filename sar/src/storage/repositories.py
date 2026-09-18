@@ -76,7 +76,7 @@ class UsuarioRepository(BaseRepository):
         return list(self.session.execute(stmt).scalars().all())
         
     def get_all_app_modulos(self) -> List[AppModulo]:
-        stmt = select(AppModulo).where(AppModulo.activo == True).order_by(AppModulo.nombre)
+        stmt = select(AppModulo).where(AppModulo.activo == True).order_by(AppModulo.app_modulo_id)
         return list(self.session.execute(stmt).scalars().all())
 
     def get_all_modulos(self) -> List[Modulo]:

@@ -177,9 +177,23 @@ class AdminWindow(QMainWindow):
         except Exception:
             pass
             
-    def _can_edit(self, modulo: str) -> bool:
-        # Check if CREAR or EDITAR is present for this modulo
+    def _can_edit(self, modulo: str, submodulo: str = None) -> bool:
+        # Verifica CREAR o EDITAR en el submódulo atómico o fallback al módulo macro
+        if submodulo:
+            if (submodulo, "CREAR") in self.user_permissions or (submodulo, "EDITAR") in self.user_permissions:
+                return True
         return (modulo, "CREAR") in self.user_permissions or (modulo, "EDITAR") in self.user_permissions
+
+    def _has_view_access(self, modulo: str, submodulo: str = None) -> bool:
+        """Verifica si el usuario cuenta con algún permiso sobre el submódulo o módulo macro (Fail-Closed)."""
+        if not self.user_permissions:
+            return False
+        for (m, a) in self.user_permissions:
+            if submodulo and m == submodulo:
+                return True
+            if m == modulo:
+                return True
+        return False
 
     def _setup_views(self):
         """Prepares lazy factories for on-demand view instantiation to optimize startup time and memory."""
@@ -188,21 +202,21 @@ class AdminWindow(QMainWindow):
         
         # Mapping of view keys to factory functions (instantiated only when clicked)
         self.view_factories = {
-            "usuarios": lambda: UsersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
-            "roles": lambda: RolesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
-            "permisos": lambda: PermissionsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
-            "app_modulos": lambda: ModulesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
-            "acciones": lambda: ActionsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD")),
-            "conceptos": lambda: CatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS")),
-            "geografia": lambda: GeographyView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS")),
-            "rfcs": lambda: RfcsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS")),
-            "estados": lambda: StatusView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS")),
-            "parametros": lambda: ParametersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
-            "localizadores": lambda: LocalizersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
-            "migracion": lambda: MigrationView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
-            "carga_masiva": lambda: BulkLoadView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
-            "update_facturas": lambda: UpdateFacturasView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION")),
-            "reserva_masiva": lambda: ReservasProcesoView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION"))
+            "usuarios": lambda: UsersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD", "ADM:USUARIOS")),
+            "roles": lambda: RolesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD", "ADM:ROLES")),
+            "permisos": lambda: PermissionsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD", "ADM:PERMISOS")),
+            "app_modulos": lambda: ModulesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD", "ADM:MODULOS")),
+            "acciones": lambda: ActionsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD", "ADM:ACCIONES")),
+            "conceptos": lambda: CatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:CAT_NEGOCIO")),
+            "geografia": lambda: GeographyView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:GEOGRAFIA")),
+            "rfcs": lambda: RfcsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:RFCS")),
+            "estados": lambda: StatusView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:ESTADOS")),
+            "parametros": lambda: ParametersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION", "ADM:PARAMETROS")),
+            "localizadores": lambda: LocalizersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION", "ADM:LOCALIZADORES")),
+            "carga_masiva": lambda: BulkLoadView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:CARGA_MASIVA")),
+            "migracion": lambda: MigrationView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:MIGRACION")),
+            "reserva_masiva": lambda: ReservasProcesoView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA")),
+            "update_facturas": lambda: UpdateFacturasView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:UPDATE_FACTURAS"))
         }
         
         # Add a lightweight default placeholder view
@@ -216,6 +230,34 @@ class AdminWindow(QMainWindow):
         
     def _change_view(self, view_name: str):
         """Loads and switches to the requested view lazily on-demand."""
+        view_module_map = {
+            "usuarios": ("SEGURIDAD", "ADM:USUARIOS"),
+            "roles": ("SEGURIDAD", "ADM:ROLES"),
+            "permisos": ("SEGURIDAD", "ADM:PERMISOS"),
+            "app_modulos": ("SEGURIDAD", "ADM:MODULOS"),
+            "acciones": ("SEGURIDAD", "ADM:ACCIONES"),
+            "conceptos": ("CATALOGOS", "ADM:CAT_NEGOCIO"),
+            "geografia": ("CATALOGOS", "ADM:GEOGRAFIA"),
+            "rfcs": ("CATALOGOS", "ADM:RFCS"),
+            "estados": ("CATALOGOS", "ADM:ESTADOS"),
+            "parametros": ("CONFIGURACION", "ADM:PARAMETROS"),
+            "localizadores": ("CONFIGURACION", "ADM:LOCALIZADORES"),
+            "carga_masiva": ("PROCESOS_ESPECIALES", "ADM:CARGA_MASIVA"),
+            "migracion": ("PROCESOS_ESPECIALES", "ADM:MIGRACION"),
+            "reserva_masiva": ("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA"),
+            "update_facturas": ("PROCESOS_ESPECIALES", "ADM:UPDATE_FACTURAS"),
+        }
+        
+        if view_name in view_module_map:
+            mod, submod = view_module_map[view_name]
+            if not self._has_view_access(mod, submod):
+                QMessageBox.warning(
+                    self,
+                    "Acceso Denegado",
+                    f"No cuenta con permisos autorizados para acceder al submódulo '{submod}'."
+                )
+                return
+
         if view_name not in self.instantiated_views and view_name in self.view_factories:
             # Instantiate view on-demand for the first time
             view_instance = self.view_factories[view_name]()

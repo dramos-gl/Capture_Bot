@@ -30,18 +30,18 @@ La tabla de módulos internos `sar_seguridad.modulo` incluye la columna **`orden
 | Orden | Código Módulo (`sar_seguridad.modulo`) | Nombre en Pantalla | Vista PySide6 Impactada | Acciones Soportadas |
 | :---: | :--- | :--- | :--- | :--- |
 | **1.0** | `DASHBOARD` | Inicio | [`dashboard_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/dashboard_view.py) | `LEER`, `EJECUTAR` |
-| **2.0** | `DERECHOS` | Derechos (Producción) | [`referencias_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/referencias_view.py) | `LEER`, `EDITAR` |
+| **2.0** | `ORDENES` | Órdenes de Generación | [`orders_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/orders_view.py) | `LEER`, `CREAR`, `EDITAR`, `ELIMINAR`, `EJECUTAR` |
+| **2.1** | `SOLICITUDES` | Solicitudes del Bot | [`requests_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/requests_view.py) | `LEER`, `ASIGNAR`, `EDITAR`, `ELIMINAR` |
+| **2.2** | `DERECHOS` | Derechos (Producción) | [`referencias_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/referencias_view.py) | `LEER`, `EDITAR` |
 | **3.0** | `CONTROL_DERECHOS` | Control de Derechos | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) | `LEER` |
 | **3.1** | `CTRL:INVENTARIO` | Inventario | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Visor) | `LEER`, `ASIGNAR`, `EJECUTAR` |
 | **3.2** | `CTRL:ASIGNAR_DERECHO` | Asignar Derecho | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Asignación) | `LEER`, `ASIGNAR` |
 | **3.3** | `CTRL:ASIGNAR_VALIDAR` | Asignar/Validar por Lotes | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Masivo) | `LEER`, `CREAR`, `ASIGNAR` |
 | **3.4** | `CTRL:RESERVA_DERECHO` | Reservar Derecho (Apartados) | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Apartar) | `LEER`, `ASIGNAR` |
 | **3.5** | `CTRL:GESTION_LOTES` | Gestión de asignaciones | [`inventory_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/inventory_view.py) (Sub-tab Lotes) | `LEER`, `EJECUTAR` |
-| **--** | `ORDENES` | Órdenes de Generación | [`orders_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/orders_view.py) | `LEER`, `CREAR`, `EDITAR`, `ELIMINAR`, `EJECUTAR` |
-| **--** | `SOLICITUDES` | Solicitudes del Bot | [`requests_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/requests_view.py) | `LEER`, `ASIGNAR`, `EDITAR`, `ELIMINAR` |
-| **--** | `CATALOGOS` | Catálogos del Sistema | [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) | `LEER`, `CREAR`, `EDITAR`, `ELIMINAR` |
-| **--** | `SEGURIDAD` | Control de Acceso (RBAC) | [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) | `LEER`, `CREAR`, `EDITAR`, `ELIMINAR`, `ASIGNAR` |
-| **--** | `CONFIGURACION` | Configuración General | [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) | `LEER`, `EDITAR` |
+| **4.0** | `SEGURIDAD` | Control de Acceso (RBAC) | [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) | `LEER`, `CREAR`, `EDITAR`, `ELIMINAR`, `ASIGNAR` |
+| **5.0** | `CATALOGOS` | Catálogos del Sistema | [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) | `LEER`, `CREAR`, `EDITAR`, `ELIMINAR` |
+| **6.0** | `CONFIGURACION` | Configuración General | [`admin_view.py`](file:///c:/Users/dramos/Documents/Proyecto_CapturaBot/sar/src/ui/views/admin_view.py) | `LEER`, `EDITAR` |
 
 ---
 
@@ -93,14 +93,44 @@ La tabla de módulos internos `sar_seguridad.modulo` incluye la columna **`orden
 * `EDITAR`: Habilita el botón **Editar Cantidad** (`_on_editar`) para ajustar la cantidad solicitada de la orden de trabajo.
 * `ELIMINAR`: Habilita el botón **Cancelar Solicitud** (`_on_cancelar`) para dar de baja una solicitud de trabajo en la cola del bot. En ausencia de permisos, el sistema aplica la política de fallo seguro informando vía `QMessageBox.warning`.
 
+#### 🛠️ Módulos de Administración del Sistema (`ADMIN` - Alternativa 2: Granularidad Atómica)
+
+##### [4.0] Seguridad (`SEGURIDAD`) y Submódulos
+* **`ADM:USUARIOS` (4.1):** Gestión de usuarios, restablecimiento de credenciales y activación/desactivación.
+* **`ADM:ROLES` (4.2):** Alta, edición y mantenimiento de perfiles y roles del sistema.
+* **`ADM:PERMISOS` (4.3):** Matriz interactiva de asignación Módulo x Acción por Rol.
+* **`ADM:MODULOS` (4.4):** Catálogo de módulos funcionales y su vinculación con macro-aplicaciones (`app_modulo_id`).
+* **`ADM:ACCIONES` (4.5):** Catálogo de operaciones y acciones auditables (`LEER`, `CREAR`, `EDITAR`, `ELIMINAR`, `ASIGNAR`, `EJECUTAR`).
+
+##### [5.0] Catálogos (`CATALOGOS`) y Submódulos
+* **`ADM:CAT_NEGOCIO` (5.1):** Conceptos, códigos de portal y agrupadores de servicios.
+* **`ADM:GEOGRAFIA` (5.2):** Catálogo geográfico de plazas, ciudades, delegaciones y notarías.
+* **`ADM:RFCS` (5.3):** Empresas maestras y sus datos fiscales para timbrado.
+* **`ADM:ESTADOS` (5.4):** Estados de ciclo de vida de órdenes y derechos.
+
+##### [6.0] Configuración (`CONFIGURACION`) y Submódulos
+* **`ADM:PARAMETROS` (6.1):** Configuración técnica del sistema, timeouts y parámetros de entorno (`settings.json`).
+* **`ADM:LOCALIZADORES` (6.2):** Configuración de selectores DOM y rutas para robots de scraping.
+
+##### [7.0] Procesos Especiales (`PROCESOS_ESPECIALES`) y Submódulos
+* **`ADM:CARGA_MASIVA` (7.1):** Carga masiva de requerimientos de órdenes desde hojas de cálculo.
+* **`ADM:MIGRACION` (7.2):** Herramienta técnica para migración de fojas y testimonios.
+* **`ADM:RESERVA_MASIVA` (7.3):** Asignación masiva y reserva de derechos para desarrollos notariales.
+* **`ADM:UPDATE_FACTURAS` (7.4):** Conciliación y actualización masiva de estados de facturación.
+
+#### 🏖️ Módulos de Tesorería Cancún (`R2F_CANCUN` - app_modulo_id = 6)
+* **`FOLIOS_CANCUN` (8.0):** Control de emisión de folios municipales.
+* **`RECIBOS_CANCUN` (8.1):** Emisión y dispersión de recibos de pago.
+* **`FACTURAS_CANCUN` (8.2):** Generación y timbrado de facturas fiscales de Cancún.
+
 ---
 
 ## 3. Matriz de Roles Estándar de Fábrica
 
 ### 🛡️ Rol `ADMINISTRADOR` (Rol ID 1)
 * **Ámbito:** Acceso total y global al sistema y administración de seguridad.
-* **Permisos RBAC:** Posee **TODAS** las intersecciones Módulo x Acción en la base de datos (102 permisos).
-* **Módulos App (`sar_seguridad.app_modulo`):** `ADMIN`, `CTRL_REF`, `BOT_FACE_A`, `BOT_C`.
+* **Permisos RBAC:** Posee **TODAS** las intersecciones Módulo x Acción en la base de datos (192 permisos).
+* **Módulos App (`sar_seguridad.app_modulo`):** `ADMIN`, `CTRL_REF`, `BOT_FACE_A`, `BOT_FACE_C`, `R2F_CANCUN`.
 
 ### 👷 Rol `OPERADOR` (Rol ID 2)
 * **Ámbito:** Operador con acceso completo a todas las funcionalidades del módulo *Control de Derechos* (y cada uno de sus submódulos) y módulos de Bot.
@@ -115,14 +145,14 @@ La tabla de módulos internos `sar_seguridad.modulo` incluye la columna **`orden
   * `CTRL:ASIGNAR_VALIDAR`: `LEER`, `CREAR`, `ASIGNAR`
   * `CTRL:RESERVA_DERECHO`: `LEER`, `ASIGNAR`
   * `CTRL:GESTION_LOTES`: `LEER`, `EJECUTAR`
-* **Módulos App (`sar_seguridad.app_modulo`):** `CTRL_REF`, `BOT_FACE_A`, `BOT_C`.
+* **Módulos App (`sar_seguridad.app_modulo`):** `CTRL_REF`, `BOT_FACE_A`, `BOT_FACE_C`.
 
 ### 🤖 Rol `BOT` (Rol ID 3)
 * **Ámbito:** Perfil exclusivo para la operación de autómatas y scrapers (*Bot Face A - Pago de Derechos* y *Bot Face C - Facturación*).
 * **Permisos RBAC:**
   * `ORDENES`: `LEER`, `EJECUTAR`
   * `SOLICITUDES`: `LEER`, `EDITAR`, `EJECUTAR`
-* **Módulos App (`sar_seguridad.app_modulo`):** `BOT_FACE_A`, `BOT_C`.
+* **Módulos App (`sar_seguridad.app_modulo`):** `BOT_FACE_A`, `BOT_FACE_C`.
 
 ### 👤 Rol `GESTOR` (Rol ID 4)
 * **Ámbito:** Perfil de gestión controlada para asignación e inventario de derechos.

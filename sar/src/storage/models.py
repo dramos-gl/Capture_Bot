@@ -100,9 +100,11 @@ class Modulo(Base):
     orden: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     descripcion: Mapped[Optional[str]] = mapped_column(String(200))
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    app_modulo_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_seguridad.app_modulo.app_modulo_id", ondelete="SET NULL"), nullable=True)
 
     # Relaciones
     permisos: Mapped[List["Permiso"]] = relationship(back_populates="modulo")
+    app_modulo: Mapped[Optional["AppModulo"]] = relationship(back_populates="modulos")
 
 
 class AppModulo(Base):
@@ -117,6 +119,7 @@ class AppModulo(Base):
 
     # Relaciones
     roles: Mapped[List["Rol"]] = relationship(secondary=rol_app_modulo, back_populates="app_modulos")
+    modulos: Mapped[List["Modulo"]] = relationship(back_populates="app_modulo")
 
 
 class Accion(Base):

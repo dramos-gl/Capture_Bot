@@ -472,24 +472,45 @@ class AdminService:
         if data.get("modulo_id"):
             m = self.session.get(Modulo, data["modulo_id"])
             action = "ACTUALIZAR_REGISTRO"
-            old_val = {"codigo": m.codigo, "nombre": m.nombre, "descripcion": m.descripcion, "activo": m.activo}
+            old_val = {
+                "codigo": m.codigo,
+                "nombre": m.nombre,
+                "descripcion": m.descripcion,
+                "activo": m.activo,
+                "orden": m.orden,
+                "app_modulo_id": m.app_modulo_id
+            }
             
             m.codigo = data.get("codigo", m.codigo)
             m.nombre = data.get("nombre", m.nombre)
             m.descripcion = data.get("descripcion", m.descripcion)
             if "activo" in data:
                 m.activo = data["activo"]
+            if "orden" in data and data["orden"] is not None:
+                m.orden = float(data["orden"])
+            if "app_modulo_id" in data:
+                m.app_modulo_id = data["app_modulo_id"]
         else:
             m = Modulo(
                 codigo=data["codigo"],
                 nombre=data["nombre"],
                 descripcion=data.get("descripcion", ""),
-                activo=data.get("activo", True)
+                activo=data.get("activo", True),
+                orden=float(data.get("orden", 1.0)),
+                app_modulo_id=data.get("app_modulo_id")
             )
 
         self.session.add(m)
         self.session.flush()
-        new_val = {"modulo_id": m.modulo_id, "codigo": m.codigo, "nombre": m.nombre, "descripcion": m.descripcion, "activo": m.activo}
+        new_val = {
+            "modulo_id": m.modulo_id,
+            "codigo": m.codigo,
+            "nombre": m.nombre,
+            "descripcion": m.descripcion,
+            "activo": m.activo,
+            "orden": m.orden,
+            "app_modulo_id": m.app_modulo_id
+        }
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": m.nombre})
         return m
 

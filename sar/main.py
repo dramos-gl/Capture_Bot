@@ -217,7 +217,7 @@ class MainWindow(QMainWindow):
                 
                 # Hook up logout for BotView
                 bot_view_widget.logout_requested.connect(self._handle_logout)
-            elif selected_mod_code == "BOT_C":
+            elif selected_mod_code in ("BOT_FACE_C", "BOT_C"):
                 from sar.src.ui.views.billing_bot_view import BillingBotWindow
                 self.active_module = BillingBotWindow(
                     self.db_connector,
@@ -253,7 +253,7 @@ class MainWindow(QMainWindow):
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.active_module.setCentralWidget(lbl)
                 
-            if selected_mod_code in ("BOT_FACE_A", "BOT_C", "R2F_CANCUN"):
+            if selected_mod_code in ("BOT_FACE_A", "BOT_FACE_C", "BOT_C", "R2F_CANCUN"):
                 # Dynamically calculate optimal window size based on available screen geometry
                 screen = QApplication.primaryScreen()
                 avail_geom = screen.availableGeometry() if screen else None

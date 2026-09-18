@@ -129,15 +129,18 @@ class MainView(QWidget):
             if has_dashboard:
                 self.sidebar.show_item("dashboard")
                 if not default_item: default_item = "dashboard"
-            if has_ordenes:
+
+            has_any_ordenes = any([has_ordenes, has_solicitudes, has_derechos])
+            if has_any_ordenes:
                 self.sidebar.show_item("ordenes")
-                self.sidebar.show_item("ordenes_capturadas")
+
+            if has_ordenes:
                 self.sidebar.show_item("capturar_orden")
-                if not default_item: default_item = "ordenes"
+                self.sidebar.show_item("ordenes_capturadas")
+                if not default_item: default_item = "capturar_orden"
             if has_solicitudes:
                 self.sidebar.show_item("solicitudes")
                 if not default_item: default_item = "solicitudes"
-            
             if has_derechos:
                 self.sidebar.show_item("referencias")
                 if not default_item: default_item = "referencias"

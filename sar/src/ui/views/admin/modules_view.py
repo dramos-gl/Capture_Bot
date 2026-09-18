@@ -7,6 +7,7 @@ from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
+from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
 from sar.src.ui.design_system.components.organisms.gl_dialog import CustomDialog
@@ -20,6 +21,7 @@ class ModulesView(QWidget):
         self.current_user_id = current_user_id
         self.current_sesion_id = current_sesion_id
         self.can_edit = can_edit
+        self.apps_data = []
         
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
@@ -37,7 +39,10 @@ class ModulesView(QWidget):
         self.layout.addWidget(self.tbl_app)
         
         self.tbl_mod = CrudTablePanel("Módulos Internos")
-        self.tbl_mod.setup_table(["ID", "Orden", "Código", "Nombre", "Descripción", "Estado"], ["modulo_id", "orden", "codigo", "nombre", "descripcion", "activo"])
+        self.tbl_mod.setup_table(
+            ["ID", "Orden", "Macro-App", "Código", "Nombre", "Descripción", "Estado"],
+            ["modulo_id", "orden", "app_modulo_nombre", "codigo", "nombre", "descripcion", "activo"]
+        )
         self.tbl_mod.add_requested.connect(self._on_new_mod)
         self.tbl_mod.edit_requested.connect(self._on_edit_mod)
         self.layout.addWidget(self.tbl_mod)
@@ -141,6 +146,18 @@ class ModulesView(QWidget):
         form_mod.setSpacing(8)
         form_mod.setContentsMargins(0, 0, 0, 0)
         
+        self.cmb_m_app = CustomComboBox(parent=card_mod)
+        self.cmb_m_app.addItem("— Sin Macro-App Asignada —", None)
+        for app in self.apps_data:
+            app_id = app.get("app_modulo_id") or app.get("id")
+            self.cmb_m_app.addItem(f"{app.get('nombre')} ({app.get('codigo')})", app_id)
+        form_mod.addRow("Macro-App (Nivel 1):", self.cmb_m_app)
+
+        self.inp_m_ord = CustomInput("Ej. 4.1", parent=card_mod)
+        self.inp_m_ord.setMaxLength(10)
+        self.inp_m_ord.setText("1.0")
+        form_mod.addRow("Orden Menú *:", self.inp_m_ord)
+
         self.inp_m_cod = CustomInput("Ej. REFERENCIAS", parent=card_mod)
         self.inp_m_cod.setMaxLength(30)
         self.inp_m_cod.textEdited.connect(lambda t: self.inp_m_cod.setText(t.upper()))
@@ -172,14 +189,18 @@ class ModulesView(QWidget):
         def _validate_mod():
             c_val = self.inp_m_cod.text().strip()
             n_val = self.inp_m_nom.text().strip()
-            dialog.btn_save.setEnabled(bool(c_val and n_val))
+            o_val = self.inp_m_ord.text().strip()
+            dialog.btn_save.setEnabled(bool(c_val and n_val and o_val))
             
         self.inp_m_cod.textChanged.connect(_validate_mod)
         self.inp_m_nom.textChanged.connect(_validate_mod)
+        self.inp_m_ord.textChanged.connect(_validate_mod)
         _validate_mod()
         
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
+            self.cmb_m_app.setEnabled(False)
+            self.inp_m_ord.setReadOnly(True)
             self.inp_m_cod.setReadOnly(True)
             self.inp_m_nom.setReadOnly(True)
             self.inp_m_desc.setReadOnly(True)
@@ -233,6 +254,8 @@ class ModulesView(QWidget):
     def _on_new_mod(self):
         self.current_mod_id = None
         d = self._create_mod_dialog("Nuevo Módulo Interno")
+        self.inp_m_ord.setText("1.0")
+        self.cmb_m_app.setCurrentIndex(0)
         self.inp_m_cod.set_focus()
         d.exec()
 
@@ -242,13 +265,29 @@ class ModulesView(QWidget):
         self.inp_m_cod.set_text(data.get("codigo", ""))
         self.inp_m_nom.set_text(data.get("nombre", ""))
         self.inp_m_desc.set_text(data.get("descripcion", "") or "")
+        self.inp_m_ord.setText(str(data.get("orden", 1.0)))
+        
+        target_app_id = data.get("app_modulo_id")
+        idx = self.cmb_m_app.findData(target_app_id)
+        if idx >= 0:
+            self.cmb_m_app.setCurrentIndex(idx)
+        else:
+            self.cmb_m_app.setCurrentIndex(0)
+
         self.chk_m_act.setChecked(bool(data.get("activo", False)))
         self.inp_m_cod.set_focus()
         d.exec()
 
     def _save_mod(self, dialog):
+        try:
+            ord_val = float(self.inp_m_ord.text().strip() or 1.0)
+        except ValueError:
+            ord_val = 1.0
+
         data = {
             "modulo_id": self.current_mod_id,
+            "app_modulo_id": self.cmb_m_app.currentData(),
+            "orden": ord_val,
             "codigo": self.inp_m_cod.text().strip().upper(),
             "nombre": self.inp_m_nom.text().strip(),
             "descripcion": self.inp_m_desc.text().strip(),
@@ -277,17 +316,35 @@ class ModulesView(QWidget):
         try:
             if self.api_client.connect_via_api:
                 apps = self.api_client.request("GET", "/api/admin/data/app_modulos")
+                self.apps_data = apps
                 self.tbl_app.populate(apps)
                 
+                app_map = {a.get("app_modulo_id") or a.get("id"): a.get("nombre") for a in apps}
                 mods = self.api_client.request("GET", "/api/admin/data/modulos")
+                for m in mods:
+                    m["app_modulo_nombre"] = app_map.get(m.get("app_modulo_id"), "—")
                 self.tbl_mod.populate(mods)
             else:
                 with self.db_connector.get_session() as session:
                     repo = UsuarioRepository(session)
                     apps = repo.get_all_app_modulos()
-                    self.tbl_app.populate([{"app_modulo_id": a.app_modulo_id, "codigo": a.codigo, "nombre": a.nombre, "activo": a.activo} for a in apps])
+                    self.apps_data = [{"app_modulo_id": a.app_modulo_id, "codigo": a.codigo, "nombre": a.nombre, "activo": a.activo} for a in apps]
+                    self.tbl_app.populate(self.apps_data)
                     
+                    app_map = {a["app_modulo_id"]: a["nombre"] for a in self.apps_data}
                     mods = repo.get_all_modulos()
-                    self.tbl_mod.populate([{"modulo_id": m.modulo_id, "orden": getattr(m, 'orden', 1.0), "codigo": m.codigo, "nombre": m.nombre, "descripcion": m.descripcion, "activo": m.activo} for m in mods])
+                    mod_rows = []
+                    for m in mods:
+                        mod_rows.append({
+                            "modulo_id": m.modulo_id,
+                            "orden": getattr(m, 'orden', 1.0),
+                            "app_modulo_id": getattr(m, 'app_modulo_id', None),
+                            "app_modulo_nombre": app_map.get(getattr(m, 'app_modulo_id', None), "—"),
+                            "codigo": m.codigo,
+                            "nombre": m.nombre,
+                            "descripcion": m.descripcion,
+                            "activo": m.activo
+                        })
+                    self.tbl_mod.populate(mod_rows)
         except Exception as e:
             print("Error refreshing modules:", e)
