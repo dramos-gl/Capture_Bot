@@ -113,6 +113,14 @@ Estados:
 Flujo:
 BORRADOR → ABIERTA → PROCESANDO → FINALIZADA
 ________________________________________
+6.1 Tipos de Órdenes y Modos Operativos
+Las órdenes se clasifican en cuatro tipos, definiendo el comportamiento del sistema y la automatización:
+
+•	ESTANDAR: Órdenes normales de cobro. Cada referencia equivale a 1 acto.
+•	CANCELACION: Orden anual para cancelaciones hipotecarias (Ej. ORD-CANCEL-2026). Las referencias se agrupan sobre el mismo folio padre.
+•	FOJAS: Orden anual para Derechos de Fojas (Ej. ORD-FOJAS-2026). Requiere que el usuario defina la `cantidad_actos` durante la captura, lo cual modifica el multiplicador en el portal.
+•	TESTIMONIO: Orden anual para Expedición de Testimonios (Ej. ORD-TESTIMONIO-2026). Genera las referencias en un grupo y portal distinto (Grupo=71).
+________________________________________
 7. Ciclo de Vida de un Grupo
 Estados:
 •	PENDIENTE
@@ -164,9 +172,9 @@ SAR ejecutará:
 4.	Iniciar Playwright.
 5.	Actualizar estado a PROCESANDO.
 ________________________________________
-12. Automatización Tributanet
-Secuencia:
-1.	Acceso al portal.
+12. Automatización Tributanet (Bot Face A)
+Secuencia Estándar:
+1.	Acceso al portal principal.
 2.	Selección de municipio.
 3.	Captura RFC.
 4.	Apertura de formulario.
@@ -177,6 +185,13 @@ Secuencia:
 9.	Descarga PDF.
 10.	Registro en SAR.
 11.	Continuar siguiente referencia.
+
+Excepciones Operativas:
+•	Flujo Fojas: En el paso 7, el sistema inyecta automáticamente la `cantidad_actos` en el campo multiplicador de Tributanet (utilizando selectores estrictos tipo `[type='number']` para evitar colisiones con campos de lectura).
+•	Flujo Testimonios: 
+    - El paso 1 navega a una URL específica de Grupo Especial (Grupo=71).
+    - El paso 6 (Delegación) se omite automáticamente al no existir en dicho portal.
+    - El paso 7 (Concepto) se selecciona procesando el `codigo_portal` mediante Expresiones Regulares (extrayendo el prefijo numérico) para blindar el bot contra caracteres especiales y discrepancias de codificación.
 ________________________________________
 13. Control de Consecutivos
 Regla Operativa RO-010

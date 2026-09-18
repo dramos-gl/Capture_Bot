@@ -102,16 +102,21 @@ class BotView(QWidget):
     def _on_gear_clicked(self):
         menu = self._create_styled_menu()
         
-        # Get Portal URL from DB parameter or fallback
         portal_url = "https://shacienda.qroo.gob.mx/tributanet/"
+        param_to_fetch = "TRIBUTANET_RPP_URL"
+        
+        # Validar si el contexto cargado es para Testimonios
+        if self.current_bot_context and self.current_bot_context.get("concepto_alias") == "TESTIMONIO":
+            param_to_fetch = "TRIBUTANET_GRUPO71_URL"
+            
         try:
             if self.api_client.connect_via_api:
-                res = self.api_client.request("GET", "/api/docs/config/parametro/TRIBUTANET_RPP_URL")
+                res = self.api_client.request("GET", f"/api/docs/config/parametro/{param_to_fetch}")
                 db_url = res.get("valor")
             else:
                 with self.db_connector.get_session() as session:
                     repo = ConfigRepository(session)
-                    db_url = repo.get_parametro("TRIBUTANET_RPP_URL")
+                    db_url = repo.get_parametro(param_to_fetch)
             if db_url: portal_url = db_url
         except:
             pass
@@ -449,7 +454,12 @@ class BotView(QWidget):
             self.current_bot_context = ctx
             
             # Update UI
-            self.lbl_rfc_info.setText(f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}")
+            info_text = f"RFC: {ctx['rfc']} | Razón Social: {ctx['razon_social']}\nCP: {ctx['codigo_postal']} | Municipio: {ctx.get('municipio_nombre', '')}"
+            
+            if ctx.get("concepto_alias") == "FOJAS":
+                info_text += f" | Cant. Actos (Fojas): {ctx.get('cantidad_actos', 1)}"
+                
+            self.lbl_rfc_info.setText(info_text)
             
             total = ctx["consecutivo_fin"] - ctx["consecutivo_inicio"] + 1
             completados = ctx["ultimo_consecutivo"] - ctx["consecutivo_inicio"] + 1 if ctx["ultimo_consecutivo"] >= ctx["consecutivo_inicio"] else 0

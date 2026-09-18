@@ -142,9 +142,9 @@ Justificación
 •	Excelente rendimiento.
 •	Documentación automática.
 ________________________________________
-8. Automatización
+8. Automatización y Scrapers
 Tecnología Oficial
-Playwright
+Playwright integrado con PySide6
 ________________________________________
 Razones
 •	Más estable que Selenium.
@@ -152,6 +152,20 @@ Razones
 •	Mejor manejo de descargas.
 •	Mejor soporte para sitios modernos.
 ________________________________________
+8.1 Bot Face A (Captura y Generación)
+Es el scraper autónomo encargado de inyectar las solicitudes en Tributanet para generar las referencias de pago.
+•	Flujo Estándar y Cancelaciones: Navega por el portal normal, seleccionando municipio, RFC, concepto y delegación.
+•	Flujo Fojas (identificado por `concepto_alias='FOJAS'`): Modifica el comportamiento estándar localizando el input dinámico con selector estricto (`[type='number']`) para inyectar la variable `cantidad_actos` configurada en la orden, evadiendo fallos por *Strict Mode* de Playwright.
+•	Flujo Testimonios (identificado por `concepto_alias='TESTIMONIO'`): 
+  - Desvía la navegación inicial desde el portal estándar hacia una URL específica (`dec_contribucion_control.php?Grupo=71`).
+  - Omite la interacción con el selector de Delegación.
+  - Selecciona el concepto extrayendo dinámicamente el prefijo numérico del `codigo_portal` mediante Expresiones Regulares, lo cual previene fallos por discrepancias de codificación utf-8 (acentos, paréntesis) entre la Base de Datos y el DOM de Tributanet.
+________________________________________
+8.2 Bot Face C (Facturación y Timbrado)
+Es el scraper autónomo secundario encargado de consultar Tributanet/SATQ para validar el estatus de cobro de las referencias.
+•	Identifica folios pagados.
+•	Dispara el proceso de facturación y timbrado automático.
+•	Descarga los XML/PDF de las facturas generadas.
 9. Base de Datos
 Recomendación Oficial
 PostgreSQL

@@ -353,9 +353,11 @@ class CatalogoRepository(BaseRepository):
         stmt = select(Rfc).where(Rfc.activo == True).order_by(Rfc.razon_social)
         return list(self.session.execute(stmt).scalars().all())
 
-    def get_conceptos_activos(self, es_cancelacion: Optional[bool] = None) -> List[Concepto]:
+    def get_conceptos_activos(self, es_cancelacion: Optional[bool] = None, tipo_modulo: Optional[str] = None) -> List[Concepto]:
         stmt = select(Concepto).where(Concepto.activo == True)
-        if es_cancelacion is not None:
+        if tipo_modulo is not None:
+            stmt = stmt.where(Concepto.tipo_modulo == tipo_modulo)
+        elif es_cancelacion is not None:
             stmt = stmt.where(Concepto.es_cancelacion == es_cancelacion)
         stmt = stmt.order_by(Concepto.nombre)
         return list(self.session.execute(stmt).scalars().all())
@@ -759,9 +761,10 @@ class OperacionRepository(BaseRepository):
                 rfc.rfc, rfc.razon_social, rfc.calle, rfc.codigo_postal, rfc.municipio as rfc_municipio,
                 rfc.colonia, rfc.no_exterior, rfc.no_interior, rfc.localidad, rfc.estado as rfc_estado,
                 m.codigo_portal as municipio_codigo_portal, m.nombre as municipio_nombre,
-                c.nombre as concepto_nombre, c.alias as concepto_alias, c.codigo_portal as concepto_codigo_portal,
+                c.concepto_id, c.nombre as concepto_nombre, c.alias as concepto_alias, c.codigo_portal as concepto_codigo_portal,
                 d.nombre as delegacion_nombre,
                 o.folio as orden_folio,
+                s.cantidad_actos,
                 -- Conteo real de referencias ya timbradas por Face C (fuente de verdad para reanudación)
                 COALESCE((
                     SELECT COUNT(DISTINCT f.factura_id)
@@ -812,9 +815,11 @@ class OperacionRepository(BaseRepository):
             "municipio": row.municipio_codigo_portal,  # Maps directly to the code (e.g. '02') for the portal drop-down
             "concepto_nombre": row.concepto_nombre,
             "concepto_alias": row.concepto_alias or "UNK",
+            "concepto_id": row.concepto_id,
             "concepto_codigo_portal": row.concepto_codigo_portal,
             "delegacion_nombre": row.delegacion_nombre,
-            "orden_folio": row.orden_folio
+            "orden_folio": row.orden_folio,
+            "cantidad_actos": row.cantidad_actos
         }
 
 class ProduccionRepository(BaseRepository):

@@ -54,6 +54,9 @@ class RpaWorker(QThread):
                 res_url = self.api_client.request("GET", "/api/docs/config/parametro/TRIBUTANET_RPP_URL")
                 rpp_url = res_url.get("valor") or "https://shacienda.qroo.gob.mx/tributanet/rpp/dec_rpp_control.php?tipo_declaracion=1"
                 
+                res_url71 = self.api_client.request("GET", "/api/docs/config/parametro/TRIBUTANET_GRUPO71_URL")
+                rpp_url_71 = res_url71.get("valor") or "https://shacienda.qroo.gob.mx/tributanet/contribucion/dec_contribucion_control.php?Grupo=71"
+                
                 res_retries = self.api_client.request("GET", "/api/docs/config/parametro/REINTENTOS_AUTOMATICOS")
                 retries_str = res_retries.get("valor")
                 max_retries = int(retries_str) if retries_str else 3
@@ -66,6 +69,7 @@ class RpaWorker(QThread):
                 with self.db_connector.get_session() as db_session:
                     config_repo = ConfigRepository(db_session)
                     rpp_url = config_repo.get_parametro("TRIBUTANET_RPP_URL") or "https://shacienda.qroo.gob.mx/tributanet/rpp/dec_rpp_control.php?tipo_declaracion=1"
+                    rpp_url_71 = config_repo.get_parametro("TRIBUTANET_GRUPO71_URL") or "https://shacienda.qroo.gob.mx/tributanet/contribucion/dec_contribucion_control.php?Grupo=71"
                     retries_str = config_repo.get_parametro("REINTENTOS_AUTOMATICOS")
                     max_retries = int(retries_str) if retries_str else 3
                     self.default_output_dir = config_repo.get_parametro("RUTA_DERECHOS") or "storage"
@@ -143,8 +147,9 @@ class RpaWorker(QThread):
                     if self._stop_requested:
                         break
                     try:
+                        target_url = rpp_url_71 if self.ctx.get("concepto_id") == 6 else rpp_url
                         self.status_changed.emit(f"Navegando al portal (Intento {retry_attempt + 1})...")
-                        page.goto(rpp_url)
+                        page.goto(target_url)
                         
                         # Step A: Select Municipio and Fill RFC on Access Form
                         mun_selector = locators.get("ddlMunicipio")
@@ -170,7 +175,10 @@ class RpaWorker(QThread):
                         self._fill_locator(page, locators.get("txtEstadoRfc"), self.ctx.get("rfc_estado", ""))       # 9
                         
                         # Select Delegacion (10)
-                        self._select_option_fuzzy(page, locators.get("ddlDelegacion"), self.ctx["delegacion_nombre"])
+                        if self.ctx.get("concepto_alias") != "TESTIMONIO":
+                            self._select_option_fuzzy(page, locators.get("ddlDelegacion"), self.ctx["delegacion_nombre"])
+                        else:
+                            self.status_changed.emit("Flujo Testimonios: Omitiendo Delegación (no presente en Grupo 71)...")
                         
                         # Select Concepto (11)
                         concepto_alias = self.ctx.get("concepto_alias", "").upper()
@@ -183,7 +191,35 @@ class RpaWorker(QThread):
                                        (concepto_codigo and concepto_codigo.startswith("132-1")))
                         
                         ddl_concepto = locators.get("ddlConcepto")
-                        if es_analisis:
+                        
+                        import re
+                        if self.ctx.get("concepto_alias") == "TESTIMONIO":
+                            self.status_changed.emit("Flujo Testimonios: Seleccionando concepto especial...")
+                            page.wait_for_selector(ddl_concepto, state="visible")
+                            try:
+                                # 1. Intento por coincidencia exacta o Regex del value (ej. "19363")
+                                if concepto_codigo:
+                                    try:
+                                        page.locator(ddl_concepto).select_option(value=concepto_codigo, timeout=3000)
+                                    except:
+                                        # Extraer solo la clave inicial numérica para evitar problemas de acentos o paréntesis en la BD
+                                        match_num = re.match(r"^(\d+)", concepto_codigo)
+                                        if match_num:
+                                            codigo_limpio = match_num.group(1)
+                                            page.locator(ddl_concepto).select_option(value=re.compile(f"^{codigo_limpio}"))
+                                        else:
+                                            page.locator(ddl_concepto).select_option(value=re.compile(f"^{re.escape(concepto_codigo)}"))
+                                else:
+                                    raise Exception("No code")
+                            except:
+                                # 2. Fallback heurístico por etiqueta
+                                self.status_changed.emit("Búsqueda estricta fallida, buscando por texto de testimonios...")
+                                try:
+                                    page.locator(ddl_concepto).select_option(label=re.compile(r"expedición de testimonios", re.IGNORECASE))
+                                except:
+                                    self._select_option_fuzzy(page, ddl_concepto, "expedición de testimonios")
+                                    
+                        elif es_analisis:
                             try:
                                 page.wait_for_selector(ddl_concepto, state="visible")
                                 selected_val = page.locator(ddl_concepto).input_value()
@@ -211,6 +247,17 @@ class RpaWorker(QThread):
                         # Click Add Concept
                         self._click_locator(page, locators.get("btnAgregarConcepto"))
                         time.sleep(1) # Allow page scripts to add row
+                        
+                        # Inyección especial para Fojas (Concepto 5)
+                        if self.ctx.get("concepto_alias") == "FOJAS":
+                            cant_actos = self.ctx.get("cantidad_actos", 1)
+                            selector_fojas = locators.get("txtCantidadMultiplicar136", "input.multiplicar136")
+                            # Evitar el "strict mode violation" asegurando que seleccionamos el input correcto
+                            if selector_fojas == "input.multiplicar136":
+                                selector_fojas = "input.multiplicar136[type='number']"
+                                
+                            self.status_changed.emit(f"Inyectando cantidad de actos ({cant_actos}) para Fojas...")
+                            self._fill_locator(page, selector_fojas, cant_actos)
                         
                         # Click Generate Boleta
                         self._click_locator(page, locators.get("btnGenerarBoleta"))

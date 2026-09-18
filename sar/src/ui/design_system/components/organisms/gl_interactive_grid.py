@@ -80,6 +80,17 @@ class InteractiveGridRow(QFrame):
         self.spin_cantidad.setMaximumWidth(110)
         self.spin_cantidad.setFixedHeight(36)
 
+        # Cantidad de Actos (Multiplicador 136 - Fojas)
+        self.spin_cantidad_actos = CustomSpinBox(self)
+        self.spin_cantidad_actos.setMinimum(1)
+        self.spin_cantidad_actos.setMaximum(1000)
+        self.spin_cantidad_actos.setValue(1)
+        self.spin_cantidad_actos.setMinimumWidth(75)
+        self.spin_cantidad_actos.setMaximumWidth(110)
+        self.spin_cantidad_actos.setFixedHeight(36)
+        self.spin_cantidad_actos.setToolTip("Cantidad de Actos / Fojas a declarar en el portal")
+        self.spin_cantidad_actos.setVisible(False)
+
         # Disponibles (semáforo read-only)
         self.lbl_disponibles = QLabel("—", self)
         self.lbl_disponibles.setAlignment(Qt.AlignCenter)
@@ -95,12 +106,13 @@ class InteractiveGridRow(QFrame):
         self.btn_delete.setStyleSheet("border: none; background: transparent;")
         self.btn_delete.clicked.connect(lambda: self.deleted.emit(self))
 
-        # ── Layout (order: Desarrollo → RFC → Delegación → Concepto → Cant → Disp → Del) ─
+        # ── Layout (order: Desarrollo → RFC → Delegación → Concepto → Cantidad → Cant. Actos → Disp → Del) ─
         self.layout.addWidget(self.combo_desarrollo, stretch=1)
         self.layout.addWidget(self.combo_rfc, stretch=1)
         self.layout.addWidget(self.combo_delegacion, stretch=1)
         self.layout.addWidget(self.combo_concepto, stretch=1)
         self.layout.addWidget(self.spin_cantidad)
+        self.layout.addWidget(self.spin_cantidad_actos)
         self.layout.addWidget(self.lbl_disponibles)
         self.layout.addWidget(self.btn_delete)
 
@@ -110,6 +122,7 @@ class InteractiveGridRow(QFrame):
         self.combo_delegacion.currentIndexChanged.connect(self._on_delegacion_changed)
         self.combo_concepto.currentIndexChanged.connect(self._on_concepto_changed)
         self.spin_cantidad.valueChanged.connect(lambda _: self.changed.emit())
+        self.spin_cantidad_actos.valueChanged.connect(lambda _: self.changed.emit())
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -278,6 +291,13 @@ class InteractiveGridRow(QFrame):
             self._on_combo_changed_generic()
 
     def _on_concepto_changed(self):
+        concepto_id = self.combo_concepto.currentData()
+        # Toggle Cantidad de Actos (Multiplicador 136) visibility for Concepto 5 (Fojas)
+        if concepto_id == 5:
+            self.spin_cantidad_actos.setVisible(True)
+        else:
+            self.spin_cantidad_actos.setVisible(False)
+            self.spin_cantidad_actos.setValue(1)
         self._on_combo_changed_generic()
 
     def _update_disponibles_style(self, status: str = "neutral", text: str = "—"):
@@ -337,7 +357,7 @@ class InteractiveGridRow(QFrame):
 
     # ── Data access ───────────────────────────────────────────────────────────
 
-    def set_values(self, rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada=0, desarrollo_id=None):
+    def set_values(self, rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada=0, desarrollo_id=None, cantidad_actos=1):
         """Pre-selects options and sets quantity on row creation/loading."""
         self._cantidad_generada = cantidad_generada
 
@@ -361,6 +381,9 @@ class InteractiveGridRow(QFrame):
                 self.combo_desarrollo.setCurrentIndex(idx_des)
 
         self.spin_cantidad.setValue(cantidad)
+        self.spin_cantidad_actos.setValue(cantidad_actos)
+        if concepto_id == 5:
+            self.spin_cantidad_actos.setVisible(True)
 
         # If references have already been generated, lock fields
         if cantidad_generada > 0:
@@ -370,6 +393,7 @@ class InteractiveGridRow(QFrame):
             self.combo_desarrollo.setEnabled(False)
             self.btn_delete.setEnabled(False)
             self.spin_cantidad.setMinimum(cantidad)
+            self.spin_cantidad_actos.setEnabled(False)
         else:
             self.combo_rfc.setEnabled(True)
             self.combo_concepto.setEnabled(True)
@@ -377,6 +401,7 @@ class InteractiveGridRow(QFrame):
             self.combo_desarrollo.setEnabled(True)
             self.btn_delete.setEnabled(True)
             self.spin_cantidad.setMinimum(1)
+            self.spin_cantidad_actos.setEnabled(True)
 
     def get_data(self) -> dict:
         return {
@@ -385,6 +410,7 @@ class InteractiveGridRow(QFrame):
             "delegacion_id": self.combo_delegacion.currentData(),
             "desarrollo_id": self.combo_desarrollo.currentData() if self._has_desarrollo else None,
             "cantidad": self.spin_cantidad.value(),
+            "cantidad_actos": self.spin_cantidad_actos.value() if self.combo_concepto.currentData() == 5 else 1,
             "cantidad_generada": getattr(self, "_cantidad_generada", 0)
         }
 
@@ -477,6 +503,13 @@ class InteractiveGrid(QWidget):
         self.lbl_h_cant = CustomLabel("Cantidad", variant="muted")
         self.lbl_h_cant.setMinimumWidth(75)
         self.lbl_h_cant.setMaximumWidth(110)
+        self.lbl_h_cant.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        self.lbl_h_cant_actos = CustomLabel("No. Actos", variant="muted")
+        self.lbl_h_cant_actos.setMinimumWidth(75)
+        self.lbl_h_cant_actos.setMaximumWidth(110)
+        self.lbl_h_cant_actos.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.lbl_h_cant_actos.setVisible(False)
 
         self.lbl_h_disp = CustomLabel("Disponibles", variant="muted")
         self.lbl_h_disp.setMinimumWidth(65)
@@ -487,12 +520,13 @@ class InteractiveGrid(QWidget):
         self.lbl_h_empty.setFixedSize(36, 20)
 
         # Build header layout — order matches the row widget layout:
-        # Desarrollo | RFC | Delegación | Concepto | Cantidad | Disponibles | (del)
+        # Desarrollo | RFC | Delegación | Concepto | Cantidad | No. Actos | Disponibles | (del)
         self.table_header_layout.addWidget(self.lbl_h_desarrollo, stretch=1)
         self.table_header_layout.addWidget(self.lbl_h_rfc, stretch=1)
         self.table_header_layout.addWidget(self.lbl_h_del, stretch=1)
         self.table_header_layout.addWidget(self.lbl_h_concepto, stretch=1)
         self.table_header_layout.addWidget(self.lbl_h_cant)
+        self.table_header_layout.addWidget(self.lbl_h_cant_actos)
         self.table_header_layout.addWidget(self.lbl_h_disp)
         self.table_header_layout.addWidget(self.lbl_h_empty)
         
@@ -561,7 +595,7 @@ class InteractiveGrid(QWidget):
         else:
             row_widget.populate(self._rfcs, self._conceptos, self._delegaciones, self._desarrollos)
         row_widget.deleted.connect(self._remove_row)
-        row_widget.changed.connect(self.data_changed.emit)
+        row_widget.changed.connect(self._on_row_changed)
         row_widget.availability_requested.connect(self.availability_requested.emit)
         if self._cascade_mode:
             row_widget.cascade_rfcs_needed.connect(self.cascade_rfcs_needed)
@@ -570,7 +604,16 @@ class InteractiveGrid(QWidget):
         self.rows_layout.addWidget(row_widget)
         self.rows.append(row_widget)
         self._update_badge()
+        self._update_header_visibility()
         self.data_changed.emit()
+
+    def _on_row_changed(self):
+        self._update_header_visibility()
+        self.data_changed.emit()
+
+    def _update_header_visibility(self):
+        has_concepto_5 = any(r.combo_concepto.currentData() == 5 for r in self.rows)
+        self.lbl_h_cant_actos.setVisible(has_concepto_5)
 
     def add_row_with_data(self, rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada=0, desarrollo_id=None):
         row_widget = InteractiveGridRow(self.rows_container, cascade_mode=False)  # legacy

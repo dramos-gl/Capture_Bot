@@ -62,25 +62,36 @@ class OrdenesService:
         # Config parameter for max batch size of solicitudes
         lote_size = self.config_repo.get_lote_solicitud_size()
 
-        if tipo_orden.upper() == "CANCELACION":
+        tipo_ord_upper = tipo_orden.upper() if tipo_orden else "ESTANDAR"
+        if tipo_ord_upper in ("CANCELACION", "FOJAS", "TESTIMONIO"):
             current_year = datetime.utcnow().year
-            folio_str = f"ORD-CANCEL-{current_year}"
+            prefix_map = {
+                "CANCELACION": f"ORD-CANCEL-{current_year}",
+                "FOJAS": f"ORD-FOJAS-{current_year}",
+                "TESTIMONIO": f"ORD-TESTIMONIO-{current_year}"
+            }
+            desc_map = {
+                "CANCELACION": f"Orden Anual de Cancelaciones {current_year}",
+                "FOJAS": f"Orden Anual de Fojas {current_year}",
+                "TESTIMONIO": f"Orden Anual de Testimonios {current_year}"
+            }
+            folio_str = prefix_map[tipo_ord_upper]
             
-            # Check if annual cancellation order already exists
+            # Check if annual order already exists
             from sqlalchemy import select
             stmt = select(OrdenGeneracion).where(
                 OrdenGeneracion.folio == folio_str,
-                OrdenGeneracion.tipo_orden == "CANCELACION"
+                OrdenGeneracion.tipo_orden == tipo_ord_upper
             )
             nueva_orden = self.session.execute(stmt).scalars().first()
             if not nueva_orden:
                 nueva_orden = OrdenGeneracion(
                     folio=folio_str,
-                    descripcion=descripcion or f"Orden Anual de Cancelaciones {current_year}",
+                    descripcion=descripcion or desc_map[tipo_ord_upper],
                     municipio_id=municipio_id,
                     estado_id=estado_orden_id,
                     usuario_id=usuario_id,
-                    tipo_orden="CANCELACION"
+                    tipo_orden=tipo_ord_upper
                 )
                 self.session.add(nueva_orden)
                 self.session.flush()
@@ -93,7 +104,7 @@ class OrdenesService:
                 municipio_id=municipio_id,
                 estado_id=estado_orden_id,
                 usuario_id=usuario_id,
-                tipo_orden=tipo_orden.upper() if tipo_orden else "ESTANDAR"
+                tipo_orden=tipo_ord_upper
             )
             self.session.add(nueva_orden)
             self.session.flush()
@@ -146,6 +157,7 @@ class OrdenesService:
             for row in data['filas']:
                 delegacion_id = row.get('delegacion_id')
                 cantidad_fila = int(row['cantidad'])
+                cantidad_actos = int(row.get('cantidad_actos', 1))
                 
                 # Divide into Solicitudes (batches) based on lote_size
                 lotes_requeridos = math.ceil(cantidad_fila / lote_size)
@@ -158,6 +170,7 @@ class OrdenesService:
                         grupo_id=grupo.grupo_id,
                         delegacion_id=delegacion_id,
                         cantidad_solicitada=cantidad_lote,
+                        cantidad_actos=cantidad_actos,
                         consecutivo_inicio=consecutivo_actual,
                         consecutivo_fin=consecutivo_fin,
                         estado_id=estado_sol_id

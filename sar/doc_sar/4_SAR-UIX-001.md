@@ -244,13 +244,19 @@ Habilita la captura rápida en vivo agregando renglones en una grilla interactiv
 
 Componentes del Formulario:
 *   **Descripción de la Orden**: Input de texto general.
+*   **Modos de Operación (Excluyentes)**:
+    *   `[ ] Modo Cancelaciones` (Fuerza tipo CANCELACION, simplifica la tabla al ocultar concepto/delegación).
+    *   `[ ] Modo Fojas` (Fuerza tipo FOJAS, habilita la columna "No. Actos").
+    *   `[ ] Modo Testimonios` (Fuerza tipo TESTIMONIO, mantiene el grid estándar).
+    *   *Nota: Al confirmar una operación de éxito en cualquier modo especial, el formulario se limpia y se desmarcan los checks para prevenir errores humanos.*
 *   **Tabla de Captura Dinámica (Grilla)**:
     *   Columnas:
         1.  `RFC` (Dropdown filtrable conectado a CAT_RFC)
         2.  `Concepto` (Dropdown conectado a CAT_CONCEPTO)
         3.  `Delegación` (Dropdown conectado a CAT_DELEGACION)
         4.  `Cantidad` (Input numérico)
-        5.  `Acciones` (Botón "Eliminar Renglón")
+        5.  `No. Actos` (Input numérico dinámico alineado a la izquierda. **Solo visible en Modo Fojas**. Controla el campo multiplicador `cantidad_actos`).
+        6.  `Acciones` (Botón "Eliminar Renglón")
 *   **Controles**:
     *   `[ + Agregar Renglón ]` (Añade una nueva fila vacía a la grilla)
     *   `[ Guardar Orden ]` (Registra la orden completa y genera grupos/solicitudes de forma transaccional)

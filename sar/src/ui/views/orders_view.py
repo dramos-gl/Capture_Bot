@@ -258,6 +258,8 @@ class OrdersView(QWidget):
                     return
         else:
             es_cancelacion = getattr(self, "chk_cancelaciones", None) and self.chk_cancelaciones.isChecked()
+            es_fojas = getattr(self, "chk_fojas", None) and self.chk_fojas.isChecked()
+            es_testimonios = getattr(self, "chk_testimonios", None) and self.chk_testimonios.isChecked()
             
             # Construcción de los detalles de las solicitudes a incluir
             item_details = []
@@ -265,34 +267,44 @@ class OrdersView(QWidget):
                 rfc_txt = self.grid.get_rfc_text(row["rfc_id"]) or str(row["rfc_id"])
                 concept_txt = self.grid.get_concepto_text(row["concepto_id"]) or str(row["concepto_id"])
                 del_txt = self.grid.get_delegacion_text(row["delegacion_id"]) or str(row["delegacion_id"])
-                item_details.append(f"• {rfc_txt} - {concept_txt} ({del_txt}): Cantidad = {row['cantidad']}")
+                cant_str = f"Cantidad = {row['cantidad']}"
+                if row.get("concepto_id") == 5 and row.get("cantidad_actos", 1) > 1:
+                    cant_str += f" (Fojas/Actos = {row['cantidad_actos']})"
+                item_details.append(f"• {rfc_txt} - {concept_txt} ({del_txt}): {cant_str}")
             
             details_str = "\n".join(item_details)
 
+            from datetime import datetime
+            current_year = datetime.utcnow().year
+            all_ordenes = getattr(self, "_all_ordenes_data", [])
+
             if es_cancelacion:
-                # Comprobar si ya existe la orden anual de cancelaciones del año en curso
-                from datetime import datetime
-                current_year = datetime.utcnow().year
                 folio_cancel = f"ORD-CANCEL-{current_year}"
-                
-                # Buscar en las órdenes cargadas si existe la orden anual de cancelaciones
-                all_ordenes = getattr(self, "_all_ordenes_data", [])
                 orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_cancel), None)
-                
                 action_title = "Confirmar Orden de Cancelación"
-                
-                if orden_existente:
-                    action_msg = (
-                        f"¿Estás seguro de que deseas actualizar la orden de cancelación de aviso con las siguientes partidas?\n\n"
-                        f"{details_str}\n\n"
-                        f"Descripción: {desc}"
-                    )
-                else:
-                    action_msg = (
-                        f"¿Estás seguro de que deseas guardar la orden Anual de cancelación de aviso con las siguientes partidas?\n\n"
-                        f"{details_str}\n\n"
-                        f"Descripción: {desc}"
-                    )
+                action_msg = (
+                    f"¿Estás seguro de que deseas actualizar la orden de cancelación de aviso con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                    if orden_existente else
+                    f"¿Estás seguro de que deseas guardar la orden Anual de cancelación de aviso con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                )
+            elif es_fojas:
+                folio_fojas = f"ORD-FOJAS-{current_year}"
+                orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_fojas), None)
+                action_title = "Confirmar Orden de Fojas"
+                action_msg = (
+                    f"¿Estás seguro de que deseas actualizar la orden de fojas ({folio_fojas}) con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                    if orden_existente else
+                    f"¿Estás seguro de que deseas guardar la orden Anual de fojas con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                )
+            elif es_testimonios:
+                folio_testimonio = f"ORD-TESTIMONIO-{current_year}"
+                orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_testimonio), None)
+                action_title = "Confirmar Orden de Testimonios"
+                action_msg = (
+                    f"¿Estás seguro de que deseas actualizar la orden de testimonios ({folio_testimonio}) con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                    if orden_existente else
+                    f"¿Estás seguro de que deseas guardar la orden Anual de testimonios con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                )
             else:
                 action_title = "Confirmar Guardar Orden"
                 action_msg = (
@@ -331,7 +343,15 @@ class OrdersView(QWidget):
                 )
                 self._on_cancelar_edicion()
             else:
-                tipo_ord = "CANCELACION" if self.chk_cancelaciones.isChecked() else "ESTANDAR"
+                if self.chk_cancelaciones.isChecked():
+                    tipo_ord = "CANCELACION"
+                elif self.chk_fojas.isChecked():
+                    tipo_ord = "FOJAS"
+                elif self.chk_testimonios.isChecked():
+                    tipo_ord = "TESTIMONIO"
+                else:
+                    tipo_ord = "ESTANDAR"
+
                 folio = self.ordenes_ui_service.crear_orden_manual(
                     usuario_id=current_usuario_id,
                     sesion_id=current_sesion_id,
@@ -347,6 +367,10 @@ class OrdersView(QWidget):
                 # Reset Form
                 if self.chk_cancelaciones.isChecked():
                     self.chk_cancelaciones.setChecked(False)
+                elif self.chk_fojas.isChecked():
+                    self.chk_fojas.setChecked(False)
+                elif self.chk_testimonios.isChecked():
+                    self.chk_testimonios.setChecked(False)
                 else:
                     self.desc_input.setText("")
                 self.grid.clear()
@@ -531,11 +555,20 @@ class OrdersView(QWidget):
         inputs_layout.addLayout(mun_layout, stretch=1)
         inputs_layout.addLayout(desc_layout, stretch=1)
         
-        # Checkbox Modo Cancelaciones (Design System Atom)
+        # Checkbox Modos Anuales (Design System Atom)
         mode_layout = QHBoxLayout()
+        mode_layout.setSpacing(16)
         self.chk_cancelaciones = CustomCheckBox("Modo Cancelaciones (Orden Anual)")
+        self.chk_fojas = CustomCheckBox("Modo Fojas (Orden Anual)")
+        self.chk_testimonios = CustomCheckBox("Modo Testimonios (Orden Anual)")
+        
         self.chk_cancelaciones.toggled.connect(self._on_toggle_cancelaciones)
+        self.chk_fojas.toggled.connect(self._on_toggle_fojas)
+        self.chk_testimonios.toggled.connect(self._on_toggle_testimonios)
+        
         mode_layout.addWidget(self.chk_cancelaciones)
+        mode_layout.addWidget(self.chk_fojas)
+        mode_layout.addWidget(self.chk_testimonios)
         mode_layout.addStretch()
 
         card_layout.addLayout(inputs_layout)
@@ -575,17 +608,62 @@ class OrdersView(QWidget):
         from datetime import datetime
         current_year = datetime.utcnow().year
         if checked:
-            self._load_catalogs(es_cancelacion=True)
+            self.chk_fojas.blockSignals(True)
+            self.chk_testimonios.blockSignals(True)
+            self.chk_fojas.setChecked(False)
+            self.chk_testimonios.setChecked(False)
+            self.chk_fojas.blockSignals(False)
+            self.chk_testimonios.blockSignals(False)
+
+            self._load_catalogs(tipo_modulo="CANCELACION")
             self.desc_input.setText(f"Cancelación de Avisos {current_year}")
             self.desc_input.setReadOnly(True)
         else:
-            self._load_catalogs(es_cancelacion=False)
+            self._load_catalogs(tipo_modulo="ESTANDAR")
             self.desc_input.setText("")
             self.desc_input.setReadOnly(False)
 
-    def _load_catalogs(self, es_cancelacion: bool = False):
+    def _on_toggle_fojas(self, checked: bool):
+        from datetime import datetime
+        current_year = datetime.utcnow().year
+        if checked:
+            self.chk_cancelaciones.blockSignals(True)
+            self.chk_testimonios.blockSignals(True)
+            self.chk_cancelaciones.setChecked(False)
+            self.chk_testimonios.setChecked(False)
+            self.chk_cancelaciones.blockSignals(False)
+            self.chk_testimonios.blockSignals(False)
+
+            self._load_catalogs(tipo_modulo="FOJAS")
+            self.desc_input.setText(f"Orden Anual de Fojas {current_year}")
+            self.desc_input.setReadOnly(True)
+        else:
+            self._load_catalogs(tipo_modulo="ESTANDAR")
+            self.desc_input.setText("")
+            self.desc_input.setReadOnly(False)
+
+    def _on_toggle_testimonios(self, checked: bool):
+        from datetime import datetime
+        current_year = datetime.utcnow().year
+        if checked:
+            self.chk_cancelaciones.blockSignals(True)
+            self.chk_fojas.blockSignals(True)
+            self.chk_cancelaciones.setChecked(False)
+            self.chk_fojas.setChecked(False)
+            self.chk_cancelaciones.blockSignals(False)
+            self.chk_fojas.blockSignals(False)
+
+            self._load_catalogs(tipo_modulo="TESTIMONIO")
+            self.desc_input.setText(f"Orden Anual de Testimonios {current_year}")
+            self.desc_input.setReadOnly(True)
+        else:
+            self._load_catalogs(tipo_modulo="ESTANDAR")
+            self.desc_input.setText("")
+            self.desc_input.setReadOnly(False)
+
+    def _load_catalogs(self, es_cancelacion: bool = False, tipo_modulo: Optional[str] = None):
         try:
-            data = self.ordenes_ui_service.get_catalogos(es_cancelacion=es_cancelacion)
+            data = self.ordenes_ui_service.get_catalogos(es_cancelacion=es_cancelacion, tipo_modulo=tipo_modulo)
             rfcs = [
                 (
                     r["rfc_id"],

@@ -208,6 +208,7 @@ class Concepto(Base):
     alias: Mapped[Optional[str]] = mapped_column(String(20))
     activo: Mapped[Optional[bool]] = mapped_column(Boolean, default=True)
     es_cancelacion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    tipo_modulo: Mapped[str] = mapped_column(String(30), default="ESTANDAR", nullable=False)
 
     # Relaciones
     grupos_referencia: Mapped[List["GrupoReferencia"]] = relationship(back_populates="concepto")
@@ -370,6 +371,7 @@ class Solicitud(Base):
     grupo_id: Mapped[int] = mapped_column(ForeignKey("sar_produccion.grupo_referencia.grupo_id", ondelete="CASCADE"), nullable=False)
     delegacion_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.delegacion.delegacion_id"), nullable=False)
     cantidad_solicitada: Mapped[int] = mapped_column(Integer, nullable=False)
+    cantidad_actos: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     cantidad_generada: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     cantidad_autorizada: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     cantidad_facturada: Mapped[Optional[int]] = mapped_column(Integer, default=0)

@@ -26,26 +26,30 @@ class OrdenesUIService:
                     repo = ProduccionRepository(session)
                     return repo.get_ordenes(include_rejected=include_rejected)
 
-    def get_catalogos(self, es_cancelacion: Optional[bool] = None) -> Dict[str, Any]:
+    def get_catalogos(self, es_cancelacion: Optional[bool] = None, tipo_modulo: Optional[str] = None) -> Dict[str, Any]:
         """Fetches active RFCS, concepts, delegaciones, and active municipios."""
         transport = "api" if self.api_client.connect_via_api else "local"
         with track_perf("OrdenesUIService.get_catalogos", transport=transport):
             if self.api_client.connect_via_api:
-                params = {"es_cancelacion": es_cancelacion} if es_cancelacion is not None else None
-                return self.api_client.request("GET", "/api/ops/catalogos", params=params)
+                params = {}
+                if tipo_modulo:
+                    params["tipo_modulo"] = tipo_modulo
+                elif es_cancelacion is not None:
+                    params["es_cancelacion"] = es_cancelacion
+                return self.api_client.request("GET", "/api/ops/catalogos", params=params if params else None)
             else:
                 if not self.db_connector:
                     raise ValueError("db_connector is required when connect_via_api is False")
                 with self.db_connector.get_session() as session:
                     repo = CatalogoRepository(session)
                     rfcs = [(r.rfc_id, r.rfc, r.alias, r.razon_social) for r in repo.get_rfcs_activos()]
-                    conceptos_db = repo.get_conceptos_activos(es_cancelacion=es_cancelacion)
-                    conceptos = [(c.concepto_id, c.nombre, getattr(c, "es_cancelacion", False)) for c in conceptos_db]
+                    conceptos_db = repo.get_conceptos_activos(es_cancelacion=es_cancelacion, tipo_modulo=tipo_modulo)
+                    conceptos = [(c.concepto_id, c.nombre, getattr(c, "es_cancelacion", False), getattr(c, "tipo_modulo", "ESTANDAR")) for c in conceptos_db]
                     delegaciones = [(d.delegacion_id, d.nombre) for d in repo.get_delegaciones_activas()]
                     municipios = [{"nombre": m.nombre, "municipio_id": m.municipio_id, "activo": m.activo} for m in repo.get_all_municipios() if m.activo]
                     return {
                         "rfcs": [{"rfc_id": r[0], "rfc": r[1], "alias": r[2], "razon_social": r[3]} for r in rfcs],
-                        "conceptos": [{"concepto_id": c[0], "nombre": c[1], "es_cancelacion": c[2]} for c in conceptos],
+                        "conceptos": [{"concepto_id": c[0], "nombre": c[1], "es_cancelacion": c[2], "tipo_modulo": c[3]} for c in conceptos],
                         "delegaciones": [{"delegacion_id": d[0], "nombre": d[1]} for d in delegaciones],
                         "municipios": municipios
                     }

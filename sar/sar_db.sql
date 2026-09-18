@@ -169,7 +169,8 @@ CREATE TABLE sar_catalogo.concepto (
     nombre VARCHAR(300) NOT NULL,
     alias VARCHAR(20),
     activo BOOLEAN DEFAULT TRUE,
-    es_cancelacion BOOLEAN NOT NULL DEFAULT FALSE
+    es_cancelacion BOOLEAN NOT NULL DEFAULT FALSE,
+    tipo_modulo VARCHAR(30) NOT NULL DEFAULT 'ESTANDAR'
 );
 
 -- Tabla: rfc
@@ -298,6 +299,7 @@ CREATE TABLE sar_produccion.solicitud (
     grupo_id BIGINT NOT NULL,
     delegacion_id BIGINT NOT NULL,
     cantidad_solicitada INTEGER NOT NULL,
+    cantidad_actos INTEGER NOT NULL DEFAULT 1,
     cantidad_generada INTEGER DEFAULT 0,
     cantidad_autorizada INTEGER DEFAULT 0,
     cantidad_facturada INTEGER DEFAULT 0,
@@ -961,10 +963,17 @@ INSERT INTO sar_catalogo.delegacion (municipio_id, codigo_portal, nombre) VALUES
 (3, 'Delegación Cozumel',                                                                   'COZUMEL');
 
 -- Conceptos de Cobro del RPP
-INSERT INTO sar_catalogo.concepto (codigo_portal, nombre, alias) VALUES
-('132-1 Análisis y calificación de documentos que contengan actos inscribibles-CT-65.00-117.31-',                                                                                         '1. Análisis y calificación de documentos', 'ANA'),
-('137-3 Por solicitud de asiento de presentación de primer aviso preventivo con vigencia de 30 días o segundo aviso preventivo con vigencia de 90 días.-CT-12.00-117.31-',                '2. Primer o Segundo Aviso Preventivo',    'AVI'),
-('141-5 Expedición de certificados de información o datos que obren en el sistema de registro-CT-5.00-117.31-',                                                                           '3. Certificados / CLG',                   'CLG');
+INSERT INTO sar_catalogo.concepto (concepto_id, codigo_portal, nombre, alias, es_cancelacion, tipo_modulo) VALUES
+(1, '132-1 Análisis y calificación de documentos que contengan actos inscribibles-CT-65.00-117.31-', '1. Análisis y calificación de documentos', 'ANA', FALSE, 'ESTANDAR'),
+(2, '137-3 Por solicitud de asiento de presentación de primer aviso preventivo con vigencia de 30 días o segundo aviso preventivo con vigencia de 90 días.-CT-12.00-117.31-', '2. Primer o Segundo Aviso Preventivo', 'AVI', FALSE, 'ESTANDAR'),
+(3, '141-5 Expedición de certificados de información o datos que obren en el sistema de registro-CT-5.00-117.31-', '3. Certificados / CLG', 'CLG', FALSE, 'ESTANDAR'),
+(4, 'PORTAL-CNC-01', '4. Cancelación de avisos', 'CANCELACION', TRUE, 'CANCELACION'),
+(5, 'PORTAL-FOJAS-01', '5. Derechos de Fojas', 'FOJAS', FALSE, 'FOJAS'),
+(6, 'PORTAL-TESTIMONIO-01', '6. Expedición de Testimonios', 'TESTIMONIO', FALSE, 'TESTIMONIO')
+ON CONFLICT (concepto_id) DO UPDATE SET 
+    nombre = EXCLUDED.nombre,
+    tipo_modulo = EXCLUDED.tipo_modulo,
+    es_cancelacion = EXCLUDED.es_cancelacion;
 
 -- Semilla de Notarías de prueba
 INSERT INTO sar_catalogo.notaria (nombre) VALUES
@@ -1003,7 +1012,9 @@ INSERT INTO sar_configuracion.localizador_portal (nombre_clave, label_visible, e
 ('input_domicilio_fiscal_receptor', 'CP Receptor',                           'CSS',   'input#DomicilioFiscalReceptor',                                    'Campo para ingresar el código postal del receptor en el timbrado',          'SAR'),
 ('btn_timbrar',                'Botón Timbrar CFDI',                          'CSS',   'button#btnTimbrar',                                                'Botón final para timbrar el CFDI',                                          'SAR'),
 ('btn_pdf',                    'Botón Descargar PDF Factura',                 'CSS',   'button:has-text("PDF"), a:has-text("PDF")',                         'Botón para descargar el PDF de la factura generada',                        'SAR'),
-('btn_salir',                  'Botón Salir Portal Factura',                  'CSS',   'button:has-text("Salir"), a.btn.btn-default[href="./"], a:has-text("Salir")', 'Botón para salir de la consulta y regresar al inicio', 'SAR');
+('btn_salir',                  'Botón Salir Portal Factura',                  'CSS',   'button:has-text("Salir"), a.btn.btn-default[href="./"], a:has-text("Salir")', 'Botón para salir de la consulta y regresar al inicio', 'SAR'),
+('txtCantidadMultiplicar136',   'Cantidad Multiplicador (Detalle 136)',        'CSS',   'input.multiplicar136',                                             'Campo de cantidad multiplicadora para conceptos en Tributanet',              'SAR')
+ON CONFLICT (nombre_clave) DO NOTHING;
 
 -- ===========================================================================
 -- SEMILLA DE SEGURIDAD (RBAC)
