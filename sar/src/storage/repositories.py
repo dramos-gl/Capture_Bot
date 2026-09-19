@@ -1839,6 +1839,7 @@ class ProduccionRepository(BaseRepository):
             "municipio_id": orden.municipio_id,
             "estado": estado_codigo,
             "editable": editable,
+            "tipo_orden": orden.tipo_orden,
             "renglones": renglones
         }
 

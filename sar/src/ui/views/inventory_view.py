@@ -160,7 +160,7 @@ class SearchReferencesWorker(QThread):
                     row["rfc_id"], row["concepto_id"], row["delegacion_id"], row["cantidad"],
                     orden_ids=self.orden_ids
                 )
-                deleg_name = self.get_delegacion_text_fn(row["delegacion_id"]) or "Delegación"
+                deleg_name = row.get("delegacion_text") or self.get_delegacion_text_fn(row["delegacion_id"]) or "Delegación"
                 for r in refs:
                     r["desarrollo_id"] = None
                     r["delegacion_id"] = row["delegacion_id"]
@@ -2366,6 +2366,7 @@ class InventoryView(QWidget):
         self.grid_individual = InteractiveGrid(self)
         self.grid_individual.setMinimumHeight(180)
         self.grid_individual.set_third_column_label("Delegación")
+        self.grid_individual.set_show_cantidad_actos(False)
         self.grid_individual.btn_save.setVisible(False)
         self.grid_individual.btn_cancel.setVisible(False)
         
@@ -2441,7 +2442,6 @@ class InventoryView(QWidget):
         self.txt_obs_apartar.clear()
 
     def _on_tipo_destino_ind_changed(self, text):
-
         self.cb_destinatario_ind.clear()
         if not text or text == "-- Seleccione Destino --":
             self.grid_individual.clear()
@@ -2452,49 +2452,45 @@ class InventoryView(QWidget):
             self.cb_destinatario_ind.addItem("-- Seleccione Destinatario --", None)
             self.cb_destinatario_ind.addItems(list(self._notarias_map.keys()))
             self.cb_destinatario_ind.setCurrentIndex(0)
-            # NOTARIA: Enable cascade mode (Desarrollo -> RFC -> Delegación -> Concepto)
-            if hasattr(self, "_cascade_desarrollos_entries"):
-                self.grid_individual.set_cascade_mode(True, self._cascade_desarrollos_entries)
         else:
             if hasattr(self, "_colaboradores_map"):
                 self.cb_destinatario_ind.addItem("-- Seleccione Destinatario --", None)
                 self.cb_destinatario_ind.addItems(list(self._colaboradores_map.keys()))
                 self.cb_destinatario_ind.setCurrentIndex(0)
 
-            # COLABORADOR: Disable cascade mode (independent combos, but Desarrollo remains visible and optional)
-            self.grid_individual.set_cascade_mode(False)
-            self.grid_individual.set_has_desarrollo(True)
-            # Pre-load only RFCs that actually have 'FACTURADA' stock
-            try:
-                rfcs_con_stock = self.inventario_ui_service.get_rfcs_con_stock_facturadas()
-                rfcs_tuples = [(r["rfc_id"], r["razon_social"]) for r in rfcs_con_stock]
-                
-                concepts_all_tuples = sorted(
-                    [(c_id, c_name) for c_name, c_id in self._concepts_map.items()],
-                    key=lambda x: x[0]
-                )
-                delegations_list_tuples = [
-                    (dg_id, dg_name) for dg_name, dg_id in self._delegations_map.items()
-                ]
-                
-                # Fetch desarrollos catalog for the optional combo
-                desarrollos_tuples = sorted(
-                    [
-                        (
-                            d["desarrollo_id"],
-                            d["nombre"],
-                            d.get("delegacion_id"),
-                            d.get("es_default", False),
-                        )
-                        for d in self.inventario_ui_service.get_desarrollos()
-                    ],
-                    key=lambda x: (not x[3], x[1])
-                )
-                
-                self.grid_individual.set_catalogs(rfcs_tuples, concepts_all_tuples, delegations_list_tuples, desarrollos_tuples)
-            except Exception as e:
-                print("Error loading active stock RFCs for individual grid:", e)
-
+        # Disable cascade mode for both (independent combos, Desarrollo remains visible and optional)
+        self.grid_individual.set_cascade_mode(False)
+        self.grid_individual.set_has_desarrollo(True)
+        # Pre-load only RFCs that actually have 'FACTURADA' stock
+        try:
+            rfcs_con_stock = self.inventario_ui_service.get_rfcs_con_stock_facturadas()
+            rfcs_tuples = [(r["rfc_id"], r["razon_social"]) for r in rfcs_con_stock]
+            
+            concepts_all_tuples = sorted(
+                [(c_id, c_name) for c_name, c_id in self._concepts_map.items()],
+                key=lambda x: x[0]
+            )
+            delegations_list_tuples = [
+                (dg_id, dg_name) for dg_name, dg_id in self._delegations_map.items()
+            ]
+            
+            # Fetch desarrollos catalog for the optional combo
+            desarrollos_tuples = sorted(
+                [
+                    (
+                        d["desarrollo_id"],
+                        d["nombre"],
+                        d.get("delegacion_id"),
+                        d.get("es_default", False),
+                    )
+                    for d in self.inventario_ui_service.get_desarrollos()
+                ],
+                key=lambda x: (not x[3], x[1])
+            )
+            
+            self.grid_individual.set_catalogs(rfcs_tuples, concepts_all_tuples, delegations_list_tuples, desarrollos_tuples)
+        except Exception as e:
+            print("Error loading active stock RFCs for individual grid:", e)
 
         # Clear and add a clean row to match the new mode
         self.grid_individual.clear()
@@ -2872,6 +2868,7 @@ class InventoryView(QWidget):
         self.grid_apartar = InteractiveGrid(self)
         self.grid_apartar.set_has_desarrollo(True)
         self.grid_apartar.btn_save.setVisible(False)
+        self.grid_apartar.set_show_cantidad_actos(False)
         self.grid_apartar.btn_cancel.setVisible(False)
         self.grid_apartar.availability_requested.connect(self._on_availability_requested)
         # Connect cascade signals to the view's handler methods
@@ -3984,7 +3981,7 @@ class ManualAssignmentDialog(QDialog):
         form_cli.setSpacing(6)
 
         self.txt_cliente = CustomInput("Nombre completo del cliente", parent=self.container_notaria)
-        form_cli.addRow("Cliente *:", self.txt_cliente)
+        form_cli.addRow("Cliente:", self.txt_cliente)
 
         fin_lay = QHBoxLayout()
         fin_lay.setSpacing(6)
@@ -4048,7 +4045,7 @@ class ManualAssignmentDialog(QDialog):
         self.txt_obs_notaria.setMaximumHeight(55)
         self.txt_obs_notaria.setPlaceholderText("Observaciones generales...")
         self.txt_obs_notaria.setStyleSheet(f"background-color: {bg_card}; color: {text_primary}; border: 1px solid {border_color}; border-radius: 4px; padding: 4px;")
-        form_obs.addRow("Observaciones:", self.txt_obs_notaria)
+        form_obs.addRow("Observaciones *:", self.txt_obs_notaria)
         notaria_vlayout.addLayout(form_obs)
 
         scroll_content_layout.addWidget(self.container_notaria)
@@ -4188,7 +4185,7 @@ class ManualAssignmentDialog(QDialog):
             else: alias_del = str(raw_del)[:5].upper()
 
         # Format Empresa
-        empresa = r_meta.get("empresa") or r_meta.get("rfc_razon_social") or r_meta.get("rfc") or "EMPRESA"
+        empresa = r_meta.get("empresa") or r_meta.get("empresa_nombre") or r_meta.get("rfc_razon_social") or r_meta.get("rfc") or "EMPRESA"
 
         is_dark = ThemeManager.is_dark_active()
         text_primary = Colors.TEXT_DARK_PRIMARY if is_dark else "#1E293B"
@@ -4644,12 +4641,36 @@ class ManualAssignmentDialog(QDialog):
                     QMessageBox.warning(self, "Notaría Requerida", f"En el Derecho {idx+1} de {self.total_refs}: Por favor seleccione una Notaría válida.")
                     return
 
+                obs = d.get("observaciones", "").strip()
+                if not obs:
+                    self.current_idx = idx
+                    self._load_current_draft()
+                    QMessageBox.warning(self, "Observaciones Requeridas", f"En el Derecho {idx+1} de {self.total_refs}: Debe capturar observaciones generales para la notaría.")
+                    return
+
                 cliente = d.get("cliente", "").strip()
                 if not cliente:
                     self.current_idx = idx
                     self._load_current_draft()
-                    QMessageBox.warning(self, "Cliente Requerido", f"En el Derecho {idx+1} de {self.total_refs}: Por favor ingrese el nombre del cliente.")
-                    return
+                    ref_meta = d.get("ref_meta", {})
+                    tipo_derecho = ref_meta.get("concepto_nombre", "") or "Desconocido"
+                    referencia = d.get("referencia_portal", "") or ref_meta.get("referencia_portal", "")
+                    empresa = ref_meta.get("empresa_nombre", "") or "Desconocida"
+
+                    msg_text = (
+                        f"El derecho {tipo_derecho} | {referencia} | {empresa}\n"
+                        f"No ha ingresado el nombre del cliente, ¿Desea Continuar?"
+                    )
+
+                    reply = QMessageBox.question(
+                        self,
+                        "Cliente Vacío",
+                        msg_text,
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
 
                 def _parse_d(date_str, field_name):
                     if not date_str: return None
@@ -5244,6 +5265,7 @@ class ApartarReferenciasDialog(QDialog):
         self.grid = InteractiveGrid(self)
         self.grid.set_third_column_label("Desarrollo")
         self.grid.btn_save.setVisible(False)
+        self.grid.set_show_cantidad_actos(False)
         self.grid.btn_cancel.setVisible(False)
         self.layout.addWidget(self.grid)
         

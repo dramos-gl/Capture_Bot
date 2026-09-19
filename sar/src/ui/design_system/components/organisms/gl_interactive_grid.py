@@ -139,6 +139,15 @@ class InteractiveGridRow(QFrame):
         self._cascade_mode = enabled
         self.set_has_desarrollo(enabled)
 
+    def set_show_cantidad_actos(self, enabled: bool):
+        self._show_cantidad_actos = enabled
+        if not enabled:
+            self.spin_cantidad_actos.setVisible(False)
+            self.spin_cantidad_actos.setValue(1)
+        else:
+            if self.combo_concepto.currentData() == 5:
+                self.spin_cantidad_actos.setVisible(True)
+
 
     # ── Populate helpers ─────────────────────────────────────────────────────
 
@@ -293,7 +302,8 @@ class InteractiveGridRow(QFrame):
     def _on_concepto_changed(self):
         concepto_id = self.combo_concepto.currentData()
         # Toggle Cantidad de Actos (Multiplicador 136) visibility for Concepto 5 (Fojas)
-        if concepto_id == 5:
+        show_actos = getattr(self, "_show_cantidad_actos", True)
+        if concepto_id == 5 and show_actos:
             self.spin_cantidad_actos.setVisible(True)
         else:
             self.spin_cantidad_actos.setVisible(False)
@@ -382,7 +392,7 @@ class InteractiveGridRow(QFrame):
 
         self.spin_cantidad.setValue(cantidad)
         self.spin_cantidad_actos.setValue(cantidad_actos)
-        if concepto_id == 5:
+        if concepto_id == 5 and getattr(self, "_show_cantidad_actos", True):
             self.spin_cantidad_actos.setVisible(True)
 
         # If references have already been generated, lock fields
@@ -409,6 +419,10 @@ class InteractiveGridRow(QFrame):
             "concepto_id": self.combo_concepto.currentData(),
             "delegacion_id": self.combo_delegacion.currentData(),
             "desarrollo_id": self.combo_desarrollo.currentData() if self._has_desarrollo else None,
+            "rfc_text": self.combo_rfc.currentText(),
+            "concepto_text": self.combo_concepto.currentText(),
+            "delegacion_text": self.combo_delegacion.currentText(),
+            "desarrollo_text": self.combo_desarrollo.currentText() if self._has_desarrollo else None,
             "cantidad": self.spin_cantidad.value(),
             "cantidad_actos": self.spin_cantidad_actos.value() if self.combo_concepto.currentData() == 5 else 1,
             "cantidad_generada": getattr(self, "_cantidad_generada", 0)
@@ -435,6 +449,7 @@ class InteractiveGrid(QWidget):
         self.main_layout.setSpacing(12)
         
         self._has_desarrollo = False
+        self._show_cantidad_actos = True
         
         # Header layout
         self.header_layout = QHBoxLayout()
@@ -558,6 +573,15 @@ class InteractiveGrid(QWidget):
         for r in self.rows:
             r.set_has_disponibles(enabled)
 
+    def set_show_cantidad_actos(self, enabled: bool):
+        self._show_cantidad_actos = enabled
+        if not enabled:
+            self.lbl_h_cant_actos.setVisible(False)
+        else:
+            self._update_header_visibility()
+        for r in self.rows:
+            r.set_show_cantidad_actos(enabled)
+
     def set_cascade_mode(self, enabled: bool, desarrollos_entries: list = None):
         """Enable cascade mode for the grid (used by the Apartar tab).
         desarrollos_entries: full list of dicts from get_desarrollos_activos_para_apartar().
@@ -589,6 +613,7 @@ class InteractiveGrid(QWidget):
         row_widget = InteractiveGridRow(self.rows_container, cascade_mode=self._cascade_mode)
         row_widget.set_has_desarrollo(self._has_desarrollo)
         row_widget.set_has_disponibles(self._has_disponibles)
+        row_widget.set_show_cantidad_actos(getattr(self, "_show_cantidad_actos", True))
         if self._cascade_mode:
             # In cascade mode, populate only the Desarrollo combo initially
             row_widget.populate_cascade_desarrollos(self._cascade_desarrollos_entries)
@@ -612,13 +637,17 @@ class InteractiveGrid(QWidget):
         self.data_changed.emit()
 
     def _update_header_visibility(self):
-        has_concepto_5 = any(r.combo_concepto.currentData() == 5 for r in self.rows)
-        self.lbl_h_cant_actos.setVisible(has_concepto_5)
+        if getattr(self, "_show_cantidad_actos", True):
+            has_concepto_5 = any(r.combo_concepto.currentData() == 5 for r in self.rows)
+            self.lbl_h_cant_actos.setVisible(has_concepto_5)
+        else:
+            self.lbl_h_cant_actos.setVisible(False)
 
     def add_row_with_data(self, rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada=0, desarrollo_id=None):
         row_widget = InteractiveGridRow(self.rows_container, cascade_mode=False)  # legacy
         row_widget.set_has_desarrollo(self._has_desarrollo)
         row_widget.set_has_disponibles(self._has_disponibles)
+        row_widget.set_show_cantidad_actos(getattr(self, "_show_cantidad_actos", True))
         row_widget.populate(self._rfcs, self._conceptos, self._delegaciones, self._desarrollos)
         row_widget.set_values(rfc_id, concepto_id, delegacion_id, cantidad, cantidad_generada, desarrollo_id)
         row_widget.deleted.connect(self._remove_row)
@@ -653,22 +682,22 @@ class InteractiveGrid(QWidget):
             
     def get_rfc_text(self, id_val):
         for r_id, r_text in self._rfcs:
-            if r_id == id_val: return r_text
+            if str(r_id) == str(id_val): return r_text
         return None
         
     def get_concepto_text(self, id_val):
         for c_id, c_text in self._conceptos:
-            if c_id == id_val: return c_text
+            if str(c_id) == str(id_val): return c_text
         return None
         
     def get_delegacion_text(self, id_val):
         for d_id, d_text in self._delegaciones:
-            if d_id == id_val: return d_text
+            if str(d_id) == str(id_val): return d_text
         return None
 
     def get_desarrollo_text(self, id_val):
         # Tuplas: (desarrollo_id, nombre, delegacion_id, es_default) — el 4to elemento es opcional
         for tpl in self._desarrollos:
-            if tpl[0] == id_val:
+            if str(tpl[0]) == str(id_val):
                 return tpl[1]
         return None

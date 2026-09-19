@@ -558,9 +558,9 @@ class OrdersView(QWidget):
         # Checkbox Modos Anuales (Design System Atom)
         mode_layout = QHBoxLayout()
         mode_layout.setSpacing(16)
-        self.chk_cancelaciones = CustomCheckBox("Modo Cancelaciones (Orden Anual)")
-        self.chk_fojas = CustomCheckBox("Modo Fojas (Orden Anual)")
-        self.chk_testimonios = CustomCheckBox("Modo Testimonios (Orden Anual)")
+        self.chk_cancelaciones = CustomCheckBox("Derechos Cancelación de Avisos")
+        self.chk_fojas = CustomCheckBox("Derechos de Fojas")
+        self.chk_testimonios = CustomCheckBox("Expedición de Testimonios")
         
         self.chk_cancelaciones.toggled.connect(self._on_toggle_cancelaciones)
         self.chk_fojas.toggled.connect(self._on_toggle_fojas)
@@ -635,7 +635,7 @@ class OrdersView(QWidget):
             self.chk_testimonios.blockSignals(False)
 
             self._load_catalogs(tipo_modulo="FOJAS")
-            self.desc_input.setText(f"Orden Anual de Fojas {current_year}")
+            self.desc_input.setText(f"Derechos de Fojas {current_year}")
             self.desc_input.setReadOnly(True)
         else:
             self._load_catalogs(tipo_modulo="ESTANDAR")
@@ -654,7 +654,7 @@ class OrdersView(QWidget):
             self.chk_fojas.blockSignals(False)
 
             self._load_catalogs(tipo_modulo="TESTIMONIO")
-            self.desc_input.setText(f"Orden Anual de Testimonios {current_year}")
+            self.desc_input.setText(f"Derechos de Testimonios {current_year}")
             self.desc_input.setReadOnly(True)
         else:
             self._load_catalogs(tipo_modulo="ESTANDAR")
@@ -1078,6 +1078,43 @@ class OrdersView(QWidget):
             if idx_mun >= 0:
                 self.combo_municipio.setCurrentIndex(idx_mun)
                 
+            # Set tipo_orden and catalog
+            self.chk_cancelaciones.blockSignals(True)
+            self.chk_fojas.blockSignals(True)
+            self.chk_testimonios.blockSignals(True)
+            self.chk_cancelaciones.setChecked(False)
+            self.chk_fojas.setChecked(False)
+            self.chk_testimonios.setChecked(False)
+            self.chk_cancelaciones.blockSignals(False)
+            self.chk_fojas.blockSignals(False)
+            self.chk_testimonios.blockSignals(False)
+            
+            tipo_orden = data.get("tipo_orden", "ESTANDAR")
+            if tipo_orden == "CANCELACION":
+                self.chk_cancelaciones.setChecked(True)
+                self.chk_cancelaciones.setEnabled(False)
+                self.chk_cancelaciones.setVisible(True)
+                self.chk_fojas.setVisible(False)
+                self.chk_testimonios.setVisible(False)
+            elif tipo_orden == "FOJAS":
+                self.chk_fojas.setChecked(True)
+                self.chk_fojas.setEnabled(False)
+                self.chk_fojas.setVisible(True)
+                self.chk_cancelaciones.setVisible(False)
+                self.chk_testimonios.setVisible(False)
+            elif tipo_orden == "TESTIMONIO":
+                self.chk_testimonios.setChecked(True)
+                self.chk_testimonios.setEnabled(False)
+                self.chk_testimonios.setVisible(True)
+                self.chk_cancelaciones.setVisible(False)
+                self.chk_fojas.setVisible(False)
+            else:
+                self._load_catalogs(tipo_modulo="ESTANDAR")
+                self.desc_input.setReadOnly(False)
+                self.chk_cancelaciones.setVisible(False)
+                self.chk_fojas.setVisible(False)
+                self.chk_testimonios.setVisible(False)
+                
             # Clear and populate grid
             self.grid.clear()
             self._original_renglones = [dict(r) for r in data["renglones"]]
@@ -1092,6 +1129,11 @@ class OrdersView(QWidget):
                 
             # Switch to Capture tab (0)
             self.tabs.setCurrentIndex(0)
+            main_window = self.window()
+            if hasattr(main_window, 'sidebar'):
+                main_window.sidebar.blockSignals(True)
+                main_window.sidebar.select_item("capturar_orden")
+                main_window.sidebar.blockSignals(False)
             
         except Exception as e:
             QMessageBox.critical(self, "Error al Cargar", f"No se pudieron obtener los detalles de la orden:\n{str(e)}")
@@ -1112,6 +1154,18 @@ class OrdersView(QWidget):
         self.lbl_tot_ant_val.setText("0")
         
         self.desc_input.setText("")
+        
+        # Reset checkboxes
+        self.chk_cancelaciones.setVisible(True)
+        self.chk_cancelaciones.setEnabled(True)
+        self.chk_cancelaciones.setChecked(False)
+        self.chk_fojas.setVisible(True)
+        self.chk_fojas.setEnabled(True)
+        self.chk_fojas.setChecked(False)
+        self.chk_testimonios.setVisible(True)
+        self.chk_testimonios.setEnabled(True)
+        self.chk_testimonios.setChecked(False)
+        
         self._load_catalogs() # Re-selects default municipio
         
         self.grid.clear()
@@ -1122,3 +1176,8 @@ class OrdersView(QWidget):
         
         # Switch to history tab (1)
         self.tabs.setCurrentIndex(1)
+        main_window = self.window()
+        if hasattr(main_window, 'sidebar'):
+            main_window.sidebar.blockSignals(True)
+            main_window.sidebar.select_item("ordenes_capturadas")
+            main_window.sidebar.blockSignals(False)

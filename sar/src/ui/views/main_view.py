@@ -202,6 +202,27 @@ class MainView(QWidget):
 
     def _on_navigation(self, view_key: str):
         """Switches the stacked widget active view or opens independent windows with routing permissions check."""
+        
+        # Interceptar navegación si hay una edición en curso
+        if hasattr(self, 'orders_view') and getattr(self.orders_view, '_edit_mode', False):
+            if view_key != "capturar_orden":
+                from sar.src.ui.design_system.components import GLMessageBox as QMessageBox
+                reply = QMessageBox.question(self, "Edición en curso", "Tiene una edición en curso. ¿Desea cancelar la edición y salir?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.Yes:
+                    if hasattr(self, 'sidebar'):
+                        self.sidebar.blockSignals(True)
+                        self.orders_view._on_cancelar_edicion()
+                        self.sidebar.select_item(view_key)
+                        self.sidebar.blockSignals(False)
+                else:
+                    if hasattr(self, 'sidebar'):
+                        self.sidebar.blockSignals(True)
+                        self.sidebar.select_item("capturar_orden")
+                        self.sidebar.blockSignals(False)
+                    return
+            else:
+                return
+
         try:
             parent_window = self.window()
             usuario_id = getattr(parent_window, 'current_usuario_id', None)
