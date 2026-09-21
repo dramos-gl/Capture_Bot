@@ -489,9 +489,6 @@ class InventoryKPIDetailDialog(QDialog):
         self.lbl_metric_count = CustomLabel("Total Registros: 0", variant="body")
         self.lbl_metric_count.setStyleSheet("font-weight: bold; color: #1E293B;")
 
-        self.lbl_metric_monto = CustomLabel("Importe Total: $0.00", variant="body")
-        self.lbl_metric_monto.setStyleSheet("font-weight: bold; color: #1E293B;")
-
         self.lbl_metric_estado = CustomLabel(f"Filtro Estado: {self.state_filter.upper()}", variant="body")
         self.lbl_metric_estado.setStyleSheet(f"font-weight: bold; color: {self.header_color};")
 
@@ -499,7 +496,6 @@ class InventoryKPIDetailDialog(QDialog):
         self.lbl_metric_ordenes.setStyleSheet("color: #475569;")
 
         metric_layout.addWidget(self.lbl_metric_count)
-        metric_layout.addWidget(self.lbl_metric_monto)
         metric_layout.addWidget(self.lbl_metric_estado)
         metric_layout.addWidget(self.lbl_metric_ordenes)
         metric_layout.addStretch()
@@ -1070,16 +1066,7 @@ class InventoryKPIDetailDialog(QDialog):
             self.filtered_records.append(r)
 
         # Update metric chips
-        total_monto = 0.0
-        for r in self.filtered_records:
-            try:
-                imp = float(r.get("importe") or 0.0)
-                total_monto += imp
-            except (ValueError, TypeError):
-                pass
-
         self.lbl_metric_count.setText(f"Total Registros: {len(self.filtered_records):,}")
-        self.lbl_metric_monto.setText(f"Importe Total: ${total_monto:,.2f}")
         if self.total_db_count > len(self.all_records):
             self.lbl_footer_info.setText(
                 f"Mostrando {len(self.filtered_records)} de {len(self.all_records)} cargados (Total en BD: {self.total_db_count:,})"

@@ -162,7 +162,7 @@ class SearchReferencesWorker(QThread):
                 )
                 deleg_name = row.get("delegacion_text") or self.get_delegacion_text_fn(row["delegacion_id"]) or "Delegación"
                 for r in refs:
-                    r["desarrollo_id"] = None
+                    r["desarrollo_id"] = row.get("desarrollo_id")
                     r["delegacion_id"] = row["delegacion_id"]
                     r["delegacion_nombre"] = deleg_name
                     all_refs.append(r)
@@ -3901,6 +3901,9 @@ class ManualAssignmentDialog(QDialog):
         self.txt_fecha_sol_colab.setText(datetime.now().strftime("%Y-%m-%d"))
         form_colab.addRow("Fecha Asignación:", self.txt_fecha_sol_colab)
 
+        self.cb_desarrollo_colab = CustomComboBox(self.container_colaborador)
+        form_colab.addRow("Desarrollo (Opcional):", self.cb_desarrollo_colab)
+
         self.txt_obs_colab = QTextEdit(self.container_colaborador)
         self.txt_obs_colab.setMaximumHeight(90)
         self.txt_obs_colab.setPlaceholderText("Describa el uso exclusivo para trámites externos...")
@@ -4118,6 +4121,7 @@ class ManualAssignmentDialog(QDialog):
         self.cb_colaboradores.setEnabled(enabled)
         self.txt_fecha_sol_colab.setEnabled(enabled)
         self.txt_obs_colab.setEnabled(enabled)
+        self.cb_desarrollo_colab.setEnabled(enabled)
         
         self.cb_notarias.setEnabled(enabled)
         self.txt_solicitante.setEnabled(enabled)
@@ -4271,6 +4275,15 @@ class ManualAssignmentDialog(QDialog):
             col_name = self.cb_colaboradores.currentText()
             d["colaborador_id"] = self._colaboradores_map.get(col_name)
             d["colaborador_name"] = col_name
+            
+            des_name_colab = self.cb_desarrollo_colab.currentText()
+            if des_name_colab and des_name_colab != "-- Seleccione Desarrollo (Opcional) --":
+                d["desarrollo_id"] = self._desarrollos_map.get(des_name_colab)
+                d["desarrollo_name"] = des_name_colab
+            else:
+                d["desarrollo_id"] = None
+                d["desarrollo_name"] = ""
+                
             d["fecha_sol"] = self.txt_fecha_sol_colab.text().strip()
             d["observaciones"] = self.txt_obs_colab.toPlainText().strip()
             d["cliente"] = "ASIGNACIÓN A COLABORADOR"
@@ -4353,6 +4366,11 @@ class ManualAssignmentDialog(QDialog):
                 if d.get("colaborador_name"):
                     idx_col = self.cb_colaboradores.findText(d["colaborador_name"])
                     if idx_col >= 0: self.cb_colaboradores.setCurrentIndex(idx_col)
+                if d.get("desarrollo_name"):
+                    idx_des_col = self.cb_desarrollo_colab.findText(d["desarrollo_name"])
+                    if idx_des_col >= 0: self.cb_desarrollo_colab.setCurrentIndex(idx_des_col)
+                else:
+                    self.cb_desarrollo_colab.setCurrentIndex(0)
                 self.txt_fecha_sol_colab.setText(d.get("fecha_sol", datetime.now().strftime("%Y-%m-%d")))
                 self.txt_obs_colab.setPlainText(d.get("observaciones", ""))
 
@@ -4502,12 +4520,17 @@ class ManualAssignmentDialog(QDialog):
             self.cb_desarrollo.clear()
             self.cb_desarrollo.addItem("-- Seleccione Desarrollo (Opcional) --", None)
             
+            self.cb_desarrollo_colab.clear()
+            self.cb_desarrollo_colab.addItem("-- Seleccione Desarrollo (Opcional) --", None)
+            
             # 3. Nivel 3: Si se encontraron IDs válidos por RFC/Delegación, filtrar; de lo contrario mostrar globales
             for d in self._desarrollos_list:
                 if not valid_desarrollo_ids or d["desarrollo_id"] in valid_desarrollo_ids:
                     self.cb_desarrollo.addItem(d["nombre"], d["desarrollo_id"])
+                    self.cb_desarrollo_colab.addItem(d["nombre"], d["desarrollo_id"])
             
             self.cb_desarrollo.setCurrentIndex(0)
+            self.cb_desarrollo_colab.setCurrentIndex(0)
         except Exception as e:
             print("Error filtering developments for current reference:", e)
 
@@ -4535,7 +4558,6 @@ class ManualAssignmentDialog(QDialog):
 
                 update_payload = {
                     "cliente": self.txt_cliente.text().strip(),
-                    "desarrollo_id": self._desarrollos_map.get(self.cb_desarrollo.currentText()) if self.cb_desarrollo.currentIndex() > 0 else None,
                     "sm": self.txt_sm.text().strip(),
                     "mz": self.txt_mz.text().strip(),
                     "lote": self.txt_lote.text().strip(),
@@ -4553,6 +4575,22 @@ class ManualAssignmentDialog(QDialog):
                     "comentarios": self.txt_comentarios.text().strip(),
                     "observaciones": self.txt_obs_notaria.toPlainText().strip() if self.cb_destino.currentText() == "NOTARIA" else self.txt_obs_colab.toPlainText().strip()
                 }
+
+                tipo_dest = self.cb_destino.currentText()
+                if tipo_dest == "NOTARIA":
+                    has_coords = any([self.txt_sm.text().strip(), self.txt_mz.text().strip(), self.txt_lote.text().strip(), self.txt_edif.text().strip(), self.txt_viv.text().strip()])
+                    des_id = self._desarrollos_map.get(self.cb_desarrollo.currentText()) if self.cb_desarrollo.currentIndex() > 0 else None
+                    if has_coords and not des_id:
+                        QMessageBox.warning(
+                            self,
+                            "Desarrollo Requerido",
+                            "Ha ingresado datos de ubicación del inmueble (SM, Manzana, Lote, etc.), por lo que es necesario seleccionar el Desarrollo correspondiente.\n\n"
+                            "Si no desea asignar desarrollo a este trámite, deje las coordenadas vacías."
+                        )
+                        return
+                    update_payload["desarrollo_id"] = des_id
+                elif tipo_dest == "COLABORADOR":
+                    update_payload["desarrollo_id"] = self._desarrollos_map.get(self.cb_desarrollo_colab.currentText()) if self.cb_desarrollo_colab.currentIndex() > 0 else None
 
                 self.inventario_ui_service.update_asignacion_referencia(
                     ar_id, update_payload, usuario_id=current_usuario_id
@@ -4614,7 +4652,7 @@ class ManualAssignmentDialog(QDialog):
 
                 detalles_list.append({
                     "cliente": "ASIGNACIÓN A COLABORADOR",
-                    "desarrollo_id": None,
+                    "desarrollo_id": d.get("desarrollo_id"),
                     "fecha_solicitud": fecha_sol,
                     "sm": None, "mz": None, "lote": None, "edif": None, "viv": None,
                     "folio_electronico": None,
@@ -4687,6 +4725,18 @@ class ManualAssignmentDialog(QDialog):
                     self.current_idx = idx
                     self._load_current_draft()
                     QMessageBox.warning(self, "Fecha Inválida", str(ve))
+                    return
+
+                has_coords = any([d.get("sm"), d.get("mz"), d.get("lote"), d.get("edif"), d.get("viv")])
+                if has_coords and not d.get("desarrollo_id"):
+                    self.current_idx = idx
+                    self._load_current_draft()
+                    QMessageBox.warning(
+                        self,
+                        "Desarrollo Requerido",
+                        f"En el Derecho {idx+1} de {self.total_refs}: Ha ingresado datos de ubicación del inmueble (SM, Manzana, Lote, etc.), por lo que es necesario seleccionar el Desarrollo correspondiente.\n\n"
+                        f"Si no desea asignar desarrollo a este trámite, deje las coordenadas vacías."
+                    )
                     return
 
                 detalles_list.append({

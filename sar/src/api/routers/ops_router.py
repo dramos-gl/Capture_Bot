@@ -95,7 +95,8 @@ def create_orden(request: OrdenCrearRequest, db: Session = Depends(get_db)):
             sesion_id=request.sesion_id,
             descripcion=request.descripcion,
             municipio_id=request.municipio_id,
-            renglones=request.renglones
+            renglones=request.renglones,
+            tipo_orden=request.tipo_orden
         )
         return {
             "folio": nueva_orden.folio,

@@ -2596,8 +2596,6 @@ class InventarioRepository(BaseRepository):
                     self.session.add(des_obj)
                     self.session.flush()
                 desarrollo_id = des_obj.desarrollo_id
-            if not desarrollo_id and not solo_reservar and tipo_destino != "COLABORADOR":
-                desarrollo_id = 1
 
             key = (rfc_id, concepto_id, desarrollo_id)
             if key not in grouped_details:
@@ -3419,11 +3417,8 @@ class InventarioRepository(BaseRepository):
                         self.session.flush()
                     desarrollo_id = des_obj.desarrollo_id
                 
-                if not desarrollo_id:
-                    desarrollo_id = 1 # Generic development fallback
-                
-                # Synchronize lote_detalle desarrollo_id if it was NULL
-                if ar.lote_detalle and not ar.lote_detalle.desarrollo_id:
+                # Synchronize lote_detalle desarrollo_id only if explicitly resolved
+                if desarrollo_id and ar.lote_detalle and not ar.lote_detalle.desarrollo_id:
                     ar.lote_detalle.desarrollo_id = desarrollo_id
 
                 mz = d.get("mz") or "-"
@@ -3431,37 +3426,41 @@ class InventarioRepository(BaseRepository):
                 edif = d.get("edif") or "-"
                 viv = d.get("viv") or "-"
                 
-                dup_ubi_stmt = select(Ubicacion).where(
-                    Ubicacion.desarrollo_id == desarrollo_id,
-                    Ubicacion.mz == mz,
-                    Ubicacion.lote == lote,
-                    Ubicacion.edif == edif,
-                    Ubicacion.viv == viv
-                )
-                ubi = self.session.execute(dup_ubi_stmt).scalars().first()
-
-                # Get correct 'pa' field from Excel payload
-                pa_val = d.get("pa")
-
-                if not ubi:
-                    # Create new Ubicacion with physical fields
-                    ubi = Ubicacion(
-                        desarrollo_id=desarrollo_id,
-                        mz=mz,
-                        lote=lote,
-                        edif=edif,
-                        viv=viv,
-                        lote_id_erp=d.get("folio_electronico")
+                ubi = None
+                if desarrollo_id:
+                    dup_ubi_stmt = select(Ubicacion).where(
+                        Ubicacion.desarrollo_id == desarrollo_id,
+                        Ubicacion.mz == mz,
+                        Ubicacion.lote == lote,
+                        Ubicacion.edif == edif,
+                        Ubicacion.viv == viv
                     )
-                    self.session.add(ubi)
-                    self.session.flush()
+                    ubi = self.session.execute(dup_ubi_stmt).scalars().first()
+
+                    # Get correct 'pa' field from Excel payload
+                    pa_val = d.get("pa")
+
+                    if not ubi:
+                        # Create new Ubicacion with physical fields
+                        ubi = Ubicacion(
+                            desarrollo_id=desarrollo_id,
+                            mz=mz,
+                            lote=lote,
+                            edif=edif,
+                            viv=viv,
+                            lote_id_erp=d.get("folio_electronico")
+                        )
+                        self.session.add(ubi)
+                        self.session.flush()
+                    else:
+                        if d.get("folio_electronico") and not ubi.lote_id_erp:
+                            ubi.lote_id_erp = d.get("folio_electronico")
+                        self.session.flush()
                 else:
-                    if d.get("folio_electronico") and not ubi.lote_id_erp:
-                        ubi.lote_id_erp = d.get("folio_electronico")
-                    self.session.flush()
+                    pa_val = d.get("pa")
 
                 # Link to AsignacionReferencia and set status to ASIGNADA along with all transactional fields
-                ar.ubicacion_id = ubi.ubicacion_id
+                ar.ubicacion_id = ubi.ubicacion_id if ubi else None
                 ar.estado_id = estado_asignada_id
                 ar.cliente = cliente_upper
                 ar.credito_titular = d.get("credito_titular")
@@ -3795,19 +3794,17 @@ class InventarioRepository(BaseRepository):
             if not ref:
                 continue
 
-            # Obtener el desarrollo_id correspondiente a esa delegación y al RFC del grupo de la referencia
-            from sar.src.storage.models import DesarrolloEmpresa
-            de_stmt = select(DesarrolloEmpresa.desarrollo_id).where(
-                DesarrolloEmpresa.delegacion_id == delegacion_id,
-                DesarrolloEmpresa.rfc_id == ref.grupo.rfc_id,
-                DesarrolloEmpresa.activo == True
-            )
-            desarrollo_id = self.session.execute(de_stmt).scalar()
+            # Si el UI especificó un desarrollo, usarlo, de lo contrario inferirlo
+            desarrollo_id = item.get("desarrollo_id")
             if not desarrollo_id:
-                # Fallback to any development matching this delegation
-                from sar.src.storage.models import Desarrollo
-                des_stmt = select(Desarrollo.desarrollo_id).where(Desarrollo.nombre == "GENERAL")
-                desarrollo_id = self.session.execute(des_stmt).scalar() or 1
+                # Obtener el desarrollo_id correspondiente a esa delegación y al RFC del grupo de la referencia
+                from sar.src.storage.models import DesarrolloEmpresa
+                de_stmt = select(DesarrolloEmpresa.desarrollo_id).where(
+                    DesarrolloEmpresa.delegacion_id == delegacion_id,
+                    DesarrolloEmpresa.rfc_id == ref.grupo.rfc_id,
+                    DesarrolloEmpresa.activo == True
+                )
+                desarrollo_id = self.session.execute(de_stmt).scalar()
 
             ld = LoteDetalle(
                 lote_asignacion_id=lote.lote_asignacion_id,
@@ -3881,10 +3878,7 @@ class InventarioRepository(BaseRepository):
                 details.append({"referencia": ref_str, "status": "ERROR", "message": "La referencia no existe."})
                 continue
 
-            # Fallback development
-            from sar.src.storage.models import Desarrollo
-            des_stmt = select(Desarrollo.desarrollo_id).where(Desarrollo.nombre == "GENERAL")
-            desarrollo_id = self.session.execute(des_stmt).scalar() or 1
+            desarrollo_id = None
 
             # Determine state ID
             status_id = estado_asignada_id if target_status == "ASIGNADA" else estado_reservada_id
@@ -4003,9 +3997,9 @@ class InventarioRepository(BaseRepository):
                 if desarrollo_id: ubi.desarrollo_id = desarrollo_id
                 if ar.no_oficial: ubi.lote_id_erp = ar.no_oficial
         else:
-            if any([sm, mz, lote, edif, viv, desarrollo_id]):
+            if desarrollo_id and any([sm, mz, lote, edif, viv]):
                 nueva_ubi = Ubicacion(
-                    desarrollo_id=desarrollo_id or 1,
+                    desarrollo_id=desarrollo_id,
                     sm=sm,
                     mz=mz,
                     lote=lote,
