@@ -5,6 +5,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPainter, QPen, QColor, QPainterPath
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.utils.icons import Icons
+from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.theme_manager import ThemeManager
 
 class SparklineWidget(QWidget):
     """Draws a smooth wavy sparkline path natively using QPainter."""
@@ -48,6 +50,10 @@ class StatCard(QFrame):
         self.setMinimumWidth(80)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.setCursor(Qt.PointingHandCursor)
+        
+        _bg_card = "#FFFFFF" if not ThemeManager.is_dark_active() else Colors.SURFACE_DARK
+        _border_card = Colors.SLATE_200 if not ThemeManager.is_dark_active() else Colors.BORDER_DARK
+        self.setStyleSheet(f"QFrame#cardFrame {{ background-color: {_bg_card}; border: 1px solid {_border_card}; border-radius: 12px; }}")
         
         self.color_hex = color_hex
         self._current_value = initial_value

@@ -66,10 +66,11 @@ class R2FCancunView(QWidget):
         self.active_worker = None
         self.selected_lote_id = None
         
-        # Layout principal
+        # Layout principal — Tema Claro Estricto (Design System SAR)
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(10, 10, 10, 10)
         self.main_layout.setSpacing(10)
+        self.setStyleSheet(f"background-color: {Colors.BG_LIGHT}; color: {Colors.TEXT_LIGHT_PRIMARY};")
 
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
@@ -109,7 +110,6 @@ class R2FCancunView(QWidget):
         h_layout.setSpacing(12)
 
         self.lbl_titulo = QLabel("📥 R2F-CANCÚN — MODO: RECIBOS")
-        # Cambiado el color a blanco (#ffffff) para contraste total con el fondo oscuro del Header del bot.
         self.lbl_titulo.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
         h_layout.addWidget(self.lbl_titulo)
         h_layout.addStretch()
@@ -122,7 +122,7 @@ class R2FCancunView(QWidget):
 
         # Indicador de estado del portal
         self.lbl_portal_status = QLabel("Portal: INACTIVO")
-        self.lbl_portal_status.setStyleSheet("background-color: #334155; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")
+        self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.SLATE_600}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
         h_layout.addWidget(self.lbl_portal_status)
 
         # Botones de Gear y User
@@ -182,7 +182,7 @@ class R2FCancunView(QWidget):
         path_input_layout = QHBoxLayout()
         display_label_text = f"Por defecto ({self.default_output_dir})"
         self.lbl_download_path_display = CustomLabel(display_label_text, variant="body")
-        self.lbl_download_path_display.setStyleSheet("background-color: #f9fafb; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px;")
+        self.lbl_download_path_display.setStyleSheet(f"background-color: {Colors.SURFACE_LIGHT}; padding: 6px; border: 1px solid {Colors.SLATE_300}; border-radius: 4px; font-size: 11px; color: {Colors.TEXT_LIGHT_PRIMARY};")
         path_input_layout.addWidget(self.lbl_download_path_display, stretch=4)
         
         self.btn_browse = CustomButton("...", is_secondary=True)
@@ -213,16 +213,16 @@ class R2FCancunView(QWidget):
         m_layout.addWidget(lbl_m)
 
         grid_m = QGridLayout()
-        self.box_pendientes = MetricBox("Pendientes", "0", "#3b82f6")
-        self.box_exitosos = MetricBox("Exitosos", "0", "#10b981")
-        self.box_errores = MetricBox("Errores", "0", "#ef4444")
+        self.box_pendientes = MetricBox("Pendientes", "0", Colors.INFO)
+        self.box_exitosos = MetricBox("Exitosos", "0", Colors.SUCCESS)
+        self.box_errores = MetricBox("Errores", "0", Colors.ERROR)
 
         grid_m.addWidget(self.box_pendientes, 0, 0)
         grid_m.addWidget(self.box_exitosos, 0, 1)
         grid_m.addWidget(self.box_errores, 0, 2)
 
         self.lbl_lote_actual_info = CustomLabel("RFC: -- | Razón Social: --\nCP: --", variant="muted")
-        self.lbl_lote_actual_info.setStyleSheet("color: #6b7280; font-size: 11px; background: #f9fafb; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px;")
+        self.lbl_lote_actual_info.setStyleSheet(f"color: {Colors.TEXT_LIGHT_SECONDARY}; font-size: 11px; background: {Colors.SURFACE_LIGHT}; padding: 8px; border: 1px solid {Colors.SLATE_200}; border-radius: 4px;")
         grid_m.addWidget(self.lbl_lote_actual_info, 1, 0, 1, 3)
 
         # Integrar botón Control R2F en la última fila disponible del panel de Métricas
@@ -262,7 +262,7 @@ class R2FCancunView(QWidget):
         mon_layout.addWidget(self.progress_bar)
 
         self.lbl_mon_status = CustomLabel("ESPERANDO INICIO DE PROCESAMIENTO...", variant="muted")
-        self.lbl_mon_status.setStyleSheet("color: #6b7280; font-size: 11px;")
+        self.lbl_mon_status.setStyleSheet(f"color: {Colors.TEXT_LIGHT_MUTED}; font-size: 11px;")
         mon_layout.addWidget(self.lbl_mon_status)
 
         top_layout.addWidget(monitoreo_frame, stretch=1)
@@ -297,7 +297,7 @@ class R2FCancunView(QWidget):
         self.txt_console = QTextEdit()
         self.txt_console.setReadOnly(True)
         self.txt_console.setObjectName("console")
-        self.txt_console.setStyleSheet("font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; background-color: #1e293b; color: #f8fafc;")
+        self.txt_console.setStyleSheet(f"font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; background-color: {Colors.SLATE_50}; color: {Colors.SLATE_800}; border: 1px solid {Colors.SLATE_300}; border-radius: 4px;")
         
         console_card.add_widget(self.txt_console)
         self.main_layout.addWidget(console_card, stretch=1)

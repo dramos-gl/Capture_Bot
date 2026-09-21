@@ -25,6 +25,9 @@ class NavigationSidebar(QFrame):
         self.setFixedWidth(250)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
         self.setMinimumHeight(0)
+        _bg_sidebar = Colors.SURFACE_LIGHT if not ThemeManager.is_dark_active() else Colors.SURFACE_DARK
+        _border_sidebar = Colors.BORDER_LIGHT if not ThemeManager.is_dark_active() else Colors.BORDER_DARK
+        self.setStyleSheet(f"QFrame#sidebarFrame {{ background-color: {_bg_sidebar}; border-right: 1px solid {_border_sidebar}; }}")
         
         # Main outer layout to contain the 3 decoupled areas
         outer_layout = QVBoxLayout(self)

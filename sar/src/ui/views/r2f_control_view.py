@@ -2,16 +2,18 @@
 
 import os
 import subprocess
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFrame, QButtonGroup
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFrame, QButtonGroup, QLabel, QScrollArea
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QDateTime, QSize
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
 
 from sar.src.ui.design_system.components import (
-    CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomLabel,
+    CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomLabel, NavigationSidebar,
     GLMessageBox as QMessageBox
 )
+from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.utils.icons import Icons
+from sar.src.ui.design_system.tokens.colors import Colors
 from cancunbot.src.storage.cancunbot_repos import ReciboCancunRepository
 
 class R2FLoadWorker(QThread):
@@ -76,97 +78,139 @@ class R2FLoadWorker(QThread):
 
 class R2FControlView(QWidget):
     """View to consult and administer the downloaded R2F-Cancún receipts & billing metadata."""
+    logout_requested = Signal()
     
     def __init__(self, db_connector, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
-        
-        # Main layout is horizontal to accommodate the local Sidebar on the left
+        self.setStyleSheet(f"background-color: {Colors.BG_LIGHT}; color: {Colors.TEXT_LIGHT_PRIMARY};")
+
+        # Layout exterior (Sidebar + Área de Contenido + Footer)
         self.main_h_layout = QHBoxLayout(self)
         self.main_h_layout.setContentsMargins(0, 0, 0, 0)
         self.main_h_layout.setSpacing(0)
         
-        # 1. LOCAL SIDEBAR CONTAINER
-        self.sidebar_frame = QFrame()
-        self.sidebar_frame.setFixedWidth(200)
-        self.sidebar_frame.setStyleSheet("""
-            QFrame {
-                background-color: #1E293B;
-                border-right: 1px solid #334155;
-            }
-            QPushButton {
-                background-color: transparent;
-                color: #94A3B8;
+        # 1. SIDEBAR DE NAVEGACIÓN COMPLETO CON HAMBURGUESA ☰
+        self.sidebar = NavigationSidebar(self)
+        self.sidebar.brand_title.setText("R2F")
+        self.sidebar.brand_subtitle.setText("Control de Recibos")
+        
+        # Omitir explícitamente el botón "Cambiar Tema"
+        if hasattr(self.sidebar, "theme_btn") and self.sidebar.theme_btn:
+            self.sidebar.theme_btn.hide()
+            
+        # Conectar señal de logout
+        self.sidebar.logout_requested.connect(self.logout_requested.emit)
+        
+        # Mostrar menú de Cancun / R2F Control
+        self.sidebar.show_item("dashboard")
+        self.sidebar.show_item("r2f_control")
+        self.sidebar.select_item("r2f_control")
+        self.sidebar.nav_selected.connect(self._on_sidebar_item_selected)
+        
+        self.main_h_layout.addWidget(self.sidebar)
+        
+        # 2. ÁREA PRINCIPAL DE CONTENIDO
+        self.content_area = QWidget(self)
+        self.content_layout = QVBoxLayout(self.content_area)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(0)
+        
+        # ScrollArea principal para el contenido
+        scroll_area = QScrollArea(self.content_area)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
                 border: none;
-                padding: 12px 16px;
-                text-align: left;
-                font-weight: bold;
-                font-size: 12px;
-                border-radius: 4px;
+                background-color: transparent;
             }
-            QPushButton:hover {
-                background-color: #334155;
-                color: #F8FAFC;
-            }
-            QPushButton:checked {
-                background-color: #2563EB;
-                color: #FFFFFF;
+            QWidget#r2fScrollContent {
+                background-color: transparent;
             }
         """)
-        self.sidebar_layout = QVBoxLayout(self.sidebar_frame)
-        self.sidebar_layout.setContentsMargins(12, 24, 12, 12)
-        self.sidebar_layout.setSpacing(8)
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("r2fScrollContent")
+        self.layout = QVBoxLayout(scroll_content)
+        self.layout.setContentsMargins(16, 16, 16, 16)
+        self.layout.setSpacing(20)
         
-        # Sidebar Brand/Title Area
-        brand_lbl = CustomLabel("R2F CONTROL", variant="header")
-        brand_lbl.setStyleSheet("color: #FFFFFF; font-size: 14px; font-weight: bold; margin-bottom: 20px; padding-left: 8px;")
-        self.sidebar_layout.addWidget(brand_lbl)
+        # --- HEADER DE BIENVENIDA / ENCABEZADO SAR ---
+        self.header_layout = QHBoxLayout()
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout.setSpacing(12)
         
-        # Navigation buttons group (behaves like radio buttons)
-        self.button_group = QButtonGroup(self)
-        self.button_group.setExclusive(True)
+        self.indicator_bar = QFrame(self)
+        self.indicator_bar.setFixedWidth(4)
+        self.indicator_bar.setFixedHeight(28)
+        self.indicator_bar.setObjectName("dashboardIndicatorBar")
+        self.header_layout.addWidget(self.indicator_bar)
         
-        self.btn_nav_todos = QPushButton("📋 Todos los Recibos")
-        self.btn_nav_todos.setCheckable(True)
-        self.btn_nav_todos.setChecked(True)
-        self.btn_nav_todos.clicked.connect(lambda: self._on_sidebar_nav_changed("Todos"))
-        self.button_group.addButton(self.btn_nav_todos)
-        self.sidebar_layout.addWidget(self.btn_nav_todos)
+        self.title_text_layout = QVBoxLayout()
+        self.title_text_layout.setContentsMargins(0, 0, 0, 0)
+        self.title_text_layout.setSpacing(2)
         
-        self.btn_nav_capturados = QPushButton("📥 Capturados / Descargados")
-        self.btn_nav_capturados.setCheckable(True)
-        self.btn_nav_capturados.clicked.connect(lambda: self._on_sidebar_nav_changed("CAPTURADO"))
-        self.button_group.addButton(self.btn_nav_capturados)
-        self.sidebar_layout.addWidget(self.btn_nav_capturados)
+        self.lbl_title = CustomLabel("Tablero de Control Operativo R2F", variant="header")
+        self.lbl_subtitle = CustomLabel("Resumen general del estado de recibos y facturación", variant="muted")
+        self.title_text_layout.addWidget(self.lbl_title)
+        self.title_text_layout.addWidget(self.lbl_subtitle)
+        self.header_layout.addLayout(self.title_text_layout)
         
-        self.btn_nav_pendientes = QPushButton("⏳ Pendientes Facturar")
-        self.btn_nav_pendientes.setCheckable(True)
-        self.btn_nav_pendientes.clicked.connect(lambda: self._on_sidebar_nav_changed("PENDIENTE_FACTURAR"))
-        self.button_group.addButton(self.btn_nav_pendientes)
-        self.sidebar_layout.addWidget(self.btn_nav_pendientes)
+        self.header_layout.addStretch()
         
-        self.btn_nav_facturados = QPushButton("🧾 Facturados")
-        self.btn_nav_facturados.setCheckable(True)
-        self.btn_nav_facturados.clicked.connect(lambda: self._on_sidebar_nav_changed("FACTURADO"))
-        self.button_group.addButton(self.btn_nav_facturados)
-        self.sidebar_layout.addWidget(self.btn_nav_facturados)
+        # Date & Time display widget
+        self.time_widget = QWidget(self)
+        self.time_widget.setStyleSheet("background: transparent;")
+        self.time_layout = QHBoxLayout(self.time_widget)
+        self.time_layout.setContentsMargins(0, 0, 0, 0)
+        self.time_layout.setSpacing(6)
         
-        self.btn_nav_errores = QPushButton("❌ Errores Facturación")
-        self.btn_nav_errores.setCheckable(True)
-        self.btn_nav_errores.clicked.connect(lambda: self._on_sidebar_nav_changed("ERROR_FACTURA"))
-        self.button_group.addButton(self.btn_nav_errores)
-        self.sidebar_layout.addWidget(self.btn_nav_errores)
+        self.lbl_calendar_icon = QLabel()
+        self.lbl_calendar_icon.setPixmap(Icons.calendar().pixmap(16, 16))
+        self.lbl_calendar_icon.setStyleSheet("background: transparent;")
         
-        self.sidebar_layout.addStretch()
-        self.main_h_layout.addWidget(self.sidebar_frame)
+        self.lbl_datetime = CustomLabel(QDateTime.currentDateTime().toString("dd/MM/yyyy  hh:mm AP"), variant="body")
+        self.time_layout.addWidget(self.lbl_calendar_icon)
+        self.time_layout.addWidget(self.lbl_datetime)
+        self.header_layout.addWidget(self.time_widget)
         
-        # 2. MAIN CONTENT VIEW
-        self.content_widget = QWidget()
-        self.layout = QVBoxLayout(self.content_widget)
-        self.layout.setContentsMargins(24, 24, 24, 24)
-        self.layout.setSpacing(24)
+        self.btn_update = QPushButton(self)
+        self.btn_update.setObjectName("filterBarActionBtn")
+        self.btn_update.setIcon(Icons.actualizar("#FFFFFF"))
+        self.btn_update.setIconSize(QSize(20, 20))
+        self.btn_update.setFixedSize(35, 35)
+        self.btn_update.setToolTip("Actualizar Tablero R2F")
+        self.btn_update.clicked.connect(self.refresh_data)
+        self.header_layout.addWidget(self.btn_update)
         
-        # FilterBar search box
+        self.layout.addLayout(self.header_layout)
+        
+        # --- FILA DE TARJETAS KPI (StatCards) ---
+        self.kpi_widget = QWidget(self)
+        self.kpi_widget.setStyleSheet("background: transparent;")
+        self.kpi_layout = QHBoxLayout(self.kpi_widget)
+        self.kpi_layout.setContentsMargins(0, 0, 0, 0)
+        self.kpi_layout.setSpacing(10)
+        
+        self.card_total = StatCard("Total Descargados", "0", "file_text", color_hex=Colors.CHART_EMERALD_DARK, parent=self.kpi_widget)
+        self.card_pendientes = StatCard("Pendientes Facturar", "0", "clock", color_hex=Colors.CHART_AMBER, parent=self.kpi_widget)
+        self.card_facturados = StatCard("Facturados", "0", "shield_check", color_hex=Colors.CHART_TEAL, parent=self.kpi_widget)
+        self.card_errores = StatCard("Errores Factura", "0", "x_circle", color_hex=Colors.CHART_CORAL, parent=self.kpi_widget)
+        self.card_invalidos = StatCard("Invalidos", "0", "alert_triangle", color_hex=Colors.ERROR, parent=self.kpi_widget)
+        self.card_lotes = StatCard("Lotes Activos", "0", "list_icon", color_hex=Colors.CHART_BLUE, parent=self.kpi_widget)
+        
+        self.kpi_layout.addWidget(self.card_total, stretch=1)
+        self.kpi_layout.addWidget(self.card_pendientes, stretch=1)
+        self.kpi_layout.addWidget(self.card_facturados, stretch=1)
+        self.kpi_layout.addWidget(self.card_errores, stretch=1)
+        self.kpi_layout.addWidget(self.card_invalidos, stretch=1)
+        self.kpi_layout.addWidget(self.card_lotes, stretch=1)
+        
+        self.layout.addWidget(self.kpi_widget)
+        
+        # --- BANDEJA PRINCIPAL DE REGISTROS ---
         self.filter_bar = FilterBar(
             search_placeholder="Buscar por folio, RFC, contribuyente...",
             state_options=["Todos", "CAPTURADO", "PENDIENTE_FACTURAR", "FACTURANDO", "FACTURADO", "ERROR_FACTURA"],
@@ -177,15 +221,11 @@ class R2FControlView(QWidget):
             action_tooltip="Actualizar Registros",
             parent=self
         )
-        # Hiding state combobox because we have it cleanly in the sidebar
-        if hasattr(self.filter_bar, 'labeled_combo') and self.filter_bar.labeled_combo:
-            self.filter_bar.labeled_combo.hide()
         self.layout.addWidget(self.filter_bar)
         
         # Main Card
         self.card = CustomCard(title="Bandeja de Control de Recibos & Facturas", parent=self)
         
-        # Headers matching the Catastrales layout requested
         headers = ["✔", "ID", "Folio/Referencia", "RFC", "Contribuyente", "Concepto de Cobro", "SM", "MZ", "L", "Total", "Fecha", "Estado"]
         self.table = StyledDataTable(headers, parent=self)
         self.table.setMinimumHeight(200)
@@ -244,18 +284,38 @@ class R2FControlView(QWidget):
         self.card.layout.addLayout(actions_layout)
         self.layout.addWidget(self.card)
         
-        self.main_h_layout.addWidget(self.content_widget)
+        scroll_area.setWidget(scroll_content)
+        self.content_layout.addWidget(scroll_area, stretch=1)
+        
+        # Discreet right-aligned footer bar (Pie de página global SAR)
+        self.global_footer_bar = QWidget(self.content_area)
+        self.global_footer_layout = QHBoxLayout(self.global_footer_bar)
+        self.global_footer_layout.setContentsMargins(16, 2, 20, 6)
+        self.global_footer_layout.setSpacing(0)
+        
+        self.lbl_global_footer = QLabel("Sistema de Administración de Recibos & Facturas | R2F | v1.0.0", self.global_footer_bar)
+        self.lbl_global_footer.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_global_footer.setStyleSheet("color: #94A3B8; font-size: 10px; background: transparent;")
+        
+        self.global_footer_layout.addStretch()
+        self.global_footer_layout.addWidget(self.lbl_global_footer)
+        self.content_layout.addWidget(self.global_footer_bar)
+        
+        self.main_h_layout.addWidget(self.content_area, stretch=1)
         
         self._current_search_text = ""
         self._current_estado_filter = "Todos"
         
-        # Debounce timer for text search (350ms delay) to prevent database flooding while typing
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self._on_search_timer_timeout)
         
         self.table.itemChanged.connect(self._on_table_item_changed)
         self.refresh_data()
+        
+    def _on_sidebar_item_selected(self, key: str):
+        """Maneja la selección de ítems en el sidebar principal."""
+        pass
         
     def _on_sidebar_nav_changed(self, state_code: str):
         """Callback to handle clicks on the local sidebar items."""
@@ -374,7 +434,7 @@ class R2FControlView(QWidget):
         self.current_page = 1
         self.refresh_data()
         
-    def _filter_table_by_state(self, index: int, text_val: str):
+    def _filter_table_by_state(self, text_val: str, index: int = 0):
         self._current_estado_filter = text_val
         self.current_page = 1
         self.refresh_data()
