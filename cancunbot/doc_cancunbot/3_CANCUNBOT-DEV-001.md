@@ -15,8 +15,19 @@ Definir la guía oficial de construcción del proyecto CancunBot, incluyendo:
 - Patrones de diseño.
 - Fases de construcción.
 - Estándares de código.
+- **Directivas de no-afectación al sistema base (SAR) y control de dependencias.**
 
 ---
+
+## 1.1 Directivas de Coexistencia e Impacto Operativo
+
+1. **Aislamiento de Funcionalidad SAR**:
+   - **Regla de Oro**: Ninguna refactorización, mejora o módulo nuevo en CancunBot debe alterar o romper la estabilidad y contratos del SAR.
+   - Las vistas de PySide6, servicios backend, endpoints FastAPI y repositorios del SAR son considerados núcleo congelado.
+
+2. **Requisito de Documentación de Dependencias de BD en Planes de Trabajo**:
+   - Si una mejora o nueva funcionalidad requiere la adición de nuevas tablas, campos o scripts de migración (ya sea en `db_cancunbot` o excepcionalmente en `sar_db`), se debe declarar de forma obligatoria en la sección de **Propuesta de Cambios / Dependencias** dentro del **Plan de Trabajo (Implementation Plan)** correspondiente antes de tocar código.
+
 
 ## 2. Tecnologías Congeladas
 

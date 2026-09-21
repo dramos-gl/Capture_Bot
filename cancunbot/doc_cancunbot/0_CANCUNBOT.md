@@ -46,3 +46,16 @@ CancunBot es un proyecto **hermano** del SAR, que hereda sus patrones de diseño
 | Base de datos | PostgreSQL (`sar_db`) | PostgreSQL (`db_cancunbot`) |
 
 > **Ambos proyectos comparten el entorno virtual `.venv_sar`** ubicado en la raíz de `Proyecto_CapturaBot`.
+
+---
+
+## Directivas Obligatorias de Coexistencia e Impacto
+
+1. **Aislamiento y No-Afectación al Ecosistema SAR**:
+   - Bajo ninguna circunstancia las modificaciones, mejoras o refactorizaciones realizadas en **CancunBot** deben alterar, romper o degradar la funcionalidad existente del **SAR** (modelos, servicios, endpoints REST o vistas de PySide6).
+   - CancunBot debe consumir los componentes del Atomic Design (`sar/src/ui/design_system/`) en modo **solo lectura / extensión limpia**, sin modificar los contratos ni los tokens base del SAR.
+
+2. **Gestión de Nuevas Dependencias y Esquemas de Base de Datos**:
+   - Cualquier requerimiento que implique nuevas dependencias de base de datos (nuevas tablas, migraciones SQL, modificaciones a `db_cancunbot` o `sar_db`) **debe ser explícitamente documentado y detallado en los Planes de Trabajo (Implementation Plans)** antes de su ejecución.
+   - Las migraciones DDL deben estar aisladas en `cancunbot/src/storage/migrations/` y no deben afectar las tablas del núcleo SAR (`sar_db`) salvo aprobación explícita del **Equipo de Arquitectura de Datos**.
+
