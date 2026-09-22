@@ -28,7 +28,7 @@ from sar.src.ui.design_system.components.atoms.gl_status_indicator import GLStat
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.storage.repositories import ConfigRepository
 
-from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository, FolioCancunRepository, ReciboCancunRepository
+from cancunbot.src.storage.cancunbot_repos import OrdenCancunRepository, LoteFolioRepository, FolioCancunRepository, ReciboCancunRepository
 from cancunbot.src.core.bot_recibo_worker import BotReciboCunWorker
 
 logger = logging.getLogger(__name__)
@@ -66,11 +66,10 @@ class R2FCancunView(QWidget):
         self.active_worker = None
         self.selected_lote_id = None
         
-        # Layout principal — Tema Claro Estricto (Design System SAR)
+        # Layout principal — Mirror Bot Face A
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(10, 10, 10, 10)
-        self.main_layout.setSpacing(10)
-        self.setStyleSheet(f"background-color: {Colors.BG_LIGHT}; color: {Colors.TEXT_LIGHT_PRIMARY};")
+        self.main_layout.setSpacing(8)
 
         from sar.src.storage.api_client import APIClient
         self.api_client = APIClient()
@@ -109,20 +108,20 @@ class R2FCancunView(QWidget):
         h_layout.setContentsMargins(0, 0, 0, 0)
         h_layout.setSpacing(12)
 
-        self.lbl_titulo = QLabel("📥 R2F-CANCÚN — MODO: RECIBOS")
-        self.lbl_titulo.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff;")
+        self.lbl_titulo = QLabel("🚀 BOT - CONSULTA Y DESCARGA DE RECIBOS (R2F-CANCÚN)")
         h_layout.addWidget(self.lbl_titulo)
         h_layout.addStretch()
 
-        # Switch de Modo (RECIBOS / FACTURAS)
+        # Switch de Modo (RECIBOS / FACTURAS) con texto en blanco para el header oscuro
         self.switch_modo = CustomSwitch("MODO FACTURAS")
         self.switch_modo.setChecked(False)
+        self.switch_modo.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 12px;")
         self.switch_modo.toggled.connect(self._on_modo_toggled)
         h_layout.addWidget(self.switch_modo)
 
         # Indicador de estado del portal
         self.lbl_portal_status = QLabel("Portal: INACTIVO")
-        self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.SLATE_600}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white; font-weight: bold;")
+        self.lbl_portal_status.setStyleSheet("background-color: #334155; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")
         h_layout.addWidget(self.lbl_portal_status)
 
         # Botones de Gear y User
@@ -142,39 +141,22 @@ class R2FCancunView(QWidget):
         top_layout = QHBoxLayout()
         top_layout.setSpacing(10)
 
-        # Panel de Controles
+        # 1. Panel de Controles
         controles_frame = QFrame()
         controles_frame.setObjectName("card")
         c_layout = QVBoxLayout(controles_frame)
-        c_layout.setContentsMargins(8, 8, 8, 8)
+        c_layout.setContentsMargins(8, 6, 8, 6)
+        c_layout.setSpacing(4)
 
-        lbl_c = CustomLabel("⚙ CONTROLES", variant="subheader")
+        lbl_c = CustomLabel("⚙ CONTROLES OPERATIVOS", variant="subheader")
         c_layout.addWidget(lbl_c)
 
         self.chk_autonomo = CustomSwitch("🤖 Modo Autónomo (Visible)")
-        self.chk_autonomo.setChecked(True)  # Activo por defecto (Visible en Playwright)
-        self.chk_autonomo.setEnabled(False) # Estático, no editable por el usuario
+        self.chk_autonomo.setChecked(True)
+        self.chk_autonomo.setEnabled(False)
         c_layout.addWidget(self.chk_autonomo)
 
-        # Botones en la misma fila (2 columnas) para optimizar el espacio vertical
-        buttons_row_layout = QHBoxLayout()
-        buttons_row_layout.setSpacing(6)
-
-        self.btn_importar_excel = CustomButton("📁 Importar Excel", is_secondary=True)
-        self.btn_importar_excel.clicked.connect(self._on_importar_excel)
-        buttons_row_layout.addWidget(self.btn_importar_excel)
-
-        self.btn_importar_pdf = CustomButton("📄 Importar PDF(s)", is_secondary=True)
-        self.btn_importar_pdf.clicked.connect(self._on_importar_pdf)
-        buttons_row_layout.addWidget(self.btn_importar_pdf)
-
-        self.btn_descargar_plantilla = CustomButton("⬇ Plantilla", is_secondary=True)
-        self.btn_descargar_plantilla.clicked.connect(self._on_descargar_plantilla)
-        buttons_row_layout.addWidget(self.btn_descargar_plantilla)
-
-        c_layout.addLayout(buttons_row_layout)
-
-        # Replicando selector de ruta de descarga de Bot Face A
+        # Ruta de descarga selector
         lbl_path_title = CustomLabel("📁 Ruta de Descarga / Almacenamiento:", variant="body")
         lbl_path_title.setStyleSheet("font-weight: bold;")
         c_layout.addWidget(lbl_path_title)
@@ -182,68 +164,72 @@ class R2FCancunView(QWidget):
         path_input_layout = QHBoxLayout()
         display_label_text = f"Por defecto ({self.default_output_dir})"
         self.lbl_download_path_display = CustomLabel(display_label_text, variant="body")
-        self.lbl_download_path_display.setStyleSheet(f"background-color: {Colors.SURFACE_LIGHT}; padding: 6px; border: 1px solid {Colors.SLATE_300}; border-radius: 4px; font-size: 11px; color: {Colors.TEXT_LIGHT_PRIMARY};")
+        self.lbl_download_path_display.setStyleSheet("background-color: #f9fafb; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px;")
         path_input_layout.addWidget(self.lbl_download_path_display, stretch=4)
         
         self.btn_browse = CustomButton("...", is_secondary=True)
         self.btn_browse.setObjectName("secondaryBtn")
-        self.btn_browse.setStyleSheet("padding: 4px 8px; font-weight: bold;")
+        self.btn_browse.setStyleSheet("padding: 2px 6px; font-weight: bold;")
         self.btn_browse.clicked.connect(self._on_browse_path_clicked)
         path_input_layout.addWidget(self.btn_browse, stretch=1)
         c_layout.addLayout(path_input_layout)
 
-        # GLStatusIndicator pill under the download path
+        # GLStatusIndicator pill under download path
         self.status_indicator = GLStatusIndicator()
         c_layout.addWidget(self.status_indicator)
 
         self.btn_iniciar = CustomButton("▶ Iniciar Bot", is_secondary=False)
         self.btn_iniciar.setObjectName("primaryBtn")
+        self.btn_iniciar.setFixedHeight(30)
         self.btn_iniciar.clicked.connect(self._on_iniciar_bot)
         c_layout.addWidget(self.btn_iniciar)
 
+        self.btn_cargar_lote = CustomButton("📥 Cargar Lote Seleccionado", is_secondary=True)
+        self.btn_cargar_lote.setObjectName("secondaryBtn")
+        self.btn_cargar_lote.setFixedHeight(30)
+        self.btn_cargar_lote.clicked.connect(self._on_cargar_lote_clicked)
+        c_layout.addWidget(self.btn_cargar_lote)
+
         top_layout.addWidget(controles_frame, stretch=1)
 
-        # Panel de Métricas (Replicado de Bot Face A)
+        # 2. Panel de Métricas (Replicado de Bot Face A)
         metricas_frame = QFrame()
         metricas_frame.setObjectName("card")
         m_layout = QVBoxLayout(metricas_frame)
-        m_layout.setContentsMargins(8, 8, 8, 8)
+        m_layout.setContentsMargins(8, 6, 8, 6)
+        m_layout.setSpacing(4)
 
-        lbl_m = CustomLabel("📊 MÉTRICAS DEL LOTE", variant="subheader")
-        m_layout.addWidget(lbl_m)
+        self.lbl_m_titulo = CustomLabel("📊 MÉTRICAS DE DESCARGA DE RECIBOS", variant="subheader")
+        m_layout.addWidget(self.lbl_m_titulo)
 
         grid_m = QGridLayout()
-        self.box_pendientes = MetricBox("Pendientes", "0", Colors.INFO)
-        self.box_exitosos = MetricBox("Exitosos", "0", Colors.SUCCESS)
-        self.box_errores = MetricBox("Errores", "0", Colors.ERROR)
+        self.box_pendientes = MetricBox("Por Generar", "0", "#3b82f6")
+        self.box_exitosos = MetricBox("Generados", "0", "#10b981")
+        self.box_errores = MetricBox("Errores", "0", "#ef4444")
 
         grid_m.addWidget(self.box_pendientes, 0, 0)
         grid_m.addWidget(self.box_exitosos, 0, 1)
         grid_m.addWidget(self.box_errores, 0, 2)
 
         self.lbl_lote_actual_info = CustomLabel("RFC: -- | Razón Social: --\nCP: --", variant="muted")
-        self.lbl_lote_actual_info.setStyleSheet(f"color: {Colors.TEXT_LIGHT_SECONDARY}; font-size: 11px; background: {Colors.SURFACE_LIGHT}; padding: 8px; border: 1px solid {Colors.SLATE_200}; border-radius: 4px;")
+        self.lbl_lote_actual_info.setStyleSheet("color: #6b7280; font-size: 11px; background: #f9fafb; padding: 4px; border: 1px solid #e5e7eb; border-radius: 4px;")
         grid_m.addWidget(self.lbl_lote_actual_info, 1, 0, 1, 3)
-
-        # Integrar botón Control R2F en la última fila disponible del panel de Métricas
-        self.btn_control_r2f = CustomButton("📊 Control de Recibos & Facturas (R2F)", is_secondary=True)
-        self.btn_control_r2f.clicked.connect(self._on_administrar_recibos_clicked)
-        grid_m.addWidget(self.btn_control_r2f, 2, 0, 1, 3)
 
         m_layout.addLayout(grid_m)
         top_layout.addWidget(metricas_frame, stretch=1)
 
-        # Panel de Monitoreo en Tiempo Real (Replicado de Bot Face A)
+        # 3. Panel de Monitoreo en Tiempo Real (Replicado de Bot Face A)
         monitoreo_frame = QFrame()
         monitoreo_frame.setObjectName("card")
         mon_layout = QVBoxLayout(monitoreo_frame)
-        mon_layout.setContentsMargins(8, 8, 8, 8)
+        mon_layout.setContentsMargins(8, 6, 8, 6)
+        mon_layout.setSpacing(4)
 
         lbl_mon = CustomLabel("📡 MONITOREO EN TIEMPO REAL", variant="subheader")
         mon_layout.addWidget(lbl_mon)
 
         grid_data = QGridLayout()
-        grid_data.addWidget(CustomLabel("Folio:", variant="body"), 0, 0)
+        grid_data.addWidget(CustomLabel("Referencia:", variant="body"), 0, 0)
         self.lbl_m_ref = CustomLabel("--", variant="body")
         grid_data.addWidget(self.lbl_m_ref, 0, 1)
 
@@ -258,49 +244,99 @@ class R2FCancunView(QWidget):
 
         mon_layout.addWidget(CustomLabel("Progreso", variant="body"))
         self.progress_bar = QProgressBar()
+        self.progress_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progress_bar.setTextVisible(True)
         self.progress_bar.setValue(0)
         mon_layout.addWidget(self.progress_bar)
 
         self.lbl_mon_status = CustomLabel("ESPERANDO INICIO DE PROCESAMIENTO...", variant="muted")
-        self.lbl_mon_status.setStyleSheet(f"color: {Colors.TEXT_LIGHT_MUTED}; font-size: 11px;")
+        self.lbl_mon_status.setStyleSheet("color: #6b7280; font-size: 11px;")
         mon_layout.addWidget(self.lbl_mon_status)
 
         top_layout.addWidget(monitoreo_frame, stretch=1)
 
-        self.main_layout.addLayout(top_layout, stretch=1)
+        self.main_layout.addLayout(top_layout, stretch=0)
 
     def _build_tables_panel(self):
-        self.tables_card = CustomCard("📑 BANDEJA DE TRABAJO")
-        # CustomCard ya tiene un container interno con layout vertical.
-        # Agregamos el tab_widget usando .add_widget() en lugar de asignarle un layout directamente a la tarjeta.
-        self.tab_widget = QTabWidget()
-        
-        # Tabla de Lotes
-        self.table_lotes = StyledDataTable([
-            "ID", "Folio Lote", "Origen", "Total Folios", "Procesados", "Estado"
-        ])
+        panel = QFrame()
+        panel.setObjectName("card")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+
+        header_layout = QHBoxLayout()
+        lbl = CustomLabel("⚙ SOLICITUDES / LOTES ASIGNADOS", variant="subheader")
+        header_layout.addWidget(lbl)
+        header_layout.addStretch()
+
+        self.chk_ver_todos = CustomCheckBox("Mostrar completados y cancelados")
+        self.chk_ver_todos.setStyleSheet("margin-right: 8px;")
+        self.chk_ver_todos.stateChanged.connect(self._refresh_lotes_table)
+        header_layout.addWidget(self.chk_ver_todos)
+
+        self.btn_refresh = CustomButton("↻ Actualizar", is_secondary=False)
+        self.btn_refresh.clicked.connect(self._refresh_lotes_table)
+        header_layout.addWidget(self.btn_refresh)
+
+        layout.addLayout(header_layout)
+
+        # Tabla de Lotes Asignados (Directa, sin pestañas, espejo exacto de Bot Face A)
+        headers = ["ID Lote", "Folio Lote", "Origen", "Total Folios", "Procesados", "Estado"]
+        self.table_lotes = StyledDataTable(headers, parent=self)
+        self.table_lotes.setObjectName("botTable")
         self.table_lotes.doubleClicked.connect(self._on_lote_double_clicked)
-        self.tab_widget.addTab(self.table_lotes, "Lotes de Folios")
+        self.table_lotes.setMinimumHeight(130)
+        layout.addWidget(self.table_lotes, stretch=1)
 
-        # Tabla de Detalles (Folios / Recibos)
-        self.table_detalles = StyledDataTable([
-            "ID", "Folio/Referencia", "Tipo", "Intentos", "Estado"
-        ])
-        self.tab_widget.addTab(self.table_detalles, "Folios en Lote")
-
-        self.tables_card.add_widget(self.tab_widget)
-        self.main_layout.addWidget(self.tables_card, stretch=2)
+        self.main_layout.addWidget(panel, stretch=3)
 
     def _build_console_panel(self):
-        console_card = CustomCard("📡 BITÁCORA DE OPERACIÓN")
+        panel = QFrame()
+        panel.setObjectName("card")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+
+        lbl = CustomLabel("⚙ CONSOLA DE LOGS DE ACTIVIDAD", variant="subheader")
+        layout.addWidget(lbl)
 
         self.txt_console = QTextEdit()
-        self.txt_console.setReadOnly(True)
         self.txt_console.setObjectName("console")
-        self.txt_console.setStyleSheet(f"font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; background-color: {Colors.SLATE_50}; color: {Colors.SLATE_800}; border: 1px solid {Colors.SLATE_300}; border-radius: 4px;")
-        
-        console_card.add_widget(self.txt_console)
-        self.main_layout.addWidget(console_card, stretch=1)
+        self.txt_console.setReadOnly(True)
+        self.txt_console.setMinimumHeight(80)
+        self.txt_console.setStyleSheet("""
+            QTextEdit#console {
+                background-color: #0f172a;
+                color: #22c55e;
+                font-family: 'Consolas', 'Cascadia Code', 'Courier New', monospace;
+                font-size: 11px;
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                padding: 6px;
+            }
+        """)
+
+        layout.addWidget(self.txt_console, stretch=1)
+        self._write_log("Sistema R2F-Cancún listo. Esperando carga de lote...")
+        self.main_layout.addWidget(panel, stretch=2)
+
+    def _on_cargar_lote_clicked(self):
+        """Maneja el clic en 'Cargar Lote Seleccionado' espejo de Bot Face A."""
+        if hasattr(self, 'active_worker') and self.active_worker and self.active_worker.isRunning():
+            return
+
+        selected = self.table_lotes.selectedItems()
+        if not selected:
+            QMessageBox.warning(self, "Atención", "Selecciona una fila de la tabla de lotes primero.")
+            return
+
+        row = selected[0].row()
+        lote_id_item = self.table_lotes.item(row, 0)
+        if lote_id_item:
+            lote_id = int(lote_id_item.text())
+            self.selected_lote_id = lote_id
+            self._write_log(f"Cargando contexto para Lote #{lote_id}...")
+            self._load_lote_detalles(lote_id)
 
     def _on_modo_toggled(self, is_checked: bool):
         """Alterna el modo de trabajo del dashboard."""
@@ -310,13 +346,17 @@ class R2FCancunView(QWidget):
             return
 
         if is_checked:
-            self.lbl_titulo.setText("🧾 R2F-CANCÚN — MODO: FACTURACIÓN [PROXIMAMENTE]")
-            self.btn_importar_excel.setEnabled(False)
+            self.lbl_titulo.setText("🧾 BOT - GENERACIÓN Y DESCARGA DE FACTURAS (R2F-CANCÚN)")
+            if hasattr(self, 'lbl_m_titulo'):
+                self.lbl_m_titulo.setText("📊 MÉTRICAS DE GENERACIÓN Y DESCARGA DE FACTURAS")
+            if hasattr(self, 'btn_importar_excel'): self.btn_importar_excel.setEnabled(False)
             self.btn_iniciar.setEnabled(False)  # Bloqueado hasta integrar portal de facturas
             self._write_log("Modo cambiado a FACTURACIÓN. Portal de facturación pendiente de implementar.")
         else:
-            self.lbl_titulo.setText("📥 R2F-CANCÚN — MODO: RECIBOS")
-            self.btn_importar_excel.setEnabled(True)
+            self.lbl_titulo.setText("🚀 BOT - CONSULTA Y DESCARGA DE RECIBOS (R2F-CANCÚN)")
+            if hasattr(self, 'lbl_m_titulo'):
+                self.lbl_m_titulo.setText("📊 MÉTRICAS DE DESCARGA DE RECIBOS")
+            if hasattr(self, 'btn_importar_excel'): self.btn_importar_excel.setEnabled(True)
             self.btn_iniciar.setEnabled(True)
             self._write_log("Modo cambiado a RECIBOS.")
 
@@ -439,13 +479,16 @@ class R2FCancunView(QWidget):
         # Deshabilitar TODOS los controles de UI para blindar ante errores humanos
         self.switch_modo.setEnabled(False)
         self.chk_autonomo.setEnabled(False)
-        self.btn_importar_excel.setEnabled(False)
-        self.btn_importar_pdf.setEnabled(False)
-        self.btn_descargar_plantilla.setEnabled(False)
+        if hasattr(self, 'btn_cargar_lote'): self.btn_cargar_lote.setEnabled(False)
+        if hasattr(self, 'btn_refresh'): self.btn_refresh.setEnabled(False)
+        if hasattr(self, 'chk_ver_todos'): self.chk_ver_todos.setEnabled(False)
+        if hasattr(self, 'btn_importar_excel'): self.btn_importar_excel.setEnabled(False)
+        if hasattr(self, 'btn_importar_pdf'): self.btn_importar_pdf.setEnabled(False)
+        if hasattr(self, 'btn_descargar_plantilla'): self.btn_descargar_plantilla.setEnabled(False)
         self.btn_browse.setEnabled(False)
-        self.btn_control_r2f.setEnabled(False)
+        if hasattr(self, 'btn_control_r2f'): self.btn_control_r2f.setEnabled(False)
         self.table_lotes.setEnabled(False)
-        self.table_detalles.setEnabled(False)
+        if hasattr(self, 'table_detalles'): self.table_detalles.setEnabled(False)
 
         # Si el interruptor de visible está activo (Checked), headless debe ser False (Navegador visible)
         es_visible = self.chk_autonomo.isChecked()
@@ -481,13 +524,16 @@ class R2FCancunView(QWidget):
         # Rehabilitar controles de UI tras finalizar el proceso
         self.switch_modo.setEnabled(True)
         self.chk_autonomo.setEnabled(True)
-        self.btn_importar_excel.setEnabled(True)
-        self.btn_importar_pdf.setEnabled(True)
-        self.btn_descargar_plantilla.setEnabled(True)
+        if hasattr(self, 'btn_cargar_lote'): self.btn_cargar_lote.setEnabled(True)
+        if hasattr(self, 'btn_refresh'): self.btn_refresh.setEnabled(True)
+        if hasattr(self, 'chk_ver_todos'): self.chk_ver_todos.setEnabled(True)
+        if hasattr(self, 'btn_importar_excel'): self.btn_importar_excel.setEnabled(True)
+        if hasattr(self, 'btn_importar_pdf'): self.btn_importar_pdf.setEnabled(True)
+        if hasattr(self, 'btn_descargar_plantilla'): self.btn_descargar_plantilla.setEnabled(True)
         self.btn_browse.setEnabled(True)
-        self.btn_control_r2f.setEnabled(True)
+        if hasattr(self, 'btn_control_r2f'): self.btn_control_r2f.setEnabled(True)
         self.table_lotes.setEnabled(True)
-        self.table_detalles.setEnabled(True)
+        if hasattr(self, 'table_detalles'): self.table_detalles.setEnabled(True)
         
         self.lbl_portal_status.setText("Portal: INACTIVO")
         self.lbl_portal_status.setStyleSheet(f"background-color: {Colors.BORDER_DARK}; padding: 4px 12px; border-radius: 12px; font-size: 12px; color: white;")
@@ -578,6 +624,56 @@ class R2FCancunView(QWidget):
         except Exception as e:
             logger.error(f"Error cargando tabla de lotes: {e}")
 
+    def _refresh_ordenes_table(self):
+        """Carga la lista de órdenes desde la base de datos o API REST."""
+        try:
+            data = []
+            if self.api_client and getattr(self.api_client, 'connect_via_api', False):
+                ordenes = self.api_client.request("GET", "/api/docs/cancun/ordenes")
+                for ord_item in ordenes:
+                    data.append([
+                        str(ord_item["orden_id"]),
+                        ord_item["folio_orden"],
+                        ord_item.get("descripcion", "--"),
+                        str(ord_item.get("total_lotes", 0)),
+                        str(ord_item.get("total_folios", 0)),
+                        str(ord_item.get("folios_procesados", 0)),
+                        ord_item.get("estado_codigo", "ABIERTA"),
+                        ord_item.get("created_at", "--")
+                    ])
+            else:
+                with self.db_connector.get_session() as session:
+                    repo = OrdenCancunRepository(session)
+                    ordenes = repo.list_all()
+                    for ord_item in ordenes:
+                        data.append([
+                            str(ord_item.orden_id),
+                            ord_item.folio_orden,
+                            ord_item.descripcion or "--",
+                            str(ord_item.total_lotes),
+                            str(ord_item.total_folios),
+                            str(ord_item.folios_procesados),
+                            ord_item.estado.codigo if ord_item.estado else "--",
+                            ord_item.created_at.strftime("%Y-%m-%d %H:%M") if ord_item.created_at else "--"
+                        ])
+            if hasattr(self, 'table_ordenes'):
+                self.table_ordenes.populate_rows(data)
+        except Exception as e:
+            logger.error(f"Error cargando tabla de órdenes: {e}")
+
+    def _on_orden_double_clicked(self, index):
+        """Maneja el doble clic en una fila de la tabla de Órdenes para navegar a sus lotes asociados."""
+        if not hasattr(self, 'table_ordenes'):
+            return
+        row = index.row()
+        orden_id_item = self.table_ordenes.item(row, 0)
+        if orden_id_item:
+            orden_id = int(orden_id_item.text())
+            self.selected_orden_id = orden_id
+            self.lbl_lote_actual_info.setText(f"Orden seleccionada: ID {orden_id}")
+            if hasattr(self, 'tab_widget'):
+                self.tab_widget.setCurrentIndex(1)
+
     def _on_administrar_recibos_clicked(self):
         """Abre el panel de control administrativo de R2F en un diálogo modal independiente maximizado."""
         dialog = QDialog(self)
@@ -589,7 +685,7 @@ class R2FCancunView(QWidget):
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        from sar.src.ui.views.r2f_control_view import R2FControlView
+        from cancunbot.src.ui.views.r2f_control_view import R2FControlView
         control_view = R2FControlView(self.db_connector, dialog)
         layout.addWidget(control_view)
 
@@ -639,7 +735,8 @@ class R2FCancunView(QWidget):
                             str(folio["intentos"]),
                             folio["estado_codigo"]
                         ])
-                    self.table_detalles.populate_rows(data)
+                    if hasattr(self, 'table_detalles'):
+                        self.table_detalles.populate_rows(data)
             else:
                 with self.db_connector.get_session() as session:
                     lote_repo = LoteFolioRepository(session)
@@ -666,7 +763,8 @@ class R2FCancunView(QWidget):
                                 str(folio.intentos),
                                 folio.estado.codigo
                             ])
-                        self.table_detalles.populate_rows(data)
+                        if hasattr(self, 'table_detalles'):
+                            self.table_detalles.populate_rows(data)
         except Exception as e:
             logger.error(f"Error cargando folios de lote: {e}")
 
@@ -835,14 +933,21 @@ class R2FCancunView(QWidget):
                 else:
                     # Inserción de forma directa en BD (modo LAN)
                     with self.db_connector.get_session() as session:
+                        orden_repo = OrdenCancunRepository(session)
                         lote_repo = LoteFolioRepository(session)
                         folio_repo = FolioCancunRepository(session)
+
+                        orden = orden_repo.create(
+                            usuario_id=self.usuario_id,
+                            descripcion=f"Orden para importación {Path(file_path).name}"
+                        )
 
                         lote = lote_repo.create(
                             usuario_id=self.usuario_id,
                             origen="EXCEL",
                             descripcion=desc_lote,
-                            archivo_excel=file_path
+                            archivo_excel=file_path,
+                            orden_id=orden.orden_id
                         )
                         
                         guardados = folio_repo.create_bulk(lote.lote_id, folios_mapeados)
@@ -850,14 +955,16 @@ class R2FCancunView(QWidget):
                         session.commit()
                         
                         folio_lote_nombre = lote.folio_lote
+                        folio_orden_nombre = orden.folio_orden
 
                     save_loading.close()
                     QMessageBox.information(
                         self, "Importación Completada", 
-                        f"Lote {folio_lote_nombre} creado con éxito.\n"
+                        f"Orden {folio_orden_nombre} y Lote {folio_lote_nombre} creados con éxito.\n"
                         f"Se insertaron {guardados} folios nuevos."
                     )
 
+                self._refresh_ordenes_table()
                 self._refresh_lotes_table()
             finally:
                 save_loading.close()

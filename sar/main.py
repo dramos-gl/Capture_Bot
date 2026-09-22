@@ -230,7 +230,7 @@ class MainWindow(QMainWindow):
                 
                 # Hook up logout for BillingBotWindow
                 self.active_module.logout_requested.connect(self._handle_logout)
-            elif selected_mod_code == "R2F_CANCUN":
+            elif selected_mod_code == "BOT_R2F":
                 from cancunbot.src.ui.views.r2f_cancun_view import R2FCancunWindow
                 self.active_module = R2FCancunWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
                 self.active_module.current_sesion_id = self.current_sesion_id
@@ -239,6 +239,24 @@ class MainWindow(QMainWindow):
                 
                 # Hook up logout for R2FCancunWindow
                 self.active_module.logout_requested.connect(self._handle_logout)
+            elif selected_mod_code == "CTRL_R2F":
+                from cancunbot.src.ui.views.r2f_control_view import R2FControlView
+                self.active_module = SARModuleWindow(
+                    title="SAR - Control de Recibos & Facturas (R2F)",
+                    width=1200,
+                    height=750,
+                    on_logout=self._handle_logout
+                )
+                self.active_module.current_sesion_id = self.current_sesion_id
+                self.active_module.current_username = getattr(self, 'current_username', None)
+                
+                r2f_control_widget = R2FControlView(
+                    self.db_connector,
+                    api_client=self.api_client,
+                    parent=self.active_module
+                )
+                r2f_control_widget.logout_requested.connect(self._handle_logout)
+                self.active_module.setCentralWidget(r2f_control_widget)
 
             else:
                 # Placeholder for other modules
@@ -253,7 +271,7 @@ class MainWindow(QMainWindow):
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.active_module.setCentralWidget(lbl)
                 
-            if selected_mod_code in ("BOT_FACE_A", "BOT_FACE_C", "BOT_C", "R2F_CANCUN"):
+            if selected_mod_code in ("BOT_FACE_A", "BOT_FACE_C", "BOT_C", "BOT_R2F"):
                 # Dynamically calculate optimal window size based on available screen geometry
                 screen = QApplication.primaryScreen()
                 avail_geom = screen.availableGeometry() if screen else None

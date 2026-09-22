@@ -23,6 +23,7 @@ from sar.src.ui.design_system.components import (
     GLMessageDialog, DialogType
 )
 from cancunbot.src.services.pdf_analysis_worker import PdfAnalysisWorker
+from cancunbot.src.storage.cancunbot_repos import OrdenCancunRepository, LoteFolioRepository, FolioCancunRepository
 
 logger = logging.getLogger(__name__)
 
@@ -546,13 +547,20 @@ class PdfAnalysisDialog(QDialog):
                         QMessageBox.warning(self, "Sin Folios Nuevos", "Todos los folios del archivo PDF ya existen en la base de datos.")
                         return
 
+                    orden_repo = OrdenCancunRepository(session)
                     lote_repo = LoteFolioRepository(session)
                     folio_repo = FolioCancunRepository(session)
+
+                    orden = orden_repo.create(
+                        usuario_id=self.usuario_id,
+                        descripcion=f"Orden para importación PDF: {user_desc or 'Pases de Caja'}"
+                    )
 
                     lote = lote_repo.create(
                         usuario_id=self.usuario_id,
                         origen="MANUAL",
-                        descripcion=user_desc
+                        descripcion=user_desc,
+                        orden_id=orden.orden_id
                     )
                     
                     inserted = folio_repo.create_bulk(lote.lote_id, folios_list)
@@ -561,7 +569,10 @@ class PdfAnalysisDialog(QDialog):
 
                     self.created_lote_id = lote.lote_id
                     msg_extra = f"\n(Se omitieron {duplicados_omitidos} folios duplicados/existentes)." if duplicados_omitidos > 0 else ""
-                    QMessageBox.information(self, "Lote Creado", f"Se ha creado el Lote #{lote.lote_id} ({lote.folio_lote}) con {inserted} folios nuevos.{msg_extra}")
+                    QMessageBox.information(
+                        self, "Orden y Lote Creados", 
+                        f"Se ha creado la Orden {orden.folio_orden} y el Lote #{lote.lote_id} ({lote.folio_lote}) con {inserted} folios nuevos.{msg_extra}"
+                    )
                     self.accept()
         except Exception as e:
             logger.error(f"Error creando lote desde PDF: {e}")

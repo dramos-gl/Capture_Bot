@@ -332,7 +332,7 @@ class MainView(QWidget):
             self.refs_view.refresh_data()
         elif view_key == "r2f_control":
             if not hasattr(self, "r2f_control_view") or not self.r2f_control_view:
-                from sar.src.ui.views.r2f_control_view import R2FControlView
+                from cancunbot.src.ui.views.r2f_control_view import R2FControlView
                 self.r2f_control_view = R2FControlView(self.db_connector, self)
                 self.stacked_widget.addWidget(self.r2f_control_view)
             self.stacked_widget.setCurrentWidget(self.r2f_control_view)

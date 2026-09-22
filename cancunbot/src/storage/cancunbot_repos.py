@@ -7,10 +7,10 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 
 from sqlalchemy import select, update, and_, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from sar.src.storage.models import EstadoSistema, Usuario
-from cancunbot.src.storage.cancunbot_models import LoteFolio, FolioCancun, ReciboCancun, FacturaCancun
+from cancunbot.src.storage.cancunbot_models import OrdenCancun, LoteFolio, FolioCancun, ReciboCancun, FacturaCancun
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,94 @@ class BaseCancunRepository:
         if not result:
             raise ValueError(f"Estado '{codigo}' para la entidad '{entidad}' no existe en el catálogo.")
         return result
+
+
+class OrdenCancunRepository(BaseCancunRepository):
+    """Encapsulates CRUD and query logic for OrdenCancun."""
+
+    def get_by_id(self, orden_id: int) -> Optional[OrdenCancun]:
+        return self.session.get(OrdenCancun, orden_id)
+
+    def generate_next_folio(self) -> str:
+        """Generates the next sequential order folio (e.g. ORD-CUN-2026-001)."""
+        year = datetime.now().year
+        prefix = f"ORD-CUN-{year}-"
+        stmt = select(OrdenCancun.folio_orden).where(
+            OrdenCancun.folio_orden.like(f"{prefix}%")
+        )
+        folios = self.session.execute(stmt).scalars().all()
+        
+        max_seq = 0
+        for f in folios:
+            try:
+                seq = int(f.split("-")[-1])
+                if seq > max_seq:
+                    max_seq = seq
+            except ValueError:
+                continue
+        return f"{prefix}{str(max_seq + 1).zfill(3)}"
+
+    def create(self, usuario_id: int, descripcion: Optional[str] = None) -> OrdenCancun:
+        """Creates a new Cancún order."""
+        # Se asigna estado EN_PROCESO o NUEVO usando la entidad genérica del catálogo
+        try:
+            estado_id = self._get_estado_id("orden_trabajo", "ABIERTA")
+        except ValueError:
+            estado_id = self._get_estado_id("lote_folio", "NUEVO")
+
+        folio_orden = self.generate_next_folio()
+        orden = OrdenCancun(
+            folio_orden=folio_orden,
+            descripcion=descripcion or f"Orden de procesamiento R2F Cancún {folio_orden}",
+            estado_id=estado_id,
+            usuario_id=usuario_id,
+            total_lotes=0,
+            total_folios=0,
+            folios_procesados=0,
+            folios_error=0,
+            folios_facturados=0
+        )
+        self.session.add(orden)
+        self.session.flush()
+        return orden
+
+    def list_all(self) -> List[OrdenCancun]:
+        stmt = (
+            select(OrdenCancun)
+            .options(selectinload(OrdenCancun.estado))
+            .order_by(OrdenCancun.created_at.desc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
+    def update_metrics_and_status(self, orden_id: int) -> None:
+        """Recalcula las métricas agregadas de la orden en base a todos sus lotes asociados."""
+        orden = self.session.get(OrdenCancun, orden_id)
+        if not orden:
+            return
+
+        tot_lotes = self.session.scalar(
+            select(func.count(LoteFolio.lote_id)).where(LoteFolio.orden_id == orden_id)
+        ) or 0
+        tot_folios = self.session.scalar(
+            select(func.coalesce(func.sum(LoteFolio.total_folios), 0)).where(LoteFolio.orden_id == orden_id)
+        ) or 0
+        tot_proc = self.session.scalar(
+            select(func.coalesce(func.sum(LoteFolio.folios_procesados), 0)).where(LoteFolio.orden_id == orden_id)
+        ) or 0
+        tot_err = self.session.scalar(
+            select(func.coalesce(func.sum(LoteFolio.folios_error), 0)).where(LoteFolio.orden_id == orden_id)
+        ) or 0
+        tot_fact = self.session.scalar(
+            select(func.coalesce(func.sum(LoteFolio.folios_facturados), 0)).where(LoteFolio.orden_id == orden_id)
+        ) or 0
+
+        orden.total_lotes = tot_lotes
+        orden.total_folios = tot_folios
+        orden.folios_procesados = tot_proc
+        orden.folios_error = tot_err
+        orden.folios_facturados = tot_fact
+        orden.updated_at = datetime.utcnow()
+        self.session.flush()
 
 
 class LoteFolioRepository(BaseCancunRepository):
@@ -60,12 +148,13 @@ class LoteFolioRepository(BaseCancunRepository):
                 continue
         return f"{prefix}{str(max_seq + 1).zfill(3)}"
 
-    def create(self, usuario_id: int, origen: str = "EXCEL", descripcion: Optional[str] = None, archivo_excel: Optional[str] = None) -> LoteFolio:
-        """Creates a new folio batch."""
+    def create(self, usuario_id: int, origen: str = "EXCEL", descripcion: Optional[str] = None, archivo_excel: Optional[str] = None, orden_id: Optional[int] = None) -> LoteFolio:
+        """Creates a new folio batch associated optional to an order."""
         estado_id = self._get_estado_id("lote_folio", "NUEVO")
         folio_lote = self.generate_next_folio()
         
         lote = LoteFolio(
+            orden_id=orden_id,
             folio_lote=folio_lote,
             descripcion=descripcion,
             origen=origen,
@@ -79,6 +168,16 @@ class LoteFolioRepository(BaseCancunRepository):
         )
         self.session.add(lote)
         self.session.flush()
+
+        # Actualizar contadores de la orden si aplica
+        if orden_id:
+            orden = self.session.get(OrdenCancun, orden_id)
+            if orden:
+                orden.total_lotes = self.session.scalar(
+                    select(func.count(LoteFolio.lote_id)).where(LoteFolio.orden_id == orden_id)
+                ) or 0
+                self.session.flush()
+
         return lote
 
     def list_all(self) -> List[LoteFolio]:

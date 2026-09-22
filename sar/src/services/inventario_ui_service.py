@@ -53,6 +53,8 @@ class InventarioUIService:
         self._cache_colaboradores = None
         self._cache_desarrollos = None
         self._cache_desarrollos_apartar = None
+        self._cache_rfcs_inventario = None
+        self._cache_filtros_data = None
 
     def clear_catalogs_cache(self):
         """Invalidates in-memory catalog cache."""
@@ -60,6 +62,8 @@ class InventarioUIService:
         self._cache_colaboradores = None
         self._cache_desarrollos = None
         self._cache_desarrollos_apartar = None
+        self._cache_rfcs_inventario = None
+        self._cache_filtros_data = None
 
     def get_dimensiones_con_stock_facturadas(self, filter_assigned: str = "Disponible", orden_ids: list = None) -> Dict[str, List[str]]:
         """Fetches distinct dimension names (empresas, conceptos, delegaciones, desarrollos)
@@ -291,13 +295,18 @@ class InventarioUIService:
                     print(f"Error get_rfcs_con_stock_facturadas: {e}")
                     return []
 
-    def get_rfcs_con_stock_inventario(self) -> List[Dict[str, Any]]:
-        """Returns active RFCs that have at least one reference in inventory (FACTURADA, ASIGNADA, RESERVADA)."""
+    def get_rfcs_con_stock_inventario(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """Returns active RFCs that have at least one reference in inventory (FACTURADA, ASIGNADA, RESERVADA) with in-memory caching."""
+        if not force_refresh and self._cache_rfcs_inventario is not None:
+            return self._cache_rfcs_inventario
+
         transport = "API" if self.api_client.connect_via_api else "LOCAL"
         with track_perf("InventarioUIService.get_rfcs_con_stock_inventario", transport=transport):
             if self.api_client.connect_via_api:
                 try:
-                    return self.api_client.request("GET", "/api/docs/inventario/rfcs-con-stock-inventario")
+                    res = self.api_client.request("GET", "/api/docs/inventario/rfcs-con-stock-inventario")
+                    self._cache_rfcs_inventario = res
+                    return res
                 except Exception:
                     return []
             else:
@@ -306,7 +315,9 @@ class InventarioUIService:
                 try:
                     with self.db_connector.get_session() as session:
                         repo = InventarioRepository(session)
-                        return repo.get_rfcs_con_stock_inventario()
+                        res = repo.get_rfcs_con_stock_inventario()
+                        self._cache_rfcs_inventario = res
+                        return res
                 except Exception as e:
                     print(f"Error get_rfcs_con_stock_inventario: {e}")
                     return []
@@ -440,14 +451,19 @@ class InventarioUIService:
                     "rfcs": [{"rfc_id": r.rfc_id, "razon_social": r.razon_social} for r in rfcs]
                 }
 
-    def get_filtros_data(self) -> Dict[str, Any]:
-        """Fetches only the lightweight catalogs needed for visor filters (conceptos and rfcs)."""
+    def get_filtros_data(self, force_refresh: bool = False) -> Dict[str, Any]:
+        """Fetches only the lightweight catalogs needed for visor filters (conceptos and rfcs) with in-memory caching."""
+        if not force_refresh and self._cache_filtros_data is not None:
+            return self._cache_filtros_data
+
         if self.api_client.connect_via_api:
             cats = self.api_client.request("GET", "/api/ops/catalogos")
-            return {
+            res = {
                 "conceptos": cats["conceptos"],
                 "rfcs": cats.get("rfcs", [])
             }
+            self._cache_filtros_data = res
+            return res
         else:
             if not self.db_connector:
                 raise ValueError("db_connector is required when connect_via_api is False")
@@ -456,10 +472,12 @@ class InventarioUIService:
                 from sqlalchemy import select
                 concepts = session.execute(select(Concepto).where(Concepto.activo == True).order_by(Concepto.nombre)).scalars().all()
                 rfcs = session.execute(select(Rfc).where(Rfc.activo == True).order_by(Rfc.razon_social)).scalars().all()
-                return {
+                res = {
                     "conceptos": [{"concepto_id": c.concepto_id, "nombre": c.nombre} for c in concepts],
                     "rfcs": [{"rfc_id": r.rfc_id, "razon_social": r.razon_social} for r in rfcs]
                 }
+                self._cache_filtros_data = res
+                return res
 
     def save_notaria(self, name: str) -> None:
         """Saves a new notaria entry."""

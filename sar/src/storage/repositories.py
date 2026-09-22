@@ -2549,7 +2549,7 @@ class InventarioRepository(BaseRepository):
     def crear_lote_asignacion(
         self, tipo_destino: str, notaria_id: Optional[int], colaborador_id: Optional[int],
         solicitante_externo: Optional[str], observaciones: Optional[str], usuario_creacion: int,
-        detalles_list: List[dict], solo_reservar: bool = False
+        detalles_list: List[dict], solo_reservar: bool = False, asignar_directo: bool = False
     ) -> int:
         from sar.src.storage.models import LoteAsignacion, LoteDetalle, Ubicacion, AsignacionReferencia, Referencia, Concepto
         from sqlalchemy import select
@@ -2627,7 +2627,7 @@ class InventarioRepository(BaseRepository):
                 lote_val = d.get("lote").strip().upper() if d.get("lote") else None
                 edif_val = d.get("edif").strip().upper() if d.get("edif") else None
                 viv_val = d.get("viv").strip().upper() if d.get("viv") else None
-                cliente_val = d["cliente"].strip().upper() if d.get("cliente") else "RESERVA MASIVA MANUAL"
+                cliente_val = d["cliente"].strip().upper() if d.get("cliente") else (None if asignar_directo else "RESERVA MASIVA MANUAL")
                 folio_val = d.get("folio_electronico").strip() if d.get("folio_electronico") else None
                 pa_val = d.get("pa")
 
@@ -2667,7 +2667,7 @@ class InventarioRepository(BaseRepository):
 
                 ubi_id = ubi.ubicacion_id if ubi else None
             elif tipo_destino == "COLABORADOR":
-                cliente_val = d.get("cliente") or "ASIGNACIÓN A COLABORADOR"
+                cliente_val = d.get("cliente") or (None if asignar_directo else "ASIGNACIÓN A COLABORADOR")
 
             # Calculate consecutive attempt number (intento) for this location AND concept
             intento_val = 1
@@ -2719,7 +2719,7 @@ class InventarioRepository(BaseRepository):
                 fecha_titulacion=d.get("fecha_titulacion"),
                 comentarios=d.get("comentarios"),
                 usuario_asignacion=usuario_creacion,
-                observaciones=d.get("observaciones") or observaciones or pa_val
+                observaciones=d.get("observaciones") or observaciones
             )
             self.session.add(asig)
             self.session.flush()
@@ -2926,11 +2926,11 @@ class InventarioRepository(BaseRepository):
             "asignado_a": row.asignado_a,
             "notaria_alias": row.notaria_alias or "",
             "solicitante_externo": row.solicitante_externo or "",
-            "fecha": row.fecha.strftime("%d/%m/%Y %H:%M") if row.fecha else "",
+            "fecha": row.fecha.strftime("%Y-%m-%d %H:%M") if row.fecha else "",
             "observaciones": row.observaciones or "",
             "creador": row.creador,
-            "empresa": row.empresa,
-            "estado_refs": row.estado_muestra or "—",
+            "empresa": row.empresa or "",
+            "estado_refs": row.estado_muestra or "ASIGNADA",
         }
 
     def get_lote_detalles(self, lote_asignacion_id: int) -> List[dict]:
@@ -2950,7 +2950,8 @@ class InventarioRepository(BaseRepository):
                 ubi.viv,
                 COALESCE(ar.no_oficial, ubi.lote_id_erp) AS folio_electronico,
                 ar.credito_titular AS credito_titular,
-                COALESCE(ar.pa, ar.comentarios) AS pa,
+                ar.pa AS pa,
+                ar.comentarios AS comentarios,
                 d.nombre AS delegacion,
                 c.alias AS concepto_solicitado,
                 ref.referencia_portal AS referencia_asignada,
@@ -2987,6 +2988,7 @@ class InventarioRepository(BaseRepository):
                 "folio_electronico": row.folio_electronico or "",
                 "credito_titular": row.credito_titular or "",
                 "pa": row.pa or "",
+                "comentarios": row.comentarios or "",
                 "delegacion_original": row.delegacion or "",
                 "concepto": row.concepto_solicitado,
                 "referencia": row.referencia_asignada,

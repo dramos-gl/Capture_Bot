@@ -1,7 +1,7 @@
 import os
 import openpyxl
 from datetime import datetime, date
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from sqlalchemy import select, and_
 
 class ExcelInventoryHandler:
@@ -201,7 +201,7 @@ class ExcelInventoryHandler:
 
     @staticmethod
     def validate_parsed_rows(
-        session, parsed_rows: List[Dict[str, Any]], default_rfc_id: Optional[int] = None, completar_notaria_id: Optional[int] = None, orden_ids: Optional[List[int]] = None, solo_reservar: bool = False
+        session, parsed_rows: List[Dict[str, Any]], default_rfc_id: Optional[int] = None, completar_notaria_id: Optional[int] = None, orden_ids: Optional[List[int]] = None, solo_reservar: bool = False, asignar_directo: bool = False
     ) -> List[Dict[str, Any]]:
         """Validates parsed rows against the database, enforcing:
         1. Reference exists and is FACTURADA (or auto-assigns an available one if empty).
@@ -213,6 +213,8 @@ class ExcelInventoryHandler:
         """
         from sar.src.storage.models import Referencia, EstadoSistema, Desarrollo, Delegacion, GrupoReferencia, Concepto, Solicitud, Rfc, Ubicacion, AsignacionReferencia, LoteAsignacion, LoteDetalle
         from sqlalchemy import select
+        
+        omitir_validacion = solo_reservar or asignar_directo
         
         # Cache concepts mapping
         concepto_stmt = select(Concepto)
@@ -306,7 +308,7 @@ class ExcelInventoryHandler:
 
             # Validate critical missing fields presence: cliente, mz, lote, ext (edif), int (viv)
             missing_fields = []
-            if not solo_reservar:
+            if not omitir_validacion:
                 if not cliente or cliente.strip() == "": missing_fields.append("Cliente")
                 if not mz or mz.strip() == "": missing_fields.append("MZA")
                 if not lote or lote.strip() == "": missing_fields.append("Lote")
@@ -334,7 +336,7 @@ class ExcelInventoryHandler:
             row_result["rfc_id"] = resolved_rfc_id
             
             # 1. Lookup/register Desarrollo first
-            if solo_reservar and not desarrollo_name:
+            if omitir_validacion and not desarrollo_name:
                 desarrollo = None
                 row_result["desarrollo_id"] = None
                 deleg_name = "SIN ASIGNAR"
@@ -390,7 +392,7 @@ class ExcelInventoryHandler:
             has_dup = False
             dup_msg = ""
             intento_num = 1
-            if not solo_reservar and concept_id_req:
+            if not omitir_validacion and concept_id_req:
                 loc_key = (desarrollo_name.upper(), mz.strip().upper(), lote.strip().upper(), edif.strip().upper(), viv.strip().upper(), concept_id_req)
                 
                 # Check DB historical attempts first
@@ -571,14 +573,14 @@ class ExcelInventoryHandler:
                 continue
 
             # 4. Check Concept Match
-            if not solo_reservar and expected_aliases and concept_alias not in expected_aliases:
+            if not omitir_validacion and expected_aliases and concept_alias not in expected_aliases:
                 row_result["status"] = "ERROR"
                 row_result["error_message"] = f"Concepto incorrecto: Referencia es de tipo '{concept_alias}' pero se solicitó '{concept_req}'."
                 validated_rows.append(row_result)
                 continue
 
             # 5. Check Geolocation Match
-            if not solo_reservar and ref_deleg_id != deleg_id:
+            if not omitir_validacion and ref_deleg_id != deleg_id:
                 row_result["status"] = "ERROR"
                 row_result["error_message"] = f"Error geográfico: Referencia pertenece a '{ref_deleg_name}' pero el desarrollo '{desarrollo_name}' pertenece a '{deleg_name}'."
                 validated_rows.append(row_result)

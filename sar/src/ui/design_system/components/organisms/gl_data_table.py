@@ -56,10 +56,14 @@ class StyledDataTable(QTableWidget):
         status_cols = set()
         for row_idx, row_data in enumerate(data):
             for col_idx, value in enumerate(row_data):
+                if isinstance(value, QTableWidgetItem):
+                    self.setItem(row_idx, col_idx, value)
+                    continue
+
                 val_str = str(value)
                 
                 # Render state string as a StatusBadge pill
-                if val_str in ["AUTORIZADA", "PENDIENTE", "ERROR", "GENERADA", "RECHAZADA", "FALLIDO", "EXPIRADA", "ASIGNADA", "BORRADOR", "ABIERTA", "PROCESANDO", "FINALIZADA", "CANCELADA", "PENDIENTE_AUTORIZACION", "AUTORIZACION_PENDIENTE", "COMPLETADA"]:
+                if val_str in ["AUTORIZADA", "PENDIENTE", "ERROR", "GENERADA", "RECHAZADA", "FALLIDO", "EXPIRADA", "ASIGNADA", "BORRADOR", "ABIERTA", "PROCESANDO", "FINALIZADA", "CANCELADA", "PENDIENTE_AUTORIZACION", "AUTORIZACION_PENDIENTE", "COMPLETADA", "PENDIENTE_FACTURAR", "FACTURADO"]:
                     status_cols.add(col_idx)
                     badge_container = QWidget()
                     badge_container.setStyleSheet("background-color: transparent;")

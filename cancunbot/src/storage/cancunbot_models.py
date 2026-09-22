@@ -22,12 +22,37 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sar.src.storage.models import Base, Usuario, EstadoSistema
 
 
+class OrdenCancun(Base):
+    """Mapea la tabla orden_cancun que agrupa N lotes de folios."""
+    __tablename__ = "orden_cancun"
+    __table_args__ = {"schema": "cancunbot_produccion"}
+
+    orden_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    folio_orden: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    descripcion: Mapped[Optional[str]] = mapped_column(Text)
+    total_lotes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_folios: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    folios_procesados: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    folios_error: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    folios_facturados: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    estado_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.estado_sistema.estado_id"), nullable=False)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Relaciones
+    estado: Mapped[EstadoSistema] = relationship()
+    usuario: Mapped[Usuario] = relationship()
+    lotes: Mapped[List["LoteFolio"]] = relationship(back_populates="orden", cascade="all, delete-orphan")
+
+
 class LoteFolio(Base):
     """Mapea la tabla lote_folio que agrupa folios de entrada."""
     __tablename__ = "lote_folio"
     __table_args__ = {"schema": "cancunbot_produccion"}
 
     lote_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    orden_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cancunbot_produccion.orden_cancun.orden_id", ondelete="SET NULL"), nullable=True)
     folio_lote: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     descripcion: Mapped[Optional[str]] = mapped_column(Text)
     origen: Mapped[str] = mapped_column(String(20), default="EXCEL", nullable=False)
@@ -42,6 +67,7 @@ class LoteFolio(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     # Relaciones
+    orden: Mapped[Optional[OrdenCancun]] = relationship(back_populates="lotes")
     estado: Mapped[EstadoSistema] = relationship()
     usuario: Mapped[Usuario] = relationship()
     folios: Mapped[List["FolioCancun"]] = relationship(back_populates="lote", cascade="all, delete-orphan")

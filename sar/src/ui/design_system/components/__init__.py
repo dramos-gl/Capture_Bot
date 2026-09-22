@@ -17,6 +17,7 @@ from sar.src.ui.design_system.components.molecules.gl_metric_box import MetricBo
 from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
 from sar.src.ui.design_system.components.molecules.gl_info_banner import GLInfoBanner
 from sar.src.ui.design_system.components.molecules.gl_chart_widgets import DonutChartWidget, BarChartWidget
+from sar.src.ui.design_system.components.molecules.gl_file_dialog import GLFileDialog
 
 # Organisms
 from sar.src.ui.design_system.components.organisms.gl_sidebar import NavigationSidebar
@@ -54,6 +55,7 @@ __all__ = [
     "MetricBox",
     "GLLoadingDialog",
     "GLInfoBanner",
+    "GLFileDialog",
     "GLMessageDialog",
     "GLMessageBox",
     "DialogType",

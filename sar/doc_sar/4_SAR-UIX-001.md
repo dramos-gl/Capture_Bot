@@ -727,10 +727,15 @@ Trazabilidad completa desde Orden → Solicitud → Referencia.
 
 ### 26.5 Detalle de Asignación y Generación de Documentos (PDF y Excel)
 * **Exportación Excel**: Generación de reportes tabulares consolidados con métricas de asignación.
-* **Exportación de PDFs Unificados (`PdfWorker`)**: Estándar de nomenclatura con **prefijo consecutivo de 3 dígitos** (`{consec}_{...}.pdf`) para ordenamiento cronológico natural:
+* **Exportación de PDFs Individuales (`PdfWorker`)**: Estándar de nomenclatura con **prefijo consecutivo de 3 dígitos** (`{consec}_{...}.pdf`) para ordenamiento cronológico natural:
   - **`ASIGNADA`**: `{consec}_{cliente}_{concepto}.pdf` (Ej: `001_JUAN_PEREZ_Aviso.pdf`)
   - **`RESERVADA` (Notaría)**: `{consec}_{referencia}_{notaria}_{concepto}_{deleg}.pdf` (Ej: `001_1020304050_Not4_Aviso_CUN.pdf`)
   - **`COLABORADOR`**: `{consec}_{referencia}_{concepto}_{deleg}.pdf` (Ej: `001_1020304050_Aviso_CUN.pdf`)
+  - **Normalización Dinámica de Conceptos (`normalize_concept_name`)**: Los nombres de concepto se resuelven dinámicamente desde el catálogo `sar_catalogo.concepto`. Los conceptos históricos (`Aviso`, `Analisis`, `CLG`) mantienen su nomenclatura exacta por retrocompatibilidad; cualquier concepto nuevo se normaliza automáticamente removiendo acentos/diacríticos y caracteres prohibidos de Windows (ej. `CANCELACIÓN DE HIPOTECA` → `Cancelacion_Hipoteca`).
+  - **Normalización Dinámica de Delegaciones (`normalize_delegacion`)**: Soporte para delegaciones conocidas (`CUN`, `PYA`, `CHE`, `COZ`, `TUL`, `ISL`) con fallback dinámico de 3 caracteres en mayúsculas para nuevas plazas.
+* **Unificación Total en un Solo PDF (`PdfUnifiedWorker`)**: Botón **"Unificar"** que consolida **todas** las referencias seleccionadas en un **único archivo PDF**, concatenando todas las páginas de `pdf_path` y `pdf2_path` de cada referencia. El nombre sugerido sigue el patrón: `Asignacion_{LoteID}_{AsignadoA}_{Fecha}_{TotalRefs}refs_UNIFICADO.pdf`.
+* **Exploración de Archivos Optimizada (`GLFileDialog`)**: Las acciones de selección de ruta y guardado (Excel, PDF individual y PDF Unificado) utilizan la molécula centralizada `GLFileDialog`. Ésta garantiza un dimensionado responsivo adaptado a la resolución activa (pantalla / ventana padre), botones estándar de maximizar y minimizar visibles (`WindowMaximizeButtonHint`), centrado automático y redimensionamiento libre en esquinas, erradicando desbordes o ventanas fijas desproporcionadas.
+* **Reporte Detallado de Incidencias**: Al finalizar la generación (individual o unificada), el diálogo muestra el detalle explícito de cada referencia faltante o con error, indicando la causa (sin facturas en BD, archivos inaccesibles en red/disco, PDF corrupto, etc.).
 
 ### 26.6 Estandarización de Barras de Acción y Formularios en 2 Columnas
 

@@ -86,6 +86,24 @@ class CancunImportarExcelRequest(BaseModel):
     archivo_excel: Optional[str] = None
     folios: List[CancunImportarExcelFolioItem]
 
+class CancunCheckDuplicatesRequest(BaseModel):
+    folios_electronicos: List[str]
+    folios_pase_caja: List[str]
+
+class CancunCrearOAnexarOrdenRequest(BaseModel):
+    usuario_id: int
+    modo: str # "CREAR_NUEVA" o "ANEXAR"
+    target_orden_id: Optional[int] = None
+    descripcion_orden: Optional[str] = None
+    descripcion_lote: Optional[str] = None
+    archivo_excel: Optional[str] = None
+    solicitante: Optional[str] = None
+    folios: List[CancunImportarExcelFolioItem]
+
+class CancunLiberarRecibosRequest(BaseModel):
+    recibo_ids: List[int]
+    estado_codigo: str = "PENDIENTE_FACTURAR"
+
 # Endpoints de Solicitudes
 @router.get("/solicitudes")
 def list_solicitudes(orden_ids: Optional[str] = None, db: Session = Depends(get_db)):
@@ -1076,6 +1094,7 @@ class LoteAsignacionCreateRequest(BaseModel):
     usuario_creacion: int
     detalles: List[LoteDetalleItem]
     solo_reservar: bool = False
+    asignar_directo: bool = False
 
 class LoteValidarRequest(BaseModel):
     parsed_rows: List[dict]
@@ -1083,6 +1102,7 @@ class LoteValidarRequest(BaseModel):
     completar_notaria_id: Optional[int] = None
     orden_ids: Optional[List[int]] = None
     solo_reservar: bool = False
+    asignar_directo: bool = False
 class LoteApartarRequest(BaseModel):
     notaria_id: int
     rfc_id: int
@@ -1358,7 +1378,8 @@ def create_lote_asignacion(request: LoteAsignacionCreateRequest, db: Session = D
             observaciones=request.observaciones,
             usuario_creacion=request.usuario_creacion,
             detalles_list=detalles_converted,
-            solo_reservar=request.solo_reservar
+            solo_reservar=request.solo_reservar,
+            asignar_directo=request.asignar_directo
         )
         db.commit()
         return {"lote_id": lote_id, "detail": "Lote de asignación creado con éxito"}
@@ -1375,7 +1396,8 @@ def api_validar_lote(request: LoteValidarRequest, db: Session = Depends(get_db))
             default_rfc_id=request.default_rfc_id,
             completar_notaria_id=request.completar_notaria_id,
             orden_ids=request.orden_ids,
-            solo_reservar=request.solo_reservar
+            solo_reservar=request.solo_reservar,
+            asignar_directo=request.asignar_directo
         )
         # Convert datetime.date and datetime.datetime to ISO format strings for JSON compatibility
         for row in validated:
@@ -1522,6 +1544,29 @@ def api_asignar_referencias_directo(request: AsignarDirectoRequest, db: Session 
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Cancún R2F Endpoints ---
+
+@router.get("/cancun/ordenes")
+def list_cancun_ordenes(db: Session = Depends(get_db)):
+    """Retorna el listado de órdenes de R2F Cancún."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import OrdenCancunRepository
+        repo = OrdenCancunRepository(db)
+        ordenes = repo.list_all()
+        return [
+            {
+                "orden_id": o.orden_id,
+                "folio_orden": o.folio_orden,
+                "descripcion": o.descripcion,
+                "total_lotes": o.total_lotes,
+                "total_folios": o.total_folios,
+                "folios_procesados": o.folios_procesados,
+                "estado_codigo": o.estado.codigo if o.estado else "ABIERTA",
+                "created_at": o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else "--"
+            }
+            for o in ordenes
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/cancun/lotes")
 def list_cancun_lotes(db: Session = Depends(get_db)):
@@ -1949,6 +1994,178 @@ def importar_cancun_lote_excel(request: CancunImportarExcelRequest, db: Session 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al importar lote desde Excel: {str(e)}")
+
+
+@router.get("/cancun/catalogos")
+def get_cancun_catalogos(db: Session = Depends(get_db)):
+    """Retorna los mapas de RFCs y Desarrollos activos para validación de importaciones."""
+    try:
+        rfc_rows = db.execute(text("SELECT UPPER(rfc), rfc_id FROM sar_catalogo.rfc WHERE activo = true")).fetchall()
+        rfc_map = {r[0]: r[1] for r in rfc_rows}
+
+        des_rows = db.execute(text("SELECT UPPER(nombre), desarrollo_id FROM sar_catalogo.desarrollo WHERE activo = true")).fetchall()
+        des_map = {r[0]: r[1] for r in des_rows}
+
+        return {"rfcs": rfc_map, "desarrollos": des_map}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener catálogos de Cancún: {str(e)}")
+
+
+@router.get("/cancun/recibos")
+def list_cancun_recibos(
+    limit: int = 200,
+    offset: int = 0,
+    search_text: str = "",
+    estado_filter: str = "Todos",
+    db: Session = Depends(get_db)
+):
+    """Retorna recibos paginados de Cancún con filtros aplicados."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import ReciboCancunRepository
+        repo = ReciboCancunRepository(db)
+        recibos, total_count = repo.get_recibos_paginated(limit, offset, search_text, estado_filter)
+
+        data_list = []
+        for r in recibos:
+            status_lbl = "--"
+            if r.estado:
+                status_lbl = r.estado.codigo
+
+            data_list.append({
+                "recibo_id": r.recibo_id,
+                "folio_electronico": r.folio_electronico or r.folio_pase_caja or "--",
+                "rfc": r.rfc or "--",
+                "contribuyente": r.nombre_contribuyente or "--",
+                "concepto": r.concepto or "--",
+                "total": float(r.total) if r.total else 0.0,
+                "pdf_ruta": r.pdf_ruta,
+                "sm": r.sm or "--",
+                "mz": r.mz or "--",
+                "l": r.l or "--",
+                "estado": status_lbl,
+                "fecha": r.fecha_expedicion.strftime("%Y-%m-%d") if r.fecha_expedicion else "--"
+            })
+
+        return {"recibos": data_list, "total": total_count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al listar recibos de Cancún: {str(e)}")
+
+
+@router.post("/cancun/check-duplicates")
+def check_cancun_duplicates(request: CancunCheckDuplicatesRequest, db: Session = Depends(get_db)):
+    """Verifica en lote si los folios electrónicos o de pase de caja ya existen en la base de datos."""
+    try:
+        unique_elec = [x for x in request.folios_electronicos if x]
+        unique_pase = [x for x in request.folios_pase_caja if x]
+
+        db_existing_map = {}
+        if unique_elec or unique_pase:
+            sql_dup = """
+                SELECT f.folio_electronico, f.folio_pase_caja, l.folio_lote
+                FROM cancunbot_produccion.folio_cancun f
+                LEFT JOIN cancunbot_produccion.lote_folio l ON f.lote_id = l.lote_id
+                WHERE (f.folio_electronico = ANY(:elec_arr)) OR (f.folio_pase_caja = ANY(:pase_arr))
+            """
+            res_dup = db.execute(text(sql_dup), {
+                "elec_arr": unique_elec if unique_elec else [""],
+                "pase_arr": unique_pase if unique_pase else [""]
+            }).fetchall()
+
+            for r in res_dup:
+                f_el = r[0]
+                f_pa = r[1]
+                lote_nom = r[2] or "LOTE-PREVIO"
+                if f_el:
+                    db_existing_map[f_el] = lote_nom
+                if f_pa:
+                    db_existing_map[f_pa] = lote_nom
+
+        return {"existing_map": db_existing_map}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al verificar duplicados: {str(e)}")
+
+
+@router.post("/cancun/ordenes/crear-o-anexar")
+def crear_o_anexar_cancun_orden(request: CancunCrearOAnexarOrdenRequest, db: Session = Depends(get_db)):
+    """Crea una nueva orden o anexa un nuevo lote a una existente en una sola transacción atómica."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import (
+            OrdenCancunRepository, LoteFolioRepository, FolioCancunRepository
+        )
+
+        orden_repo = OrdenCancunRepository(db)
+        lote_repo = LoteFolioRepository(db)
+        folio_repo = FolioCancunRepository(db)
+
+        if request.modo == "ANEXAR":
+            if not request.target_orden_id:
+                raise HTTPException(status_code=400, detail="Debe especificar target_orden_id al anexar a una orden existente.")
+            orden = orden_repo.get_by_id(request.target_orden_id)
+            if not orden:
+                raise HTTPException(status_code=404, detail=f"La orden ID {request.target_orden_id} no existe.")
+        else:
+            desc_orden = request.descripcion_orden or "Nueva Orden Cancún"
+            if request.solicitante:
+                desc_orden += f" | Solicitante: {request.solicitante}"
+            orden = orden_repo.create(usuario_id=request.usuario_id, descripcion=desc_orden)
+
+        desc_lote = request.descripcion_lote or "Lote importado"
+        lote = lote_repo.create(
+            usuario_id=request.usuario_id,
+            origen="EXCEL",
+            descripcion=desc_lote,
+            archivo_excel=request.archivo_excel or "",
+            orden_id=orden.orden_id
+        )
+
+        folios_data = [
+            {
+                "tipo_folio": item.tipo_folio,
+                "folio_pase_caja": item.folio_pase_caja,
+                "folio_electronico": item.folio_electronico,
+                "rfc_id": item.rfc_id,
+                "desarrollo_id": item.desarrollo_id
+            }
+            for item in request.folios
+        ]
+
+        guardados = folio_repo.create_bulk(lote.lote_id, folios_data)
+        lote_repo.update_metrics_and_status(lote.lote_id)
+        orden_repo.update_metrics_and_status(orden.orden_id)
+        db.commit()
+
+        return {
+            "success": True,
+            "orden_id": orden.orden_id,
+            "folio_orden": orden.folio_orden,
+            "lote_id": lote.lote_id,
+            "folio_lote": lote.folio_lote,
+            "guardados": guardados
+        }
+    except HTTPException as he:
+        db.rollback()
+        raise he
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al registrar orden/lote: {str(e)}")
+
+
+@router.post("/cancun/recibos/liberar")
+def liberar_cancun_recibos(request: CancunLiberarRecibosRequest, db: Session = Depends(get_db)):
+    """Actualiza en lote el estado de los recibos seleccionados (por defecto a PENDIENTE_FACTURAR)."""
+    try:
+        from cancunbot.src.storage.cancunbot_repos import ReciboCancunRepository
+        repo = ReciboCancunRepository(db)
+        liberados = 0
+        for rid in request.recibo_ids:
+            repo.update_status(rid, request.estado_codigo)
+            liberados += 1
+        db.commit()
+        return {"success": True, "liberados": liberados}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al liberar recibos: {str(e)}")
+
 
 
 

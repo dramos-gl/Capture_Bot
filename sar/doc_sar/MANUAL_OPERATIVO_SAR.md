@@ -502,7 +502,13 @@ Permite consultar el historial completo de lotes de asignación creados, editar 
 * **Botón 📄 Generar PDF (Motor `PdfWorker`):**  
   Al presionar este botón, el motor asíncrono en segundo plano unifica y consolida los comprobantes PDF por desarrollo y concepto, renombrando cada archivo bajo la regla oficial de notaría:  
   `[Consecutivo]_[Referencia]_[Notaría]_[Concepto]_[Delegación].pdf`  
-  *(Ejemplo: `001_REF88392_Not14_Aviso_CUN.pdf`)*.
+  *(Ejemplo: `001_REF88392_Not14_Aviso_CUN.pdf`)*.  
+  Los nombres de concepto se normalizan dinámicamente desde el catálogo del sistema; cualquier concepto nuevo se procesa automáticamente sin requerir modificaciones de código.
+* **Botón 📄 Unificar (Motor `PdfUnifiedWorker`):**  
+  Consolida **todas** las referencias seleccionadas en un **único archivo PDF**. Si el lote contiene 100 derechos con 2 archivos cada uno (`pdf_path` y `pdf2_path`), el resultado es un solo documento de ~200 páginas. El nombre sugerido del archivo sigue el patrón:  
+  `Asignacion_[LoteID]_[AsignadoA]_[Fecha]_[TotalRefs]refs_UNIFICADO.pdf`
+* **Reporte Detallado de Incidencias:** Al finalizar la generación (individual o unificada), la ventana de resultados muestra el detalle explícito de cada referencia faltante o con error, indicando la referencia afectada y la causa (sin facturas en BD, archivos inaccesibles en red/disco, etc.).
+* **Exploración de Archivos Optimizada (`GLFileDialog`):** Tanto al guardar el Excel o PDF Unificado, como al seleccionar la carpeta destino para los PDFs individuales, la ventana de exploración se abre centrada y a un tamaño proporcional confortable, permitiendo libre redimensionamiento y maximización con un solo clic.
 
 ---
 

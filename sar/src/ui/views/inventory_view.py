@@ -11,7 +11,7 @@ from PySide6.QtGui import QColor, QDesktopServices, QAction
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomSpinBox,
     LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid, GLLoadingDialog,
-    GLMessageBox as QMessageBox, GLInfoBanner
+    GLMessageBox as QMessageBox, GLInfoBanner, GLFileDialog
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.theme_manager import Colors, ThemeManager
@@ -193,7 +193,7 @@ class ExcelWorker(QThread):
 
 
 class PdfWorker(QThread):
-    finished = Signal(dict) # success, missing, error
+    finished = Signal(dict)  # success, missing, error, missing_details, error_details
 
     def __init__(self, selected, dest_dir, header_data, inventario_ui_service):
         super().__init__()
@@ -205,11 +205,71 @@ class PdfWorker(QThread):
     def run(self):
         import os
         import re
+        import unicodedata
         import shutil
         from pypdf import PdfWriter, PdfReader
 
         def sanitize(name: str) -> str:
             return re.sub(r'[^\w\-.]', '_', name or "").strip("_") or "sin_nombre"
+
+        def strip_accents(text: str) -> str:
+            """Remueve acentos y diacríticos preservando caracteres alfanuméricos ASCII."""
+            if not text:
+                return ""
+            nfkd_form = unicodedata.normalize('NFKD', text)
+            return "".join([c for c in nfkd_form if not unicodedata.combining(c)])
+
+        def normalize_concept_name(raw_concept: str) -> tuple[str, str]:
+            """Normaliza de forma segura y dinámica el concepto.
+            Retorna: (concepto_pretty, concept_key_carpeta)
+            Preserva retrocompatibilidad exacta con conceptos históricos.
+            """
+            raw_clean = (raw_concept or "").strip()
+            raw_upper = strip_accents(raw_clean).upper()
+
+            # Mapeo histórico de cortesía (garantía 100% de compatibilidad operativa)
+            HISTORICAL_MAP = {
+                "AVISO PREVENTIVO": "Aviso",
+                "AVISO": "Aviso",
+                "NUEVO_DERECHO_AVISO": "Aviso",
+                "ANALISIS": "Analisis",
+                "CLG": "CLG",
+            }
+            if raw_upper in HISTORICAL_MAP:
+                pretty = HISTORICAL_MAP[raw_upper]
+                return pretty, pretty.lower()
+
+            # Normalización dinámica para conceptos nuevos o no mapeados
+            clean_str = strip_accents(raw_clean)
+            clean_words = re.findall(r'[A-Za-z0-9]+', clean_str)
+            if not clean_words:
+                return "General", "general"
+
+            # Formar nombre camel/title case para el nombre de archivo (ej. Cancelacion_Hipoteca o Cancelacion)
+            pretty = "_".join(w.capitalize() if not w.isupper() or len(w) > 4 else w for w in clean_words)
+            pretty = pretty[:40].strip("_")
+            folder_key = "_".join(w.lower() for w in clean_words)[:30].strip("_")
+            return pretty, folder_key
+
+        def normalize_delegacion(raw_deleg: str) -> str:
+            DELEG_MAP = {
+                "CANCUN": "CUN",
+                "CANCÚN": "CUN",
+                "PLAYA DEL CARMEN": "PYA",
+                "PLAYA": "PYA",
+                "CHETUMAL": "CHE",
+                "COZUMEL": "COZ",
+                "TULUM": "TUL",
+                "ISLA MUJERES": "ISL",
+            }
+            raw_clean = (raw_deleg or "").strip().upper()
+            if raw_clean in DELEG_MAP:
+                return DELEG_MAP[raw_clean]
+            no_acc = strip_accents(raw_clean)
+            words = re.findall(r'[A-Za-z0-9]+', no_acc)
+            if words:
+                return words[0][:3].upper()
+            return "CUN"
 
         def merge_or_copy_pdfs(pdf_paths: list, dest_path: str):
             valid = [p for p in pdf_paths if p and os.path.exists(p)]
@@ -230,35 +290,18 @@ class PdfWorker(QThread):
                     writer.write(f)
             return True
 
-        # Mapeos
-        DELEG_MAP = {
-            "CANCUN": "CUN",
-            "CANCÚN": "CUN",
-            "PLAYA DEL CARMEN": "PYA",
-            "PLAYA": "PYA",
-            "CHETUMAL": "CHE"
-        }
-        
-        CONCEPTO_MAP = {
-            "AVISO PREVENTIVO": "Aviso",
-            "AVISO": "Aviso",
-            "NUEVO_DERECHO_AVISO": "Aviso",
-            "ANALISIS": "Analisis",
-            "ANÁLISIS": "Analisis",
-            "CLG": "CLG"
-        }
-
         def clean_folder_name(name: str) -> str:
             cleaned = re.sub(r'[\\/:*?"<>|]', '_', name or "").strip()
-            return cleaned if cleaned else "sin_desarrollo"
+            return cleaned[:50] if cleaned else "sin_desarrollo"
 
         success = error = missing = 0
+        missing_details = []
+        error_details = []
         consecutivo_por_concepto = {}  # key: (desarrollo, concepto), value: counter
         estado_lote = self.header_data.get("estado_refs", "ASIGNADA")
 
         for d in self.selected:
             ref_id     = d.get("referencia_id")
-            concepto   = sanitize(d.get("concepto", "CONCEPTO"))
             cliente    = sanitize(d.get("cliente", ""))
             referencia = sanitize(d.get("referencia", ""))
             estado_ref = d.get("estado", estado_lote)
@@ -267,11 +310,13 @@ class PdfWorker(QThread):
 
             if not ref_id:
                 missing += 1
+                missing_details.append(f"Ref ID no especificado (Cliente: {d.get('cliente', '—')})")
                 continue
             try:
                 facturas = self.inventario_ui_service.get_facturas_by_referencia_id(ref_id)
                 if not facturas:
                     missing += 1
+                    missing_details.append(f"{referencia or f'ID {ref_id}'} (Sin facturas registradas en BD)")
                     continue
 
                 pdf_paths = []
@@ -283,17 +328,18 @@ class PdfWorker(QThread):
 
                 if not any(os.path.exists(p) for p in pdf_paths if p):
                     missing += 1
+                    missing_details.append(f"{referencia or f'ID {ref_id}'} (Archivos PDF inaccesibles o no encontrados en red/disco)")
                     continue
 
-                concepto_pretty = CONCEPTO_MAP.get((d.get("concepto") or "").strip().upper(), concepto)
-                deleg_raw = (d.get("delegacion") or "").strip().upper()
-                deleg_abbr = DELEG_MAP.get(deleg_raw, deleg_raw[:3] if deleg_raw else "CUN")
-                # Determine assignment type (NOTARIA or COLABORADOR)
-                tipo_lote = self.header_data.get("tipo_asignacion", "NOTARIA")
-                concept_key = concepto_pretty.lower()
+                # Normalización dinámica de concepto y delegación
+                raw_concepto = d.get("concepto") or ""
+                concepto_pretty, concept_key = normalize_concept_name(raw_concepto)
+                deleg_abbr = normalize_delegacion(d.get("delegacion") or "")
 
-                # Rule: organize by Desarrollo/Concept folder and use Notaria naming pattern
-                # ONLY for RESERVADA references assigned to a NOTARIA.
+                # Tipo de destino / asignación
+                tipo_lote = self.header_data.get("tipo_asignacion") or self.header_data.get("tipo_destino", "NOTARIA")
+
+                # Regla: organizar por carpeta {Desarrollo}/{concepto} y patrón Notaría para referencias RESERVADA asignadas a NOTARIA
                 if estado_ref == "RESERVADA" and tipo_lote == "NOTARIA":
                     folder_path = os.path.join(self.dest_dir, desarrollo_clean, concept_key)
                     os.makedirs(folder_path, exist_ok=True)
@@ -308,7 +354,7 @@ class PdfWorker(QThread):
                         notaria_alias = f"Not{nums[0]}" if nums else sanitize(notaria_raw)
                     out_name = f"{consec}_{referencia}_{notaria_alias}_{concepto_pretty}_{deleg_abbr}.pdf"
                 else:
-                    # Flat destination folder
+                    # Carpeta plana de destino
                     folder_path = self.dest_dir
                     consec_key = concept_key
                     consec_num = consecutivo_por_concepto.get(consec_key, 1)
@@ -316,20 +362,128 @@ class PdfWorker(QThread):
 
                     if estado_ref == "ASIGNADA":
                         out_name = f"{consec}_{cliente}_{concepto_pretty}.pdf"
-                    else:  # COLABORADOR
+                    else:  # COLABORADOR u otro
                         out_name = f"{consec}_{referencia}_{concepto_pretty}_{deleg_abbr}.pdf"
 
                 out_path = os.path.join(folder_path, out_name)
                 if merge_or_copy_pdfs(pdf_paths, out_path):
                     success += 1
-                    # Increment per‑concept counter
                     consecutivo_por_concepto[consec_key] = consec_num + 1
                 else:
                     error += 1
-            except Exception:
+                    error_details.append(f"{referencia or f'ID {ref_id}'} (Error al unir o copiar archivo PDF)")
+            except Exception as e:
                 error += 1
+                error_details.append(f"{referencia or f'ID {ref_id}'} ({str(e)})")
 
-        self.finished.emit({"success": success, "missing": missing, "error": error})
+        self.finished.emit({
+            "success": success,
+            "missing": missing,
+            "error": error,
+            "missing_details": missing_details,
+            "error_details": error_details
+        })
+
+
+class PdfUnifiedWorker(QThread):
+    """Worker thread that merges ALL selected references into a single unified PDF file.
+    Reuses the same InventarioUIService.get_facturas_by_referencia_id() that is
+    transparent to both CONNECT_VIA_API: true (REST) and false (Direct DB).
+    """
+    finished = Signal(dict)  # success, missing, error, total_pages, missing_details, error_details
+
+    def __init__(self, selected, dest_file_path, header_data, inventario_ui_service):
+        super().__init__()
+        self.selected = selected
+        self.dest_file_path = dest_file_path
+        self.header_data = header_data
+        self.inventario_ui_service = inventario_ui_service
+
+    def run(self):
+        import os
+        import re
+        from pypdf import PdfWriter, PdfReader
+
+        def sanitize(name: str) -> str:
+            return re.sub(r'[^\w\-.]', '_', name or "").strip("_") or "sin_nombre"
+
+        success = error = missing = 0
+        total_pages = 0
+        missing_details = []
+        error_details = []
+        estado_lote = self.header_data.get("estado_refs", "ASIGNADA")
+
+        writer = PdfWriter()
+
+        for d in self.selected:
+            ref_id = d.get("referencia_id")
+            referencia = sanitize(d.get("referencia", ""))
+
+            if not ref_id:
+                missing += 1
+                missing_details.append(f"Ref ID no especificado (Cliente: {d.get('cliente', '—')})")
+                continue
+            try:
+                facturas = self.inventario_ui_service.get_facturas_by_referencia_id(ref_id)
+                if not facturas:
+                    missing += 1
+                    missing_details.append(f"{referencia or f'ID {ref_id}'} (Sin facturas registradas en BD)")
+                    continue
+
+                pdf_paths = []
+                for f in facturas:
+                    if f.get("pdf_path"):
+                        pdf_paths.append(f["pdf_path"])
+                    if f.get("pdf2_path") and f["pdf2_path"].lower().endswith(".pdf"):
+                        pdf_paths.append(f["pdf2_path"])
+
+                valid_paths = [p for p in pdf_paths if p and os.path.exists(p)]
+                if not valid_paths:
+                    missing += 1
+                    missing_details.append(f"{referencia or f'ID {ref_id}'} (Archivos PDF inaccesibles o no encontrados en red/disco)")
+                    continue
+
+                ref_pages_added = 0
+                for pp in valid_paths:
+                    try:
+                        reader = PdfReader(pp)
+                        for page in reader.pages:
+                            writer.add_page(page)
+                            ref_pages_added += 1
+                    except Exception as e:
+                        error_details.append(f"{referencia or f'ID {ref_id}'} (Error leyendo {os.path.basename(pp)}: {str(e)})")
+
+                if ref_pages_added > 0:
+                    success += 1
+                    total_pages += ref_pages_added
+                else:
+                    error += 1
+                    error_details.append(f"{referencia or f'ID {ref_id}'} (No se pudieron leer páginas de los archivos PDF)")
+
+            except Exception as e:
+                error += 1
+                error_details.append(f"{referencia or f'ID {ref_id}'} ({str(e)})")
+
+        # Write the unified PDF only if we have pages
+        write_success = False
+        if total_pages > 0:
+            try:
+                with open(self.dest_file_path, "wb") as f:
+                    writer.write(f)
+                write_success = True
+            except Exception as e:
+                error += 1
+                error_details.append(f"Error al escribir archivo unificado: {str(e)}")
+
+        self.finished.emit({
+            "success": success,
+            "missing": missing,
+            "error": error,
+            "total_pages": total_pages,
+            "write_success": write_success,
+            "missing_details": missing_details,
+            "error_details": error_details
+        })
 
 
 class BatchValidationWorker(QThread):
@@ -337,13 +491,14 @@ class BatchValidationWorker(QThread):
     result_ready = Signal(list, list) # (parsed_records, validated_records)
     error_occurred = Signal(str)
 
-    def __init__(self, file_path: str, default_rfc_id, completar_notaria_id, orden_ids, solo_reservar, api_client, db_connector):
+    def __init__(self, file_path: str, default_rfc_id, completar_notaria_id, orden_ids, solo_reservar, api_client, db_connector, asignar_directo: bool = False):
         super().__init__()
         self.file_path = file_path
         self.default_rfc_id = default_rfc_id
         self.completar_notaria_id = completar_notaria_id
         self.orden_ids = orden_ids
         self.solo_reservar = solo_reservar
+        self.asignar_directo = asignar_directo
         self.api_client = api_client
         self.db_connector = db_connector
 
@@ -360,7 +515,8 @@ class BatchValidationWorker(QThread):
                     "default_rfc_id": self.default_rfc_id,
                     "completar_notaria_id": self.completar_notaria_id,
                     "orden_ids": self.orden_ids,
-                    "solo_reservar": self.solo_reservar
+                    "solo_reservar": self.solo_reservar,
+                    "asignar_directo": self.asignar_directo
                 }
                 validated = self.api_client.request("POST", "/api/docs/inventario/lotes/validar", data=payload)
             else:
@@ -368,7 +524,8 @@ class BatchValidationWorker(QThread):
                     validated = ExcelInventoryHandler.validate_parsed_rows(
                         session, parsed, default_rfc_id=self.default_rfc_id, completar_notaria_id=self.completar_notaria_id,
                         orden_ids=self.orden_ids,
-                        solo_reservar=self.solo_reservar
+                        solo_reservar=self.solo_reservar,
+                        asignar_directo=self.asignar_directo
                     )
             self.result_ready.emit(parsed, validated)
         except Exception as e:
@@ -383,7 +540,8 @@ class BatchConfirmationWorker(QThread):
     def __init__(
         self, is_completar: bool, api_client, db_connector, valid_details: list,
         usuario_id: int, tipo_destino: str, notaria_id, colaborador_id,
-        solicitante_externo: str, observaciones: str, solo_reservar: bool
+        solicitante_externo: str, observaciones: str, solo_reservar: bool,
+        asignar_directo: bool = False
     ):
         super().__init__()
         self.is_completar = is_completar
@@ -397,6 +555,7 @@ class BatchConfirmationWorker(QThread):
         self.solicitante_externo = solicitante_externo
         self.observaciones = observaciones
         self.solo_reservar = solo_reservar
+        self.asignar_directo = asignar_directo
 
     def run(self):
         try:
@@ -432,7 +591,7 @@ class BatchConfirmationWorker(QThread):
                             "fecha_ingreso_rpp": _fmt_d(det.get("fecha_ingreso_rpp") or det.get("estatus_primer_aviso")),
                             "fecha_escritura": _fmt_d(det.get("fecha_escritura")),
                             "fecha_titulacion": _fmt_d(det.get("fecha_titulacion")),
-                            "comentarios": det.get("comentarios") or det.get("pa")
+                            "comentarios": det.get("comentarios") or ""
                         }
                         detalles_payload.append(det_dict)
                     payload = {
@@ -478,7 +637,7 @@ class BatchConfirmationWorker(QThread):
                             "fecha_ingreso_rpp": _fmt_d(det.get("fecha_ingreso_rpp") or det.get("estatus_primer_aviso")),
                             "fecha_escritura": _fmt_d(det.get("fecha_escritura")),
                             "fecha_titulacion": _fmt_d(det.get("fecha_titulacion")),
-                            "comentarios": det.get("comentarios") or det.get("pa")
+                            "comentarios": det.get("comentarios") or ""
                         }
                         detalles_payload.append(det_dict)
 
@@ -490,7 +649,8 @@ class BatchConfirmationWorker(QThread):
                         "observaciones": self.observaciones,
                         "usuario_creacion": self.usuario_id,
                         "detalles": detalles_payload,
-                        "solo_reservar": self.solo_reservar
+                        "solo_reservar": self.solo_reservar,
+                        "asignar_directo": self.asignar_directo
                     }
                     res = self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
                     lote_id = res["lote_id"]
@@ -506,7 +666,8 @@ class BatchConfirmationWorker(QThread):
                             observaciones=self.observaciones,
                             usuario_creacion=self.usuario_id,
                             detalles_list=self.valid_details,
-                            solo_reservar=self.solo_reservar
+                            solo_reservar=self.solo_reservar,
+                            asignar_directo=self.asignar_directo
                         )
                         session.commit()
                 self.success.emit({"mode": "crear", "lote_id": lote_id, "total": len(self.valid_details)})
@@ -1070,6 +1231,7 @@ class InventoryView(QWidget):
 
     def _on_manual_refresh_visor(self):
         """Disparado por el botón de actualizar en el visor: fuerza recarga fresca de órdenes y filtros."""
+        self.inventario_ui_service.clear_catalogs_cache()
         self._load_filters_data(force_reload=True)
         self.refresh_visor_data(force_reload_orders=True)
 
@@ -1844,6 +2006,17 @@ class InventoryView(QWidget):
         chk2_box.addWidget(lbl_desc2)
         chk_layout.addLayout(chk2_box, stretch=1)
 
+        # Checkbox 3 (Asignar Derechos Directo)
+        chk3_box = QVBoxLayout()
+        chk3_box.setSpacing(2)
+        self.chk_asignar_directo = CustomCheckBox("Asignar Derechos (Directo)", self)
+        self.chk_asignar_directo.stateChanged.connect(self._on_asignar_directo_changed)
+        chk3_box.addWidget(self.chk_asignar_directo)
+        # lbl_desc3 = QLabel("Asigna derechos de forma directa omitiendo validación de clientes o dirección.")
+        # lbl_desc3.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 24px;")
+        # chk3_box.addWidget(lbl_desc3)
+        chk_layout.addLayout(chk3_box, stretch=1)
+
         card_form.layout.addWidget(chk_container)
 
         # Two-Column Form Layout
@@ -1986,6 +2159,10 @@ class InventoryView(QWidget):
             self.chk_solo_reservar.setChecked(False)
             self.chk_solo_reservar.blockSignals(False)
 
+            self.chk_asignar_directo.blockSignals(True)
+            self.chk_asignar_directo.setChecked(False)
+            self.chk_asignar_directo.blockSignals(False)
+
             self.cb_destino_masivo.setCurrentText("NOTARIA")
             self.cb_destino_masivo.setEnabled(False)
             self._on_destino_masivo_changed("NOTARIA")
@@ -2008,7 +2185,32 @@ class InventoryView(QWidget):
             self.chk_completar_reserva.blockSignals(True)
             self.chk_completar_reserva.setChecked(False)
             self.chk_completar_reserva.blockSignals(False)
+
+            self.chk_asignar_directo.blockSignals(True)
+            self.chk_asignar_directo.setChecked(False)
+            self.chk_asignar_directo.blockSignals(False)
             
+            self.cb_destino_masivo.setEnabled(True)
+            self.txt_solicitante_masivo.setEnabled(True)
+            self.txt_obs_masivo.setEnabled(True)
+
+    def _on_asignar_directo_changed(self, state):
+        is_checked = (state == 2 or state == Qt.CheckState.Checked)
+        if is_checked:
+            if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
+                self.chk_asignar_directo.blockSignals(True)
+                self.chk_asignar_directo.setChecked(False)
+                self.chk_asignar_directo.blockSignals(False)
+                return
+            # Uncheck and disable mutual conflict
+            self.chk_completar_reserva.blockSignals(True)
+            self.chk_completar_reserva.setChecked(False)
+            self.chk_completar_reserva.blockSignals(False)
+
+            self.chk_solo_reservar.blockSignals(True)
+            self.chk_solo_reservar.setChecked(False)
+            self.chk_solo_reservar.blockSignals(False)
+
             self.cb_destino_masivo.setEnabled(True)
             self.txt_solicitante_masivo.setEnabled(True)
             self.txt_obs_masivo.setEnabled(True)
@@ -2094,6 +2296,7 @@ class InventoryView(QWidget):
             completar_notaria_id=completar_notaria_id,
             orden_ids=self.selected_orden_ids,
             solo_reservar=self.chk_solo_reservar.isChecked(),
+            asignar_directo=self.chk_asignar_directo.isChecked(),
             api_client=self.api_client,
             db_connector=self.db_connector
         )
@@ -2243,7 +2446,14 @@ class InventoryView(QWidget):
             usuario_id = getattr(parent_window, "current_usuario_id", 1) # Default admin
 
             # Show GLLoadingDialog with multiline centered message
-            msg = "Completando asignaciones\nreservadas..." if self.chk_completar_reserva.isChecked() else "Guardando y confirmando\nlote de asignación..."
+            if self.chk_completar_reserva.isChecked():
+                msg = "Completando asignaciones\nreservadas..."
+            elif self.chk_asignar_directo.isChecked():
+                msg = "Asignando derechos de lote\n(Directo)..."
+            elif self.chk_solo_reservar.isChecked():
+                msg = "Reservando derechos\nde lote..."
+            else:
+                msg = "Guardando y confirmando\nlote de asignación..."
             self._confirm_loading_dialog = GLLoadingDialog(msg, self)
 
             # Launch background confirmation worker
@@ -2258,7 +2468,8 @@ class InventoryView(QWidget):
                 colaborador_id=colaborador_id,
                 solicitante_externo=solicitante_externo,
                 observaciones=observaciones,
-                solo_reservar=self.chk_solo_reservar.isChecked()
+                solo_reservar=self.chk_solo_reservar.isChecked(),
+                asignar_directo=self.chk_asignar_directo.isChecked()
             )
             self._confirm_worker.success.connect(self._on_confirm_batch_success)
             self._confirm_worker.error_occurred.connect(self._on_confirm_batch_error)
@@ -2290,6 +2501,7 @@ class InventoryView(QWidget):
         self.parsed_records = []
         self.validated_records = []
 
+        self.inventario_ui_service.clear_catalogs_cache()
         self.refresh_all(refresh_both=True)
 
     def _on_confirm_batch_error(self, error_msg):
@@ -2688,18 +2900,26 @@ class InventoryView(QWidget):
             self.cb_colaboradores_masivo.setCurrentIndex(0)
 
             current_concept_txt = self.cb_concept_filter.currentText()
+            self.cb_concept_filter.blockSignals(True)
             self.cb_concept_filter.clear()
             self.cb_concept_filter.addItem("Todos los conceptos")
             self.cb_concept_filter.addItems(list(self._concepts_map.keys()))
             if current_concept_txt in self._concepts_map:
                 self.cb_concept_filter.setCurrentText(current_concept_txt)
+            else:
+                self.cb_concept_filter.setCurrentIndex(0)
+            self.cb_concept_filter.blockSignals(False)
 
             current_empresa_txt = self.cb_empresa_filter.currentText()
+            self.cb_empresa_filter.blockSignals(True)
             self.cb_empresa_filter.clear()
             self.cb_empresa_filter.addItem("Todas las empresas")
             self.cb_empresa_filter.addItems(list(self._rfcs_map.keys()))
             if current_empresa_txt in self._rfcs_map:
                 self.cb_empresa_filter.setCurrentText(current_empresa_txt)
+            else:
+                self.cb_empresa_filter.setCurrentIndex(0)
+            self.cb_empresa_filter.blockSignals(False)
 
 
 
@@ -2738,27 +2958,35 @@ class InventoryView(QWidget):
         try:
             if not force_reload and getattr(self, '_concepts_map', None) and getattr(self, '_rfcs_map', None):
                 return
-            data = self.inventario_ui_service.get_filtros_data()
+            data = self.inventario_ui_service.get_filtros_data(force_refresh=force_reload)
             concepts_list = data["conceptos"]
-            rfcs_list = self.inventario_ui_service.get_rfcs_con_stock_inventario()
+            rfcs_list = self.inventario_ui_service.get_rfcs_con_stock_inventario(force_refresh=force_reload)
             
             self._concepts_map = {cp["nombre"] if isinstance(cp, dict) else cp.nombre: cp["concepto_id"] if isinstance(cp, dict) else cp.concepto_id for cp in concepts_list}
             self._rfcs_map = {r["razon_social"] if isinstance(r, dict) else r.razon_social: r["rfc_id"] if isinstance(r, dict) else r.rfc_id for r in rfcs_list}
 
-            # Populate filter combos in visor
+            # Populate filter combos in visor with blocked signals to prevent redundant premature queries
             current_concept_txt = self.cb_concept_filter.currentText()
+            self.cb_concept_filter.blockSignals(True)
             self.cb_concept_filter.clear()
             self.cb_concept_filter.addItem("Todos los conceptos")
             self.cb_concept_filter.addItems(list(self._concepts_map.keys()))
             if current_concept_txt in self._concepts_map:
                 self.cb_concept_filter.setCurrentText(current_concept_txt)
+            else:
+                self.cb_concept_filter.setCurrentIndex(0)
+            self.cb_concept_filter.blockSignals(False)
 
             current_empresa_txt = self.cb_empresa_filter.currentText()
+            self.cb_empresa_filter.blockSignals(True)
             self.cb_empresa_filter.clear()
             self.cb_empresa_filter.addItem("Todas las empresas")
             self.cb_empresa_filter.addItems(list(self._rfcs_map.keys()))
             if current_empresa_txt in self._rfcs_map:
                 self.cb_empresa_filter.setCurrentText(current_empresa_txt)
+            else:
+                self.cb_empresa_filter.setCurrentIndex(0)
+            self.cb_empresa_filter.blockSignals(False)
 
 
         except Exception as e:
@@ -4870,7 +5098,7 @@ class ExportLotesDialog(QDialog):
         date_str = self.table_lotes.item(row, 4).text()
 
         # Ask where to save
-        file_path, _ = QFileDialog.getSaveFileName(
+        file_path, _ = GLFileDialog.getSaveFileName(
             self, "Guardar Reporte de Asignación",
             f"Asignacion_{lote_id}.xlsx",
             "Excel Files (*.xlsx)"
@@ -5007,8 +5235,13 @@ class LoteProcessingDialog(QDialog):
         btn_excel.clicked.connect(self._on_generate_excel)
         
         btn_pdf = CustomButton.action_pdf(parent=self)
-        btn_pdf.setToolTip("Generar lotes archivos pdf")
+        btn_pdf.setToolTip("Generar archivos PDF individuales por referencia")
         btn_pdf.clicked.connect(self._on_generate_pdf)
+
+        btn_pdf_unified = CustomButton.action_pdf(parent=self)
+        btn_pdf_unified.setText("Unificar")
+        btn_pdf_unified.setToolTip("Unificar todas las referencias seleccionadas en un solo archivo PDF")
+        btn_pdf_unified.clicked.connect(self._on_generate_unified_pdf)
 
         btn_close = CustomButton.action_cerrar(parent=self)
         btn_close.clicked.connect(self.reject)
@@ -5016,6 +5249,7 @@ class LoteProcessingDialog(QDialog):
         btns.addStretch()
         btns.addWidget(btn_excel)
         btns.addWidget(btn_pdf)
+        btns.addWidget(btn_pdf_unified)
         btns.addWidget(btn_close)
         root.addLayout(btns)
 
@@ -5150,7 +5384,7 @@ class LoteProcessingDialog(QDialog):
         total_refs   = len(selected)
         default_name = f"{asignado}_{fecha_str}_{total_refs}refs.xlsx"
 
-        file_path, _ = QFileDialog.getSaveFileName(
+        file_path, _ = GLFileDialog.getSaveFileName(
             self, "Guardar Excel de Asignación", default_name, "Excel Files (*.xlsx)"
         )
         if not file_path:
@@ -5191,7 +5425,7 @@ class LoteProcessingDialog(QDialog):
                                 "Por favor selecciona al menos una referencia.")
             return
 
-        dest_dir = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Destino")
+        dest_dir = GLFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Destino")
         if not dest_dir:
             return
 
@@ -5206,19 +5440,140 @@ class LoteProcessingDialog(QDialog):
             success = result["success"]
             missing = result["missing"]
             error = result["error"]
-            
+            missing_details = result.get("missing_details", [])
+            error_details = result.get("error_details", [])
+
             msg = f"PDFs generados exitosamente: {success}\n"
             if missing:
                 msg += f"Referencias sin archivos o inaccesibles: {missing}\n"
             if error:
                 msg += f"Errores al procesar: {error}\n"
+
+            if missing_details:
+                msg += "\nDetalle de referencias faltantes:\n"
+                limit_items = missing_details[:10]
+                for item in limit_items:
+                    msg += f" • {item}\n"
+                if len(missing_details) > 10:
+                    msg += f" ... y {len(missing_details) - 10} referencias más.\n"
+
+            if error_details:
+                msg += "\nDetalle de errores:\n"
+                limit_errs = error_details[:10]
+                for item in limit_errs:
+                    msg += f" • {item}\n"
+                if len(error_details) > 10:
+                    msg += f" ... y {len(error_details) - 10} errores más.\n"
+
             if success == 0 and missing > 0:
                 msg += "\nNota: Asegúrese de contar con acceso a la unidad o ruta de red donde se almacenan los archivos de facturas."
-            QMessageBox.information(self, "Generación de PDFs Finalizada", msg)
+
+            if error > 0 or (missing > 0 and success == 0):
+                QMessageBox.warning(self, "Generación de PDFs Finalizada", msg)
+            else:
+                QMessageBox.information(self, "Generación de PDFs Finalizada", msg)
             self.pdf_worker.deleteLater()
 
         self.pdf_worker.finished.connect(on_pdf_finished)
         self.pdf_worker.start()
+        self.loading_dialog.exec()
+
+    # ── Unified PDF generation ────────────────────────────────────────────────
+    def _on_generate_unified_pdf(self):
+        """Merges ALL selected references into a single unified PDF file."""
+        can_exec = self._check_permission("CTRL:GESTION_LOTES", "EJECUTAR") or self._check_permission("REFERENCIAS", "EJECUTAR")
+        if not can_exec:
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes (CTRL:GESTION_LOTES o REFERENCIAS:EJECUTAR) para generar el PDF unificado."
+            )
+            return
+        selected = self._get_selected_details()
+        if not selected:
+            QMessageBox.warning(self, "Selección Vacía",
+                                "Por favor selecciona al menos una referencia.")
+            return
+
+        import re
+        def _clean(s: str) -> str:
+            return re.sub(r'[\\/:*?"<>|]', '_', s or "").strip()
+
+        asignado = _clean(self.header_data.get("asignado_a", "Asignacion"))
+        fecha_raw = self.header_data.get("fecha", "")
+        try:
+            from datetime import datetime
+            fecha_str = datetime.strptime(fecha_raw.split()[0], "%d/%m/%Y").strftime("%Y%m%d")
+        except Exception:
+            from datetime import date
+            fecha_str = date.today().strftime("%Y%m%d")
+        total_refs = len(selected)
+        default_name = f"Asignacion_{self.lote_id}_{asignado}_{fecha_str}_{total_refs}refs_UNIFICADO.pdf"
+
+        file_path, _ = GLFileDialog.getSaveFileName(
+            self, "Guardar PDF Unificado", default_name, "PDF Files (*.pdf)"
+        )
+        if not file_path:
+            return
+
+        # Show Loading Spinner
+        self.loading_dialog = GLLoadingDialog("Unificando todas las referencias en un solo PDF...", self)
+
+        # Start Worker Thread
+        self.pdf_unified_worker = PdfUnifiedWorker(selected, file_path, self.header_data, self.inventario_ui_service)
+
+        def on_unified_finished(result):
+            self.loading_dialog.close()
+            success = result["success"]
+            missing = result["missing"]
+            error = result["error"]
+            total_pages = result.get("total_pages", 0)
+            write_success = result.get("write_success", False)
+            missing_details = result.get("missing_details", [])
+            error_details = result.get("error_details", [])
+
+            if write_success:
+                msg = (
+                    f"¡PDF Unificado generado con éxito!\n\n"
+                    f"Referencias incluidas: {success}\n"
+                    f"Total de páginas: {total_pages}\n\n"
+                    f"Archivo guardado en:\n{file_path}\n"
+                )
+            else:
+                msg = "No se pudo generar el PDF unificado.\n"
+
+            if missing:
+                msg += f"\nReferencias sin archivos o inaccesibles: {missing}\n"
+            if error:
+                msg += f"Errores al procesar: {error}\n"
+
+            if missing_details:
+                msg += "\nDetalle de referencias faltantes:\n"
+                limit_items = missing_details[:10]
+                for item in limit_items:
+                    msg += f" • {item}\n"
+                if len(missing_details) > 10:
+                    msg += f" ... y {len(missing_details) - 10} referencias más.\n"
+
+            if error_details:
+                msg += "\nDetalle de errores:\n"
+                limit_errs = error_details[:10]
+                for item in limit_errs:
+                    msg += f" • {item}\n"
+                if len(error_details) > 10:
+                    msg += f" ... y {len(error_details) - 10} errores más.\n"
+
+            if not write_success:
+                msg += "\nNota: Asegúrese de contar con acceso a la unidad o ruta de red donde se almacenan los archivos de facturas."
+                QMessageBox.warning(self, "PDF Unificado - Resultado", msg)
+            elif error > 0 or missing > 0:
+                QMessageBox.warning(self, "PDF Unificado - Resultado", msg)
+            else:
+                QMessageBox.information(self, "PDF Unificado - Resultado", msg)
+            self.pdf_unified_worker.deleteLater()
+
+        self.pdf_unified_worker.finished.connect(on_unified_finished)
+        self.pdf_unified_worker.start()
         self.loading_dialog.exec()
 
 
