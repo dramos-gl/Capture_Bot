@@ -90,6 +90,23 @@ class R2FCancunView(QWidget):
             logger.error(f"Error cargando directorio de Cancún: {e}")
 
         self.selected_custom_path = None
+        
+        # Obtener correo del usuario
+        self.correo_usuario = ""
+        try:
+            if not self.api_client.connect_via_api:
+                from sar.src.storage.repositories import UsuarioRepository
+                with self.db_connector.get_session() as session:
+                    repo = UsuarioRepository(session)
+                    u = repo.get_by_id(self.usuario_id)
+                    if u and u.correo:
+                        self.correo_usuario = u.correo
+            else:
+                res = self.api_client.request("GET", f"/api/admin/data/usuario") # generic data fetch not perfect but handled gracefully
+                # If we have a specific endpoint, we can use it. Since we don't, we just catch the exception
+                pass 
+        except Exception as e:
+            logger.error(f"Error cargando correo de usuario: {e}")
 
         # Construir paneles de UI
         self._build_header()
@@ -350,8 +367,8 @@ class R2FCancunView(QWidget):
             if hasattr(self, 'lbl_m_titulo'):
                 self.lbl_m_titulo.setText("📊 MÉTRICAS DE GENERACIÓN Y DESCARGA DE FACTURAS")
             if hasattr(self, 'btn_importar_excel'): self.btn_importar_excel.setEnabled(False)
-            self.btn_iniciar.setEnabled(False)  # Bloqueado hasta integrar portal de facturas
-            self._write_log("Modo cambiado a FACTURACIÓN. Portal de facturación pendiente de implementar.")
+            self.btn_iniciar.setEnabled(True)
+            self._write_log("Modo cambiado a FACTURACIÓN. Listo para iniciar.")
         else:
             self.lbl_titulo.setText("🚀 BOT - CONSULTA Y DESCARGA DE RECIBOS (R2F-CANCÚN)")
             if hasattr(self, 'lbl_m_titulo'):
@@ -498,13 +515,25 @@ class R2FCancunView(QWidget):
         self._load_lote_detalles(self.selected_lote_id)
 
         # Inicializar el QThread Worker pasando la ruta personalizada si existe y el cliente API
-        self.active_worker = BotReciboCunWorker(
-            db_connector=self.db_connector,
-            lote_id=self.selected_lote_id,
-            headless=headless_mode,
-            custom_output_dir=self.selected_custom_path,
-            api_client=self.api_client
-        )
+        es_modo_facturas = self.switch_modo.isChecked()
+        if es_modo_facturas:
+            from cancunbot.src.core.bot_factura_worker import BotFacturaCunWorker
+            self.active_worker = BotFacturaCunWorker(
+                db_connector=self.db_connector,
+                lote_id=self.selected_lote_id,
+                headless=headless_mode,
+                custom_output_dir=self.selected_custom_path,
+                api_client=self.api_client,
+                correo_usuario=getattr(self, "correo_usuario", "")
+            )
+        else:
+            self.active_worker = BotReciboCunWorker(
+                db_connector=self.db_connector,
+                lote_id=self.selected_lote_id,
+                headless=headless_mode,
+                custom_output_dir=self.selected_custom_path,
+                api_client=self.api_client
+            )
 
         self.active_worker.status_changed.connect(self._write_log)
         self.active_worker.metric_updated.connect(self._on_metric_updated)
@@ -707,7 +736,8 @@ class R2FCancunView(QWidget):
         if lote_id_item:
             lote_id = int(lote_id_item.text())
             self.selected_lote_id = lote_id
-            self.lbl_lote_actual_info.setText(f"Lote seleccionado: ID {lote_id}")
+            correo_display = f" | Correo: {self.correo_usuario}" if getattr(self, "correo_usuario", "") else ""
+            self.lbl_lote_actual_info.setText(f"Lote seleccionado: ID {lote_id}{correo_display}")
             self._load_lote_detalles(lote_id)
 
     def _load_lote_detalles(self, lote_id: int):

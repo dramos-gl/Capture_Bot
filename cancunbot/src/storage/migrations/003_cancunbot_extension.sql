@@ -197,32 +197,52 @@ VALUES
 
 -- --- Portal de Facturación ---
 ('CANCUN_FACTURA_INPUT_RFC',
- 'Campo RFC del contribuyente',  'CSS', '[PENDIENTE_INSPECCION]',
+ 'Campo RFC del contribuyente',  'CSS', '#inputRfc',
  'Input donde se ingresa el RFC para generar la factura', TRUE, 'CANCUN_FACTURA'),
 
 ('CANCUN_FACTURA_INPUT_CORREO',
- 'Campo correo electrónico',     'CSS', '[PENDIENTE_INSPECCION]',
+ 'Campo correo electrónico',     'CSS', '#inputCorreo',
  'Input donde se ingresa el correo del contribuyente receptor', TRUE, 'CANCUN_FACTURA'),
 
 ('CANCUN_FACTURA_INPUT_FOLIO',
- 'Campo folio del recibo',       'CSS', '[PENDIENTE_INSPECCION]',
+ 'Campo folio del recibo',       'CSS', '#inputFolioPago',
  'Input donde se ingresa el folio electrónico del recibo a facturar', TRUE, 'CANCUN_FACTURA'),
 
 ('CANCUN_FACTURA_INPUT_IMPORTE',
- 'Campo importe',                'CSS', '[PENDIENTE_INSPECCION]',
+ 'Campo importe',                'CSS', '#inputImportePago',
  'Input donde se ingresa el importe total del recibo', TRUE, 'CANCUN_FACTURA'),
 
-('CANCUN_FACTURA_BTN_GENERAR',
- 'Botón Generar / Timbrar',      'CSS', '[PENDIENTE_INSPECCION]',
- 'Botón que ejecuta el timbrado de la factura CFDI', TRUE, 'CANCUN_FACTURA'),
+('CANCUN_FACTURA_BTN_CONTINUAR_1',
+ 'Botón Continuar 1',            'CSS', '#btnContinuar',
+ 'Primer botón de continuar tras llenar datos iniciales', TRUE, 'CANCUN_FACTURA'),
+
+('CANCUN_FACTURA_BTN_CONTINUAR_2',
+ 'Botón Continuar Datos Gral',   'CSS', '#btnContinuarDatosGral',
+ 'Botón de continuar en la segunda fase', TRUE, 'CANCUN_FACTURA'),
+
+('CANCUN_FACTURA_SELECT_CFDI',
+ 'Selector de Uso CFDI',         'CSS', '#inputCfdi',
+ 'Dropdown para seleccionar el uso de CFDI', TRUE, 'CANCUN_FACTURA'),
+
+('CANCUN_FACTURA_BTN_CONTINUAR_3',
+ 'Botón Continuar Dt Fact',      'CSS', '#btnContinuarDtFact',
+ 'Botón de continuar tras seleccionar CFDI', TRUE, 'CANCUN_FACTURA'),
+
+('CANCUN_FACTURA_BTN_CONTINUAR_4',
+ 'Botón Continuar Dt Prod',      'CSS', '#btnContinuarDtProd',
+ 'Botón de continuar hacia la confirmación final', TRUE, 'CANCUN_FACTURA'),
 
 ('CANCUN_FACTURA_BTN_DESCARGAR_PDF',
- 'Botón Descargar PDF factura',  'CSS', '[PENDIENTE_INSPECCION]',
+ 'Botón Descargar PDF factura',  'CSS', 'a.btn.btn-danger[title="Descarga PDF"]',
  'Botón para descargar el PDF de la factura generada', TRUE, 'CANCUN_FACTURA'),
 
 ('CANCUN_FACTURA_BTN_DESCARGAR_XML',
- 'Botón Descargar XML factura',  'CSS', '[PENDIENTE_INSPECCION]',
+ 'Botón Descargar XML factura',  'CSS', 'a.btn.btn-primary[title="Descarga XML"]',
  'Botón para descargar el XML fiscal de la factura generada', TRUE, 'CANCUN_FACTURA'),
+
+('CANCUN_FACTURA_MODAL_OK',
+ 'Cerrar Modal Aviso',           'CSS', 'button:has-text("OK"), .modal-header .close',
+ 'Botón para cerrar el modal de aviso inicial', TRUE, 'CANCUN_FACTURA'),
 
 ('CANCUN_FACTURA_MSG_EXITO',
  'Mensaje factura exitosa',      'CSS', '[PENDIENTE_INSPECCION]',
