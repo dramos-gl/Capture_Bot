@@ -9,7 +9,10 @@ from pathlib import Path
 # Agrega la raíz del módulo cancunbot al path de Python
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.paths import ensure_dirs
+try:
+    from cancunbot.src.paths import ensure_dirs
+except ImportError:
+    from src.paths import ensure_dirs
 
 # Configuración de logging
 logging.basicConfig(
@@ -28,7 +31,10 @@ def main() -> None:
 
     try:
         from PySide6.QtWidgets import QApplication
-        from src.storage.db_connector import verificar_conexion
+        try:
+            from cancunbot.src.storage.db_connector import verificar_conexion
+        except ImportError:
+            from src.storage.db_connector import verificar_conexion
 
         # Verifica conexión a BD antes de iniciar UI
         if not verificar_conexion():

@@ -94,8 +94,8 @@ class BotReciboCunWorker(QThread):
                 output_path.mkdir(parents=True, exist_ok=True)
             except Exception as e:
                 logger.error(f"Error creando directorio final {output_path}: {e}")
-                # Fallback al directorio local del proyecto
-                output_path = Path("C:\\Users\\dramos\\Documents\\Proyecto_CapturaBot\\PDF_Recibos")
+                from cancunbot.src.paths import PDF_RECIBOS_DIR
+                output_path = PDF_RECIBOS_DIR
                 output_path.mkdir(parents=True, exist_ok=True)
 
             self.status_changed.emit(f"Ruta de almacenamiento de recibos: {output_path}")

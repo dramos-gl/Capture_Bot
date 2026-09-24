@@ -10,7 +10,10 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from src.storage.db_connector import get_session
+try:
+    from cancunbot.src.storage.db_connector import get_session
+except ImportError:
+    from src.storage.db_connector import get_session
 
 logger = logging.getLogger(__name__)
 

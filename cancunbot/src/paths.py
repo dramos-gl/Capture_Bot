@@ -19,10 +19,13 @@ SESSION_STATE_DIR: Path = TEMP_DIR / "sessions"
 # Logs
 LOGS_DIR: Path = ROOT_DIR / "logs"
 
+# Almacenamiento de Recibos y Facturas descargadas
+PDF_RECIBOS_DIR: Path = ROOT_DIR / "PDF_Recibos"
+
 # Migraciones SQL
 MIGRATIONS_DIR: Path = ROOT_DIR / "src" / "storage" / "migrations"
 
 def ensure_dirs() -> None:
     """Crea los directorios necesarios si no existen."""
-    for directory in [TEMP_DIR, DOWNLOAD_TEMP_DIR, SESSION_STATE_DIR, LOGS_DIR]:
+    for directory in [TEMP_DIR, DOWNLOAD_TEMP_DIR, SESSION_STATE_DIR, LOGS_DIR, PDF_RECIBOS_DIR]:
         directory.mkdir(parents=True, exist_ok=True)

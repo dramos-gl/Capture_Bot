@@ -31,9 +31,35 @@ Toda modificación o extensión de la interfaz gráfica en PySide6 debe regirse 
 - **Cero Estilos Hardcodeados en Vistas**: Queda estrictamente prohibido incrustar reglas CSS/QSS inline ad-hoc en las vistas (`sar/src/ui/views/`). Toda regla visual, espaciado y paleta de colores debe originarse a través de los tokens (`tokens/colors.py`, `tokens/spacing.py`, `tokens/typography.py`) y del `ThemeManager`.
 - **Integración Formal de Nuevos Componentes**: Si un requerimiento visual necesita un nuevo tipo de control (átomo, molécula u organismo), este debe crearse formalmente en el subdirectorio correspondiente dentro de `sar/src/ui/design_system/components/` (ej. `atoms/gl_spin_box.py`, `molecules/gl_info_banner.py`) y registrarse para exportación pública en `sar/src/ui/design_system/components/__init__.py`.
 - **Compatibilidad con Temas (Light / Dark)**: Todo componente debe reaccionar adecuadamente a los cambios de tema claro y oscuro a través de `ThemeManager.is_dark_active()`.
+- **Estructura de Vistas y Diálogos**: En el dominio SAR, tanto las vistas de pantalla completa como los diálogos modales (`QDialog`) residen bajo `sar/src/ui/views/` (ej. `orders_view.py`, `order_processing_dialog.py`). Queda prohibido alterar o mover las rutas físicas de importación durante la operación activa del sistema; cualquier futura segregación física hacia `sar/src/ui/dialogs/` debe programarse exclusivamente en ventanas de mantenimiento fuera de producción.
 
 ## 5. Comportamiento en Planning Mode y Modificación de Código
 
 - Siempre que se modifique o cree código, se debe verificar el impacto en el orquestador y la interfaz de usuario en PySide6.
 - Preservar los comentarios e integridad del código no relacionado.
 - Al final de cada iteración, proporcionar un resumen conciso y hacer referencia a los archivos modificados mediante enlaces válidos de formato file:///.
+
+## 6. Estándar y Ubicación de Archivos de Pruebas (Tests y Laboratorio)
+
+Para mantener limpios los paquetes productivos y evitar problemas de empaquetado con PyInstaller:
+- **Cero Tests en Código de Producción (`src/`)**: Queda estrictamente prohibido crear archivos `test_*.py` dentro de `sar/src/` o `cancunbot/src/`.
+- **Pruebas Oficiales de SAR**: Deben ubicarse exclusivamente bajo `sar/tests/` clasificadas por capa:
+  - `sar/tests/api/`: Pruebas de endpoints y contratos FastAPI.
+  - `sar/tests/services/`: Pruebas de lógica de negocio y servicios.
+  - `sar/tests/storage/`: Pruebas de modelos ORM, repositorios y conectores DB.
+  - `sar/tests/scraper/`: Pruebas de automatización web y POM.
+  - `sar/tests/ui/`: Pruebas de vistas y componentes (`components/`).
+- **Pruebas Oficiales de CancunBot**: Deben ubicarse exclusivamente bajo `cancunbot/tests/`:
+  - `cancunbot/tests/core/`: Workers y procesos asíncronos.
+  - `cancunbot/tests/services/`: Extractores PDF, importadores Excel y gestores.
+  - `cancunbot/tests/ui/`: Vistas y diálogos de CancunBot.
+- **Laboratorio Exploratorio y Bocetos Rápidos**: Cualquier prueba ad-hoc, script de diagnóstico temporal o generación de capturas visuales preliminares debe crearse exclusivamente en la carpeta `scratch/` (la cual permanece excluida de Git en `.gitignore`).
+
+## 7. Principio de Aislamiento Estricto de Dominios (SAR vs. CancunBot)
+
+Queda estrictamente prohibido mezclar código, componentes, pruebas, recursos o extensiones entre ambos subsistemas:
+- **Dominio SAR (`sar/`)**: Todo lo perteneciente al Sistema de Administración de Referencias (su UI, API FastAPI, repositorios ORM de SAR, scripts de migración, vistas, diálogos, design system y pruebas) debe residir única y exclusivamente bajo la carpeta `sar/`.
+- **Dominio CancunBot (`cancunbot/`)**: Todo lo perteneciente al subsistema de captura, automatización R2F, workers de facturación/recibos, extractores PDF/Excel, vistas dedicadas de CancunBot, migraciones SQL de cancunbot y pruebas de cancunbot debe residir única y exclusivamente bajo la carpeta `cancunbot/`.
+- **Cero Elementos Sueltos en la Raíz**: Ningún módulo funcional, carpeta de almacenamiento (`PDF_Recibos/`), test o componente debe crearse en la raíz del repositorio. La raíz queda reservada exclusivamente para archivos de configuración global (`.gitignore`, `.env`), specs de empaquetado (`*.spec`) y el laboratorio local transitorio (`scratch/`).
+
+

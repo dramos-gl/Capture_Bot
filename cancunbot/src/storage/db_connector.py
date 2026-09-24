@@ -7,7 +7,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
 
-from src.services.settings import get_db_url
+try:
+    from cancunbot.src.services.settings import get_db_url
+except ImportError:
+    from src.services.settings import get_db_url
 
 logger = logging.getLogger(__name__)
 

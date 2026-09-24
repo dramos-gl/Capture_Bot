@@ -9,7 +9,10 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-from src.storage.repositories import ParametroRepository
+try:
+    from cancunbot.src.storage.repositories import ParametroRepository
+except ImportError:
+    from src.storage.repositories import ParametroRepository
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +42,10 @@ class FileManager:
             # Si es ruta relativa, la hace relativa al proyecto
             base_path = Path(base_path_str)
             if not base_path.is_absolute():
-                from src.paths import ROOT_DIR
+                try:
+                    from cancunbot.src.paths import ROOT_DIR
+                except ImportError:
+                    from src.paths import ROOT_DIR
                 base_path = ROOT_DIR / base_path
             self._base_dir = base_path
 

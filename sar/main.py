@@ -242,7 +242,7 @@ class MainWindow(QMainWindow):
             elif selected_mod_code == "CTRL_R2F":
                 from cancunbot.src.ui.views.r2f_control_view import R2FControlView
                 self.active_module = SARModuleWindow(
-                    title="SAR - Control de Recibos & Facturas (R2F)",
+                    title="SARF- Control de Recibos & Facturas (R2F)",
                     width=1200,
                     height=750,
                     on_logout=self._handle_logout

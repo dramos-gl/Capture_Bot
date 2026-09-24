@@ -84,7 +84,8 @@ class BotFacturaCunWorker(QThread):
                 output_path.mkdir(parents=True, exist_ok=True)
             except Exception as e:
                 logger.error(f"Error creando directorio final {output_path}: {e}")
-                output_path = Path("C:\\Users\\dramos\\Documents\\Proyecto_CapturaBot\\PDF_Recibos")
+                from cancunbot.src.paths import PDF_RECIBOS_DIR
+                output_path = PDF_RECIBOS_DIR
                 output_path.mkdir(parents=True, exist_ok=True)
 
             self.status_changed.emit(f"Obteniendo recibos PENDIENTE_FACTURAR del lote {self.lote_id}...")

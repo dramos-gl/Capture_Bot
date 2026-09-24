@@ -27,6 +27,7 @@ logs/
 # Temporary files
 temp/
 downloads/
+scratch/
 *.bak
 *.tmp
 
@@ -37,3 +38,4 @@ Thumbs.db
 # Editor/IDE files
 .vscode/
 .idea/
+

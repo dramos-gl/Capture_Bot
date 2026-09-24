@@ -76,16 +76,13 @@ SAR/
 └── deployment/
 ________________________________________
 5. Cliente Desktop
-client/
+client/ (sar/src/ui/)
 
-├── ui/
-├── views/
-├── dialogs/
-├── widgets/
-├── services/
-├── models/
-├── resources/
-└── main.py
+├── assets/             (Iconos, recursos visuales y logos)
+├── design_system/      (Tokens, temas, átomos, moléculas y organismos)
+└── views/              (Vistas principales del sistema y diálogos modales QDialog)
+    Nota: Vistas y diálogos residen juntos para máxima estabilidad operativa;
+    la segregación hacia subcarpeta dialogs/ queda sujeta a ventanas de mantenimiento.
 ________________________________________
 6. API Central
 server/
@@ -121,7 +118,26 @@ database/
 ├── seed/
 └── diagrams/
 ________________________________________
-9. Fases de Construcción
+9. Arquitectura y Organización de Pruebas (Tests)
+tests/
+
+Para preservar la pureza del código de producción y compatibilidad con PyInstaller:
+•	sar/src/ y cancunbot/src/ deben permanecer 100% libres de archivos test_*.py.
+•	Pruebas del Sistema SAR: sar/tests/
+	├── api/          (Contratos y endpoints FastAPI)
+	├── scraper/      (Playwright y automatización POM)
+	├── services/     (Lógica de negocio, estados y consecutivos)
+	├── storage/      (Conectores DB, sesiones y repositorios)
+	└── ui/           (Vistas, componentes y eventos PySide6)
+		└── components/ (Átomos y moléculas del design system)
+•	Pruebas del Sistema CancunBot: cancunbot/tests/
+	├── core/         (Workers de facturas y recibos)
+	├── services/     (Extractores PDF y análisis de Excel)
+	└── ui/           (Vistas y diálogos de CancunBot)
+•	Pruebas de Laboratorio y Bocetos: scratch/
+	(Exclusivamente scripts temporales y capturas de pantalla, ignorados por Git).
+________________________________________
+10. Fases de Construcción
 FASE DEV-01
 Fundación
 ________________________________________

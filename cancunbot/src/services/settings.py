@@ -8,13 +8,17 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+    _has_dotenv = True
+except ImportError:
+    _has_dotenv = False
 
 logger = logging.getLogger(__name__)
 
 # Carga .env si existe
 _env_path = Path(__file__).parent.parent.parent / ".env"
-if _env_path.exists():
+if _has_dotenv and _env_path.exists():
     load_dotenv(_env_path)
 
 _settings_path = Path(__file__).parent.parent.parent / "settings.json"
