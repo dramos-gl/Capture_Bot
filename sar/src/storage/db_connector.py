@@ -42,7 +42,10 @@ class DatabaseConnector:
         self.engine = create_engine(
             self.database_url,
             pool_pre_ping=True,
-            connect_args={"connect_timeout": 5},
+            connect_args={
+                "connect_timeout": 5,
+                "client_encoding": "utf8"
+            },
             echo=False  # Cambiar a True para debuguear SQL generado en desarrollo
         )
 

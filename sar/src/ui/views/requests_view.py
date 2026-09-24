@@ -1,10 +1,10 @@
 """Requests (Bandeja de Trabajo) View."""
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QDialog, QScrollArea
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QDialog, QScrollArea, QPushButton
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QIntValidator
 from sar.src.ui.design_system.components import (
-    CustomCard, CustomLabel, CustomInput, CustomButton, StyledDataTable, KeepOpenMenu,
+    CustomCard, CustomLabel, CustomInput, CustomButton, CustomComboBox, StyledDataTable, KeepOpenMenu,
     GLInfoBanner, GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.tokens.colors import Colors
@@ -161,6 +161,33 @@ class RequestsView(QWidget):
         
         self.card.add_widget(self.table)
         
+        # Table Footer Pagination Layout (Golden Standard)
+        self.footer_layout = QHBoxLayout()
+        self.footer_layout.setContentsMargins(0, 8, 0, 0)
+        
+        self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 solicitudes", variant="muted")
+        self.lbl_pagination_info.setObjectName("requestsPaginationInfo")
+        self.footer_layout.addWidget(self.lbl_pagination_info)
+        
+        self.footer_layout.addStretch()
+        
+        # Page size combobox (activación dinámica si total > 50)
+        self.cb_page_size = CustomComboBox(self)
+        self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
+        self.cb_page_size.setCurrentIndex(0) # Default 50 por página
+        self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
+        self.cb_page_size.setVisible(False)
+        self.footer_layout.addWidget(self.cb_page_size)
+        
+        # Pagination buttons wrapper
+        self.pagination_widget = QWidget(self)
+        self.pag_btn_layout = QHBoxLayout(self.pagination_widget)
+        self.pag_btn_layout.setContentsMargins(0, 0, 0, 0)
+        self.pag_btn_layout.setSpacing(4)
+        self.footer_layout.addWidget(self.pagination_widget)
+        
+        self.card.layout.addLayout(self.footer_layout)
+        
         # Action Buttons & Footer Hint Layout
         actions_layout = QHBoxLayout()
         self.lbl_table_hint = CustomLabel("💡 Doble clic en 'Folio Orden' para ver detalle / lotes • Doble clic en 'Asignado a' para asignar usuario", variant="muted")
@@ -190,6 +217,14 @@ class RequestsView(QWidget):
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area)
         
+        # Pagination & selection state
+        self.current_page = 1
+        self.page_size = 50
+        self._all_solicitudes_data = []
+        self._filtered_solicitudes_data = []
+        self._current_search_text = ""
+        self._current_estado_filter = "Todas"
+
         self.selected_orden_ids = []
         self.todas_las_ordenes = []
         self.is_custom_filter = False
@@ -615,8 +650,89 @@ class RequestsView(QWidget):
         self.active_worker.start()
 
     def _on_data_loaded(self, solicitudes):
+        self._all_solicitudes_data = solicitudes or []
+        self._apply_filters(reset_page=True)
+
+    def _on_load_error(self, err_msg):
+        QMessageBox.critical(self, "Error", f"No se pudo cargar la bandeja de trabajo:\n{err_msg}")
+
+    def _filter_table_by_text(self, text: str):
+        self._current_search_text = text.strip().lower()
+        self._apply_filters(reset_page=True)
+        
+    def _filter_table_by_state(self, state: str):
+        self._current_estado_filter = state
+        self._apply_filters(reset_page=True)
+
+    def _on_page_size_changed(self, text: str):
+        if "50" in text:
+            self.page_size = 50
+        elif "100" in text:
+            self.page_size = 100
+        elif "200" in text:
+            self.page_size = 200
+        self.current_page = 1
+        self._apply_filters(reset_page=True)
+
+    def _set_page(self, page_num: int):
+        self.current_page = page_num
+        self._apply_filters(reset_page=False)
+
+    def _apply_filters(self, reset_page: bool = False):
+        if reset_page:
+            self.current_page = 1
+
+        search_text = getattr(self, '_current_search_text', "").strip().lower()
+        estado_filter = getattr(self, '_current_estado_filter', "Todas")
+
+        # 1. Filter in-memory data
+        filtered = []
+        for s in getattr(self, '_all_solicitudes_data', []):
+            estado = s.get("estado", "") or ""
+
+            # State Filter Logic
+            state_match = True
+            if estado_filter != "Todas":
+                if estado_filter == "ASIGNADA":
+                    state_match = estado in ["ASIGNADA", "ASIGNADO"]
+                elif estado_filter == "CANCELADA":
+                    state_match = estado in ["CANCELADA", "CANCELADO"]
+                elif estado_filter == "COMPLETADA":
+                    state_match = estado in ["COMPLETADA", "COMPLETADO"]
+                else:
+                    state_match = (estado == estado_filter)
+
+            if not state_match:
+                continue
+
+            # Search Text Logic (search across all fields)
+            if search_text:
+                matched = any(
+                    search_text in str(v).lower()
+                    for k, v in s.items()
+                    if v is not None
+                )
+                if not matched:
+                    continue
+
+            filtered.append(s)
+
+        self._filtered_solicitudes_data = filtered
+        total_items = len(self._filtered_solicitudes_data)
+        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
+
+        if self.current_page > total_pages:
+            self.current_page = total_pages
+        if self.current_page < 1:
+            self.current_page = 1
+
+        start_idx = (self.current_page - 1) * self.page_size
+        end_idx = min(start_idx + self.page_size, total_items)
+        page_slice = self._filtered_solicitudes_data[start_idx:end_idx]
+
+        # 2. Populate table with page slice
         data_rows = []
-        for s in solicitudes:
+        for s in page_slice:
             data_rows.append([
                 str(s["solicitud_id"]),
                 str(s["grupo_id"]),
@@ -630,52 +746,51 @@ class RequestsView(QWidget):
                 s["estado"],
                 s["usuario_asignado"]
             ])
-            
+
+        self.table.blockSignals(True)
         self.table.populate_rows(data_rows)
-        self._apply_filters()
+        self.table.blockSignals(False)
 
-    def _on_load_error(self, err_msg):
-        QMessageBox.critical(self, "Error", f"No se pudo cargar la bandeja de trabajo:\n{err_msg}")
+        # 3. Update footer info
+        if total_items == 0:
+            self.lbl_pagination_info.setText("Mostrando 0 a 0 de 0 solicitudes")
+        else:
+            self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {total_items} solicitudes")
 
-    def _filter_table_by_text(self, text: str):
-        self._current_search_text = text.lower()
-        self._apply_filters()
-        
-    def _filter_table_by_state(self, state: str):
-        self._current_estado_filter = state
-        self._apply_filters()
+        # 4. Redraw pagination buttons (Golden Standard)
+        while self.pag_btn_layout.count():
+            item = self.pag_btn_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
 
-    def _apply_filters(self):
-        search_text = getattr(self, '_current_search_text', "")
-        estado_filter = getattr(self, '_current_estado_filter', "Todas")
-        
-        for row in range(self.table.rowCount()):
-            estado = self.table.item(row, 9).text() if self.table.item(row, 9) else ""
-            
-            # 1. State Filter Logic
-            state_match = True
-            if estado_filter != "Todas":
-                if estado_filter == "ASIGNADA":
-                    state_match = estado in ["ASIGNADA", "ASIGNADO"]
-                elif estado_filter == "CANCELADA":
-                    state_match = estado in ["CANCELADA", "CANCELADO"]
-                elif estado_filter == "COMPLETADA":
-                    state_match = estado in ["COMPLETADA", "COMPLETADO"]
-                else:
-                    state_match = (estado == estado_filter)
-            
-            # 2. Search Text Logic (search across all columns)
-            text_match = False
-            for col in range(self.table.columnCount()):
-                item = self.table.item(row, col)
-                if item and search_text in item.text().lower():
-                    text_match = True
-                    break
-                    
-            if state_match and text_match:
-                self.table.setRowHidden(row, False)
+        # Activar dinámicamente el selector de densidad solo si el total supera el mínimo (50)
+        self.cb_page_size.setVisible(total_items > 50)
+
+        # Activar dinámicamente los botones de navegación solo si hay 2 o más páginas
+        if total_pages <= 1:
+            self.pagination_widget.setVisible(False)
+            return
+
+        self.pagination_widget.setVisible(True)
+
+        def add_page_btn(text: str, target: int, enabled: bool, is_active: bool = False):
+            btn = QPushButton(text)
+            btn.setEnabled(enabled)
+            if is_active:
+                btn.setObjectName("paginationActivePageBtn")
+            elif text in ("<<", "<", ">", ">>"):
+                btn.setObjectName("paginationNavBtn")
             else:
-                self.table.setRowHidden(row, True)
+                btn.setObjectName("paginationPageBtn")
+            btn.clicked.connect(lambda _checked=False, t=target: self._set_page(t))
+            self.pag_btn_layout.addWidget(btn)
+
+        add_page_btn("<<", 1, self.current_page > 1)
+        add_page_btn("<", self.current_page - 1, self.current_page > 1)
+        add_page_btn(str(self.current_page), self.current_page, True, is_active=True)
+        add_page_btn(">", self.current_page + 1, self.current_page < total_pages)
+        add_page_btn(">>", total_pages, self.current_page < total_pages)
 
     def _load_available_orders(self, preserve_selection=False, force_reload=False):
         try:

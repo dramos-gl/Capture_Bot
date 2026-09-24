@@ -126,14 +126,12 @@ class ReferenciasView(QWidget):
         # Page size combobox
         self.cb_page_size = CustomComboBox(self)
         self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
-        self.cb_page_size.setFixedWidth(120)
         self.cb_page_size.setCurrentIndex(2) # Default to 200 por página
         self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
         self.footer_layout.addWidget(self.cb_page_size)
         
         # Pagination buttons wrapper
         self.pagination_widget = QWidget(self)
-        self.pagination_widget.setStyleSheet("background: transparent;")
         self.pag_btn_layout = QHBoxLayout(self.pagination_widget)
         self.pag_btn_layout.setContentsMargins(0, 0, 0, 0)
         self.pag_btn_layout.setSpacing(4)
@@ -521,37 +519,23 @@ class ReferenciasView(QWidget):
                 
         total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
         
-        # Helper to add nav buttons
-        def add_nav_btn(text, target_page, enabled):
+        def add_page_btn(text: str, target: int, enabled: bool, is_active: bool = False):
             btn = QPushButton(text)
-            btn.setObjectName("paginationNavBtn")
             btn.setEnabled(enabled)
-            btn.clicked.connect(lambda: self._set_page(target_page))
+            if is_active:
+                btn.setObjectName("paginationActivePageBtn")
+            elif text in ("<<", "<", ">", ">>"):
+                btn.setObjectName("paginationNavBtn")
+            else:
+                btn.setObjectName("paginationPageBtn")
+            btn.clicked.connect(lambda _checked=False, t=target: self._set_page(t))
             self.pag_btn_layout.addWidget(btn)
-            
-        # Helper to add numeric buttons
-        def add_page_btn(page_num, active):
-            btn = QPushButton(str(page_num))
-            btn.setObjectName("paginationActivePageBtn" if active else "paginationPageBtn")
-            btn.clicked.connect(lambda: self._set_page(page_num))
-            self.pag_btn_layout.addWidget(btn)
-            
-        # Determine showing page range
-        start_page = max(1, self.current_page - 2)
-        end_page = min(total_pages, start_page + 4)
-        if end_page - start_page < 4:
-            start_page = max(1, end_page - 4)
-            
-        # Add << and <
-        add_nav_btn("<<", 1, self.current_page > 1)
-        add_nav_btn("<", self.current_page - 1, self.current_page > 1)
-        
-        for p in range(start_page, end_page + 1):
-            add_page_btn(p, p == self.current_page)
-            
-        # Add > and >>
-        add_nav_btn(">", self.current_page + 1, self.current_page < total_pages)
-        add_nav_btn(">>", total_pages, self.current_page < total_pages)
+
+        add_page_btn("<<", 1, self.current_page > 1)
+        add_page_btn("<", self.current_page - 1, self.current_page > 1)
+        add_page_btn(str(self.current_page), self.current_page, True, is_active=True)
+        add_page_btn(">", self.current_page + 1, self.current_page < total_pages)
+        add_page_btn(">>", total_pages, self.current_page < total_pages)
         
         self.update_marcar_button_text()
 

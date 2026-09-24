@@ -590,6 +590,10 @@ class APIServerWindow(QMainWindow):
         layout.addWidget(form_card)
         
         actions = QHBoxLayout()
+        btn_test_db = CustomButton("Probar Conexión BD", is_secondary=True)
+        btn_test_db.clicked.connect(self._test_db_connection)
+        actions.addWidget(btn_test_db)
+        
         actions.addStretch()
         btn_save = CustomButton("Guardar Configuración", is_secondary=False)
         btn_save.clicked.connect(self._save_configuration)
@@ -979,6 +983,48 @@ class APIServerWindow(QMainWindow):
             self.lbl_db_info.setText(db_info)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo guardar la configuración: {e}")
+
+    def _test_db_connection(self):
+        """Valida las credenciales introducidas contra PostgreSQL informando claramente cualquier error."""
+        user = self.txt_db_user.text().strip()
+        pwd = self.txt_db_password.text()
+        host = self.txt_db_host.text().strip()
+        port = self.txt_db_port.text().strip() or "5432"
+        dbname = self.txt_db_name.text().strip()
+        
+        try:
+            import psycopg2
+            conn = psycopg2.connect(
+                dbname=dbname,
+                user=user,
+                password=pwd,
+                host=host,
+                port=port,
+                connect_timeout=5,
+                client_encoding="utf8"
+            )
+            conn.close()
+            self._write_log(f"Prueba de conexión exitosa a PostgreSQL ({host}:{port}/{dbname}) con usuario '{user}'.", level="SUCCESS")
+            QMessageBox.information(
+                self,
+                "Conexión Exitosa",
+                f"¡Conexión establecida exitosamente con PostgreSQL!\n\n"
+                f"Base de datos: {dbname}\n"
+                f"Host: {host}:{port}\n"
+                f"Usuario: {user}"
+            )
+        except Exception as e:
+            raw_err = str(e)
+            if isinstance(e, UnicodeDecodeError) or "utf-8" in raw_err.lower():
+                clean_err = "Error de autenticación o conexión a PostgreSQL. Verifique que el usuario y la contraseña sean correctos."
+            else:
+                clean_err = raw_err
+            self._write_log(f"Fallo en prueba de conexión a PostgreSQL: {clean_err}", level="ERROR")
+            QMessageBox.critical(
+                self,
+                "Error de Conexión a Base de Datos",
+                f"No se pudo conectar a PostgreSQL con los parámetros indicados:\n\n{clean_err}"
+            )
             
     def _show_help(self):
         QMessageBox.information(

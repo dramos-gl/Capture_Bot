@@ -129,6 +129,12 @@ class LoginView(QWidget):
             import sys
             import os
             import datetime
+            error_msg = str(e)
+            if isinstance(e, UnicodeDecodeError) or "utf-8" in error_msg.lower():
+                user_msg = "Error de autenticación o conexión a PostgreSQL. Verifique credenciales del servidor."
+            else:
+                user_msg = "No se pudo conectar a la base de datos o API. Verifique su configuración."
+            
             try:
                 if getattr(sys, 'frozen', False):
                     log_dir = os.path.dirname(sys.executable)
@@ -136,11 +142,16 @@ class LoginView(QWidget):
                     log_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
                 log_path = os.path.join(log_dir, "sar_error.log")
                 with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(f"\n[{datetime.datetime.now()}] Error loading modules: {str(e)}\n")
+                    f.write(f"\n[{datetime.datetime.now()}] Error loading modules: {error_msg}\n")
                     traceback.print_exc(file=f)
             except Exception:
                 pass
             print("Error loading modules:", e)
+            
+            if hasattr(self, "modulo_error_lbl"):
+                self.modulo_error_lbl.setText(user_msg)
+                self.modulo_error_lbl.set_error_style(True)
+                self.modulo_error_lbl.setVisible(True)
         
     def _clear_modulo_error(self):
         self.modulo_error_lbl.setText("")

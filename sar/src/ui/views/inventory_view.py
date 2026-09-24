@@ -11,7 +11,7 @@ from PySide6.QtGui import QColor, QDesktopServices, QAction
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomSpinBox,
     LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid, GLLoadingDialog,
-    CircularSpinner, GLMessageBox as QMessageBox, GLInfoBanner, GLFileDialog
+    CircularSpinner, GLMessageBox as QMessageBox, GLMessageDialog, GLInfoBanner, GLFileDialog
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.theme_manager import Colors, ThemeManager
@@ -5264,7 +5264,17 @@ class LoteProcessingDialog(QDialog):
         self.api_client = getattr(parent, 'api_client', None) or getattr(self.inventario_ui_service, 'api_client', None) or APIClient()
         self.header_data: dict = {}
         self.detalles: list = []
+        self.selected_ids: set = set()
+        self.current_page: int = 1
+        self.page_size: int = 50
         self._loader_worker = None
+
+        # Timer de umbral de espera: spinner solo si la consulta excede 750 ms
+        self._load_timer = QTimer(self)
+        self._load_timer.setSingleShot(True)
+        self._load_timer.setInterval(750)
+        self._load_timer.timeout.connect(self._show_loading_dialog_if_needed)
+        self._loading_dialog: Optional[GLLoadingDialog] = None
 
         self.setWindowTitle(f"Detalle de Asignación #{lote_id}")
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
@@ -5333,24 +5343,21 @@ class LoteProcessingDialog(QDialog):
         banner_row_layout.addWidget(self.metric_frame)
         root.addWidget(self.banner_row)
 
-        # ── References table Stack (Spinner de Carga / Tabla) ────────────────
-        from PySide6.QtWidgets import QStackedWidget
-        self.stack_table = QStackedWidget(self)
-        self.stack_table.setMinimumHeight(180)
+        # ── Section Title for References Table ──────────────────────────────
+        table_title_layout = QHBoxLayout()
+        table_title_layout.setContentsMargins(0, 4, 0, 0)
+        self.lbl_table_title = CustomLabel("Referencias del Lote", variant="subtitle")
+        self.lbl_table_title.setStyleSheet("font-weight: 600; font-size: 14px; color: #1E293B;")
+        
+        self.lbl_table_status = CustomLabel("Cargando referencias...", variant="caption")
+        self.lbl_table_status.setStyleSheet("color: #2563EB; font-weight: 500;")
 
-        # Página 0: Spinner / Feedback de carga no bloqueante
-        self.loading_panel = QWidget()
-        loading_layout = QVBoxLayout(self.loading_panel)
-        loading_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        loading_layout.setSpacing(10)
-        self.spinner = CircularSpinner(self.loading_panel)
-        self.lbl_loading = CustomLabel("Cargando referencias del lote...", variant="body", parent=self.loading_panel)
-        self.lbl_loading.setStyleSheet("font-weight: 500; color: #64748B;")
-        loading_layout.addWidget(self.spinner, alignment=Qt.AlignmentFlag.AlignCenter)
-        loading_layout.addWidget(self.lbl_loading, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.stack_table.addWidget(self.loading_panel)
+        table_title_layout.addWidget(self.lbl_table_title)
+        table_title_layout.addWidget(self.lbl_table_status)
+        table_title_layout.addStretch()
+        root.addLayout(table_title_layout)
 
-        # Página 1: Tabla de datos
+        # ── References Table (Visible con encabezados desde el inicio) ───────
         headers = [
             "✔", "ID", "Ref ID",
             "Estado", "Empresa", "Concepto",
@@ -5361,20 +5368,77 @@ class LoteProcessingDialog(QDialog):
         self.table_detalles = StyledDataTable(headers, parent=self)
         self.table_detalles.setColumnHidden(1, True)  # ID interno
         self.table_detalles.setColumnHidden(2, True)  # Ref ID
-        self.stack_table.addWidget(self.table_detalles)
+        self.table_detalles.setMinimumHeight(200)
 
-        root.addWidget(self.stack_table)
+        # Configurar anchos iniciales desde el inicio para estabilidad visual completa
+        from PySide6.QtWidgets import QHeaderView
+        init_col_widths = {
+            0: 38,   # Checkbox
+            3: 130,  # Estado badge
+            4: 160,  # Empresa
+            5: 140,  # Concepto
+            6: 150,  # Referencia
+            7: 180,  # Cliente
+            8: 150,  # Desarrollo
+            9: 60,   # MZA
+            10: 60,  # Lote
+            11: 60,  # Ext
+            12: 60,  # Int
+            13: 130, # No. Oficial
+            14: 60,  # P.A.
+            15: 110, # Fecha Solicitud
+        }
+        init_header = self.table_detalles.horizontalHeader()
+        for c_idx, w in init_col_widths.items():
+            if c_idx < self.table_detalles.columnCount():
+                self.table_detalles.setColumnWidth(c_idx, w)
+                init_header.setSectionResizeMode(c_idx, QHeaderView.ResizeMode.Interactive)
+        init_header.setSectionResizeMode(self.table_detalles.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
 
-        # ── Buttons ──────────────────────────────────────────────────────────
-        btns = QHBoxLayout()
-        btns.addStretch()
+        root.addWidget(self.table_detalles)
+
+        # ── Table Footer Layout (Exacto a la Imagen de Referencia) ───────────
+        footer_layout = QHBoxLayout()
+        self.lbl_footer_info = CustomLabel("Mostrando 0 a 0 de 0 asignaciones", variant="muted")
+        footer_layout.addWidget(self.lbl_footer_info)
+        footer_layout.addStretch()
+
+        # Selector de tamaño de página (activación dinámica si total > 50)
+        self.cb_page_size = CustomComboBox(self)
+        self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
+        self.cb_page_size.setCurrentIndex(0)  # Default 50 por página (como en la referencia)
+        self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
+        self.cb_page_size.setVisible(False)
+        footer_layout.addWidget(self.cb_page_size)
+
+        # Contenedor de botones de navegación de página
+        self.pagination_widget = QWidget(self)
+        self.pag_btn_layout = QHBoxLayout(self.pagination_widget)
+        self.pag_btn_layout.setContentsMargins(0, 0, 0, 0)
+        footer_layout.addWidget(self.pagination_widget)
+
+        root.addLayout(footer_layout)
+
+        # ── Bottom Action Buttons ────────────────────────────────────────────
+        actions_layout = QHBoxLayout()
+        actions_layout.setSpacing(10)
+
+        self.btn_toggle_selection = CustomButton("Limpiar selección", is_clean_btn=True, min_width=130, parent=self)
+        self.btn_toggle_selection.setIcon(Icons.limpiar("#DC2626"))
+        self.btn_toggle_selection.setToolTip("Deseleccionar todas las casillas")
+        self.btn_toggle_selection.clicked.connect(self._on_toggle_selection)
+        self.btn_toggle_selection.setEnabled(False)
+        actions_layout.addWidget(self.btn_toggle_selection)
+
+        actions_layout.addStretch()
+
         self.btn_excel = CustomButton.action_excel(parent=self)
-        self.btn_excel.setToolTip("Generar lotes archivos excel")
+        self.btn_excel.setToolTip("Generar archivo Excel con las referencias seleccionadas")
         self.btn_excel.clicked.connect(self._on_generate_excel)
         self.btn_excel.setEnabled(False)
 
         self.btn_pdf = CustomButton.action_pdf(parent=self)
-        self.btn_pdf.setToolTip("Generar archivos PDF individuales por referencia")
+        self.btn_pdf.setToolTip("Generar archivos PDF individuales por referencia seleccionada")
         self.btn_pdf.clicked.connect(self._on_generate_pdf)
         self.btn_pdf.setEnabled(False)
 
@@ -5387,11 +5451,13 @@ class LoteProcessingDialog(QDialog):
         btn_close = CustomButton.action_cerrar(parent=self)
         btn_close.clicked.connect(self.reject)
 
-        btns.addWidget(self.btn_excel)
-        btns.addWidget(self.btn_pdf)
-        btns.addWidget(self.btn_pdf_unified)
-        btns.addWidget(btn_close)
-        root.addLayout(btns)
+        actions_layout.addWidget(self.btn_excel)
+        actions_layout.addWidget(self.btn_pdf)
+        actions_layout.addWidget(self.btn_pdf_unified)
+        actions_layout.addWidget(btn_close)
+        root.addLayout(actions_layout)
+
+        self.table_detalles.itemChanged.connect(self._on_table_item_changed)
 
         # Si tenemos initial_data de la fila seleccionada, pre-poblar el encabezado al instante (0 ms)
         if initial_data:
@@ -5400,9 +5466,18 @@ class LoteProcessingDialog(QDialog):
         # Iniciar carga de datos asíncrona en segundo plano con QThread
         self._start_async_load()
 
+    def _show_loading_dialog_if_needed(self):
+        """Muestra el diálogo de carga únicamente si la consulta supera el tiempo de tolerancia (750 ms)."""
+        if self._loader_worker and self._loader_worker.isRunning():
+            if not self._loading_dialog:
+                self._loading_dialog = GLLoadingDialog("Cargando referencias\ndel lote...", self)
+            self._loading_dialog.show()
+
     def _start_async_load(self):
         """Inicia el worker en segundo plano para no congelar la GUI ni dejar la pantalla en blanco."""
-        self.stack_table.setCurrentIndex(0)
+        self.lbl_footer_info.setText("Cargando referencias del lote...")
+        if hasattr(self, "_load_timer"):
+            self._load_timer.start()
         self._loader_worker = LoteDataLoaderWorker(self.inventario_ui_service, self.lote_id)
         self._loader_worker.data_loaded.connect(self._on_data_loaded)
         self._loader_worker.error_occurred.connect(self._on_load_error)
@@ -5410,20 +5485,38 @@ class LoteProcessingDialog(QDialog):
 
     def _on_data_loaded(self, header: dict, detalles: list):
         """Callback ejecutado en el hilo principal cuando el worker finaliza."""
+        if hasattr(self, "_load_timer"):
+            self._load_timer.stop()
+        if hasattr(self, "_loading_dialog") and self._loading_dialog:
+            self._loading_dialog.accept()
+            self._loading_dialog = None
+
         if header:
             self.header_data = header
             self._apply_header(header)
-        self.detalles = detalles
-        self._populate_table()
-        self.stack_table.setCurrentIndex(1)
-        if self.detalles:
-            self.btn_excel.setEnabled(True)
-            self.btn_pdf.setEnabled(True)
-            self.btn_pdf_unified.setEnabled(True)
+        self.detalles = detalles or []
+        self.selected_ids = {d.get("lote_detalle_id") for d in self.detalles if d.get("lote_detalle_id") is not None}
+        self.current_page = 1
+        
+        # Actualizar título de sección con el total de referencias cargadas
+        total_count = len(self.detalles)
+        self.lbl_table_title.setText(f"Referencias del Lote ({total_count})")
+        self.lbl_table_status.setText("")
+        self._render_current_page()
 
     def _on_load_error(self, err_msg: str):
         """Manejo de errores si la consulta falla en segundo plano."""
-        self.stack_table.setCurrentIndex(1)
+        if hasattr(self, "_load_timer"):
+            self._load_timer.stop()
+        if hasattr(self, "_loading_dialog") and self._loading_dialog:
+            self._loading_dialog.accept()
+            self._loading_dialog = None
+
+        self.lbl_table_status.setText("Error al cargar referencias")
+        self.lbl_table_status.setStyleSheet("color: #DC2626; font-weight: 500;")
+        self.lbl_footer_info.setText("Error al cargar referencias.")
+        self.table_detalles.setRowCount(0)
+        self._update_selection_controls()
         QMessageBox.critical(self, "Error al Cargar",
                              f"No se pudieron cargar los detalles de la asignación:\n{err_msg}")
 
@@ -5446,46 +5539,258 @@ class LoteProcessingDialog(QDialog):
         estado_color = "#16A34A" if estado == "ASIGNADA" else "#D97706"
         self.lbl_metric_estado.setStyleSheet(f"font-weight: bold; color: {estado_color};")
 
-    def _populate_table(self):
-        rows = []
-        for d in self.detalles:
-            rows.append([
-                "",
-                str(d.get("lote_detalle_id", "")),
-                str(d.get("referencia_id", "") or ""),
-                d.get("estado", ""),
-                d.get("empresa", ""),
-                d.get("concepto", ""),
-                d.get("referencia", ""),
-                d.get("cliente", ""),
-                d.get("desarrollo", ""),
-                d.get("mz", ""),
-                d.get("lote", ""),
-                d.get("edif", ""),
-                d.get("viv", ""),
-                d.get("folio_electronico", ""),
-                d.get("pa", ""),
-                d.get("fecha_solicitud", ""),
-            ])
-        # Acelerar renderizado desactivando actualizaciones gráficas durante la inserción
+    def _on_page_size_changed(self, text: str):
+        """Ajusta el tamaño de página y recalcula la vista."""
+        if "50" in text:
+            self.page_size = 50
+        elif "100" in text:
+            self.page_size = 100
+        else:
+            self.page_size = 200
+        self.current_page = 1
+        self._render_current_page()
+
+    def _set_page(self, page: int):
+        """Navega a una página específica dentro de la asignación."""
+        total_pages = max(1, (len(self.detalles) + self.page_size - 1) // self.page_size)
+        if page < 1:
+            page = 1
+        if page > total_pages:
+            page = total_pages
+        if page == self.current_page:
+            return
+        self.current_page = page
+        self._render_current_page()
+
+    def _render_current_page(self):
+        """Renderiza la página actual y actualiza el pie de paginación exactamente como en la referencia."""
+        total_items = len(self.detalles)
+        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
+        start_idx = (self.current_page - 1) * self.page_size
+        end_idx = min(start_idx + self.page_size, total_items)
+
+        if total_items == 0:
+            self.lbl_footer_info.setText("Mostrando 0 a 0 de 0 asignaciones")
+        else:
+            self.lbl_footer_info.setText(f"Mostrando {start_idx + 1}–{end_idx} de {total_items} asignaciones")
+
+        # Botones de paginación
+        while self.pag_btn_layout.count():
+            item = self.pag_btn_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Activar dinámicamente el selector de densidad solo si el total supera el mínimo (50)
+        self.cb_page_size.setVisible(total_items > 50)
+
+        # Activar dinámicamente los botones de navegación solo si hay 2 o más páginas
+        if total_pages <= 1:
+            self.pagination_widget.setVisible(False)
+        else:
+            self.pagination_widget.setVisible(True)
+
+            def add_page_btn(text: str, target: int, enabled: bool, is_active: bool = False):
+                btn = QPushButton(text)
+                btn.setEnabled(enabled)
+                if is_active:
+                    btn.setObjectName("paginationActivePageBtn")
+                elif text in ("<<", "<", ">", ">>"):
+                    btn.setObjectName("paginationNavBtn")
+                else:
+                    btn.setObjectName("paginationPageBtn")
+                btn.clicked.connect(lambda _checked=False, t=target: self._set_page(t))
+                self.pag_btn_layout.addWidget(btn)
+
+            add_page_btn("<<", 1, self.current_page > 1)
+            add_page_btn("<", self.current_page - 1, self.current_page > 1)
+            add_page_btn(str(self.current_page), self.current_page, True, is_active=True)
+            add_page_btn(">", self.current_page + 1, self.current_page < total_pages)
+            add_page_btn(">>", total_pages, self.current_page < total_pages)
+
+        # Poblar filas de la página actual
+        page_slice = self.detalles[start_idx:end_idx]
+        self._populate_table_slice(page_slice)
+        self._update_selection_controls()
+
+    def _populate_table_slice(self, page_slice: list):
+        from PySide6.QtWidgets import QTableWidgetItem, QHeaderView
+        self.table_detalles.blockSignals(True)
         self.table_detalles.setUpdatesEnabled(False)
         try:
+            rows = []
+            for d in page_slice:
+                rows.append([
+                    "",
+                    str(d.get("lote_detalle_id", "")),
+                    str(d.get("referencia_id", "") or ""),
+                    d.get("estado", ""),
+                    d.get("empresa", ""),
+                    d.get("concepto", ""),
+                    d.get("referencia", ""),
+                    d.get("cliente", ""),
+                    d.get("desarrollo", ""),
+                    d.get("mz", ""),
+                    d.get("lote", ""),
+                    d.get("edif", ""),
+                    d.get("viv", ""),
+                    d.get("folio_electronico", ""),
+                    d.get("pa", ""),
+                    d.get("fecha_solicitud", ""),
+                ])
+
             self.table_detalles.populate_rows(rows, checkable_first_col=True)
-            for r in range(self.table_detalles.rowCount()):
+            for r, d in enumerate(page_slice):
                 chk = self.table_detalles.item(r, 0)
-                if chk:
-                    chk.setCheckState(Qt.CheckState.Checked)
+                if chk is not None:
+                    d_id = d.get("lote_detalle_id")
+                    is_checked = (d_id in self.selected_ids)
+                    chk.setCheckState(Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked)
+
+            col_widths = {
+                0: 38,   # Checkbox
+                3: 130,  # Estado badge
+                4: 160,  # Empresa
+                5: 140,  # Concepto
+                6: 150,  # Referencia
+                7: 180,  # Cliente
+                8: 150,  # Desarrollo
+                9: 60,   # MZA
+                10: 60,  # Lote
+                11: 60,  # Ext
+                12: 60,  # Int
+                13: 130, # No. Oficial
+                14: 60,  # P.A.
+                15: 110, # Fecha Solicitud
+            }
+            header = self.table_detalles.horizontalHeader()
+            for col_idx, width in col_widths.items():
+                if col_idx < self.table_detalles.columnCount():
+                    self.table_detalles.setColumnWidth(col_idx, width)
+                    header.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Interactive)
+            header.setSectionResizeMode(self.table_detalles.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
         finally:
+            self.table_detalles.blockSignals(False)
             self.table_detalles.setUpdatesEnabled(True)
 
+    def _update_selection_controls(self):
+        """Actualiza el estado del botón unificado, indicador en pie y botones de exportación."""
+        total = len(self.detalles)
+        count = len(self.selected_ids)
+        start_idx = (self.current_page - 1) * self.page_size
+        end_idx = min(start_idx + self.page_size, total)
+
+        # 1. Actualizar texto integrado en el pie de tabla
+        if total == 0:
+            self.lbl_footer_info.setText("Mostrando 0 a 0 de 0 asignaciones")
+            self.btn_toggle_selection.setEnabled(False)
+        else:
+            if count > 0:
+                badge_text = f"<span style='color: #2563EB; font-weight: bold;'>{count} de {total} seleccionado(s)</span>"
+            else:
+                badge_text = "<span style='color: #64748B; font-weight: bold;'>0 seleccionados</span>"
+
+            self.lbl_footer_info.setText(
+                f"Mostrando {start_idx + 1}–{end_idx} de {total} asignaciones &nbsp;|&nbsp; {badge_text}"
+            )
+            self.btn_toggle_selection.setEnabled(True)
+
+        # 2. Mutar el botón unificado según el estado de selección
+        if count == total and total > 0:
+            self.btn_toggle_selection.setText("Limpiar selección")
+            self.btn_toggle_selection.setToolTip("Deseleccionar todas las casillas de la asignación")
+            self.btn_toggle_selection.setIcon(Icons.limpiar("#DC2626"))
+        else:
+            self.btn_toggle_selection.setText("Seleccionar todo")
+            self.btn_toggle_selection.setToolTip("Seleccionar todas las casillas de la asignación")
+            self.btn_toggle_selection.setIcon(Icons.checkbox(Colors.PRIMARY))
+
+        # 3. Habilitar/deshabilitar botones de exportación
+        has_selection = (count > 0)
+        self.btn_excel.setEnabled(has_selection)
+        self.btn_pdf.setEnabled(has_selection)
+        self.btn_pdf_unified.setEnabled(has_selection)
+
+    def _on_toggle_selection(self):
+        """Alterna entre seleccionar todo o limpiar selección según el estado actual."""
+        total = len(self.detalles)
+        count = len(self.selected_ids)
+        if count == total and total > 0:
+            self._on_deselect_all_rows()
+        else:
+            self._on_select_all_rows()
+
+    def _on_table_item_changed(self, item):
+        """Reacciona en tiempo real a los cambios de casillas en la tabla y sincroniza el conjunto de IDs."""
+        if not self.detalles or item is None or item.column() != 0:
+            return
+        row = item.row()
+        start_idx = (self.current_page - 1) * self.page_size
+        global_idx = start_idx + row
+        if 0 <= global_idx < len(self.detalles):
+            d = self.detalles[global_idx]
+            d_id = d.get("lote_detalle_id")
+            if d_id is not None:
+                if item.checkState() == Qt.CheckState.Checked:
+                    self.selected_ids.add(d_id)
+                else:
+                    self.selected_ids.discard(d_id)
+        self._update_selection_controls()
+
+    def _on_select_all_rows(self):
+        """Marca todas las casillas de la asignación y selecciona todos los registros."""
+        self.selected_ids = {d.get("lote_detalle_id") for d in self.detalles if d.get("lote_detalle_id") is not None}
+        self.table_detalles.blockSignals(True)
+        try:
+            for r in range(self.table_detalles.rowCount()):
+                chk = self.table_detalles.item(r, 0)
+                if chk is not None:
+                    chk.setCheckState(Qt.CheckState.Checked)
+        finally:
+            self.table_detalles.blockSignals(False)
+        self._update_selection_controls()
+
+    def _on_deselect_all_rows(self):
+        """Desmarca todas las casillas de la tabla y limpia la selección."""
+        self.selected_ids.clear()
+        self.table_detalles.blockSignals(True)
+        try:
+            for r in range(self.table_detalles.rowCount()):
+                chk = self.table_detalles.item(r, 0)
+                if chk is not None:
+                    chk.setCheckState(Qt.CheckState.Unchecked)
+        finally:
+            self.table_detalles.blockSignals(False)
+        self._update_selection_controls()
+
+    def closeEvent(self, event):
+        """Garantiza la cancelación limpia de hilos y temporizadores al cerrar el diálogo."""
+        if hasattr(self, "_load_timer"):
+            self._load_timer.stop()
+        if hasattr(self, "_loading_dialog") and self._loading_dialog:
+            self._loading_dialog.accept()
+            self._loading_dialog = None
+        if hasattr(self, "_loader_worker") and self._loader_worker and self._loader_worker.isRunning():
+            self._loader_worker.terminate()
+            self._loader_worker.wait()
+        super().closeEvent(event)
+
+    def reject(self):
+        """Sobrescribe reject para limpiar hilos en caso de cierre con ESC o botón Cerrar."""
+        if hasattr(self, "_load_timer"):
+            self._load_timer.stop()
+        if hasattr(self, "_loading_dialog") and self._loading_dialog:
+            self._loading_dialog.accept()
+            self._loading_dialog = None
+        if hasattr(self, "_loader_worker") and self._loader_worker and self._loader_worker.isRunning():
+            self._loader_worker.terminate()
+            self._loader_worker.wait()
+        super().reject()
+
     def _get_selected_details(self) -> list:
-        """Returns detalles list filtered to checked rows."""
-        selected = []
-        for r in range(self.table_detalles.rowCount()):
-            if self.table_detalles.item(r, 0).checkState() == Qt.CheckState.Checked:
-                if r < len(self.detalles):
-                    selected.append(self.detalles[r])
-        return selected
+        """Returns detalles list filtered to checked rows across all pages."""
+        if not self.detalles:
+            return []
+        return [d for d in self.detalles if d.get("lote_detalle_id") in self.selected_ids]
 
     def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
         """Verifies RBAC permissions for dialog actions supporting both Direct DB and REST API."""
@@ -5528,6 +5833,17 @@ class LoteProcessingDialog(QDialog):
         if not selected:
             QMessageBox.warning(self, "Selección Vacía",
                                 "Por favor selecciona al menos una referencia.")
+            return
+
+        total_refs = len(selected)
+        confirm = GLMessageDialog.confirm(
+            parent=self,
+            title="Confirmar Generación de Excel",
+            message=f"¿Estás seguro de que deseas generar el archivo Excel con las {total_refs} referencia(s) seleccionada(s) del Lote #{self.lote_id}?",
+            confirm_text="Continuar",
+            cancel_text="Cancelar"
+        )
+        if not confirm:
             return
 
         import re
@@ -5584,6 +5900,17 @@ class LoteProcessingDialog(QDialog):
         if not selected:
             QMessageBox.warning(self, "Selección Vacía",
                                 "Por favor selecciona al menos una referencia.")
+            return
+
+        total_refs = len(selected)
+        confirm = GLMessageDialog.confirm(
+            parent=self,
+            title="Confirmar Generación de PDFs",
+            message=f"Se generarán y optimizarán archivos PDF individuales para {total_refs} referencia(s) seleccionada(s) del Lote #{self.lote_id}.\n\n¿Deseas continuar?",
+            confirm_text="Continuar",
+            cancel_text="Cancelar"
+        )
+        if not confirm:
             return
 
         dest_dir = GLFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Destino")
@@ -5654,6 +5981,17 @@ class LoteProcessingDialog(QDialog):
         if not selected:
             QMessageBox.warning(self, "Selección Vacía",
                                 "Por favor selecciona al menos una referencia.")
+            return
+
+        total_refs = len(selected)
+        confirm = GLMessageDialog.confirm(
+            parent=self,
+            title="Confirmar Unificación de PDFs",
+            message=f"Se unificarán y optimizarán {total_refs} referencia(s) seleccionada(s) en un único archivo PDF consolidado.\n\n¿Deseas continuar?",
+            confirm_text="Continuar",
+            cancel_text="Cancelar"
+        )
+        if not confirm:
             return
 
         import re

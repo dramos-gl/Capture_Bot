@@ -1,7 +1,7 @@
 """Orders Management View."""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QStackedWidget, QCheckBox, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QStackedWidget, QCheckBox, QFrame, QPushButton
 )
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components import (
@@ -91,6 +91,12 @@ class OrdersView(QWidget):
         self._current_search_text = ""
         self._current_estado_filter = "Todas"
         
+        # Pagination state
+        self.current_page = 1
+        self.page_size = 50
+        self._all_ordenes_data = []
+        self._filtered_ordenes_data = []
+
         # Edit mode state variables
         self._edit_mode = False
         self._editing_order_id = None
@@ -412,6 +418,33 @@ class OrdersView(QWidget):
         
         self.historial_card.add_widget(self.table_historial)
         
+        # Table Footer Pagination Layout (Golden Standard)
+        self.footer_layout = QHBoxLayout()
+        self.footer_layout.setContentsMargins(0, 8, 0, 0)
+        
+        self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 órdenes", variant="muted")
+        self.lbl_pagination_info.setObjectName("ordersPaginationInfo")
+        self.footer_layout.addWidget(self.lbl_pagination_info)
+        
+        self.footer_layout.addStretch()
+        
+        # Page size combobox (activación dinámica si total > 50)
+        self.cb_page_size = CustomComboBox(self)
+        self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
+        self.cb_page_size.setCurrentIndex(0) # Default 50 por página
+        self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
+        self.cb_page_size.setVisible(False)
+        self.footer_layout.addWidget(self.cb_page_size)
+        
+        # Pagination buttons wrapper
+        self.pagination_widget = QWidget(self)
+        self.pag_btn_layout = QHBoxLayout(self.pagination_widget)
+        self.pag_btn_layout.setContentsMargins(0, 0, 0, 0)
+        self.pag_btn_layout.setSpacing(4)
+        self.footer_layout.addWidget(self.pagination_widget)
+        
+        self.historial_card.layout.addLayout(self.footer_layout)
+        
         actions_layout = QHBoxLayout()
         self.lbl_table_hint = CustomLabel(
             "💡 Doble clic sobre cualquier orden para ver solicitudes, generar lotes Excel/PDF o Autorizar/Rechazar",
@@ -705,9 +738,76 @@ class OrdersView(QWidget):
         self.active_worker.start()
 
     def _on_historial_loaded(self, data):
-        self._all_ordenes_data = data
+        self._all_ordenes_data = data or []
+        self._apply_historial_filters(reset_page=True)
+
+    def _on_historial_error(self, err_msg):
+        QMessageBox.critical(self, "Error", f"No se pudo cargar el historial de órdenes:\n{err_msg}")
+    
+    def _on_historial_search(self, text: str):
+        self._current_search_text = text.strip().lower()
+        self._apply_historial_filters(reset_page=True)
+    
+    def _on_historial_state_change(self, state: str):
+        self._current_estado_filter = state
+        self._apply_historial_filters(reset_page=True)
+
+    def _on_page_size_changed(self, text: str):
+        if "50" in text:
+            self.page_size = 50
+        elif "100" in text:
+            self.page_size = 100
+        elif "200" in text:
+            self.page_size = 200
+        self.current_page = 1
+        self._apply_historial_filters(reset_page=True)
+
+    def _set_page(self, page_num: int):
+        self.current_page = page_num
+        self._apply_historial_filters(reset_page=False)
+
+    def _apply_historial_filters(self, reset_page: bool = False):
+        if reset_page:
+            self.current_page = 1
+
+        search_text = getattr(self, '_current_search_text', "").strip().lower()
+        estado_filter = getattr(self, '_current_estado_filter', "Todas")
+
+        # 1. Filter in-memory data
+        filtered = []
+        for o in getattr(self, '_all_ordenes_data', []):
+            if estado_filter != "Todas" and o.get("estado") != estado_filter:
+                continue
+
+            if search_text:
+                matched = (
+                    search_text in str(o.get("folio", "")).lower()
+                    or search_text in str(o.get("descripcion", "")).lower()
+                    or search_text in str(o.get("estado", "")).lower()
+                    or search_text in str(o.get("creador", "")).lower()
+                    or search_text in str(o.get("fecha_creacion", "")).lower()
+                )
+                if not matched:
+                    continue
+
+            filtered.append(o)
+
+        self._filtered_ordenes_data = filtered
+        total_items = len(self._filtered_ordenes_data)
+        total_pages = max(1, (total_items + self.page_size - 1) // self.page_size)
+
+        if self.current_page > total_pages:
+            self.current_page = total_pages
+        if self.current_page < 1:
+            self.current_page = 1
+
+        start_idx = (self.current_page - 1) * self.page_size
+        end_idx = min(start_idx + self.page_size, total_items)
+        page_slice = self._filtered_ordenes_data[start_idx:end_idx]
+
+        # 2. Populate table with page slice
         data_rows = []
-        for o in self._all_ordenes_data:
+        for o in page_slice:
             data_rows.append([
                 str(o["orden_id"]),
                 o["folio"],
@@ -718,46 +818,51 @@ class OrdersView(QWidget):
                 str(o["total_solicitadas"]),
                 str(o["total_generadas"])
             ])
-            
-        self.table_historial.populate_rows(data_rows, checkable_first_col=False)
-        self._apply_historial_filters()
 
-    def _on_historial_error(self, err_msg):
-        QMessageBox.critical(self, "Error", f"No se pudo cargar el historial de órdenes:\n{err_msg}")
-    
-    def _on_historial_search(self, text: str):
-        self._current_search_text = text.strip().lower()
-        self._apply_historial_filters()
-    
-    def _on_historial_state_change(self, state: str):
-        self._current_estado_filter = state
-        self._apply_historial_filters()
-    
-    def _apply_historial_filters(self):
-        search_text = getattr(self, '_current_search_text', "")
-        estado_filter = getattr(self, '_current_estado_filter', "Todas")
-        
-        for row in range(self.table_historial.rowCount()):
-            # Estado is in column 3
-            estado_item = self.table_historial.item(row, 3)
-            estado = estado_item.text() if estado_item else ""
-            
-            # 1. State Filter
-            state_match = True
-            if estado_filter != "Todas":
-                state_match = (estado == estado_filter)
-            
-            # 2. Text search across visible columns
-            text_match = True
-            if search_text:
-                text_match = False
-                for col in range(self.table_historial.columnCount()):
-                    item = self.table_historial.item(row, col)
-                    if item and search_text in item.text().lower():
-                        text_match = True
-                        break
-            
-            self.table_historial.setRowHidden(row, not (state_match and text_match))
+        self.table_historial.blockSignals(True)
+        self.table_historial.populate_rows(data_rows, checkable_first_col=False)
+        self.table_historial.blockSignals(False)
+
+        # 3. Update footer info
+        if total_items == 0:
+            self.lbl_pagination_info.setText("Mostrando 0 a 0 de 0 órdenes")
+        else:
+            self.lbl_pagination_info.setText(f"Mostrando {start_idx + 1} a {end_idx} de {total_items} órdenes")
+
+        # 4. Redraw pagination buttons (Golden Standard)
+        while self.pag_btn_layout.count():
+            item = self.pag_btn_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Activar dinámicamente el selector de densidad solo si el total supera el mínimo (50)
+        self.cb_page_size.setVisible(total_items > 50)
+
+        # Activar dinámicamente los botones de navegación solo si hay 2 o más páginas
+        if total_pages <= 1:
+            self.pagination_widget.setVisible(False)
+            return
+
+        self.pagination_widget.setVisible(True)
+
+        def add_page_btn(text: str, target: int, enabled: bool, is_active: bool = False):
+            btn = QPushButton(text)
+            btn.setEnabled(enabled)
+            if is_active:
+                btn.setObjectName("paginationActivePageBtn")
+            elif text in ("<<", "<", ">", ">>"):
+                btn.setObjectName("paginationNavBtn")
+            else:
+                btn.setObjectName("paginationPageBtn")
+            btn.clicked.connect(lambda _checked=False, t=target: self._set_page(t))
+            self.pag_btn_layout.addWidget(btn)
+
+        add_page_btn("<<", 1, self.current_page > 1)
+        add_page_btn("<", self.current_page - 1, self.current_page > 1)
+        add_page_btn(str(self.current_page), self.current_page, True, is_active=True)
+        add_page_btn(">", self.current_page + 1, self.current_page < total_pages)
+        add_page_btn(">>", total_pages, self.current_page < total_pages)
 
     def _on_row_double_clicked(self, row: int, column: int):
         if not (self._check_permission("ORDENES", "LEER") or self._check_permission("DERECHOS", "LEER")):

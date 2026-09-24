@@ -136,7 +136,7 @@ def run_tests():
         # Verify in GET
         r2 = requests.get(f"{BASE}/data/parametros")
         if r2.status_code == 200:
-            found = any(p.get("codigo") == "TEST_AUDIT_2026" for p in r2.json())
+            found = any(p.get("codigo") == test_codigo for p in r2.json())
             check("Parametro creado aparece en GET /data/parametros", found)
 
         # Update

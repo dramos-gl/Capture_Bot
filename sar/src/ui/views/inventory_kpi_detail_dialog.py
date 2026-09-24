@@ -14,6 +14,7 @@ from PySide6.QtGui import QColor, QAction
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
+from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
 from sar.src.ui.design_system.components.molecules.gl_menu import KeepOpenMenu
 from sar.src.ui.design_system.components.organisms.gl_data_table import StyledDataTable
@@ -25,19 +26,32 @@ from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
 
 
 class KPIDetailLoadWorker(QThread):
-    """Background worker thread to load KPI drill-down references from the DB."""
+    """Background worker thread to load KPI drill-down references from the DB.
+
+    Uses true server-side pagination (limit/offset) to avoid fetching large
+    datasets into Python memory. All dimensional filters are forwarded to the
+    DB/API layer instead of being applied client-side, matching the performance
+    model of InventoryLoadWorker in inventory_view.py.
+    """
     result_ready = Signal(list, int, dict)
     error_occurred = Signal(str)
 
     def __init__(
         self, inventario_ui_service, filter_assigned: str,
         concepto_id: Optional[int], rfc_id: Optional[int],
-        orden_ids: Optional[list], search_text: str = "",
+        orden_ids: Optional[list],
+        search_text: str = "",
         delegacion_nombre: Optional[str] = None,
         empresa_nombre: Optional[str] = None,
         concepto_nombre: Optional[str] = None,
         desarrollo_nombre: Optional[str] = None,
-        start_date: Optional[str] = None, end_date: Optional[str] = None
+        destino_nombre: Optional[str] = None,
+        asignado_a: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        # ── Server-side paging parameters ──────────────────────────────
+        limit: int = 100,
+        offset: int = 0,
     ):
         super().__init__()
         self.inventario_ui_service = inventario_ui_service
@@ -50,8 +64,12 @@ class KPIDetailLoadWorker(QThread):
         self.empresa_nombre = empresa_nombre
         self.concepto_nombre = concepto_nombre
         self.desarrollo_nombre = desarrollo_nombre
+        self.destino_nombre = destino_nombre
+        self.asignado_a = asignado_a
         self.start_date = start_date
         self.end_date = end_date
+        self.limit = limit
+        self.offset = offset
         self._is_cancelled = False
 
     def cancel(self):
@@ -61,10 +79,10 @@ class KPIDetailLoadWorker(QThread):
         try:
             if self._is_cancelled:
                 return
-            # Load matching records up to 10,000 for drill-down view
+            # ── True server-side pagination: DB/API only returns current page ──
             res = self.inventario_ui_service.get_referencias_facturadas_paginated(
-                limit=10000,
-                offset=0,
+                limit=self.limit,
+                offset=self.offset,
                 search_text=self.search_text,
                 concepto_id=self.concepto_id,
                 rfc_id=self.rfc_id,
@@ -73,6 +91,8 @@ class KPIDetailLoadWorker(QThread):
                 empresa_nombre=self.empresa_nombre,
                 concepto_nombre=self.concepto_nombre,
                 desarrollo_nombre=self.desarrollo_nombre,
+                destino_nombre=self.destino_nombre,
+                asignado_a=self.asignado_a,
                 start_date=self.start_date,
                 end_date=self.end_date,
                 orden_ids=self.orden_ids
@@ -89,6 +109,39 @@ class KPIDetailLoadWorker(QThread):
             )
             if not self._is_cancelled:
                 self.result_ready.emit(res.get("records", []), res.get("total_count", 0), summary)
+        except Exception as e:
+            if not self._is_cancelled:
+                self.error_occurred.emit(str(e))
+
+
+class KPIDimensionesWorker(QThread):
+    """Lightweight background worker that only fetches filter dropdown options
+    (empresas, conceptos, desarrollos, delegaciones) for the given state/orders.
+    Runs independently of the main data worker to avoid blocking the UI.
+    """
+    result_ready = Signal(dict)
+    error_occurred = Signal(str)
+
+    def __init__(self, inventario_ui_service, filter_assigned: str, orden_ids: Optional[list]):
+        super().__init__()
+        self.inventario_ui_service = inventario_ui_service
+        self.filter_assigned = filter_assigned
+        self.orden_ids = orden_ids
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        try:
+            if self._is_cancelled:
+                return
+            dims = self.inventario_ui_service.get_dimensiones_con_stock_facturadas(
+                filter_assigned=self.filter_assigned,
+                orden_ids=self.orden_ids
+            )
+            if not self._is_cancelled:
+                self.result_ready.emit(dims)
         except Exception as e:
             if not self._is_cancelled:
                 self.error_occurred.emit(str(e))
@@ -376,16 +429,30 @@ class InventoryKPIDetailDialog(QDialog):
         self.start_date = start_date
         self.end_date = end_date
 
-        self.all_records: List[Dict[str, Any]] = []
-        self.filtered_records: List[Dict[str, Any]] = []
         self.total_db_count: int = 0
         self.active_worker: Optional[KPIDetailLoadWorker] = None
+        self._dim_worker: Optional[KPIDimensionesWorker] = None
+
+        # ── Server-side pagination state ──────────────────────────────────
+        self.current_page: int = 1
+        self.page_size: int = 200
+        self._total_pages: int = 1
 
         # Debounce timer para búsqueda en Detalle KPI (700 ms)
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(700)
         self._search_timer.timeout.connect(self._on_search_trigger)
+
+        # Timer umbral de espera para feedback de carga (spinner solo si excede 750 ms)
+        self._load_timer = QTimer(self)
+        self._load_timer.setSingleShot(True)
+        self._load_timer.setInterval(750)
+        self._load_timer.timeout.connect(self._show_loading_dialog_if_needed)
+        self._loading_dialog: Optional[GLLoadingDialog] = None
+
+        # Flag to suppress filter-change signals during dropdown population
+        self._populating_dropdowns: bool = False
 
         # Resolve Title, State Filter & Colors
         if self.kpi_type == "disponibles":
@@ -651,11 +718,11 @@ class InventoryKPIDetailDialog(QDialog):
         # ── 4. Main Data Table with all asignacion_referencia fields ──────────
         headers = [
             "#", "Referencia", "Folio Orden", "Empresa", "Concepto",
-            "Delegación", "Importe", "Estado", "Intento", "Cliente",
+            "Delegación", "Estado", "Intento", "Cliente",
             "Crédito Titular", "Desarrollo", "Mz", "Lt", "Edif", "Viv",
             "Folio Electrónico", "No. Oficial", "P.A.", "Fecha Solicitud",
             "Fecha Reporte Notaría", "Fecha Ingreso RPP", "Fecha Escritura",
-            "Fecha Titulación", "Destino / Asignado A", "Tipo", "Solicitante",
+            "Fecha Titulación", "Destino / Asignado A", "Tipo",
             "Fecha Asignación", "Comentarios"
         ]
         self.table = StyledDataTable(headers, parent=self)
@@ -663,145 +730,169 @@ class InventoryKPIDetailDialog(QDialog):
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         root.addWidget(self.table)
 
-        # ── 5. Footer Layout ─────────────────────────────────────────────────
+        # ── 5. Footer Layout con Paginación Integrada (Idéntico a Inventario) ───
         footer = QHBoxLayout()
-        self.lbl_footer_info = CustomLabel("Cargando registros...", variant="muted")
+        self.lbl_footer_info = CustomLabel("Mostrando 0 a 0 de 0 derechos", variant="muted")
         footer.addWidget(self.lbl_footer_info)
         footer.addStretch()
+
+        # Selector de tamaño de página
+        self.cb_page_size = CustomComboBox(self)
+        self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
+        self.cb_page_size.setCurrentIndex(2)  # Default 200 por página
+        self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
+        footer.addWidget(self.cb_page_size)
+
+        # Contenedor de botones de navegación de página
+        self.pagination_widget = QWidget(self)
+        self.pag_btn_layout = QHBoxLayout(self.pagination_widget)
+        self.pag_btn_layout.setContentsMargins(0, 0, 0, 0)
+        footer.addWidget(self.pagination_widget)
+
+        root.addLayout(footer)
+
+        # ── 6. Botones de Acción Inferiores ───────────────────────────────────
+        actions_layout = QHBoxLayout()
+        actions_layout.addStretch()
 
         btn_close = CustomButton("Cerrar", is_secondary=True)
         btn_close.setFixedHeight(36)
         btn_close.clicked.connect(self.accept)
-        footer.addWidget(btn_close)
+        actions_layout.addWidget(btn_close)
 
-        root.addLayout(footer)
+        root.addLayout(actions_layout)
 
-        # Trigger initial loading smoothly after dialog is shown
-        QTimer.singleShot(50, self._load_data)
+        # Trigger: load dimension dropdowns + first data page
+        QTimer.singleShot(50, self._load_dimensiones)
+        QTimer.singleShot(80, self._load_data)
 
-    def _populate_filter_dropdowns(self):
-        """Populates the combo boxes dynamically with all dimensions that have stock in DB
-        under the active KPI state and selected orders, while preserving user selections.
-        """
+    def _get_active_filters(self) -> dict:
+        """Returns a dict with all currently active server-side filter parameters."""
         cur_emp = self.cb_empresa.currentText()
         cur_con = self.cb_concepto.currentText()
         cur_des = self.cb_desarrollo.currentText()
         cur_del = self.cb_delegacion.currentText()
-
-        # Sets iniciales basados en los registros cargados en memoria
-        empresas_set = {str(r.get("empresa") or "").strip() for r in self.all_records if r.get("empresa")}
-        conceptos_set = {str(r.get("concepto") or "").strip() for r in self.all_records if r.get("concepto")}
-        desarrollos_set = {str(r.get("desarrollo") or "").strip() for r in self.all_records if r.get("desarrollo")}
-        delegaciones_set = {str(r.get("delegacion") or "").strip() for r in self.all_records if r.get("delegacion")}
-
-        # Si aún no hemos cargado las dimensiones completas desde la BD para este estado/órdenes, consultarlas
-        if not hasattr(self, "_dimensiones_stock") or self._dimensiones_stock is None:
-            try:
-                self._dimensiones_stock = self.inventario_ui_service.get_dimensiones_con_stock_facturadas(
-                    filter_assigned=self.state_filter,
-                    orden_ids=self.selected_orden_ids
-                )
-            except Exception as e:
-                print(f"Advertencia al consultar dimensiones con stock: {e}")
-                self._dimensiones_stock = {}
-
-        for emp in self._dimensiones_stock.get("empresas", []):
-            if emp and emp.strip():
-                empresas_set.add(emp.strip())
-        for con in self._dimensiones_stock.get("conceptos", []):
-            if con and con.strip():
-                conceptos_set.add(con.strip())
-        for des in self._dimensiones_stock.get("desarrollos", []):
-            if des and des.strip():
-                desarrollos_set.add(des.strip())
-        for d in self._dimensiones_stock.get("delegaciones", []):
-            if d and d.strip():
-                delegaciones_set.add(d.strip())
-
-        empresas = sorted(empresas_set)
-        conceptos = sorted(conceptos_set)
-        desarrollos = sorted(desarrollos_set)
-        delegaciones = sorted(delegaciones_set)
-
-        self.cb_empresa.blockSignals(True)
-        self.cb_empresa.clear()
-        self.cb_empresa.addItem("Todas las empresas")
-        self.cb_empresa.addItems(empresas)
-        if cur_emp in empresas:
-            self.cb_empresa.setCurrentText(cur_emp)
-        elif self.initial_rfc_nombre in empresas:
-            self.cb_empresa.setCurrentText(self.initial_rfc_nombre)
-        self.cb_empresa.blockSignals(False)
-
-        self.cb_concepto.blockSignals(True)
-        self.cb_concepto.clear()
-        self.cb_concepto.addItem("Todos los conceptos")
-        self.cb_concepto.addItems(conceptos)
-        if cur_con in conceptos:
-            self.cb_concepto.setCurrentText(cur_con)
-        elif self.initial_concepto_nombre in conceptos:
-            self.cb_concepto.setCurrentText(self.initial_concepto_nombre)
-        self.cb_concepto.blockSignals(False)
-
-        self.cb_desarrollo.blockSignals(True)
-        self.cb_desarrollo.clear()
-        self.cb_desarrollo.addItem("Todos los desarrollos")
-        self.cb_desarrollo.addItems(desarrollos)
-        if cur_des in desarrollos:
-            self.cb_desarrollo.setCurrentText(cur_des)
-        self.cb_desarrollo.blockSignals(False)
-
-        self.cb_delegacion.blockSignals(True)
-        self.cb_delegacion.clear()
-        self.cb_delegacion.addItem("Todas las delegaciones")
-        self.cb_delegacion.addItems(delegaciones)
-        if cur_del in delegaciones:
-            self.cb_delegacion.setCurrentText(cur_del)
-        self.cb_delegacion.blockSignals(False)
-
-        # 6. Manejo dinámico de Destino Asignado según tipo de KPI
-        self.cb_destino.blockSignals(True)
         cur_dest = self.cb_destino.currentText()
-        self.cb_destino.clear()
+        is_asig_active = not self.labeled_asignado_a.isHidden()
+        asig_val = self.cb_asignado_a.currentText().strip() if is_asig_active else ""
+
+        return {
+            "empresa_nombre": cur_emp if cur_emp != "Todas las empresas" else None,
+            "concepto_nombre": cur_con if cur_con != "Todos los conceptos" else None,
+            "desarrollo_nombre": cur_des if cur_des != "Todos los desarrollos" else None,
+            "delegacion_nombre": cur_del if cur_del != "Todas las delegaciones" else None,
+            "destino_nombre": cur_dest if cur_dest not in ("Todos los destinos", "No aplica (Disponibles)") else None,
+            "asignado_a": asig_val if (asig_val and not (asig_val.upper().startswith("TODO") or asig_val.upper().startswith("TODA"))) else None,
+            "search_text": self.search_input.text().strip(),
+        }
+
+    def _load_dimensiones(self):
+        """Asynchronously fetches dimension options for dropdowns via a dedicated lightweight worker."""
+        if self._dim_worker and self._dim_worker.isRunning():
+            self._dim_worker.cancel()
+            self._dim_worker.wait()
+
+        self._dim_worker = KPIDimensionesWorker(
+            inventario_ui_service=self.inventario_ui_service,
+            filter_assigned=self.state_filter,
+            orden_ids=self.selected_orden_ids
+        )
+        self._dim_worker.result_ready.connect(self._on_dimensiones_loaded)
+        self._dim_worker.error_occurred.connect(self._on_dimensiones_error)
+        self._dim_worker.start()
+
+    def _on_dimensiones_loaded(self, dims: dict):
+        """Populates the filter combos from the server-returned dimension data."""
+        self._populating_dropdowns = True
+        try:
+            empresas = sorted([e for e in dims.get("empresas", []) if e and e.strip()])
+            conceptos = sorted([c for c in dims.get("conceptos", []) if c and c.strip()])
+            desarrollos = sorted([d for d in dims.get("desarrollos", []) if d and d.strip()])
+            delegaciones = sorted([d for d in dims.get("delegaciones", []) if d and d.strip()])
+
+            self.cb_empresa.blockSignals(True)
+            self.cb_empresa.clear()
+            self.cb_empresa.addItem("Todas las empresas")
+            self.cb_empresa.addItems(empresas)
+            if self.initial_rfc_nombre in empresas:
+                self.cb_empresa.setCurrentText(self.initial_rfc_nombre)
+            self.cb_empresa.blockSignals(False)
+
+            self.cb_concepto.blockSignals(True)
+            self.cb_concepto.clear()
+            self.cb_concepto.addItem("Todos los conceptos")
+            self.cb_concepto.addItems(conceptos)
+            if self.initial_concepto_nombre in conceptos:
+                self.cb_concepto.setCurrentText(self.initial_concepto_nombre)
+            self.cb_concepto.blockSignals(False)
+
+            self.cb_desarrollo.blockSignals(True)
+            self.cb_desarrollo.clear()
+            self.cb_desarrollo.addItem("Todos los desarrollos")
+            self.cb_desarrollo.addItems(desarrollos)
+            self.cb_desarrollo.blockSignals(False)
+
+            self.cb_delegacion.blockSignals(True)
+            self.cb_delegacion.clear()
+            self.cb_delegacion.addItem("Todas las delegaciones")
+            self.cb_delegacion.addItems(delegaciones)
+            self.cb_delegacion.blockSignals(False)
+
+            self._load_asignado_a_catalog()
+        finally:
+            self._populating_dropdowns = False
+
+    def _on_dimensiones_error(self, msg: str):
+        """Silently logs dimension loading errors without interrupting the user."""
+        print(f"[KPIDetailDialog] Advertencia al cargar dimensiones: {msg}")
+
+    def _load_asignado_a_catalog(self):
+        """Pre-loads the destinatario combo from the notarias/colaboradores catalogue.
+        Uses get_notarias() / get_colaboradores() instead of iterating record sets.
+        """
         if self.kpi_type == "disponibles":
-            # Por lógica de negocio, los derechos disponibles no cuentan con destino asignado
-            self.cb_destino.addItem("No aplica (Disponibles)")
-            self.cb_destino.setCurrentIndex(0)
-            self.cb_destino.setEnabled(False)
-            self.labeled_destino.setEnabled(False)
+            return
+        dest_val = self.cb_destino.currentText().strip().upper()
+        if dest_val == "NOTARIA":
+            try:
+                notarias = self.inventario_ui_service.get_notarias()
+                names = sorted({n.get("nombre", "").strip() for n in notarias if n.get("nombre")})
+                self.cb_asignado_a.blockSignals(True)
+                self.cb_asignado_a.clear()
+                self.cb_asignado_a.addItem("Todas las notarías")
+                self.cb_asignado_a.addItems(names)
+                self.cb_asignado_a.blockSignals(False)
+                self.labeled_asignado_a.setTitle("Notaría")
+                self.labeled_asignado_a.setVisible(True)
+            except Exception as e:
+                print(f"[KPIDetailDialog] Error cargando catálogo de notarías: {e}")
+        elif dest_val == "COLABORADOR":
+            try:
+                colaboradores = self.inventario_ui_service.get_colaboradores()
+                names = sorted({c.get("nombre", "").strip() for c in colaboradores if c.get("nombre")})
+                self.cb_asignado_a.blockSignals(True)
+                self.cb_asignado_a.clear()
+                self.cb_asignado_a.addItem("Todos los colaboradores")
+                self.cb_asignado_a.addItems(names)
+                self.cb_asignado_a.blockSignals(False)
+                self.labeled_asignado_a.setTitle("Colaborador")
+                self.labeled_asignado_a.setVisible(True)
+            except Exception as e:
+                print(f"[KPIDetailDialog] Error cargando catálogo de colaboradores: {e}")
         else:
-            self.cb_destino.setEnabled(True)
-            self.labeled_destino.setEnabled(True)
-            # Extraer los destinos asignados reales presentes en los registros o catálogo
-            destinos_encontrados = set()
-            for r in self.all_records:
-                tipo = str(r.get("tipo_asignacion") or "").strip().upper()
-                if tipo:
-                    destinos_encontrados.add(tipo)
-            
-            destinos_opciones = ["Todos los destinos"]
-            # Añadir opciones estándar si existen o están en el catálogo
-            for d_opt in ["NOTARIA", "COLABORADOR", "SIN ASIGNAR"]:
-                if d_opt in destinos_encontrados or self.kpi_type == "total":
-                    if d_opt not in destinos_opciones:
-                        destinos_opciones.append(d_opt)
-            # Agregar cualquier otro destino encontrado no estándar
-            for d_custom in sorted(destinos_encontrados):
-                if d_custom not in destinos_opciones:
-                    destinos_opciones.append(d_custom)
+            self.cb_asignado_a.blockSignals(True)
+            self.cb_asignado_a.clear()
+            self.cb_asignado_a.addItem("Todos")
+            self.cb_asignado_a.setCurrentIndex(0)
+            self.cb_asignado_a.blockSignals(False)
+            self.labeled_asignado_a.setVisible(False)
 
-            self.cb_destino.addItems(destinos_opciones)
-            if cur_dest in destinos_opciones:
-                self.cb_destino.setCurrentText(cur_dest)
-            else:
-                self.cb_destino.setCurrentIndex(0)
-        self.cb_destino.blockSignals(False)
-
-        # 7. Actualizar combo dinámico de destinatario según el destino seleccionado
-        self._update_dynamic_asignado_combo(preserve_selection=True)
+        # El combo de Destino Asignado se inicializa estáticamente en __init__.
+        # No requiere re-population desde dimensiones (sus opciones son fijas: NOTARIA, COLABORADOR, SIN ASIGNAR).
+        # Solo el sub-combo 'Destinatario' se carga desde catálogo cuando el usuario selecciona destino.
 
     def _show_order_filter_menu(self):
-        """Displays the popup menu for selecting orders."""
+        """Displays the popup menu for selecting generation orders."""
         if not self.todas_las_ordenes:
             QMessageBox.information(self, "Sin Órdenes", "No hay órdenes disponibles para filtrar.")
             return
@@ -821,7 +912,7 @@ class InventoryKPIDetailDialog(QDialog):
 
         def toggle_all(checked):
             if checked:
-                self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
+                self.selected_orden_ids = [ord_["orden_id"] for ord_ in self.todas_las_ordenes]
             else:
                 self.selected_orden_ids = []
 
@@ -831,8 +922,8 @@ class InventoryKPIDetailDialog(QDialog):
                 act.blockSignals(False)
 
             self.lbl_metric_ordenes.setText(f"Órdenes: {len(self.selected_orden_ids)} sel.")
-            self._dimensiones_stock = None
-            self._load_data()
+            self._load_dimensiones()
+            self._load_data(reset_page=True)
 
         action_all.toggled.connect(toggle_all)
         menu.addAction(action_all)
@@ -855,8 +946,8 @@ class InventoryKPIDetailDialog(QDialog):
                             self.selected_orden_ids.remove(target_oid)
                     update_all_action_state()
                     self.lbl_metric_ordenes.setText(f"Órdenes: {len(self.selected_orden_ids)} sel.")
-                    self._dimensiones_stock = None
-                    self._load_data()
+                    self._load_dimensiones()
+                    self._load_data(reset_page=True)
                 return handler
 
             action.triggered.connect(make_toggle_handler(oid))
@@ -864,34 +955,53 @@ class InventoryKPIDetailDialog(QDialog):
 
         menu.exec(self.btn_filter_orden.mapToGlobal(self.btn_filter_orden.rect().bottomLeft()))
 
-    def _on_dimension_filter_changed(self, text: str = ""):
-        """Invoked when user chooses a specific dimension (empresa, concepto, desarrollo, delegacion).
-        Re-queries from server to retrieve 100% of matching records directly from DB/API, avoiding 10k truncation.
+    def _on_dimension_filter_changed(self, _text: str = ""):
+        """Triggered when empresa/concepto/desarrollo/delegación combos change.
+        Resets to page 1 and triggers a new server-side query with updated filters.
         """
-        self._load_data()
+        if self._populating_dropdowns:
+            return
+        self._load_data(reset_page=True)
 
-    def _on_delegacion_changed(self, text: str = ""):
-        self._on_dimension_filter_changed(text)
+    def _show_loading_dialog_if_needed(self):
+        """Displays a modal loading dialog only if a server query exceeds the threshold limit (750 ms)."""
+        if self.active_worker and self.active_worker.isRunning():
+            if not self._loading_dialog:
+                self._loading_dialog = GLLoadingDialog("Cargando registros\ndel inventario...", self)
+            self._loading_dialog.show()
 
-    def _load_data(self):
-        """Asynchronously queries references from the database."""
+    def _load_data(self, reset_page: bool = True):
+        """Triggers an asynchronous server-side data load for the current page.
+
+        All active filters are forwarded to the DB/API layer so only the
+        records for the visible page are transferred to Python.
+
+        Args:
+            reset_page: If True, resets current_page to 1 before loading.
+                        Pass False when navigating between pages.
+        """
+        if self._populating_dropdowns:
+            return
+
+        if hasattr(self, "_load_timer"):
+            self._load_timer.stop()
+
         if self.active_worker and self.active_worker.isRunning():
             self.active_worker.cancel()
             self.active_worker.wait()
 
-        self._loading_dialog = GLLoadingDialog("Cargando registros\ndel inventario...", self)
+        if self._loading_dialog:
+            self._loading_dialog.accept()
+            self._loading_dialog = None
 
-        cur_del = self.cb_delegacion.currentText()
-        delegacion_param = cur_del if (cur_del and cur_del != "Todas las delegaciones") else None
+        if reset_page:
+            self.current_page = 1
 
-        cur_emp = self.cb_empresa.currentText()
-        empresa_param = cur_emp if (cur_emp and cur_emp != "Todas las empresas") else None
+        offset = (self.current_page - 1) * self.page_size
+        filters = self._get_active_filters()
 
-        cur_con = self.cb_concepto.currentText()
-        concepto_param = cur_con if (cur_con and cur_con != "Todos los conceptos") else None
-
-        cur_des = self.cb_desarrollo.currentText()
-        desarrollo_param = cur_des if (cur_des and cur_des != "Todos los desarrollos") else None
+        self.lbl_footer_info.setText("Cargando derechos...")
+        self.pagination_widget.setEnabled(False)
 
         self.active_worker = KPIDetailLoadWorker(
             inventario_ui_service=self.inventario_ui_service,
@@ -899,31 +1009,56 @@ class InventoryKPIDetailDialog(QDialog):
             concepto_id=None,
             rfc_id=None,
             orden_ids=self.selected_orden_ids,
-            search_text="",
-            delegacion_nombre=delegacion_param,
-            empresa_nombre=empresa_param,
-            concepto_nombre=concepto_param,
-            desarrollo_nombre=desarrollo_param,
+            search_text=filters["search_text"],
+            delegacion_nombre=filters["delegacion_nombre"],
+            empresa_nombre=filters["empresa_nombre"],
+            concepto_nombre=filters["concepto_nombre"],
+            desarrollo_nombre=filters["desarrollo_nombre"],
+            destino_nombre=filters["destino_nombre"],
+            asignado_a=filters["asignado_a"],
             start_date=self.start_date,
-            end_date=self.end_date
+            end_date=self.end_date,
+            limit=self.page_size,
+            offset=offset,
         )
         self.active_worker.result_ready.connect(self._on_data_loaded)
         self.active_worker.error_occurred.connect(self._on_data_error)
         self.active_worker.start()
-        self._loading_dialog.exec()
+
+        # Activar spinner únicamente si la consulta supera el tiempo prudente de espera (750 ms)
+        if hasattr(self, "_load_timer"):
+            self._load_timer.start()
 
     def _on_data_loaded(self, records: list, total_count: int, summary: dict):
-        if hasattr(self, "_loading_dialog") and self._loading_dialog:
-            self._loading_dialog.accept()
+        """Handles data received from the worker.
 
-        self.all_records = records
+        'records' is already the slice for the current page (only page_size items).
+        'total_count' is the total number of matching records in the DB.
+        No client-side filtering is performed.
+        """
+        if hasattr(self, "_load_timer"):
+            self._load_timer.stop()
+
+        if self._loading_dialog:
+            self._loading_dialog.accept()
+            self._loading_dialog = None
+
+        self.pagination_widget.setEnabled(True)
         self.total_db_count = total_count
-        self._populate_filter_dropdowns()
-        self._apply_filter_and_populate()
+        self._total_pages = max(1, (total_count + self.page_size - 1) // self.page_size)
+        self.lbl_metric_count.setText(f"Total Registros: {total_count:,}")
+        self._render_page(records, total_count)
 
     def _on_data_error(self, error_msg: str):
-        if hasattr(self, "_loading_dialog") and self._loading_dialog:
+        if hasattr(self, "_load_timer"):
+            self._load_timer.stop()
+
+        if self._loading_dialog:
             self._loading_dialog.accept()
+            self._loading_dialog = None
+
+        self.pagination_widget.setEnabled(True)
+        self.lbl_footer_info.setText("Error al cargar derechos.")
         QMessageBox.critical(self, "Error al Cargar Detalle", f"Ocurrió un error al consultar los datos:\n{error_msg}")
 
     def _on_search_text_changed(self, text: str):
@@ -939,156 +1074,97 @@ class InventoryKPIDetailDialog(QDialog):
     def _on_search_trigger(self):
         if hasattr(self, "_search_timer"):
             self._search_timer.stop()
-        self._apply_filter_and_populate()
+        self._load_data(reset_page=True)
 
     def _on_filter_changed(self, _text: str = ""):
-        self._apply_filter_and_populate()
+        if self._populating_dropdowns:
+            return
+        self._load_data(reset_page=True)
 
     def _on_destino_changed(self, _text: str = ""):
-        self._update_dynamic_asignado_combo(preserve_selection=False)
-        self._apply_filter_and_populate()
+        if self._populating_dropdowns:
+            return
+        self._load_asignado_a_catalog()
+        self._load_data(reset_page=True)
 
-    def _update_dynamic_asignado_combo(self, preserve_selection: bool = True):
-        """Dynamically populates cb_asignado_a depending on cb_destino selection (NOTARIA / COLABORADOR).
-        If NOTARIA is chosen, shows notarías from loaded records.
-        If COLABORADOR is chosen, shows colaboradores from loaded records.
-        Otherwise, hides the combo box.
+
+
+    def _on_page_size_changed(self, text: str):
+        """Adjusts page size and reloads page 1 from the server."""
+        if "50" in text:
+            self.page_size = 50
+        elif "100" in text:
+            self.page_size = 100
+        else:
+            self.page_size = 200
+        self.current_page = 1
+        self._load_data(reset_page=True)
+
+    def _set_page(self, page: int):
+        """Navigates to a specific page by triggering a new server-side load."""
+        if page < 1:
+            page = 1
+        if page > self._total_pages:
+            page = self._total_pages
+        if page == self.current_page:
+            return
+        self.current_page = page
+        self._load_data(reset_page=False)
+
+    def _render_page(self, page_records: list, total_count: int):
+        """Renders only the provided page records into the table.
+        No in-memory filtering required: all filtering happened server-side.
         """
-        dest_val = self.cb_destino.currentText().strip().upper()
-        cur_selection = self.cb_asignado_a.currentText().strip() if preserve_selection else ""
+        total_pages = max(1, (total_count + self.page_size - 1) // self.page_size)
+        self._total_pages = total_pages
+        start_idx = (self.current_page - 1) * self.page_size
+        end_idx = min(start_idx + len(page_records), total_count)
 
-        self.cb_asignado_a.blockSignals(True)
-        self.cb_asignado_a.clear()
-
-        if dest_val == "NOTARIA":
-            self.labeled_asignado_a.setTitle("Notaría")
-            notarias = set()
-            for r in self.all_records:
-                if str(r.get("tipo_asignacion") or "").strip().upper() == "NOTARIA":
-                    asig_name = (r.get("asignado_a") or "").strip()
-                    if asig_name:
-                        notarias.add(asig_name)
-            items = ["Todas las notarías"] + sorted(notarias)
-            self.cb_asignado_a.addItems(items)
-            if cur_selection in items:
-                self.cb_asignado_a.setCurrentText(cur_selection)
-            else:
-                self.cb_asignado_a.setCurrentIndex(0)
-            self.labeled_asignado_a.setVisible(True)
-        elif dest_val == "COLABORADOR":
-            self.labeled_asignado_a.setTitle("Colaborador")
-            colaboradores = set()
-            for r in self.all_records:
-                if str(r.get("tipo_asignacion") or "").strip().upper() == "COLABORADOR":
-                    asig_name = (r.get("asignado_a") or "").strip()
-                    if asig_name:
-                        colaboradores.add(asig_name)
-            items = ["Todos los colaboradores"] + sorted(colaboradores)
-            self.cb_asignado_a.addItems(items)
-            if cur_selection in items:
-                self.cb_asignado_a.setCurrentText(cur_selection)
-            else:
-                self.cb_asignado_a.setCurrentIndex(0)
-            self.labeled_asignado_a.setVisible(True)
+        # Footer info
+        if total_count == 0:
+            self.lbl_footer_info.setText("Mostrando 0 a 0 de 0 derechos")
         else:
-            self.cb_asignado_a.addItem("Todos")
-            self.cb_asignado_a.setCurrentIndex(0)
-            self.labeled_asignado_a.setVisible(False)
-
-        self.cb_asignado_a.blockSignals(False)
-
-    def _apply_filter_and_populate(self):
-        query = self.search_input.text().strip().upper()
-        emp_filter = self.cb_empresa.currentText()
-        con_filter = self.cb_concepto.currentText()
-        des_filter = self.cb_desarrollo.currentText()
-        del_filter = self.cb_delegacion.currentText()
-        dest_filter = self.cb_destino.currentText()
-        is_asig_active = not self.labeled_asignado_a.isHidden()
-        asig_filter = self.cb_asignado_a.currentText().strip() if is_asig_active else ""
-
-        self.filtered_records = []
-        for r in self.all_records:
-            # Check Empresa
-            if emp_filter != "Todas las empresas" and (r.get("empresa") or "").strip() != emp_filter:
-                continue
-            # Check Concepto
-            if con_filter != "Todos los conceptos" and (r.get("concepto") or "").strip() != con_filter:
-                continue
-            # Check Desarrollo
-            if des_filter != "Todos los desarrollos" and (r.get("desarrollo") or "").strip() != des_filter:
-                continue
-            # Check Delegación
-            if del_filter != "Todas las delegaciones" and (r.get("delegacion") or "").strip() != del_filter:
-                continue
-            # Check Destino Asignado
-            if dest_filter and dest_filter not in ("Todos los destinos", "No aplica (Disponibles)"):
-                if dest_filter == "NOTARIA":
-                    if str(r.get("tipo_asignacion") or "").upper() != "NOTARIA":
-                        continue
-                elif dest_filter == "COLABORADOR":
-                    if str(r.get("tipo_asignacion") or "").upper() != "COLABORADOR":
-                        continue
-                elif dest_filter == "SIN ASIGNAR":
-                    if r.get("asignada") or r.get("tipo_asignacion"):
-                        continue
-                else:
-                    if str(r.get("tipo_asignacion") or "").upper() != dest_filter.upper():
-                        continue
-
-            # Check Destinatario Asignado Dinámico (Notaría / Colaborador)
-            if asig_filter and not (asig_filter.upper().startswith("TODO") or asig_filter.upper().startswith("TODA")):
-                if (r.get("asignado_a") or "").strip().upper() != asig_filter.upper():
-                    continue
-
-            # Text search filter
-            if query:
-                haystack = " ".join([
-                    str(r.get("referencia_portal", "")),
-                    str(r.get("folio_orden", "")),
-                    str(r.get("empresa", "")),
-                    str(r.get("concepto", "")),
-                    str(r.get("delegacion", "")),
-                    str(r.get("cliente", "")),
-                    str(r.get("credito_titular", "")),
-                    str(r.get("desarrollo", "")),
-                    str(r.get("folio_electronico", "")),
-                    str(r.get("no_oficial", "")),
-                    str(r.get("pa", "")),
-                    str(r.get("asignado_a", "")),
-                    str(r.get("solicitante_externo", "")),
-                    str(r.get("comentarios", "")),
-                    str(r.get("intento", ""))
-                ]).upper()
-                if query not in haystack:
-                    continue
-
-            self.filtered_records.append(r)
-
-        # Update metric chips
-        self.lbl_metric_count.setText(f"Total Registros: {len(self.filtered_records):,}")
-        if self.total_db_count > len(self.all_records):
             self.lbl_footer_info.setText(
-                f"Mostrando {len(self.filtered_records)} de {len(self.all_records)} cargados (Total en BD: {self.total_db_count:,})"
+                f"Mostrando {start_idx + 1} a {end_idx} de {total_count} derechos"
             )
-        else:
-            self.lbl_footer_info.setText(f"Mostrando {len(self.filtered_records)} de {len(self.all_records)} registros")
 
-        # Populate table
+        # Actualizar botones de paginación
+        while self.pag_btn_layout.count():
+            item = self.pag_btn_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        def add_page_btn(text: str, target: int, enabled: bool, is_active: bool = False):
+            btn = QPushButton(text)
+            btn.setEnabled(enabled)
+            if is_active:
+                btn.setObjectName("paginationActivePageBtn")
+            elif text in ("<<", "<", ">", ">>"):
+                btn.setObjectName("paginationNavBtn")
+            else:
+                btn.setObjectName("paginationPageBtn")
+            btn.clicked.connect(lambda _checked=False, t=target: self._set_page(t))
+            self.pag_btn_layout.addWidget(btn)
+
+        add_page_btn("<<", 1, self.current_page > 1)
+        add_page_btn("<", self.current_page - 1, self.current_page > 1)
+        add_page_btn(str(self.current_page), self.current_page, True, is_active=True)
+        add_page_btn(">", self.current_page + 1, self.current_page < total_pages)
+        add_page_btn(">>", total_pages, self.current_page < total_pages)
+
+        # Build table rows for current page
         table_rows = []
-        for idx, r in enumerate(self.filtered_records, 1):
+        for offset_idx, r in enumerate(page_records, start=1):
+            global_idx = start_idx + offset_idx
             estado_code = r.get("estado_codigo") or ("ASIGNADA" if r.get("asignada") else "FACTURADA")
-            imp_val = r.get("importe")
-            imp_str = f"${float(imp_val):,.2f}" if imp_val else "$0.00"
 
             table_rows.append([
-                str(idx),
+                str(global_idx),
                 str(r.get("referencia_portal", "")),
                 str(r.get("folio_orden", "")),
                 str(r.get("empresa", "")),
                 str(r.get("concepto", "")),
                 str(r.get("delegacion", "")),
-                imp_str,
                 estado_code,
                 str(r.get("intento", "") or "1"),
                 str(r.get("cliente", "")),
@@ -1108,12 +1184,15 @@ class InventoryKPIDetailDialog(QDialog):
                 str(r.get("fecha_titulacion", "")),
                 str(r.get("asignado_a") or r.get("procesado_por") or "Sin Asignar"),
                 str(r.get("tipo_asignacion", "")),
-                str(r.get("solicitante_externo", "")),
                 str(r.get("fecha_asignacion", "")),
                 str(r.get("comentarios", ""))
             ])
 
-        self.table.populate_rows(table_rows, checkable_first_col=False)
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.populate_rows(table_rows, checkable_first_col=False)
+        finally:
+            self.table.setUpdatesEnabled(True)
 
     def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
         """Helper to verify if current session/user holds permission for modulo + accion."""
@@ -1138,8 +1217,9 @@ class InventoryKPIDetailDialog(QDialog):
             return False
 
     def _on_export_excel(self):
-        """Asynchronously generates an official styled Excel spreadsheet with the filtered records and displays a loading spinner.
-        If total database records exceed the initial memory buffer (10k), fetches the 100% complete dataset directly from DB/API.
+        """Asynchronously generates an official styled Excel spreadsheet.
+        Always fetches the COMPLETE dataset from DB/API (limit=None) via the
+        ExcelWorker, regardless of the current page, ensuring 100% export.
         """
         if not (self._check_permission("CTRL:INVENTARIO", "EJECUTAR") or self._check_permission("REFERENCIAS", "EJECUTAR")):
             QMessageBox.warning(
@@ -1148,19 +1228,17 @@ class InventoryKPIDetailDialog(QDialog):
                 "No tiene permisos para exportar el detalle de inventario a Excel (CTRL:INVENTARIO:EJECUTAR)."
             )
             return
-        if not self.filtered_records:
+
+        if self.total_db_count == 0:
             QMessageBox.warning(self, "Sin Registros", "No hay registros disponibles para exportar.")
             return
 
-        # Determine total records to export and prepare confirmation prompt
-        needs_full_fetch = (self.total_db_count > len(self.all_records))
-        records_to_export_count = self.total_db_count if needs_full_fetch else len(self.filtered_records)
+        filters = self._get_active_filters()
 
-        # Build confirmation message detailing scope and active filters
         confirm_lines = [
             f"¿Desea exportar el reporte de {self.title_text} a Excel?",
             "",
-            f"• Registros a exportar: {records_to_export_count:,}",
+            f"• Registros a exportar: {self.total_db_count:,}",
             f"• Empresa: {self.cb_empresa.currentText()}",
             f"• Concepto: {self.cb_concepto.currentText()}",
             f"• Delegación: {self.cb_delegacion.currentText()}",
@@ -1168,13 +1246,12 @@ class InventoryKPIDetailDialog(QDialog):
             f"• Destino: {self.cb_destino.currentText()}",
         ]
         is_asig_active = not self.labeled_asignado_a.isHidden()
-        if is_asig_active and not (self.cb_asignado_a.currentText().strip().upper().startswith("TODO") or self.cb_asignado_a.currentText().strip().upper().startswith("TODA")):
+        if is_asig_active and filters.get("asignado_a"):
             confirm_lines.append(f"• {self.labeled_asignado_a.title()}: {self.cb_asignado_a.currentText()}")
         if self.selected_orden_ids:
             confirm_lines.append(f"• Órdenes seleccionadas: {len(self.selected_orden_ids)}")
-        search_query = self.search_input.text().strip()
-        if search_query:
-            confirm_lines.append(f"• Texto de búsqueda: \"{search_query}\"")
+        if filters.get("search_text"):
+            confirm_lines.append(f"• Texto de búsqueda: \"{filters['search_text']}\"")
 
         confirm_msg = "\n".join(confirm_lines)
         reply = QMessageBox.question(
@@ -1194,58 +1271,37 @@ class InventoryKPIDetailDialog(QDialog):
         if not save_path:
             return
 
-        fetch_params = None
-        service_for_worker = None
+        self._export_loading_dialog = GLLoadingDialog(
+            f"Descargando {self.total_db_count:,} registros y\ngenerando reporte de Excel...", self
+        )
 
-        cur_asig = self.cb_asignado_a.currentText().strip() if is_asig_active else None
-        asig_param = cur_asig if (cur_asig and not (cur_asig.upper().startswith("TODO") or cur_asig.upper().startswith("TODA"))) else None
-
-        if needs_full_fetch:
-            self._export_loading_dialog = GLLoadingDialog(
-                f"Descargando {self.total_db_count:,} registros y\ngenerando reporte de Excel...", self
-            )
-            cur_del = self.cb_delegacion.currentText()
-            del_param = cur_del if (cur_del and cur_del != "Todas las delegaciones") else None
-            cur_emp = self.cb_empresa.currentText()
-            emp_param = cur_emp if (cur_emp and cur_emp != "Todas las empresas") else None
-            cur_con = self.cb_concepto.currentText()
-            con_param = cur_con if (cur_con and cur_con != "Todos los conceptos") else None
-            cur_des = self.cb_desarrollo.currentText()
-            des_param = cur_des if (cur_des and cur_des != "Todos los desarrollos") else None
-            cur_dest = self.cb_destino.currentText()
-            dest_param = cur_dest if (cur_dest and cur_dest not in ("Todos los destinos", "No aplica (Disponibles)")) else None
-
-            fetch_params = {
-                "filter_assigned": self.state_filter,
-                "concepto_id": None,
-                "rfc_id": None,
-                "orden_ids": self.selected_orden_ids,
-                "search_text": "",
-                "delegacion_nombre": del_param,
-                "empresa_nombre": emp_param,
-                "concepto_nombre": con_param,
-                "desarrollo_nombre": des_param,
-                "destino_nombre": dest_param,
-                "asignado_a": asig_param,
-                "start_date": self.start_date,
-                "end_date": self.end_date,
-                "client_search": self.search_input.text().strip()
-            }
-            service_for_worker = self.inventario_ui_service
-        else:
-            self._export_loading_dialog = GLLoadingDialog("Generando y formateando\nreporte de Excel...", self)
+        fetch_params = {
+            "filter_assigned": self.state_filter,
+            "concepto_id": None,
+            "rfc_id": None,
+            "orden_ids": self.selected_orden_ids,
+            "search_text": filters.get("search_text", ""),
+            "delegacion_nombre": filters.get("delegacion_nombre"),
+            "empresa_nombre": filters.get("empresa_nombre"),
+            "concepto_nombre": filters.get("concepto_nombre"),
+            "desarrollo_nombre": filters.get("desarrollo_nombre"),
+            "destino_nombre": filters.get("destino_nombre"),
+            "asignado_a": filters.get("asignado_a"),
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+        }
 
         self._export_worker = KPIDetailExcelWorker(
             save_path=save_path,
-            filtered_records=list(self.filtered_records) if not needs_full_fetch else [],
+            filtered_records=[],
             title_text=self.title_text,
             rfc_nombre=self.cb_empresa.currentText(),
             concepto_nombre=self.cb_concepto.currentText(),
             desarrollo_nombre=self.cb_desarrollo.currentText(),
             delegacion_nombre=self.cb_delegacion.currentText(),
             destino_nombre=self.cb_destino.currentText(),
-            asignado_a_nombre=asig_param,
-            inventario_ui_service=service_for_worker,
+            asignado_a_nombre=filters.get("asignado_a"),
+            inventario_ui_service=self.inventario_ui_service,
             fetch_params=fetch_params
         )
         self._export_worker.finished_success.connect(self._on_export_success)
@@ -1265,3 +1321,37 @@ class InventoryKPIDetailDialog(QDialog):
         if hasattr(self, "_export_loading_dialog") and self._export_loading_dialog:
             self._export_loading_dialog.accept()
         QMessageBox.critical(self, "Error al Exportar", f"No se pudo guardar el archivo Excel:\n{error_msg}")
+
+    def closeEvent(self, event):
+        """Ensures background threads and timers are cancelled cleanly upon closing the dialog."""
+        if hasattr(self, "_load_timer"):
+            self._load_timer.stop()
+        if hasattr(self, "_search_timer"):
+            self._search_timer.stop()
+        if self._loading_dialog:
+            self._loading_dialog.accept()
+            self._loading_dialog = None
+        if self.active_worker and self.active_worker.isRunning():
+            self.active_worker.cancel()
+            self.active_worker.wait()
+        if self._dim_worker and self._dim_worker.isRunning():
+            self._dim_worker.cancel()
+            self._dim_worker.wait()
+        super().closeEvent(event)
+
+    def reject(self):
+        """Overrides reject (ESC or close) to clean up worker threads."""
+        if hasattr(self, "_load_timer"):
+            self._load_timer.stop()
+        if hasattr(self, "_search_timer"):
+            self._search_timer.stop()
+        if self._loading_dialog:
+            self._loading_dialog.accept()
+            self._loading_dialog = None
+        if self.active_worker and self.active_worker.isRunning():
+            self.active_worker.cancel()
+            self.active_worker.wait()
+        if self._dim_worker and self._dim_worker.isRunning():
+            self._dim_worker.cancel()
+            self._dim_worker.wait()
+        super().reject()
