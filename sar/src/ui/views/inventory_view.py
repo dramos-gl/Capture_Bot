@@ -11,7 +11,7 @@ from PySide6.QtGui import QColor, QDesktopServices, QAction
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomSpinBox,
     LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid, GLLoadingDialog,
-    GLMessageBox as QMessageBox, GLInfoBanner, GLFileDialog
+    CircularSpinner, GLMessageBox as QMessageBox, GLInfoBanner, GLFileDialog
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.theme_manager import Colors, ThemeManager
@@ -275,20 +275,57 @@ class PdfWorker(QThread):
             valid = [p for p in pdf_paths if p and os.path.exists(p)]
             if not valid:
                 return False
-            if len(valid) == 1:
-                shutil.copy2(valid[0], dest_path)
-            else:
+
+            # Intentar optimización inteligente con pypdf
+            try:
                 writer = PdfWriter()
                 for pp in valid:
+                    reader = PdfReader(pp)
+                    for page in reader.pages:
+                        writer.add_page(page)
+
+                # 1. Deduplicar objetos compartidos
+                try:
+                    writer.compress_identical_objects(remove_identicals=True, remove_orphans=True)
+                except Exception:
+                    pass
+
+                # 2. Comprimir streams de contenido por página
+                for page in writer.pages:
                     try:
-                        reader = PdfReader(pp)
-                        for page in reader.pages:
-                            writer.add_page(page)
+                        page.compress_content_streams()
                     except Exception:
                         pass
+
                 with open(dest_path, "wb") as f:
                     writer.write(f)
-            return True
+
+                # Si era un solo archivo y la optimización resultó más pesada que el original, conservar el original
+                if len(valid) == 1 and os.path.exists(dest_path):
+                    orig_size = os.path.getsize(valid[0])
+                    dest_size = os.path.getsize(dest_path)
+                    if dest_size > orig_size:
+                        shutil.copy2(valid[0], dest_path)
+
+                return True
+
+            except Exception:
+                # Fallback de máxima seguridad: copia directa o unión estándar
+                try:
+                    if len(valid) == 1:
+                        shutil.copy2(valid[0], dest_path)
+                        return True
+                    else:
+                        fallback_writer = PdfWriter()
+                        for pp in valid:
+                            r = PdfReader(pp)
+                            for p in r.pages:
+                                fallback_writer.add_page(p)
+                        with open(dest_path, "wb") as f_fb:
+                            fallback_writer.write(f_fb)
+                        return True
+                except Exception:
+                    return False
 
         def clean_folder_name(name: str) -> str:
             cleaned = re.sub(r'[\\/:*?"<>|]', '_', name or "").strip()
@@ -466,14 +503,55 @@ class PdfUnifiedWorker(QThread):
 
         # Write the unified PDF only if we have pages
         write_success = False
+        file_size_bytes = 0
+        file_size_formatted = ""
+        compression_applied = False
+
         if total_pages > 0:
+            # Opción C: Compresión inteligente (deduplicación y compresión de flujos)
+            try:
+                # 1. Deduplicar objetos compartidos (mismas fuentes, logos o plantillas en múltiples páginas)
+                writer.compress_identical_objects(remove_identicals=True, remove_orphans=True)
+                compression_applied = True
+            except Exception as e_dedup:
+                import logging
+                logging.getLogger("sar.ui.inventory").warning(f"No se pudo deduplicar objetos en PDF unificado: {e_dedup}")
+
+            # 2. Comprimir flujos de contenido de cada página (lossless / FlateDecode)
+            for page in writer.pages:
+                try:
+                    page.compress_content_streams()
+                except Exception:
+                    pass
+
+            # 3. Guardado a disco con mecanismo de fallback si la compresión causó conflicto
             try:
                 with open(self.dest_file_path, "wb") as f:
                     writer.write(f)
                 write_success = True
-            except Exception as e:
-                error += 1
-                error_details.append(f"Error al escribir archivo unificado: {str(e)}")
+            except Exception as e_write:
+                # Fallback de emergencia: si la escritura optimizada falló, intentar sin deduplicación
+                try:
+                    fallback_writer = PdfWriter()
+                    for p in writer.pages:
+                        fallback_writer.add_page(p)
+                    with open(self.dest_file_path, "wb") as f_fb:
+                        fallback_writer.write(f_fb)
+                    write_success = True
+                    compression_applied = False
+                except Exception as e_fb:
+                    error += 1
+                    error_details.append(f"Error al escribir archivo unificado: {str(e_write)} | Fallback: {str(e_fb)}")
+
+            if write_success and os.path.exists(self.dest_file_path):
+                try:
+                    file_size_bytes = os.path.getsize(self.dest_file_path)
+                    if file_size_bytes < 1024 * 1024:
+                        file_size_formatted = f"{file_size_bytes / 1024:.1f} KB"
+                    else:
+                        file_size_formatted = f"{file_size_bytes / (1024 * 1024):.2f} MB"
+                except Exception:
+                    file_size_formatted = ""
 
         self.finished.emit({
             "success": success,
@@ -481,6 +559,8 @@ class PdfUnifiedWorker(QThread):
             "error": error,
             "total_pages": total_pages,
             "write_success": write_success,
+            "file_size_formatted": file_size_formatted,
+            "compression_applied": compression_applied,
             "missing_details": missing_details,
             "error_details": error_details
         })
@@ -671,6 +751,26 @@ class BatchConfirmationWorker(QThread):
                         )
                         session.commit()
                 self.success.emit({"mode": "crear", "lote_id": lote_id, "total": len(self.valid_details)})
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+
+class LoteDataLoaderWorker(QThread):
+    """Worker thread to fetch lote header and detail records asynchronously,
+    preventing any GUI freeze or blank screens upon opening Detalle de Asignación."""
+    data_loaded = Signal(dict, list)  # (header_data, detalles_list)
+    error_occurred = Signal(str)
+
+    def __init__(self, inventario_ui_service, lote_id: int):
+        super().__init__()
+        self.inventario_ui_service = inventario_ui_service
+        self.lote_id = lote_id
+
+    def run(self):
+        try:
+            header = self.inventario_ui_service.get_lote_asignacion_header(self.lote_id) or {}
+            detalles = self.inventario_ui_service.get_lote_detalles(self.lote_id) or []
+            self.data_loaded.emit(header, detalles)
         except Exception as e:
             self.error_occurred.emit(str(e))
 
@@ -2670,9 +2770,10 @@ class InventoryView(QWidget):
                 self.cb_destinatario_ind.addItems(list(self._colaboradores_map.keys()))
                 self.cb_destinatario_ind.setCurrentIndex(0)
 
-        # Disable cascade mode for both (independent combos, Desarrollo remains visible and optional)
+        # Disable cascade mode for both (independent combos: RFC, Delegación, Concepto)
+        # In individual assignment, Desarrollo is captured only in the final assignment form
         self.grid_individual.set_cascade_mode(False)
-        self.grid_individual.set_has_desarrollo(True)
+        self.grid_individual.set_has_desarrollo(False)
         # Pre-load only RFCs that actually have 'FACTURADA' stock
         try:
             rfcs_con_stock = self.inventario_ui_service.get_rfcs_con_stock_facturadas()
@@ -2944,9 +3045,29 @@ class InventoryView(QWidget):
             if not self.grid_apartar.rows:
                 self.grid_apartar.add_row()
 
-            # Populate grid_individual by default in CASCADE MODE to match Apartar
-            self.grid_individual.set_has_desarrollo(True)
-            self.grid_individual.set_cascade_mode(True, desarrollos_activos_para_apartar)
+            # Populate grid_individual consistently in independent mode (NOTARIA and COLABORADOR)
+            # Pre-load only RFCs that actually have 'FACTURADA' stock
+            rfcs_con_stock = self.inventario_ui_service.get_rfcs_con_stock_facturadas()
+            rfcs_tuples = [(r["rfc_id"], r["razon_social"]) for r in rfcs_con_stock]
+            concepts_all_tuples = sorted(
+                [(c_id, c_name) for c_name, c_id in self._concepts_map.items()],
+                key=lambda x: x[0]
+            )
+            desarrollos_tuples = sorted(
+                [
+                    (
+                        d["desarrollo_id"],
+                        d["nombre"],
+                        d.get("delegacion_id"),
+                        d.get("es_default", False),
+                    )
+                    for d in self._desarrollos_list
+                ],
+                key=lambda x: (not x[3], x[1])
+            )
+            self.grid_individual.set_cascade_mode(False)
+            self.grid_individual.set_has_desarrollo(False)
+            self.grid_individual.set_catalogs(rfcs_tuples, concepts_all_tuples, delegations_list_tuples, desarrollos_tuples)
             if not self.grid_individual.rows:
                 self.grid_individual.add_row()
 
@@ -3871,7 +3992,7 @@ class InventoryView(QWidget):
         lote = self.all_lotes_data[row]
         lote_id = lote.get("lote_asignacion_id")
         if lote_id:
-            dialog = LoteProcessingDialog(self.db_connector, lote_id, self)
+            dialog = LoteProcessingDialog(self.db_connector, lote_id, parent=self, initial_data=lote)
             dialog.exec()
 
     def _on_ver_detalle_lote(self):
@@ -4968,7 +5089,7 @@ class ManualAssignmentDialog(QDialog):
                     return
 
                 detalles_list.append({
-                    "cliente": cliente,
+                    "cliente": cliente if cliente else None,
                     "desarrollo_id": d.get("desarrollo_id"),
                     "fecha_solicitud": fecha_sol,
                     "sm": d.get("sm") or None,
@@ -5135,7 +5256,7 @@ class LoteProcessingDialog(QDialog):
     """Dialog to show details of an assignment with rich header, enhanced table,
     Generar Excel and Generar PDF actions."""
 
-    def __init__(self, db_connector, lote_id: int, parent=None):
+    def __init__(self, db_connector, lote_id: int, parent=None, initial_data: dict = None):
         super().__init__(parent)
         self.db_connector = db_connector
         self.lote_id = lote_id
@@ -5143,6 +5264,7 @@ class LoteProcessingDialog(QDialog):
         self.api_client = getattr(parent, 'api_client', None) or getattr(self.inventario_ui_service, 'api_client', None) or APIClient()
         self.header_data: dict = {}
         self.detalles: list = []
+        self._loader_worker = None
 
         self.setWindowTitle(f"Detalle de Asignación #{lote_id}")
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint | Qt.WindowMinimizeButtonHint)
@@ -5184,7 +5306,6 @@ class LoteProcessingDialog(QDialog):
         
         self.metric_frame = QFrame()
         self.metric_frame.setObjectName("assignmentMetricBar")
-        # Reuse style pattern of orderProcessingMetricBar
         self.metric_frame.setStyleSheet("""
             QFrame#assignmentMetricBar {
                 background-color: #F8FAFC;
@@ -5212,8 +5333,24 @@ class LoteProcessingDialog(QDialog):
         banner_row_layout.addWidget(self.metric_frame)
         root.addWidget(self.banner_row)
 
-        # ── References table ─────────────────────────────────────────────────
+        # ── References table Stack (Spinner de Carga / Tabla) ────────────────
+        from PySide6.QtWidgets import QStackedWidget
+        self.stack_table = QStackedWidget(self)
+        self.stack_table.setMinimumHeight(180)
 
+        # Página 0: Spinner / Feedback de carga no bloqueante
+        self.loading_panel = QWidget()
+        loading_layout = QVBoxLayout(self.loading_panel)
+        loading_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_layout.setSpacing(10)
+        self.spinner = CircularSpinner(self.loading_panel)
+        self.lbl_loading = CustomLabel("Cargando referencias del lote...", variant="body", parent=self.loading_panel)
+        self.lbl_loading.setStyleSheet("font-weight: 500; color: #64748B;")
+        loading_layout.addWidget(self.spinner, alignment=Qt.AlignmentFlag.AlignCenter)
+        loading_layout.addWidget(self.lbl_loading, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.stack_table.addWidget(self.loading_panel)
+
+        # Página 1: Tabla de datos
         headers = [
             "✔", "ID", "Ref ID",
             "Estado", "Empresa", "Concepto",
@@ -5224,58 +5361,77 @@ class LoteProcessingDialog(QDialog):
         self.table_detalles = StyledDataTable(headers, parent=self)
         self.table_detalles.setColumnHidden(1, True)  # ID interno
         self.table_detalles.setColumnHidden(2, True)  # Ref ID
-        self.table_detalles.setMinimumHeight(150)
-        root.addWidget(self.table_detalles)
+        self.stack_table.addWidget(self.table_detalles)
+
+        root.addWidget(self.stack_table)
 
         # ── Buttons ──────────────────────────────────────────────────────────
         btns = QHBoxLayout()
-        
-        btn_excel = CustomButton.action_excel(parent=self)
-        btn_excel.setToolTip("Generar lotes archivos excel")
-        btn_excel.clicked.connect(self._on_generate_excel)
-        
-        btn_pdf = CustomButton.action_pdf(parent=self)
-        btn_pdf.setToolTip("Generar archivos PDF individuales por referencia")
-        btn_pdf.clicked.connect(self._on_generate_pdf)
+        btns.addStretch()
+        self.btn_excel = CustomButton.action_excel(parent=self)
+        self.btn_excel.setToolTip("Generar lotes archivos excel")
+        self.btn_excel.clicked.connect(self._on_generate_excel)
+        self.btn_excel.setEnabled(False)
 
-        btn_pdf_unified = CustomButton.action_pdf(parent=self)
-        btn_pdf_unified.setText("Unificar")
-        btn_pdf_unified.setToolTip("Unificar todas las referencias seleccionadas en un solo archivo PDF")
-        btn_pdf_unified.clicked.connect(self._on_generate_unified_pdf)
+        self.btn_pdf = CustomButton.action_pdf(parent=self)
+        self.btn_pdf.setToolTip("Generar archivos PDF individuales por referencia")
+        self.btn_pdf.clicked.connect(self._on_generate_pdf)
+        self.btn_pdf.setEnabled(False)
+
+        self.btn_pdf_unified = CustomButton.action_pdf(parent=self)
+        self.btn_pdf_unified.setText("Unificar")
+        self.btn_pdf_unified.setToolTip("Unificar todas las referencias seleccionadas en un solo archivo PDF")
+        self.btn_pdf_unified.clicked.connect(self._on_generate_unified_pdf)
+        self.btn_pdf_unified.setEnabled(False)
 
         btn_close = CustomButton.action_cerrar(parent=self)
         btn_close.clicked.connect(self.reject)
 
-        btns.addStretch()
-        btns.addWidget(btn_excel)
-        btns.addWidget(btn_pdf)
-        btns.addWidget(btn_pdf_unified)
+        btns.addWidget(self.btn_excel)
+        btns.addWidget(self.btn_pdf)
+        btns.addWidget(self.btn_pdf_unified)
         btns.addWidget(btn_close)
         root.addLayout(btns)
 
-        self._load_all()
+        # Si tenemos initial_data de la fila seleccionada, pre-poblar el encabezado al instante (0 ms)
+        if initial_data:
+            self._apply_header(initial_data)
 
-    # ── Data loading ─────────────────────────────────────────────────────────
-    def _load_all(self):
-        """Load header and detail rows."""
-        try:
-            self.header_data = self.inventario_ui_service.get_lote_asignacion_header(self.lote_id)
-            self._apply_header(self.header_data)
-        except Exception as e:
-            print("[LoteProcessingDialog] Header error:", e)
+        # Iniciar carga de datos asíncrona en segundo plano con QThread
+        self._start_async_load()
 
-        try:
-            self.detalles = self.inventario_ui_service.get_lote_detalles(self.lote_id)
-            self._populate_table()
-        except Exception as e:
-            QMessageBox.critical(self, "Error al Cargar",
-                                 f"No se pudieron cargar los detalles de la asignación:\n{str(e)}")
+    def _start_async_load(self):
+        """Inicia el worker en segundo plano para no congelar la GUI ni dejar la pantalla en blanco."""
+        self.stack_table.setCurrentIndex(0)
+        self._loader_worker = LoteDataLoaderWorker(self.inventario_ui_service, self.lote_id)
+        self._loader_worker.data_loaded.connect(self._on_data_loaded)
+        self._loader_worker.error_occurred.connect(self._on_load_error)
+        self._loader_worker.start()
+
+    def _on_data_loaded(self, header: dict, detalles: list):
+        """Callback ejecutado en el hilo principal cuando el worker finaliza."""
+        if header:
+            self.header_data = header
+            self._apply_header(header)
+        self.detalles = detalles
+        self._populate_table()
+        self.stack_table.setCurrentIndex(1)
+        if self.detalles:
+            self.btn_excel.setEnabled(True)
+            self.btn_pdf.setEnabled(True)
+            self.btn_pdf_unified.setEnabled(True)
+
+    def _on_load_error(self, err_msg: str):
+        """Manejo de errores si la consulta falla en segundo plano."""
+        self.stack_table.setCurrentIndex(1)
+        QMessageBox.critical(self, "Error al Cargar",
+                             f"No se pudieron cargar los detalles de la asignación:\n{err_msg}")
 
     def _apply_header(self, h: dict):
         tipo       = h.get("tipo_destino", "")
         asignado   = h.get("asignado_a", "—")
         fecha      = h.get("fecha", "—")
-        estado     = h.get("estado_refs", "—")
+        estado     = h.get("estado_refs", h.get("estado", "—"))
         solicitante = h.get("solicitante_externo", "")
         icon = "🏛" if tipo == "NOTARIA" else "🤝"
 
@@ -5311,11 +5467,16 @@ class LoteProcessingDialog(QDialog):
                 d.get("pa", ""),
                 d.get("fecha_solicitud", ""),
             ])
-        self.table_detalles.populate_rows(rows, checkable_first_col=True)
-        for r in range(self.table_detalles.rowCount()):
-            chk = self.table_detalles.item(r, 0)
-            if chk:
-                chk.setCheckState(Qt.CheckState.Checked)
+        # Acelerar renderizado desactivando actualizaciones gráficas durante la inserción
+        self.table_detalles.setUpdatesEnabled(False)
+        try:
+            self.table_detalles.populate_rows(rows, checkable_first_col=True)
+            for r in range(self.table_detalles.rowCount()):
+                chk = self.table_detalles.item(r, 0)
+                if chk:
+                    chk.setCheckState(Qt.CheckState.Checked)
+        finally:
+            self.table_detalles.setUpdatesEnabled(True)
 
     def _get_selected_details(self) -> list:
         """Returns detalles list filtered to checked rows."""
@@ -5443,7 +5604,7 @@ class LoteProcessingDialog(QDialog):
             missing_details = result.get("missing_details", [])
             error_details = result.get("error_details", [])
 
-            msg = f"PDFs generados exitosamente: {success}\n"
+            msg = f"PDFs generados y optimizados exitosamente: {success}\n"
             if missing:
                 msg += f"Referencias sin archivos o inaccesibles: {missing}\n"
             if error:
@@ -5532,11 +5693,17 @@ class LoteProcessingDialog(QDialog):
             missing_details = result.get("missing_details", [])
             error_details = result.get("error_details", [])
 
+            file_size_formatted = result.get("file_size_formatted", "")
+            compression_applied = result.get("compression_applied", False)
+
             if write_success:
+                opt_str = " (Optimizado / Comprimido)" if compression_applied else ""
+                size_str = f"Tamaño del archivo: {file_size_formatted}{opt_str}\n" if file_size_formatted else ""
                 msg = (
                     f"¡PDF Unificado generado con éxito!\n\n"
                     f"Referencias incluidas: {success}\n"
-                    f"Total de páginas: {total_pages}\n\n"
+                    f"Total de páginas: {total_pages}\n"
+                    f"{size_str}\n"
                     f"Archivo guardado en:\n{file_path}\n"
                 )
             else:

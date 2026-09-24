@@ -2576,11 +2576,15 @@ class InventarioRepository(BaseRepository):
 
         # We will group references by (rfc_id, concepto_id, desarrollo_id) to create the LoteDetalle entries
         grouped_details = {}
+        seen_ref_ids = set()
 
         for d in detalles_list:
-            ref = None
-            if d.get("referencia_id"):
-                ref = self.session.get(Referencia, d["referencia_id"])
+            ref_id = d.get("referencia_id")
+            if not ref_id or ref_id in seen_ref_ids:
+                continue
+            seen_ref_ids.add(ref_id)
+
+            ref = self.session.get(Referencia, ref_id)
             
             # Resolve keys
             rfc_id = ref.grupo.rfc_id if (ref and ref.grupo) else 1
@@ -2627,7 +2631,8 @@ class InventarioRepository(BaseRepository):
                 lote_val = d.get("lote").strip().upper() if d.get("lote") else None
                 edif_val = d.get("edif").strip().upper() if d.get("edif") else None
                 viv_val = d.get("viv").strip().upper() if d.get("viv") else None
-                cliente_val = d["cliente"].strip().upper() if d.get("cliente") else (None if asignar_directo else "RESERVA MASIVA MANUAL")
+                raw_cli = d.get("cliente")
+                cliente_val = raw_cli.strip().upper() if raw_cli and str(raw_cli).strip() else None
                 folio_val = d.get("folio_electronico").strip() if d.get("folio_electronico") else None
                 pa_val = d.get("pa")
 
@@ -2940,7 +2945,7 @@ class InventarioRepository(BaseRepository):
             SELECT
                 ar.asignacion_referencia_id AS lote_detalle_id,
                 ar.referencia_id,
-                COALESCE(ar.cliente, 'RESERVA PENDIENTE DE COMPLETAR') AS cliente,
+                COALESCE(ar.cliente, '') AS cliente,
                 des.nombre AS desarrollo_nombre,
                 ar.fecha_solicitud AS fecha_solicitud,
                 COALESCE(ubi.mz, '') || ' ' || COALESCE(ubi.lote, '') AS ubicacion,
@@ -3403,7 +3408,7 @@ class InventarioRepository(BaseRepository):
                 from sqlalchemy import select
                 from sar.src.storage.models import Desarrollo
                 cliente_val = d.get("cliente")
-                cliente_upper = cliente_val.strip().upper() if cliente_val else "RESERVA MASIVA MANUAL"
+                cliente_upper = cliente_val.strip().upper() if cliente_val and str(cliente_val).strip() else None
                 
                 # Resolve development ID with fallback to Excel payload or generic development
                 desarrollo_id = d.get("desarrollo_id")

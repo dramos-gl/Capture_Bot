@@ -555,6 +555,13 @@ class ExcelInventoryHandler:
             row_result["referencia_id"] = ref_obj.referencia_id
             row_result["concepto_solicitado"] = concept_alias
 
+            # Check if reference was already used in this same batch/file
+            if ref_obj.referencia_id in allocated_ref_ids:
+                row_result["status"] = "ERROR"
+                row_result["error_message"] = f"La referencia '{ref_str}' se encuentra repetida más de una vez en el archivo Excel."
+                validated_rows.append(row_result)
+                continue
+
             # 3. Check if reference is in FACTURADA state
             if estado_cod != "FACTURADA":
                 from sar.src.storage.models import AsignacionReferencia, Ubicacion
@@ -587,6 +594,7 @@ class ExcelInventoryHandler:
                 continue
 
             # Valid reference!
+            allocated_ref_ids.add(ref_obj.referencia_id)
             if has_dup:
                 row_result["status"] = "WARNING"
                 row_result["error_message"] = dup_msg

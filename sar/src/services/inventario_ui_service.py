@@ -617,25 +617,29 @@ class InventarioUIService:
 
     def get_lote_detalles(self, lote_id: int) -> List[Dict[str, Any]]:
         """Fetches details of an assignment lote."""
-        if self.api_client.connect_via_api:
-            return self.api_client.request("GET", f"/api/docs/inventario/lotes/{lote_id}/detalles")
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                return repo.get_lote_detalles(lote_id)
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_lote_detalles", transport=transport):
+            if self.api_client.connect_via_api:
+                return self.api_client.request("GET", f"/api/docs/inventario/lotes/{lote_id}/detalles")
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_lote_detalles(lote_id)
 
     def get_lote_asignacion_header(self, lote_id: int) -> Dict[str, Any]:
         """Fetches rich header info for a single lote_asignacion."""
-        if self.api_client.connect_via_api:
-            return self.api_client.request("GET", f"/api/docs/inventario/lotes/{lote_id}/header")
-        else:
-            if not self.db_connector:
-                raise ValueError("db_connector is required when connect_via_api is False")
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                return repo.get_lote_asignacion_header(lote_id)
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_lote_asignacion_header", transport=transport):
+            if self.api_client.connect_via_api:
+                return self.api_client.request("GET", f"/api/docs/inventario/lotes/{lote_id}/header")
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_lote_asignacion_header(lote_id)
 
     def get_facturas_by_referencia_id(self, referencia_id: int) -> List[Dict[str, Any]]:
         """Fetches invoices (facturas) associated with a reference ID."""

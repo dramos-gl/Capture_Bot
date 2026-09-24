@@ -252,20 +252,32 @@ class InteractiveGridRow(QFrame):
     # ── Legacy desarrollo update (used when cascade_mode=False) ──────────────
 
     def _update_desarrollo_options_legacy(self):
-        """Legacy: filter Desarrollo by selected Delegación (old behavior)."""
+        """Legacy: filter Desarrollo by selected Delegación (old behavior).
+        Preserves previously selected desarrollo if it belongs to the newly chosen delegacion.
+        """
         if not self._has_desarrollo or self._cascade_mode:
             return
+        
+        current_des_id = self.combo_desarrollo.currentData()
         self.combo_desarrollo.blockSignals(True)
         self.combo_desarrollo.clear()
         self.combo_desarrollo.addItem("Cualquier Desarrollo", None)
         delegacion_id = self.combo_delegacion.currentData()
+        
+        target_idx = 0
+        idx_counter = 0
         for tpl in self._all_desarrollos:
             d_id, d_name, d_del_id = tpl[0], tpl[1], tpl[2]
             es_default = tpl[3] if len(tpl) > 3 else False
             if delegacion_id and d_del_id != delegacion_id:
                 continue
-            label = f"★ {d_name}" if es_default else d_name
+            idx_counter += 1
+            label = d_name
             self.combo_desarrollo.addItem(label, d_id)
+            if current_des_id is not None and d_id == current_des_id:
+                target_idx = idx_counter
+        
+        self.combo_desarrollo.setCurrentIndex(target_idx)
         self.combo_desarrollo.blockSignals(False)
 
     # ── Cascade signal handlers ───────────────────────────────────────────────
@@ -276,7 +288,7 @@ class InteractiveGridRow(QFrame):
             # Signal to the parent view to load RFCs for this desarrollo
             self.cascade_rfcs_needed.emit(self, desarrollo_id)
         elif not self._cascade_mode:
-            self._update_desarrollo_options_legacy()
+            # When user selects a development in legacy/independent mode, do NOT clear/repopulate the combo.
             self._on_combo_changed_generic()
 
     def _on_rfc_changed(self):
