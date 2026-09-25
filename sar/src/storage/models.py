@@ -491,9 +491,18 @@ class Ubicacion(Base):
     lote: Mapped[Optional[str]] = mapped_column(String(50))
     edif: Mapped[Optional[str]] = mapped_column(String(50))
     viv: Mapped[Optional[str]] = mapped_column(String(50))
-    lote_id_erp: Mapped[Optional[str]] = mapped_column(String(100))
+    no_oficial: Mapped[Optional[str]] = mapped_column(String(100))
     descripcion: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    @property
+    def lote_id_erp(self) -> Optional[str]:
+        """Alias retrocompatible de no_oficial."""
+        return self.no_oficial
+
+    @lote_id_erp.setter
+    def lote_id_erp(self, value: Optional[str]) -> None:
+        self.no_oficial = value
 
     # Relaciones
     desarrollo: Mapped["Desarrollo"] = relationship()

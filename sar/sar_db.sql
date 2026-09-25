@@ -406,7 +406,7 @@ CREATE TABLE sar_archivo.ubicacion (
     lote VARCHAR(50),
     edif VARCHAR(50),
     viv VARCHAR(50),
-    lote_id_erp VARCHAR(100),
+    no_oficial VARCHAR(100),
     descripcion TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     FOREIGN KEY (desarrollo_id) REFERENCES sar_catalogo.desarrollo(desarrollo_id) ON DELETE RESTRICT
@@ -471,7 +471,7 @@ CREATE TABLE sar_archivo.asignacion_referencia (
 CREATE INDEX IF NOT EXISTS idx_asig_ref_credito ON sar_archivo.asignacion_referencia (UPPER(TRIM(credito_titular)));
 CREATE INDEX IF NOT EXISTS idx_asig_ref_pa ON sar_archivo.asignacion_referencia (UPPER(TRIM(pa)));
 CREATE INDEX IF NOT EXISTS idx_asig_ref_no_oficial ON sar_archivo.asignacion_referencia (UPPER(TRIM(no_oficial)));
-CREATE INDEX IF NOT EXISTS idx_ubi_lote_id_erp ON sar_archivo.ubicacion (UPPER(TRIM(lote_id_erp)));
+CREATE INDEX IF NOT EXISTS idx_ubi_no_oficial ON sar_archivo.ubicacion (UPPER(TRIM(no_oficial)));
 
 -- ===========================================================================
 -- ESQUEMA: sar_auditoria

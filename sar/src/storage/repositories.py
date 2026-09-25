@@ -2291,7 +2291,7 @@ class InventarioRepository(BaseRepository):
                 "ar.cliente ILIKE :search",
                 "des.nombre ILIKE :search",
                 "ar.no_oficial ILIKE :search",
-                "ubi.lote_id_erp ILIKE :search",
+                "ubi.no_oficial ILIKE :search",
                 "n.nombre ILIKE :search",
                 "col.nombre ILIKE :search",
                 "u.nombre ILIKE :search",
@@ -2379,7 +2379,7 @@ class InventarioRepository(BaseRepository):
                 des.nombre AS desarrollo_nombre,
                 ar.cliente AS cliente_nombre,
                 ubi.mz, ubi.lote, ubi.edif, ubi.viv, 
-                COALESCE(ar.no_oficial, ubi.lote_id_erp) AS folio_electronico,
+                COALESCE(ar.no_oficial, ubi.no_oficial) AS folio_electronico,
                 ar.fecha_ingreso_rpp AS fecha_ingreso_rpp,
                 ar.fecha_reporte_notaria AS fecha_reporte_notaria,
                 ar.fecha_escritura AS fecha_escritura,
@@ -2441,6 +2441,7 @@ class InventarioRepository(BaseRepository):
                 "edif": row.edif or "",
                 "viv": row.viv or "",
                 "folio_electronico": row.folio_electronico or "",
+                "no_oficial": row.folio_electronico or "",
                 "fecha_ingreso_rpp": row.fecha_ingreso_rpp.strftime("%Y-%m-%d") if row.fecha_ingreso_rpp else "",
                 "fecha_reporte_notaria": row.fecha_reporte_notaria.strftime("%Y-%m-%d") if row.fecha_reporte_notaria else "",
                 "fecha_escritura": row.fecha_escritura.strftime("%Y-%m-%d") if row.fecha_escritura else "",
@@ -2512,7 +2513,7 @@ class InventarioRepository(BaseRepository):
                 "ar.cliente ILIKE :search",
                 "des.nombre ILIKE :search",
                 "ar.no_oficial ILIKE :search",
-                "ubi.lote_id_erp ILIKE :search",
+                "ubi.no_oficial ILIKE :search",
                 "n.nombre ILIKE :search",
                 "col.nombre ILIKE :search",
                 "u.nombre ILIKE :search",
@@ -2633,7 +2634,8 @@ class InventarioRepository(BaseRepository):
                 viv_val = d.get("viv").strip().upper() if d.get("viv") else None
                 raw_cli = d.get("cliente")
                 cliente_val = raw_cli.strip().upper() if raw_cli and str(raw_cli).strip() else None
-                folio_val = d.get("folio_electronico").strip() if d.get("folio_electronico") else None
+                raw_folio = d.get("no_oficial") or d.get("folio_electronico")
+                folio_val = raw_folio.strip() if raw_folio and str(raw_folio).strip() else None
                 pa_val = d.get("pa")
 
                 ubi = None
@@ -2661,13 +2663,13 @@ class InventarioRepository(BaseRepository):
                         lote=lote_val,
                         edif=edif_val,
                         viv=viv_val,
-                        lote_id_erp=folio_val
+                        no_oficial=folio_val
                     )
                     self.session.add(ubi)
                     self.session.flush()
                 elif ubi:
-                    if folio_val and not ubi.lote_id_erp:
-                        ubi.lote_id_erp = folio_val
+                    if folio_val and not ubi.no_oficial:
+                        ubi.no_oficial = folio_val
                     self.session.flush()
 
                 ubi_id = ubi.ubicacion_id if ubi else None
@@ -2953,7 +2955,7 @@ class InventarioRepository(BaseRepository):
                 ubi.lote,
                 ubi.edif,
                 ubi.viv,
-                COALESCE(ar.no_oficial, ubi.lote_id_erp) AS folio_electronico,
+                COALESCE(ar.no_oficial, ubi.no_oficial) AS folio_electronico,
                 ar.credito_titular AS credito_titular,
                 ar.pa AS pa,
                 ar.comentarios AS comentarios,
@@ -2991,6 +2993,7 @@ class InventarioRepository(BaseRepository):
                 "edif": row.edif or "",
                 "viv": row.viv or "",
                 "folio_electronico": row.folio_electronico or "",
+                "no_oficial": row.folio_electronico or "",
                 "credito_titular": row.credito_titular or "",
                 "pa": row.pa or "",
                 "comentarios": row.comentarios or "",
@@ -3447,6 +3450,7 @@ class InventarioRepository(BaseRepository):
                     # Get correct 'pa' field from Excel payload
                     pa_val = d.get("pa")
 
+                    folio_oficial = d.get("no_oficial") or d.get("folio_electronico")
                     if not ubi:
                         # Create new Ubicacion with physical fields
                         ubi = Ubicacion(
@@ -3455,24 +3459,25 @@ class InventarioRepository(BaseRepository):
                             lote=lote,
                             edif=edif,
                             viv=viv,
-                            lote_id_erp=d.get("folio_electronico")
+                            no_oficial=folio_oficial
                         )
                         self.session.add(ubi)
                         self.session.flush()
                     else:
-                        if d.get("folio_electronico") and not ubi.lote_id_erp:
-                            ubi.lote_id_erp = d.get("folio_electronico")
+                        if folio_oficial and not ubi.no_oficial:
+                            ubi.no_oficial = folio_oficial
                         self.session.flush()
                 else:
                     pa_val = d.get("pa")
 
                 # Link to AsignacionReferencia and set status to ASIGNADA along with all transactional fields
+                folio_oficial = d.get("no_oficial") or d.get("folio_electronico")
                 ar.ubicacion_id = ubi.ubicacion_id if ubi else None
                 ar.estado_id = estado_asignada_id
                 ar.cliente = cliente_upper
                 ar.credito_titular = d.get("credito_titular")
                 ar.pa = pa_val
-                ar.no_oficial = d.get("folio_electronico")
+                ar.no_oficial = folio_oficial
                 ar.fecha_solicitud = fecha_sol
                 ar.fecha_reporte_notaria = fecha_rep_not
                 ar.fecha_ingreso_rpp = fecha_rpp
@@ -3568,7 +3573,7 @@ class InventarioRepository(BaseRepository):
         cliente_res = last_asig.cliente if last_asig and last_asig.cliente else ""
         credito_res = last_asig.credito_titular if last_asig and last_asig.credito_titular else ""
         pa_res = last_asig.pa or last_asig.comentarios if last_asig else ""
-        no_oficial_res = last_asig.no_oficial if last_asig and last_asig.no_oficial else ubi.lote_id_erp or ""
+        no_oficial_res = last_asig.no_oficial if last_asig and last_asig.no_oficial else ubi.no_oficial or ""
         fecha_sol_res = last_asig.fecha_solicitud.strftime("%Y-%m-%d") if last_asig and last_asig.fecha_solicitud else ""
 
         return {
@@ -3620,7 +3625,7 @@ class InventarioRepository(BaseRepository):
             clauses.append("UPPER(TRIM(ar.pa)) = :pa")
             params["pa"] = pa_clean
         if folio_clean:
-            clauses.append("(UPPER(TRIM(ar.no_oficial)) = :folio OR UPPER(TRIM(ubi.lote_id_erp)) = :folio)")
+            clauses.append("(UPPER(TRIM(ar.no_oficial)) = :folio OR UPPER(TRIM(ubi.no_oficial)) = :folio)")
             params["folio"] = folio_clean
         if desarrollo_id and mz_clean and lote_clean:
             coords_clause = "ubi.desarrollo_id = :des_id AND UPPER(TRIM(ubi.mz)) = :mz AND UPPER(TRIM(ubi.lote)) = :lote"
@@ -3647,7 +3652,7 @@ class InventarioRepository(BaseRepository):
                 ar.cliente,
                 ar.credito_titular,
                 ar.pa,
-                COALESCE(ar.no_oficial, ubi.lote_id_erp) as folio_electronico,
+                COALESCE(ar.no_oficial, ubi.no_oficial) as folio_electronico,
                 ar.fecha_solicitud,
                 ar.fecha_reporte_notaria,
                 ar.fecha_ingreso_rpp,
@@ -3690,6 +3695,7 @@ class InventarioRepository(BaseRepository):
             "credito_titular": row.credito_titular or "",
             "pa": row.pa or "",
             "folio_electronico": row.folio_electronico or "",
+            "no_oficial": row.folio_electronico or "",
             "desarrollo_id": row.desarrollo_id,
             "desarrollo_nombre": row.desarrollo_nombre or "",
             "sm": row.sm or "",
@@ -4002,7 +4008,7 @@ class InventarioRepository(BaseRepository):
                 if edif is not None or "edif" in datos: ubi.edif = edif
                 if viv is not None or "viv" in datos: ubi.viv = viv
                 if desarrollo_id: ubi.desarrollo_id = desarrollo_id
-                if ar.no_oficial: ubi.lote_id_erp = ar.no_oficial
+                if ar.no_oficial: ubi.no_oficial = ar.no_oficial
         else:
             if desarrollo_id and any([sm, mz, lote, edif, viv]):
                 nueva_ubi = Ubicacion(
@@ -4012,7 +4018,7 @@ class InventarioRepository(BaseRepository):
                     lote=lote,
                     edif=edif,
                     viv=viv,
-                    lote_id_erp=ar.no_oficial
+                    no_oficial=ar.no_oficial
                 )
                 self.session.add(nueva_ubi)
                 self.session.flush()

@@ -660,7 +660,8 @@ class BatchConfirmationWorker(QThread):
                             "lote": det.get("lote"),
                             "edif": det.get("edif"),
                             "viv": det.get("viv"),
-                            "folio_electronico": det.get("folio_electronico"),
+                            "folio_electronico": det.get("folio_electronico") or det.get("no_oficial"),
+                            "no_oficial": det.get("no_oficial") or det.get("folio_electronico"),
                             "estatus_primer_aviso": _fmt_d(det.get("estatus_primer_aviso") or det.get("fecha_ingreso_rpp")),
                             "ubicacion": det.get("ubicacion"),
                             "credito_titular": det.get("credito_titular"),
@@ -706,7 +707,8 @@ class BatchConfirmationWorker(QThread):
                             "lote": det.get("lote"),
                             "edif": det.get("edif"),
                             "viv": det.get("viv"),
-                            "folio_electronico": det.get("folio_electronico"),
+                            "folio_electronico": det.get("folio_electronico") or det.get("no_oficial"),
+                            "no_oficial": det.get("no_oficial") or det.get("folio_electronico"),
                             "estatus_primer_aviso": _fmt_d(det.get("estatus_primer_aviso") or det.get("fecha_ingreso_rpp")),
                             "ubicacion": det.get("ubicacion"),
                             "credito_titular": det.get("credito_titular"),
@@ -1235,7 +1237,7 @@ class InventoryView(QWidget):
         
         self.card.layout.addLayout(self.table_header_layout)
         
-        headers = ["✔", "ID", "Referencia", "Concepto", "Empresa", "Importe", "Estado", "Asignado A", "Tipo", "Solicitante", "Desarrollo", "Cliente", "Mz", "Lt", "Edif", "Viv", "Folio Electrónico", "Fecha Asignación"]
+        headers = ["✔", "ID", "Referencia", "Concepto", "Empresa", "Importe", "Estado", "Asignado A", "Tipo", "Solicitante", "Desarrollo", "Cliente", "Mz", "Lt", "Edif", "Viv", "No. Oficial", "Fecha Asignación"]
         self.table = StyledDataTable(headers, parent=self)
         self.table.setMinimumHeight(180)
         self.table.setMinimumWidth(200)
@@ -1441,7 +1443,7 @@ class InventoryView(QWidget):
                 r.get("lote", ""),
                 r.get("edif", ""),
                 r.get("viv", ""),
-                r.get("folio_electronico", ""),
+                r.get("no_oficial") or r.get("folio_electronico", ""),
                 r.get("fecha_asignacion", "")
             ])
 
@@ -4320,8 +4322,8 @@ class ManualAssignmentDialog(QDialog):
         self.lbl_ubi_match.setStyleSheet(f"color: {success_color}; font-size: 11px; font-weight: bold;")
         form_ubi.addRow("", self.lbl_ubi_match)
 
-        self.txt_folio = CustomInput("Folio electrónico o número oficial", parent=self.container_notaria)
-        form_ubi.addRow("Folio Electrónico:", self.txt_folio)
+        self.txt_folio = CustomInput("Número oficial de la vivienda", parent=self.container_notaria)
+        form_ubi.addRow("No. Oficial:", self.txt_folio)
         notaria_vlayout.addLayout(form_ubi)
 
         # Subsección C: Datos del Cliente y Crédito
@@ -4700,7 +4702,7 @@ class ManualAssignmentDialog(QDialog):
                 self.txt_lote.setText(d.get("lote", ""))
                 self.txt_edif.setText(d.get("edif", ""))
                 self.txt_viv.setText(d.get("viv", ""))
-                self.txt_folio.setText(d.get("folio_electronico", ""))
+                self.txt_folio.setText(d.get("no_oficial") or d.get("folio_electronico", ""))
                 self.txt_credito.setText(d.get("credito_titular", ""))
                 self.txt_pa.setText(d.get("pa", ""))
                 self.txt_fecha_sol.setText(d.get("fecha_sol", datetime.now().strftime("%Y-%m-%d")))
@@ -4778,8 +4780,9 @@ class ManualAssignmentDialog(QDialog):
                     self.txt_credito.setText(match["credito_titular"])
                 if not self.txt_pa.text().strip() and match.get("pa"):
                     self.txt_pa.setText(match["pa"])
-                if not self.txt_folio.text().strip() and match.get("folio_electronico"):
-                    self.txt_folio.setText(match["folio_electronico"])
+                folio_match = match.get("no_oficial") or match.get("folio_electronico")
+                if not self.txt_folio.text().strip() and folio_match:
+                    self.txt_folio.setText(folio_match)
             else:
                 self.lbl_ubi_match.setText("")
         except Exception as e:
@@ -4913,6 +4916,7 @@ class ManualAssignmentDialog(QDialog):
                     "edif": self.txt_edif.text().strip(),
                     "viv": self.txt_viv.text().strip(),
                     "folio_electronico": self.txt_folio.text().strip(),
+                    "no_oficial": self.txt_folio.text().strip(),
                     "credito_titular": self.txt_credito.text().strip(),
                     "pa": self.txt_pa.text().strip(),
                     "fecha_solicitud": self.txt_fecha_sol.text().strip() if self.cb_destino.currentText() == "NOTARIA" else self.txt_fecha_sol_colab.text().strip(),
@@ -5097,7 +5101,8 @@ class ManualAssignmentDialog(QDialog):
                     "lote": d.get("lote") or None,
                     "edif": d.get("edif") or None,
                     "viv": d.get("viv") or None,
-                    "folio_electronico": d.get("folio_electronico") or None,
+                    "folio_electronico": d.get("folio_electronico") or d.get("no_oficial") or None,
+                    "no_oficial": d.get("no_oficial") or d.get("folio_electronico") or None,
                     "estatus_primer_aviso": d.get("estatus_aviso") or "NUEVO INGRESO",
                     "credito_titular": d.get("credito_titular") or None,
                     "pa": d.get("pa") or None,

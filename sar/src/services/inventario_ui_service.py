@@ -683,6 +683,7 @@ class InventarioUIService:
         credito_titular: str = None,
         pa: str = None,
         folio_electronico: str = None,
+        no_oficial: str = None,
         desarrollo_id: int = None,
         sm: str = None,
         mz: str = None,
@@ -691,11 +692,14 @@ class InventarioUIService:
         viv: str = None
     ) -> Optional[Dict[str, Any]]:
         """Multi-criteria search by business identifiers or coordinates."""
+        folio_val = no_oficial or folio_electronico
         if self.api_client.connect_via_api:
             params = {}
             if credito_titular: params["credito_titular"] = credito_titular
             if pa: params["pa"] = pa
-            if folio_electronico: params["folio_electronico"] = folio_electronico
+            if folio_val:
+                params["folio_electronico"] = folio_val
+                params["no_oficial"] = folio_val
             if desarrollo_id: params["desarrollo_id"] = desarrollo_id
             if sm: params["sm"] = sm
             if mz: params["mz"] = mz
@@ -711,7 +715,7 @@ class InventarioUIService:
                 return repo.get_asignacion_by_identificador(
                     credito_titular=credito_titular,
                     pa=pa,
-                    folio_electronico=folio_electronico,
+                    folio_electronico=folio_val,
                     desarrollo_id=desarrollo_id,
                     sm=sm,
                     mz=mz,

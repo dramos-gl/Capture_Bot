@@ -1244,6 +1244,7 @@ def api_buscar_identificador(
     credito_titular: Optional[str] = None,
     pa: Optional[str] = None,
     folio_electronico: Optional[str] = None,
+    no_oficial: Optional[str] = None,
     desarrollo_id: Optional[int] = None,
     sm: Optional[str] = None,
     mz: Optional[str] = None,
@@ -1253,11 +1254,12 @@ def api_buscar_identificador(
     db: Session = Depends(get_db)
 ):
     from sar.src.storage.repositories import InventarioRepository
+    folio_val = no_oficial or folio_electronico
     try:
         return InventarioRepository(db).get_asignacion_by_identificador(
             credito_titular=credito_titular,
             pa=pa,
-            folio_electronico=folio_electronico,
+            folio_electronico=folio_val,
             desarrollo_id=desarrollo_id,
             sm=sm,
             mz=mz,

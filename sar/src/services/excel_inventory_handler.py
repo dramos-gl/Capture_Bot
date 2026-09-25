@@ -184,6 +184,7 @@ class ExcelInventoryHandler:
                         "edif": edif,
                         "viv": viv,
                         "folio_electronico": folio,
+                        "no_oficial": folio,
                         "estatus_primer_aviso": estatus_aviso,
                         "credito_titular": credito_titular,
                         "pa": pa,
@@ -660,7 +661,8 @@ class ExcelInventoryHandler:
         pivot_data = {}
         for r in data_rows:
             # Group key by client and location coordinates
-            key = (r["cliente"], r["desarrollo"], r["mz"], r["lote"], r["edif"], r["viv"], r["folio_electronico"])
+            row_folio = r.get("no_oficial") or r.get("folio_electronico") or ""
+            key = (r["cliente"], r["desarrollo"], r["mz"], r["lote"], r["edif"], r["viv"], row_folio)
             if key not in pivot_data:
                 pivot_data[key] = {
                     "cliente": r["cliente"],
@@ -670,7 +672,7 @@ class ExcelInventoryHandler:
                     "lote": r["lote"],
                     "edif": r["edif"],
                     "viv": r["viv"],
-                    "folio": r["folio_electronico"],
+                    "folio": row_folio,
                     "estatus": r.get("estatus_primer_aviso", ""),
                     "references": {}
                 }
@@ -821,7 +823,7 @@ class ExcelInventoryHandler:
                         "lote_loc":   r.get("lote", ""),
                         "edif":       r.get("edif", ""),
                         "viv":        r.get("viv", ""),
-                        "folio":      r.get("folio_electronico", ""),
+                        "folio":      r.get("no_oficial") or r.get("folio_electronico", ""),
                         "fecha_sol":  r.get("fecha_solicitud", ""),
                         "pa":         r.get("pa", ""),
                         "comentarios": r.get("comentarios", ""),
@@ -863,7 +865,7 @@ class ExcelInventoryHandler:
                 "lote_loc":   ref_rep.get("lote", ""),
                 "edif":       ref_rep.get("edif", ""),
                 "viv":        ref_rep.get("viv", ""),
-                "folio":      ref_rep.get("folio_electronico", ""),
+                "folio":      ref_rep.get("no_oficial") or ref_rep.get("folio_electronico", ""),
                 "fecha_sol":  ref_rep.get("fecha_solicitud", ""),
                 "pa":         ref_rep.get("pa", ""),
                 "comentarios": ref_rep.get("comentarios", ""),
@@ -890,7 +892,7 @@ class ExcelInventoryHandler:
                 "lote_loc":   r.get("lote", ""),
                 "edif":       r.get("edif", ""),
                 "viv":        r.get("viv", ""),
-                "folio":      r.get("folio_electronico", ""),
+                "folio":      r.get("no_oficial") or r.get("folio_electronico", ""),
                 "fecha_sol":  r.get("fecha_solicitud", ""),
                 "pa":         r.get("pa", ""),
                 "comentarios": r.get("comentarios", ""),
