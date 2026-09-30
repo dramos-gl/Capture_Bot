@@ -2104,17 +2104,17 @@ class InventarioRepository(BaseRepository):
         from sqlalchemy import text
         conds = []
         params = {}
-        if filter_assigned == "Disponible":
+        if filter_assigned in ("Disponible", "Disponibles"):
             conds.append("es.codigo = 'FACTURADA'")
             conds.append("ar.referencia_id IS NULL")
-        elif filter_assigned == "Asignada":
-            conds.append("es.codigo = 'ASIGNADA'")
-        elif filter_assigned == "Reservada":
+        elif filter_assigned in ("Asignada", "Asignados"):
+            conds.append("es.codigo IN ('ASIGNADA', 'SUSTITUIDO')")
+        elif filter_assigned in ("Reservada", "Reservados"):
             conds.append("es.codigo = 'RESERVADA'")
         elif filter_assigned == "LotesControl":
-            conds.append("es.codigo IN ('ASIGNADA', 'RESERVADA')")
+            conds.append("es.codigo IN ('ASIGNADA', 'RESERVADA', 'SUSTITUIDO')")
         else:
-            conds.append("es.codigo IN ('FACTURADA', 'ASIGNADA', 'RESERVADA')")
+            conds.append("es.codigo IN ('FACTURADA', 'ASIGNADA', 'RESERVADA', 'SUSTITUIDO')")
 
         if orden_ids:
             conds.append("og.orden_id IN :orden_ids_param")
@@ -2227,17 +2227,17 @@ class InventarioRepository(BaseRepository):
         
         # Modify conditions to use table aliases
         conditions_sql = []
-        if filter_assigned == "Disponible":
+        if filter_assigned in ("Disponible", "Disponibles"):
             conditions_sql.append("es.codigo = 'FACTURADA'")
             conditions_sql.append("ar.referencia_id IS NULL")
-        elif filter_assigned == "Asignada":
-            conditions_sql.append("es.codigo = 'ASIGNADA'")
-        elif filter_assigned == "Reservada":
+        elif filter_assigned in ("Asignada", "Asignados"):
+            conditions_sql.append("es.codigo IN ('ASIGNADA', 'SUSTITUIDO')")
+        elif filter_assigned in ("Reservada", "Reservados"):
             conditions_sql.append("es.codigo = 'RESERVADA'")
         elif filter_assigned == "LotesControl":
-            conditions_sql.append("es.codigo IN ('ASIGNADA', 'RESERVADA')")
+            conditions_sql.append("es.codigo IN ('ASIGNADA', 'RESERVADA', 'SUSTITUIDO')")
         else: # Todos
-            conditions_sql.append("es.codigo IN ('FACTURADA', 'ASIGNADA', 'RESERVADA')")
+            conditions_sql.append("es.codigo IN ('FACTURADA', 'ASIGNADA', 'RESERVADA', 'SUSTITUIDO')")
 
             
         if concepto_id:
@@ -2319,7 +2319,7 @@ class InventarioRepository(BaseRepository):
                 "FROM sar_produccion.referencia r",
                 "JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id"
             ]
-            if filter_assigned == "Disponible":
+            if filter_assigned in ("Disponible", "Disponibles"):
                 filter_tables.append("LEFT JOIN sar_archivo.asignacion_referencia ar ON r.referencia_id = ar.referencia_id")
             if concepto_id or rfc_id or orden_ids or (empresa_nombre and empresa_nombre != "Todas las empresas") or (concepto_nombre and concepto_nombre != "Todos los conceptos"):
                 filter_tables.append("JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id")
@@ -2385,7 +2385,7 @@ class InventarioRepository(BaseRepository):
                 ar.fecha_escritura AS fecha_escritura,
                 ar.fecha_titulacion AS fecha_titulacion,
                 la.lote_asignacion_id AS lote_asignacion_id,
-                es.codigo AS estado_codigo
+                COALESCE(ar_es.codigo, es.codigo) AS estado_codigo
             FROM paged_ref pr
             JOIN sar_produccion.referencia r ON pr.referencia_id = r.referencia_id
             JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
@@ -2397,6 +2397,7 @@ class InventarioRepository(BaseRepository):
             JOIN sar_catalogo.estado_sistema es ON r.estado_id = es.estado_id
             LEFT JOIN sar_seguridad.usuario u ON r.usuario_asignado = u.usuario_id
             LEFT JOIN sar_archivo.asignacion_referencia ar ON r.referencia_id = ar.referencia_id
+            LEFT JOIN sar_catalogo.estado_sistema ar_es ON ar.estado_id = ar_es.estado_id
             LEFT JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
             LEFT JOIN sar_archivo.lote_asignacion la ON ld.lote_asignacion_id = la.lote_asignacion_id
             LEFT JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
@@ -2529,7 +2530,7 @@ class InventarioRepository(BaseRepository):
         
         # Assigned condition
         conds_asig = list(base_conditions)
-        conds_asig.append("es.codigo = 'ASIGNADA'")
+        conds_asig.append("es.codigo IN ('ASIGNADA', 'SUSTITUIDO')")
         where_asig = f"WHERE {' AND '.join(conds_asig)}"
         
         # Reservada condition

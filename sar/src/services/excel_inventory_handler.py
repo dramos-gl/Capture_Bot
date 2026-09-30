@@ -761,14 +761,15 @@ class ExcelInventoryHandler:
 
         # ── Column headers (row 1) ───────────────────────────────────────────
         COLUMNS = [
-            "ID", "DESARROLLO", "P.A.", "CLIENTE",
+            "ID", "DESARROLLO", "DELEGACIÓN", "P.A.", "CLIENTE",
             "MZA", "LOTE", "EXT", "INT",
             "No.OFICIAL", "FECHA REPORTA LA NOTARIA",
             "FECHA INGRESO A RPP", "FECHA ESCRITURA",
-            "FECHA TITULACION", "AVISO", "CLG",
+            "FECHA TITULACION", "ANALISIS", "AVISO", "CLG",
             "CANCELACION PRIMER AVISO", "CANCELACION SEGUNDO AVISO",
             "COMENTARIOS",
         ]
+        ALIAS_ANALISIS = {"ANALISIS", "ANÁLISIS", "ANALIS"}
         ALIAS_AVISO = {"AVISO", "AVISO PREVENTIVO", "NUEVO_DERECHO_AVISO"}
         ALIAS_CLG   = {"CLG"}
         ALIAS_CANC1 = {"CANC_1ER _AVISO", "CANCELACION_1ER_AVISO"}
@@ -819,6 +820,7 @@ class ExcelInventoryHandler:
                     pivot[key] = {
                         "cliente":    r.get("cliente", ""),
                         "desarrollo": r.get("desarrollo", ""),
+                        "delegacion": r.get("delegacion", "") or r.get("delegacion_original", ""),
                         "mz":         r.get("mz", ""),
                         "lote_loc":   r.get("lote", ""),
                         "edif":       r.get("edif", ""),
@@ -831,6 +833,7 @@ class ExcelInventoryHandler:
                         "fecha_ingreso_rpp": r.get("fecha_ingreso_rpp", ""),
                         "fecha_escritura": r.get("fecha_escritura", ""),
                         "fecha_titulacion": r.get("fecha_titulacion", ""),
+                        "analisis":   "",
                         "aviso":      "",
                         "clg":        "",
                         "canc1":      "",
@@ -839,7 +842,9 @@ class ExcelInventoryHandler:
                 concepto = (r.get("concepto") or "").strip().upper()
                 ref_val  = r.get("referencia", "")
                 p = pivot[key]
-                if concepto in ALIAS_AVISO and not p["aviso"]:
+                if concepto in ALIAS_ANALISIS and not p["analisis"]:
+                    p["analisis"] = ref_val
+                elif concepto in ALIAS_AVISO and not p["aviso"]:
                     p["aviso"] = ref_val
                 elif concepto in ALIAS_CLG and not p["clg"]:
                     p["clg"] = ref_val
@@ -861,6 +866,7 @@ class ExcelInventoryHandler:
             pivot[key] = {
                 "cliente":    ref_rep.get("cliente", "RESERVA PENDIENTE"),
                 "desarrollo": ref_rep.get("desarrollo", ""),
+                "delegacion": ref_rep.get("delegacion", "") or ref_rep.get("delegacion_original", ""),
                 "mz":         ref_rep.get("mz", ""),
                 "lote_loc":   ref_rep.get("lote", ""),
                 "edif":       ref_rep.get("edif", ""),
@@ -873,6 +879,7 @@ class ExcelInventoryHandler:
                 "fecha_ingreso_rpp": ref_rep.get("fecha_ingreso_rpp", ""),
                 "fecha_escritura": ref_rep.get("fecha_escritura", ""),
                 "fecha_titulacion": ref_rep.get("fecha_titulacion", ""),
+                "analisis":   "",
                 "aviso":      aviso_ref.get("referencia", ""),
                 "clg":        clg_ref.get("referencia", ""),
                 "canc1":      "",
@@ -888,6 +895,7 @@ class ExcelInventoryHandler:
             pivot[key] = {
                 "cliente":    r.get("cliente", "RESERVA PENDIENTE"),
                 "desarrollo": r.get("desarrollo", ""),
+                "delegacion": r.get("delegacion", "") or r.get("delegacion_original", ""),
                 "mz":         r.get("mz", ""),
                 "lote_loc":   r.get("lote", ""),
                 "edif":       r.get("edif", ""),
@@ -900,6 +908,7 @@ class ExcelInventoryHandler:
                 "fecha_ingreso_rpp": r.get("fecha_ingreso_rpp", ""),
                 "fecha_escritura": r.get("fecha_escritura", ""),
                 "fecha_titulacion": r.get("fecha_titulacion", ""),
+                "analisis":   ref_val if concepto in ALIAS_ANALISIS else "",
                 "aviso":      "",
                 "clg":        "",
                 "canc1":      ref_val if concepto in ALIAS_CANC1 else "",
@@ -915,6 +924,7 @@ class ExcelInventoryHandler:
             values = [
                 idx + 1,            # ID = sequential row number
                 p["desarrollo"],
+                p.get("delegacion", ""),
                 p["pa"],
                 p["cliente"],
                 p["mz"],
@@ -926,6 +936,7 @@ class ExcelInventoryHandler:
                 p["fecha_ingreso_rpp"],     # FECHA INGRESO A RPP
                 p["fecha_escritura"],       # FECHA ESCRITURA
                 p["fecha_titulacion"],       # FECHA TITULACION
+                p.get("analisis", ""),
                 p["aviso"],
                 p["clg"],
                 p["canc1"],
@@ -938,12 +949,16 @@ class ExcelInventoryHandler:
                 cell.border = border_data
                 if use_alt:
                     cell.fill = fill_alt
-                if ci in (5, 6, 7, 8, 10, 11, 12, 13):
+                if ci in (6, 7, 8, 9, 11, 12, 13, 14):
                     cell.alignment = Alignment(horizontal="center")
             row_num += 1
 
         # ── Column widths ────────────────────────────────────────────────────
-        col_widths = [10, 22, 12, 28, 8, 8, 8, 8, 18, 22, 22, 22, 22, 22, 22, 22, 22, 25]
+        # COLUMNS: ID(10), DESARROLLO(22), DELEGACION(18), P.A.(12), CLIENTE(28),
+        # MZA(8), LOTE(8), EXT(8), INT(8), No.OFICIAL(18), FECHA REPORTA NOTARIA(22),
+        # FECHA INGRESO RPP(22), FECHA ESCRITURA(22), FECHA TITULACION(22),
+        # ANALISIS(22), AVISO(22), CLG(22), CANC 1(22), CANC 2(22), COMENTARIOS(25)
+        col_widths = [10, 22, 18, 12, 28, 8, 8, 8, 8, 18, 22, 22, 22, 22, 22, 22, 22, 22, 22, 25]
         for ci, w in enumerate(col_widths, start=1):
             ws.column_dimensions[openpyxl.utils.get_column_letter(ci)].width = w
 

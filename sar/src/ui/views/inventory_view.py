@@ -1089,7 +1089,7 @@ class InventoryView(QWidget):
         # Filter bar
         self.filter_bar = FilterBar(
             search_placeholder="",
-            state_options=["Todos", "Disponible", "Asignada", "Reservadas"],
+            state_options=["Todos", "Disponibles", "Asignados", "Reservados"],
             on_search=None,
             on_state_change=self._on_state_filter_visor,
             on_action=self._on_manual_refresh_visor,
@@ -1424,6 +1424,8 @@ class InventoryView(QWidget):
         for r in self.visible_table_data:
             if r.get("estado_codigo") == "RESERVADA":
                 state_desc = "Reservada"
+            elif r.get("estado_codigo") == "SUSTITUIDO":
+                state_desc = "Sustituido"
             else:
                 state_desc = "Asignada" if r.get("asignada") else "Disponible"
             rows_data.append([
@@ -1459,12 +1461,12 @@ class InventoryView(QWidget):
                 continue
                 
             r_id = r.get("referencia_id")
-            is_asignada = r.get("asignada", False) or r.get("estado_codigo") == "ASIGNADA"
+            is_asignada = r.get("asignada", False) or r.get("estado_codigo") in ("ASIGNADA", "SUSTITUIDO")
             
             if is_asignada:
                 check_item.setFlags(check_item.flags() & ~Qt.ItemFlag.ItemIsEnabled & ~Qt.ItemFlag.ItemIsUserCheckable)
                 check_item.setCheckState(Qt.CheckState.Unchecked)
-                check_item.setToolTip("Los derechos en estado asignado no se pueden volver a asignar.")
+                check_item.setToolTip("Los derechos en estado asignado o sustituido no se pueden volver a asignar.")
             else:
                 if r_id in self.selected_ref_map:
                     check_item.setCheckState(Qt.CheckState.Checked)
@@ -1550,10 +1552,14 @@ class InventoryView(QWidget):
             self.refresh_visor_data()
 
     def _on_state_filter_visor(self, text):
-        if text == "Reservadas":
+        if text in ("Reservados", "Reservadas"):
             self._current_estado_filter = "Reservada"
+        elif text in ("Asignados", "Asignada"):
+            self._current_estado_filter = "Asignada"
+        elif text in ("Disponibles", "Disponible"):
+            self._current_estado_filter = "Disponible"
         else:
-            self._current_estado_filter = text
+            self._current_estado_filter = "Todos"
         self.current_page = 1
         self.refresh_visor_data()
 
@@ -5366,7 +5372,7 @@ class LoteProcessingDialog(QDialog):
         headers = [
             "✔", "ID", "Ref ID",
             "Estado", "Empresa", "Concepto",
-            "Referencia", "Cliente", "Desarrollo",
+            "Referencia", "Cliente", "Desarrollo", "Delegación",
             "MZA", "Lote", "Ext", "Int",
             "No.Oficial", "P.A.", "Fecha Solicitud",
         ]
@@ -5385,13 +5391,14 @@ class LoteProcessingDialog(QDialog):
             6: 150,  # Referencia
             7: 180,  # Cliente
             8: 150,  # Desarrollo
-            9: 60,   # MZA
-            10: 60,  # Lote
-            11: 60,  # Ext
-            12: 60,  # Int
-            13: 130, # No. Oficial
-            14: 60,  # P.A.
-            15: 110, # Fecha Solicitud
+            9: 130,  # Delegación
+            10: 60,  # MZA
+            11: 60,  # Lote
+            12: 60,  # Ext
+            13: 60,  # Int
+            14: 130, # No. Oficial
+            15: 60,  # P.A.
+            16: 110, # Fecha Solicitud
         }
         init_header = self.table_detalles.horizontalHeader()
         for c_idx, w in init_col_widths.items():
@@ -5634,6 +5641,7 @@ class LoteProcessingDialog(QDialog):
                     d.get("referencia", ""),
                     d.get("cliente", ""),
                     d.get("desarrollo", ""),
+                    d.get("delegacion", ""),
                     d.get("mz", ""),
                     d.get("lote", ""),
                     d.get("edif", ""),
@@ -5659,13 +5667,14 @@ class LoteProcessingDialog(QDialog):
                 6: 150,  # Referencia
                 7: 180,  # Cliente
                 8: 150,  # Desarrollo
-                9: 60,   # MZA
-                10: 60,  # Lote
-                11: 60,  # Ext
-                12: 60,  # Int
-                13: 130, # No. Oficial
-                14: 60,  # P.A.
-                15: 110, # Fecha Solicitud
+                9: 130,  # Delegación
+                10: 60,  # MZA
+                11: 60,  # Lote
+                12: 60,  # Ext
+                13: 60,  # Int
+                14: 130, # No. Oficial
+                15: 60,  # P.A.
+                16: 110, # Fecha Solicitud
             }
             header = self.table_detalles.horizontalHeader()
             for col_idx, width in col_widths.items():

@@ -52,6 +52,10 @@ class StatusBadge(QFrame):
             variant = "error"
             icon_name = "alert_triangle"
             icon_color = Colors.ERROR
+        elif "SUSTITU" in normalized:
+            variant = "neutral"
+            icon_name = "clock"
+            icon_color = Colors.SLATE_500
         else:
             variant = "neutral"
             icon_name = "clock"
