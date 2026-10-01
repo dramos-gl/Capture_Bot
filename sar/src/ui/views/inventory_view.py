@@ -2460,8 +2460,10 @@ class InventoryView(QWidget):
                 if r["status"] == "ERROR":
                     if "no existe" in r["error_message"].lower():
                         error_types.add("Referencias inexistentes en la base de datos")
-                    elif "ya está asignada" in r["error_message"].lower():
-                        error_types.add("Referencias ya asignadas/confirmadas previamente")
+                    elif "reservada" in r["error_message"].lower():
+                        error_types.add("Referencias ya reservadas previamente (Notaría / Colaborador)")
+                    elif "asignada" in r["error_message"].lower():
+                        error_types.add("Referencias ya asignadas/confirmadas previamente a clientes")
                     else:
                         error_types.add(r["error_message"])
             

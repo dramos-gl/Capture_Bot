@@ -117,11 +117,19 @@ El administrador del sistema puede controlar el estatus del servicio, consultar 
 ```
 
 #### 2. Compilar a .exe independiente:
+Para evitar falsos positivos de antivirus corporativos (como TrendMicro Apex One), las especificaciones de compilación tienen deshabilitada la compresión UPX (`upx=False`).
+
+Compilar directamente usando el descriptor `.spec` (Recomendado):
 ```powershell
 # Asegúrese de cerrar cualquier instancia previa de SAR_Servidor.exe antes de compilar
 Get-Process | Where-Object { $_.ProcessName -eq "SAR_Servidor" } | Stop-Process -Force -ErrorAction SilentlyContinue
 
-.venv_sar\Scripts\pyinstaller --noconfirm --onedir --windowed --paths=. --icon="sar/src/ui/assets/sar_logo.png" --add-data "sar/src/ui/assets;sar/src/ui/assets" --name="SAR_Servidor" sar/main_server_manager.py
+.venv_sar\Scripts\pyinstaller SAR_Servidor.spec --clean --noconfirm
+```
+
+*Alternativa mediante comando CLI directo (utilizando `--noupx`):*
+```powershell
+.venv_sar\Scripts\pyinstaller --noconfirm --onedir --windowed --paths=. --noupx --icon="sar/src/ui/assets/sar_logo.png" --add-data "sar/src/ui/assets;sar/src/ui/assets" --name="SAR_Servidor" sar/main_server_manager.py
 ```
 
 ---
@@ -181,8 +189,15 @@ En la carpeta de instalación de cada cliente de escritorio (junto al ejecutable
 ---
 
 ### 6.2. Compilación del Cliente
-Utilice PyInstaller desde el entorno virtual para compilar la aplicación de escritorio especificando la ruta de búsqueda de módulos, el icono del ejecutable `--icon` e incluyendo la carpeta de recursos visuales (iconos/imágenes):
+Para prevenir falsos positivos de antivirus y sistemas EDR (como **TrendMicro Apex One**), la especificación de empaquetado tiene deshabilitada de forma estricta la compresión UPX (`upx=False`).
+
+Compilar directamente utilizando el archivo `.spec` blindado (Recomendado):
 ```powershell
-.venv_sar\Scripts\pyinstaller --noconfirm --onedir --windowed --paths=. --icon="sar/src/ui/assets/sar_logo.png" --add-data "sar/src/ui/assets;sar/src/ui/assets" --name="SAR_Cliente" sar/main.py
+.venv_sar\Scripts\pyinstaller SAR_Cliente.spec --clean --noconfirm
+```
+
+*Alternativa mediante comando CLI directo (utilizando obligatoriamente `--noupx`):*
+```powershell
+.venv_sar\Scripts\pyinstaller --noconfirm --onedir --windowed --paths=. --noupx --icon="sar/src/ui/assets/sar_logo.png" --add-data "sar/src/ui/assets;sar/src/ui/assets" --name="SAR_Cliente" sar/main.py
 ```
 Distribuya la carpeta de salida `dist/SAR_Cliente/` (que incluye el ejecutable `SAR_Cliente.exe`, el archivo `settings.json` y los assets empaquetados) a los operadores de la red local.

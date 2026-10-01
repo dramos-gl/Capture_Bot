@@ -568,15 +568,36 @@ class ExcelInventoryHandler:
                 from sar.src.storage.models import AsignacionReferencia, Ubicacion
                 ar_check = session.execute(
                     select(AsignacionReferencia)
-                    .join(Ubicacion, AsignacionReferencia.ubicacion_id == Ubicacion.ubicacion_id)
+                    .outerjoin(Ubicacion, AsignacionReferencia.ubicacion_id == Ubicacion.ubicacion_id)
                     .where(AsignacionReferencia.referencia_id == ref_obj.referencia_id)
                 ).scalars().first()
-                if ar_check and ar_check.ubicacion:
-                    row_result["status"] = "ERROR"
-                    row_result["error_message"] = f"La referencia ya está asignada al cliente '{ar_check.ubicacion.cliente}'."
+                
+                cliente_asignado = (ar_check.cliente or "").strip() if ar_check else ""
+                if not cliente_asignado and ar_check and ar_check.lote_detalle and ar_check.lote_detalle.lote_asignacion:
+                    lote = ar_check.lote_detalle.lote_asignacion
+                    if lote.notaria:
+                        cliente_asignado = f"Notaría: {lote.notaria.nombre}"
+                    elif lote.colaborador:
+                        cliente_asignado = f"Colaborador: {lote.colaborador.nombre}"
+                    elif lote.solicitante_externo:
+                        cliente_asignado = f"Solicitante: {lote.solicitante_externo}"
+
+                row_result["status"] = "ERROR"
+                if estado_cod == "RESERVADA":
+                    if cliente_asignado:
+                        row_result["error_message"] = f"La referencia '{ref_str}' ya fue RESERVADA previamente ({cliente_asignado})."
+                    else:
+                        row_result["error_message"] = f"La referencia '{ref_str}' ya se encuentra RESERVADA en el sistema."
+                elif estado_cod == "ASIGNADA":
+                    if cliente_asignado:
+                        row_result["error_message"] = f"La referencia '{ref_str}' ya fue ASIGNADA al cliente '{cliente_asignado}'."
+                    else:
+                        row_result["error_message"] = f"La referencia '{ref_str}' ya se encuentra ASIGNADA en el sistema."
                 else:
-                    row_result["status"] = "ERROR"
-                    row_result["error_message"] = f"La referencia ya está asignada en el sistema (Estado: '{estado_cod}')."
+                    if cliente_asignado:
+                        row_result["error_message"] = f"La referencia '{ref_str}' no está disponible (Estado: '{estado_cod}', {cliente_asignado})."
+                    else:
+                        row_result["error_message"] = f"La referencia '{ref_str}' no está disponible (Estado: '{estado_cod}')."
                 validated_rows.append(row_result)
                 continue
 
