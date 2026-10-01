@@ -263,9 +263,7 @@ class OrdersView(QWidget):
                 if reply != QMessageBox.Yes:
                     return
         else:
-            es_cancelacion = getattr(self, "chk_cancelaciones", None) and self.chk_cancelaciones.isChecked()
-            es_fojas = getattr(self, "chk_fojas", None) and self.chk_fojas.isChecked()
-            es_testimonios = getattr(self, "chk_testimonios", None) and self.chk_testimonios.isChecked()
+            tipo_ord = self.combo_tipo_orden.currentData() or "ESTANDAR"
             
             # Construcción de los detalles de las solicitudes a incluir
             item_details = []
@@ -284,7 +282,16 @@ class OrdersView(QWidget):
             current_year = datetime.utcnow().year
             all_ordenes = getattr(self, "_all_ordenes_data", [])
 
-            if es_cancelacion:
+            if tipo_ord == "PAGADA":
+                folio_pagada = f"ORD-PAGADA-{current_year}"
+                orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_pagada), None)
+                action_title = "Confirmar Orden de Derechos Pagados"
+                action_msg = (
+                    f"¿Estás seguro de que deseas actualizar la orden anual de derechos pagados ({folio_pagada}) con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                    if orden_existente else
+                    f"¿Estás seguro de que deseas guardar la orden Anual de derechos pagados ({folio_pagada}) con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                )
+            elif tipo_ord == "CANCELACION":
                 folio_cancel = f"ORD-CANCEL-{current_year}"
                 orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_cancel), None)
                 action_title = "Confirmar Orden de Cancelación"
@@ -293,7 +300,7 @@ class OrdersView(QWidget):
                     if orden_existente else
                     f"¿Estás seguro de que deseas guardar la orden Anual de cancelación de aviso con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
                 )
-            elif es_fojas:
+            elif tipo_ord == "FOJAS":
                 folio_fojas = f"ORD-FOJAS-{current_year}"
                 orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_fojas), None)
                 action_title = "Confirmar Orden de Fojas"
@@ -302,7 +309,7 @@ class OrdersView(QWidget):
                     if orden_existente else
                     f"¿Estás seguro de que deseas guardar la orden Anual de fojas con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
                 )
-            elif es_testimonios:
+            elif tipo_ord == "TESTIMONIO":
                 folio_testimonio = f"ORD-TESTIMONIO-{current_year}"
                 orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_testimonio), None)
                 action_title = "Confirmar Orden de Testimonios"
@@ -349,14 +356,7 @@ class OrdersView(QWidget):
                 )
                 self._on_cancelar_edicion()
             else:
-                if self.chk_cancelaciones.isChecked():
-                    tipo_ord = "CANCELACION"
-                elif self.chk_fojas.isChecked():
-                    tipo_ord = "FOJAS"
-                elif self.chk_testimonios.isChecked():
-                    tipo_ord = "TESTIMONIO"
-                else:
-                    tipo_ord = "ESTANDAR"
+                tipo_ord = self.combo_tipo_orden.currentData() or "ESTANDAR"
 
                 folio = self.ordenes_ui_service.crear_orden_manual(
                     usuario_id=current_usuario_id,
@@ -371,16 +371,7 @@ class OrdersView(QWidget):
                     f"Orden {folio} registrada correctamente con {len(data)} partidas."
                 )
                 # Reset Form
-                if self.chk_cancelaciones.isChecked():
-                    self.chk_cancelaciones.setChecked(False)
-                elif self.chk_fojas.isChecked():
-                    self.chk_fojas.setChecked(False)
-                elif self.chk_testimonios.isChecked():
-                    self.chk_testimonios.setChecked(False)
-                else:
-                    self.desc_input.setText("")
-                self.grid.clear()
-                self.grid.add_row()
+                self._reset_formulario_captura()
                 
         except Exception as e:
             QMessageBox.critical(self, "Error al Guardar", f"Hubo un problema al crear la orden:\n{str(e)}")
@@ -563,11 +554,11 @@ class OrdersView(QWidget):
         
         card_layout.addLayout(card_header_layout)
         
-        # Two-column input layout: Municipio on the left, Descripción on the right
+        # Three-column input layout: Municipio, Tipo de Orden, Descripción
         inputs_layout = QHBoxLayout()
         inputs_layout.setSpacing(16)
         
-        # Left side: Municipio
+        # Column 1: Municipio
         mun_layout = QVBoxLayout()
         lbl_mun_title = CustomLabel("Municipio de Acceso (Tributanet)", variant="body")
         lbl_mun_title.setStyleSheet("font-weight: bold; background: transparent; border: none;")
@@ -576,7 +567,22 @@ class OrdersView(QWidget):
         mun_layout.addWidget(lbl_mun_title)
         mun_layout.addWidget(self.combo_municipio)
         
-        # Right side: Descripción
+        # Column 2: Tipo de Orden (Desplegable)
+        tipo_layout = QVBoxLayout()
+        lbl_tipo_title = CustomLabel("Tipo de Orden", variant="body")
+        lbl_tipo_title.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.combo_tipo_orden = CustomComboBox()
+        self.combo_tipo_orden.setMinimumHeight(35)
+        self.combo_tipo_orden.addItem("Estándar (Subsidios)", "ESTANDAR")
+        self.combo_tipo_orden.addItem("Derechos Pagados (Anual)", "PAGADA")
+        self.combo_tipo_orden.addItem("Cancelación de Avisos (Anual)", "CANCELACION")
+        self.combo_tipo_orden.addItem("Derechos de Fojas (Anual)", "FOJAS")
+        self.combo_tipo_orden.addItem("Expedición de Testimonios (Anual)", "TESTIMONIO")
+        self.combo_tipo_orden.currentIndexChanged.connect(self._on_tipo_orden_changed)
+        tipo_layout.addWidget(lbl_tipo_title)
+        tipo_layout.addWidget(self.combo_tipo_orden)
+
+        # Column 3: Descripción
         desc_layout = QVBoxLayout()
         lbl_desc_title = CustomLabel("Descripción de la Orden", variant="body")
         lbl_desc_title.setStyleSheet("font-weight: bold; background: transparent; border: none;")
@@ -586,26 +592,10 @@ class OrdersView(QWidget):
         desc_layout.addWidget(self.desc_input)
         
         inputs_layout.addLayout(mun_layout, stretch=1)
-        inputs_layout.addLayout(desc_layout, stretch=1)
-        
-        # Checkbox Modos Anuales (Design System Atom)
-        mode_layout = QHBoxLayout()
-        mode_layout.setSpacing(16)
-        self.chk_cancelaciones = CustomCheckBox("Derechos Cancelación de Avisos")
-        self.chk_fojas = CustomCheckBox("Derechos de Fojas")
-        self.chk_testimonios = CustomCheckBox("Expedición de Testimonios")
-        
-        self.chk_cancelaciones.toggled.connect(self._on_toggle_cancelaciones)
-        self.chk_fojas.toggled.connect(self._on_toggle_fojas)
-        self.chk_testimonios.toggled.connect(self._on_toggle_testimonios)
-        
-        mode_layout.addWidget(self.chk_cancelaciones)
-        mode_layout.addWidget(self.chk_fojas)
-        mode_layout.addWidget(self.chk_testimonios)
-        mode_layout.addStretch()
+        inputs_layout.addLayout(tipo_layout, stretch=1)
+        inputs_layout.addLayout(desc_layout, stretch=2)
 
         card_layout.addLayout(inputs_layout)
-        card_layout.addLayout(mode_layout)
         
         # Divider line
         divider = QFrame()
@@ -636,63 +626,48 @@ class OrdersView(QWidget):
             if row.get("rfc_id") and row.get("concepto_id"):
                 total_general += row.get("cantidad", 0)
         self.lbl_tot_val.setText(str(total_general))
-            
-    def _on_toggle_cancelaciones(self, checked: bool):
+
+    def _on_tipo_orden_changed(self, index: int):
         from datetime import datetime
         current_year = datetime.utcnow().year
-        if checked:
-            self.chk_fojas.blockSignals(True)
-            self.chk_testimonios.blockSignals(True)
-            self.chk_fojas.setChecked(False)
-            self.chk_testimonios.setChecked(False)
-            self.chk_fojas.blockSignals(False)
-            self.chk_testimonios.blockSignals(False)
+        tipo = self.combo_tipo_orden.currentData() or "ESTANDAR"
 
-            self._load_catalogs(tipo_modulo="CANCELACION")
-            self.desc_input.setText(f"Cancelación de Avisos {current_year}")
-            self.desc_input.setReadOnly(True)
-        else:
+        if tipo == "ESTANDAR":
             self._load_catalogs(tipo_modulo="ESTANDAR")
             self.desc_input.setText("")
             self.desc_input.setReadOnly(False)
+            return
 
-    def _on_toggle_fojas(self, checked: bool):
-        from datetime import datetime
-        current_year = datetime.utcnow().year
-        if checked:
-            self.chk_cancelaciones.blockSignals(True)
-            self.chk_testimonios.blockSignals(True)
-            self.chk_cancelaciones.setChecked(False)
-            self.chk_testimonios.setChecked(False)
-            self.chk_cancelaciones.blockSignals(False)
-            self.chk_testimonios.blockSignals(False)
+        # Para órdenes anuales, verificar si ya existe la orden en BD para recuperar su descripción real
+        all_ordenes = getattr(self, "_all_ordenes_data", [])
+        prefix_map = {
+            "PAGADA": f"ORD-PAGADA-{current_year}",
+            "CANCELACION": f"ORD-CANCEL-{current_year}",
+            "FOJAS": f"ORD-FOJAS-{current_year}",
+            "TESTIMONIO": f"ORD-TESTIMONIO-{current_year}"
+        }
+        default_desc_map = {
+            "PAGADA": f"Derechos Pagados {current_year}",
+            "CANCELACION": f"Cancelación de Avisos {current_year}",
+            "FOJAS": f"Derechos de Fojas {current_year}",
+            "TESTIMONIO": f"Derechos de Testimonios {current_year}"
+        }
+        catalog_map = {
+            "PAGADA": "ESTANDAR",
+            "CANCELACION": "CANCELACION",
+            "FOJAS": "FOJAS",
+            "TESTIMONIO": "TESTIMONIO"
+        }
 
-            self._load_catalogs(tipo_modulo="FOJAS")
-            self.desc_input.setText(f"Derechos de Fojas {current_year}")
-            self.desc_input.setReadOnly(True)
-        else:
-            self._load_catalogs(tipo_modulo="ESTANDAR")
-            self.desc_input.setText("")
-            self.desc_input.setReadOnly(False)
-
-    def _on_toggle_testimonios(self, checked: bool):
-        from datetime import datetime
-        current_year = datetime.utcnow().year
-        if checked:
-            self.chk_cancelaciones.blockSignals(True)
-            self.chk_fojas.blockSignals(True)
-            self.chk_cancelaciones.setChecked(False)
-            self.chk_fojas.setChecked(False)
-            self.chk_cancelaciones.blockSignals(False)
-            self.chk_fojas.blockSignals(False)
-
-            self._load_catalogs(tipo_modulo="TESTIMONIO")
-            self.desc_input.setText(f"Derechos de Testimonios {current_year}")
-            self.desc_input.setReadOnly(True)
-        else:
-            self._load_catalogs(tipo_modulo="ESTANDAR")
-            self.desc_input.setText("")
-            self.desc_input.setReadOnly(False)
+        folio_target = prefix_map.get(tipo)
+        orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_target), None)
+        
+        # Si la orden ya existe en BD, tomar su descripción real guardada; sino, usar la sugerida por defecto
+        desc_final = orden_existente.get("descripcion") if (orden_existente and orden_existente.get("descripcion")) else default_desc_map.get(tipo, "")
+        
+        self._load_catalogs(tipo_modulo=catalog_map.get(tipo, "ESTANDAR"))
+        self.desc_input.setText(desc_final)
+        self.desc_input.setReadOnly(True)
 
     def _load_catalogs(self, es_cancelacion: bool = False, tipo_modulo: Optional[str] = None):
         try:
@@ -1184,41 +1159,23 @@ class OrdersView(QWidget):
                 self.combo_municipio.setCurrentIndex(idx_mun)
                 
             # Set tipo_orden and catalog
-            self.chk_cancelaciones.blockSignals(True)
-            self.chk_fojas.blockSignals(True)
-            self.chk_testimonios.blockSignals(True)
-            self.chk_cancelaciones.setChecked(False)
-            self.chk_fojas.setChecked(False)
-            self.chk_testimonios.setChecked(False)
-            self.chk_cancelaciones.blockSignals(False)
-            self.chk_fojas.blockSignals(False)
-            self.chk_testimonios.blockSignals(False)
-            
             tipo_orden = data.get("tipo_orden", "ESTANDAR")
-            if tipo_orden == "CANCELACION":
-                self.chk_cancelaciones.setChecked(True)
-                self.chk_cancelaciones.setEnabled(False)
-                self.chk_cancelaciones.setVisible(True)
-                self.chk_fojas.setVisible(False)
-                self.chk_testimonios.setVisible(False)
-            elif tipo_orden == "FOJAS":
-                self.chk_fojas.setChecked(True)
-                self.chk_fojas.setEnabled(False)
-                self.chk_fojas.setVisible(True)
-                self.chk_cancelaciones.setVisible(False)
-                self.chk_testimonios.setVisible(False)
-            elif tipo_orden == "TESTIMONIO":
-                self.chk_testimonios.setChecked(True)
-                self.chk_testimonios.setEnabled(False)
-                self.chk_testimonios.setVisible(True)
-                self.chk_cancelaciones.setVisible(False)
-                self.chk_fojas.setVisible(False)
+            self.combo_tipo_orden.blockSignals(True)
+            idx_tipo = self.combo_tipo_orden.findData(tipo_orden)
+            if idx_tipo >= 0:
+                self.combo_tipo_orden.setCurrentIndex(idx_tipo)
+            self.combo_tipo_orden.setEnabled(False) # No permitir cambiar tipo de orden en edición
+            self.combo_tipo_orden.blockSignals(False)
+            
+            if tipo_orden in ("CANCELACION", "FOJAS", "TESTIMONIO"):
+                self._load_catalogs(tipo_modulo=tipo_orden)
+                self.desc_input.setReadOnly(True)
+            elif tipo_orden == "PAGADA":
+                self._load_catalogs(tipo_modulo="ESTANDAR")
+                self.desc_input.setReadOnly(True)
             else:
                 self._load_catalogs(tipo_modulo="ESTANDAR")
                 self.desc_input.setReadOnly(False)
-                self.chk_cancelaciones.setVisible(False)
-                self.chk_fojas.setVisible(False)
-                self.chk_testimonios.setVisible(False)
                 
             # Clear and populate grid
             self.grid.clear()
@@ -1243,6 +1200,20 @@ class OrdersView(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error al Cargar", f"No se pudieron obtener los detalles de la orden:\n{str(e)}")
 
+    def _reset_formulario_captura(self):
+        """Reinicia el formulario de captura a su estado original estándar."""
+        self.desc_input.setText("")
+        self.desc_input.setReadOnly(False)
+        
+        self.combo_tipo_orden.blockSignals(True)
+        self.combo_tipo_orden.setCurrentIndex(0) # ESTANDAR
+        self.combo_tipo_orden.setEnabled(True)
+        self.combo_tipo_orden.blockSignals(False)
+        
+        self._load_catalogs(tipo_modulo="ESTANDAR")
+        self.grid.clear()
+        self.grid.add_row()
+
     def _on_cancelar_edicion(self):
         # Reset mode
         self._edit_mode = False
@@ -1258,23 +1229,7 @@ class OrdersView(QWidget):
         self.total_anterior_frame.setVisible(False)
         self.lbl_tot_ant_val.setText("0")
         
-        self.desc_input.setText("")
-        
-        # Reset checkboxes
-        self.chk_cancelaciones.setVisible(True)
-        self.chk_cancelaciones.setEnabled(True)
-        self.chk_cancelaciones.setChecked(False)
-        self.chk_fojas.setVisible(True)
-        self.chk_fojas.setEnabled(True)
-        self.chk_fojas.setChecked(False)
-        self.chk_testimonios.setVisible(True)
-        self.chk_testimonios.setEnabled(True)
-        self.chk_testimonios.setChecked(False)
-        
-        self._load_catalogs() # Re-selects default municipio
-        
-        self.grid.clear()
-        self.grid.add_row()
+        self._reset_formulario_captura()
         
         # Refresh history
         self.refresh_historial()

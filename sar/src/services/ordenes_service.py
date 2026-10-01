@@ -63,17 +63,19 @@ class OrdenesService:
         lote_size = self.config_repo.get_lote_solicitud_size()
 
         tipo_ord_upper = tipo_orden.upper() if tipo_orden else "ESTANDAR"
-        if tipo_ord_upper in ("CANCELACION", "FOJAS", "TESTIMONIO"):
+        if tipo_ord_upper in ("CANCELACION", "FOJAS", "TESTIMONIO", "PAGADA"):
             current_year = datetime.utcnow().year
             prefix_map = {
                 "CANCELACION": f"ORD-CANCEL-{current_year}",
                 "FOJAS": f"ORD-FOJAS-{current_year}",
-                "TESTIMONIO": f"ORD-TESTIMONIO-{current_year}"
+                "TESTIMONIO": f"ORD-TESTIMONIO-{current_year}",
+                "PAGADA": f"ORD-PAGADA-{current_year}"
             }
             desc_map = {
                 "CANCELACION": f"Orden Anual de Cancelaciones {current_year}",
                 "FOJAS": f"Orden Anual de Fojas {current_year}",
-                "TESTIMONIO": f"Orden Anual de Testimonios {current_year}"
+                "TESTIMONIO": f"Orden Anual de Testimonios {current_year}",
+                "PAGADA": f"Orden Anual de Derechos Pagados {current_year}"
             }
             folio_str = prefix_map[tipo_ord_upper]
             
