@@ -345,9 +345,10 @@ class DashboardView(QWidget):
         scroll_area.setWidget(scroll_content)
         main_layout.addWidget(scroll_area)
 
-        self._load_available_orders()
-        self._update_order_filter_title()
-        self.refresh_data()
+        # Deferred non-blocking initial loading (Ajuste 3)
+        QTimer.singleShot(10, self._load_available_orders)
+        QTimer.singleShot(12, self._update_order_filter_title)
+        QTimer.singleShot(15, self.refresh_data)
         
     def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
         """Helper to verify if current session/user holds permission for modulo + accion."""

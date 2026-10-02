@@ -3,13 +3,12 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QStackedWidget, QCheckBox, QFrame, QPushButton
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from sar.src.ui.design_system.components import (
     CustomCard, CustomLabel, CustomButton, CustomCheckBox, InteractiveGrid, CustomInput, CustomComboBox, FilterBar,
     GLInfoBanner, GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.utils.icons import Icons
-from PySide6.QtCore import QThread, Signal
 from sar.src.services.ordenes_ui_service import OrdenesUIService
 from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
 
@@ -102,8 +101,9 @@ class OrdersView(QWidget):
         self._editing_order_id = None
         self._editing_folio = None
 
-        self._load_catalogs()
-        self.refresh_historial()
+        # Deferred non-blocking initial loading (Ajuste 3)
+        QTimer.singleShot(10, self._load_catalogs)
+        QTimer.singleShot(15, self.refresh_historial)
         
         # Agregamos el primer renglón por defecto en la nueva orden
         self.grid.add_row()
@@ -116,14 +116,18 @@ class OrdersView(QWidget):
             return True # Fallback if standalone/testing without active user session context
         
         try:
-            if getattr(self.api_client, 'connect_via_api', False):
-                perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
-                return perms.get(modulo_codigo, {}).get(accion_codigo, False)
-            else:
-                with self.db_connector.get_session() as session:
-                    from sar.src.services.security_service import SecurityService
-                    sec_service = SecurityService(session)
-                    return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+            perms = getattr(parent_window, '_permissions_cache', None)
+            if perms is None or getattr(parent_window, '_permissions_cache_user_id', None) != usuario_id:
+                if getattr(self.api_client, 'connect_via_api', False):
+                    perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.services.security_service import SecurityService
+                        sec_service = SecurityService(session)
+                        perms = sec_service.get_user_permissions(usuario_id)
+                setattr(parent_window, '_permissions_cache', perms)
+                setattr(parent_window, '_permissions_cache_user_id', usuario_id)
+            return perms.get(modulo_codigo, {}).get(accion_codigo, False)
         except Exception as e:
             print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
             return False

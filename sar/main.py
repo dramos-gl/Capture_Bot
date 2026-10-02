@@ -168,6 +168,14 @@ class MainWindow(QMainWindow):
                     self.current_sesion_id = sesion_obj.sesion_id
                     self.current_usuario_id = sesion_obj.usuario_id
 
+                    # Disparar pre-calentamiento asíncrono de sockets TCP/HTTP Keep-Alive (Ajuste 2)
+                    try:
+                        from sar.src.services.network_warmup import NetworkWarmupWorker
+                        self._warmup_worker = NetworkWarmupWorker(db_connector=self.db_connector, parent=self)
+                        self._warmup_worker.start()
+                    except Exception:
+                        pass
+
             # Clear login form
             self.login_view.user_input.set_text("")
             self.login_view.pass_input.set_text("")

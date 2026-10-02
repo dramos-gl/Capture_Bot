@@ -986,9 +986,9 @@ class InventoryView(QWidget):
 
         self.main_layout.addWidget(self.tabs)
         
-        # Initial data loading (load only filters at start to make tab switching instant)
-        self._apply_permissions()
-        self.refresh_all(load_catalogs=False, active_tab="inventario_facturas")
+        # Deferred non-blocking initial loading (Ajuste 3)
+        QTimer.singleShot(10, self._apply_permissions)
+        QTimer.singleShot(15, lambda: self.refresh_all(load_catalogs=False, active_tab="inventario_facturas"))
 
     def _apply_permissions(self):
         """Aplica control de acceso atómico Fail-Closed en sub-pestañas y acciones de InventoryView."""
@@ -998,21 +998,25 @@ class InventoryView(QWidget):
             if not usuario_id:
                 return
 
-            from sar.src.storage.api_client import APIClient
-            api_client = APIClient()
+            # Reutilizar caché en memoria de la sesión si ya fue consultado
+            perms = getattr(parent_window, '_permissions_cache', None)
+            if perms is None or getattr(parent_window, '_permissions_cache_user_id', None) != usuario_id:
+                from sar.src.storage.api_client import APIClient
+                api_client = APIClient()
 
-            if api_client.connect_via_api:
-                perms = api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
-                has_inv_asignar = perms.get("CTRL:INVENTARIO", {}).get("ASIGNAR", False) or perms.get("REFERENCIAS", {}).get("ASIGNAR", False)
-                has_masivo_access = perms.get("CTRL:ASIGNAR_VALIDAR", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("ASIGNAR", False)
-                has_apartar_access = perms.get("CTRL:RESERVA_DERECHO", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("ASIGNAR", False)
-            else:
-                from sar.src.services.security_service import SecurityService
-                with self.db_connector.get_session() as session:
-                    sec_service = SecurityService(session)
-                    has_inv_asignar = sec_service.has_permission(usuario_id, "CTRL:INVENTARIO", "ASIGNAR") or sec_service.has_permission(usuario_id, "REFERENCIAS", "ASIGNAR")
-                    has_masivo_access = sec_service.has_permission(usuario_id, "CTRL:ASIGNAR_VALIDAR", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "ASIGNAR")
-                    has_apartar_access = sec_service.has_permission(usuario_id, "CTRL:RESERVA_DERECHO", "LEER") or sec_service.has_permission(usuario_id, "REFERENCIAS", "ASIGNAR")
+                if api_client.connect_via_api:
+                    perms = api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                else:
+                    from sar.src.services.security_service import SecurityService
+                    with self.db_connector.get_session() as session:
+                        sec_service = SecurityService(session)
+                        perms = sec_service.get_user_permissions(usuario_id)
+                setattr(parent_window, '_permissions_cache', perms)
+                setattr(parent_window, '_permissions_cache_user_id', usuario_id)
+
+            has_inv_asignar = perms.get("CTRL:INVENTARIO", {}).get("ASIGNAR", False) or perms.get("REFERENCIAS", {}).get("ASIGNAR", False)
+            has_masivo_access = perms.get("CTRL:ASIGNAR_VALIDAR", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("ASIGNAR", False)
+            has_apartar_access = perms.get("CTRL:RESERVA_DERECHO", {}).get("LEER", False) or perms.get("REFERENCIAS", {}).get("ASIGNAR", False)
 
             # 1. Habilitar o deshabilitar botón "Asignar Seleccionados"
             self.btn_asignar_seleccionados.setEnabled(has_inv_asignar)
