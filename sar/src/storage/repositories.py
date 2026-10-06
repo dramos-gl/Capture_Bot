@@ -924,7 +924,9 @@ class ProduccionRepository(BaseRepository):
                 og.folio AS folio_orden,
                 r.grupo_id,
                 rfc.razon_social AS rfc_razon_social,
+                rfc.alias AS rfc_alias,
                 c.nombre AS concepto_nombre,
+                c.alias AS concepto_alias,
                 d.nombre AS delegacion_nombre,
                 es.codigo AS estado_codigo,
                 u.nombre AS usuario_asignado_nombre
@@ -955,7 +957,9 @@ class ProduccionRepository(BaseRepository):
                 "folio_orden": row.folio_orden,
                 "grupo_id": row.grupo_id,
                 "empresa": row.rfc_razon_social,
+                "rfc_alias": row.rfc_alias or row.rfc_razon_social or "-",
                 "concepto": row.concepto_nombre,
+                "concepto_alias": row.concepto_alias or row.concepto_nombre or "-",
                 "delegacion": row.delegacion_nombre or "Sin Delegación",
                 "procesado_por": row.usuario_asignado_nombre or "Sin Asignar"
             })
@@ -2593,15 +2597,33 @@ class InventarioRepository(BaseRepository):
             concepto_id = ref.grupo.concepto_id if (ref and ref.grupo) else concepts_map.get(d.get("concepto_solicitado"), 3)
             
             from sar.src.storage.models import Desarrollo
+            from sar.src.storage.models import Desarrollo
             desarrollo_id = d.get("desarrollo_id")
             if not desarrollo_id and d.get("desarrollo"):
-                des_name = str(d.get("desarrollo")).strip().upper()
-                des_obj = self.session.execute(select(Desarrollo).where(Desarrollo.nombre == des_name)).scalars().first()
-                if not des_obj:
-                    des_obj = Desarrollo(nombre=des_name, activo=True)
-                    self.session.add(des_obj)
-                    self.session.flush()
-                desarrollo_id = des_obj.desarrollo_id
+                import unicodedata
+                import re
+                def _norm(t):
+                    t = re.sub(r"[´’'`]", "", str(t))
+                    return re.sub(r"\s+", " ", t).strip().upper()
+                def _strip(t):
+                    return "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn")
+
+                des_name = str(d.get("desarrollo")).strip()
+                des_norm = _norm(des_name)
+                des_strip = _strip(des_norm)
+
+                all_devs = self.session.execute(select(Desarrollo).where(Desarrollo.activo == True)).scalars().all()
+                matched_dev = None
+                for dev in all_devs:
+                    dn = _norm(dev.nombre)
+                    if dn == des_norm or _strip(dn) == des_strip:
+                        matched_dev = dev
+                        break
+                
+                if matched_dev:
+                    desarrollo_id = matched_dev.desarrollo_id
+                else:
+                    raise ValueError(f"El desarrollo '{des_name}' no existe en el catálogo activo de desarrollos.")
 
             key = (rfc_id, concepto_id, desarrollo_id)
             if key not in grouped_details:

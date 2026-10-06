@@ -2378,6 +2378,60 @@ class InventoryView(QWidget):
     def _on_pick_excel_masivo(self):
         if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "CREAR"):
             return
+
+        # 1. Asegurar que las órdenes disponibles estén cargadas
+        if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
+            self._load_available_orders()
+
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            QMessageBox.warning(
+                self,
+                "Filtro de Órdenes Vacío",
+                "No hay ninguna orden de generación seleccionada en el filtro.\n\n"
+                "Para poder importar y validar el archivo Excel, por favor seleccione al menos una orden "
+                "o elija 'Todas las órdenes' mediante el botón de filtro (icono de embudo)."
+            )
+            return
+
+        # 2. Construir detalle de órdenes activas para confirmación de seguridad del usuario
+        if num_selected == total_orders:
+            ordenes_summary = f"• ALCANCE GLOBAL: Se buscarán derechos en TODAS las órdenes activas ({total_orders} órdenes registradas)."
+        else:
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            lines = [f"• Órdenes seleccionadas ({num_selected} de {total_orders}):"]
+            for o in selected_objs[:8]:  # Mostrar hasta 8 de forma legible
+                folio = str(o.get("folio", "")).strip() or f"Orden #{o.get('orden_id')}"
+                empresa = str(o.get("rfc_razon_social") or o.get("empresa") or "").strip()
+                disponibles = o.get("total_disponibles", 0)
+                desc = f" ({empresa})" if empresa else ""
+                lines.append(f"   - {folio}{desc} | Disp: {disponibles}")
+            if len(selected_objs) > 8:
+                lines.append(f"   - ... y {len(selected_objs) - 8} orden(es) más.")
+            ordenes_summary = "\n".join(lines)
+
+        confirm_msg = (
+            "¿Desea continuar con la importación aplicando el filtro de órdenes actual?\n\n"
+            f"{ordenes_summary}\n\n"
+            "El proceso de validación consumirá derechos disponibles ÚNICAMENTE dentro de estas órdenes.\n"
+            "Si necesita cambiar de orden, presione 'No' y ajuste el filtro antes de continuar."
+        )
+
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Órdenes Activas",
+            confirm_msg,
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
         file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar Excel de Control", "", "Excel Files (*.xlsx)")
         if not file_path:
             return
@@ -2856,6 +2910,58 @@ class InventoryView(QWidget):
                 QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener Empresa, Concepto y Delegación seleccionados.")
                 return
 
+        # Asegurar que las órdenes disponibles estén cargadas
+        if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
+            self._load_available_orders()
+
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            QMessageBox.warning(
+                self,
+                "Filtro de Órdenes Vacío",
+                "No hay ninguna orden de generación seleccionada en el filtro.\n\n"
+                "Para poder buscar derechos disponibles, por favor seleccione al menos una orden "
+                "o elija 'Todas las órdenes' mediante el botón de filtro (icono de embudo)."
+            )
+            return
+
+        # Construir detalle de órdenes activas para confirmación de seguridad del usuario
+        if num_selected == total_orders:
+            ordenes_summary = f"• ALCANCE GLOBAL: Se buscarán derechos en TODAS las órdenes activas ({total_orders} órdenes registradas)."
+        else:
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            lines = [f"• Órdenes seleccionadas ({num_selected} de {total_orders}):"]
+            for o in selected_objs[:8]:  # Mostrar hasta 8 de forma legible
+                folio = str(o.get("folio", "")).strip() or f"Orden #{o.get('orden_id')}"
+                empresa = str(o.get("rfc_razon_social") or o.get("empresa") or "").strip()
+                disponibles = o.get("total_disponibles", 0)
+                desc = f" ({empresa})" if empresa else ""
+                lines.append(f"   - {folio}{desc} | Disp: {disponibles}")
+            if len(selected_objs) > 8:
+                lines.append(f"   - ... y {len(selected_objs) - 8} orden(es) más.")
+            ordenes_summary = "\n".join(lines)
+
+        confirm_msg = (
+            "¿Desea continuar con la búsqueda aplicando el filtro de órdenes actual?\n\n"
+            f"{ordenes_summary}\n\n"
+            "El proceso buscará derechos disponibles ÚNICAMENTE dentro de estas órdenes.\n"
+            "Si necesita cambiar de orden, presione 'No' y ajuste el filtro antes de continuar."
+        )
+
+        reply = QMessageBox.question(
+            self,
+            "Confirmar Órdenes Activas",
+            confirm_msg,
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
 
         self.btn_buscar_ind.setEnabled(False)
         self._pending_ind_refs = []
@@ -3471,6 +3577,59 @@ class InventoryView(QWidget):
                 f"Cada combinación de Empresa + Delegación/Desarrollo debe tener un renglón de "
                 f"Aviso Preventivo y uno de CLG.\n\nFaltan:\n{detail}"
             )
+            return
+
+        # --- Validación de Órdenes Activas ---
+        if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
+            self._load_available_orders()
+
+        total_orders = len(getattr(self, "todas_las_ordenes", []))
+        selected_ids = getattr(self, "selected_orden_ids", [])
+        num_selected = len(selected_ids)
+
+        if total_orders == 0 or num_selected == 0:
+            QMessageBox.warning(
+                self,
+                "Filtro de Órdenes Vacío",
+                "No hay ninguna orden de generación seleccionada en el filtro.\n\n"
+                "Para poder apartar y reservar derechos, por favor seleccione al menos una orden "
+                "o elija 'Todas las órdenes' mediante el botón de filtro (icono de embudo)."
+            )
+            return
+
+        # Construir detalle de órdenes activas para confirmación de seguridad del usuario
+        if num_selected == total_orders:
+            ordenes_summary = f"• ALCANCE GLOBAL: Se reservarán derechos en TODAS las órdenes activas ({total_orders} órdenes registradas)."
+        else:
+            selected_objs = [
+                ord for ord in self.todas_las_ordenes
+                if ord.get("orden_id") in selected_ids
+            ]
+            lines = [f"• Órdenes seleccionadas ({num_selected} de {total_orders}):"]
+            for o in selected_objs[:8]:
+                folio = str(o.get("folio", "")).strip() or f"Orden #{o.get('orden_id')}"
+                empresa = str(o.get("rfc_razon_social") or o.get("empresa") or "").strip()
+                disponibles = o.get("total_disponibles", 0)
+                desc = f" ({empresa})" if empresa else ""
+                lines.append(f"   - {folio}{desc} | Disp: {disponibles}")
+            if len(selected_objs) > 8:
+                lines.append(f"   - ... y {len(selected_objs) - 8} orden(es) más.")
+            ordenes_summary = "\n".join(lines)
+
+        confirm_ordenes_msg = (
+            "¿Desea continuar con el apartado aplicando el filtro de órdenes actual?\n\n"
+            f"{ordenes_summary}\n\n"
+            "El proceso reservará derechos ÚNICAMENTE dentro de estas órdenes.\n"
+            "Si necesita cambiar de orden, presione 'No' y ajuste el filtro antes de continuar."
+        )
+
+        reply_ordenes = QMessageBox.question(
+            self,
+            "Confirmar Órdenes Activas",
+            confirm_ordenes_msg,
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply_ordenes != QMessageBox.Yes:
             return
 
         # --- Diálogo de confirmación con resumen detallado ---

@@ -301,7 +301,7 @@ class DashboardView(QWidget):
         self.activity_layout.addLayout(self.table_header_layout)
         
         # Data Table
-        headers = ["ID", "Consecutivo", "Referencia Portal", "Importe", "Fecha Generación", "Estado"]
+        headers = ["ID", "Consecutivo", "Referencia Portal", "Importe", "Concepto", "Empresa", "Fecha Generación", "Estado"]
         self.table = StyledDataTable(headers, parent=self)
         self.table.setMinimumHeight(150)
         self.table.setMinimumWidth(200)
@@ -585,6 +585,8 @@ class DashboardView(QWidget):
                 str(ref["consecutivo_grupo"]),
                 ref["referencia_portal"],
                 f"${ref['importe']}" if ref['importe'] else "-",
+                str(ref.get("concepto_alias") or ref.get("concepto") or "-"),
+                str(ref.get("rfc_alias") or ref.get("empresa") or "-"),
                 ref["fecha_generacion"],
                 ref["estado"]
             ])

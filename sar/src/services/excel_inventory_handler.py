@@ -282,6 +282,35 @@ class ExcelInventoryHandler:
             # Convert to a mutable list of dicts/tuples to pop sequentially
             reserved_placeholders = list(reserved_placeholders)
 
+        # Cache Desarrollos mapping (name normalized to Desarrollo obj)
+        import unicodedata
+        import re
+
+        def _clean_dev_name(txt: str) -> str:
+            if not txt:
+                return ""
+            # Normalizar comillas simples, apóstrofes tipográficos (´, ’, `, ')
+            cleaned = re.sub(r"[´’'`]", "", txt)
+            # Reemplazar múltiples espacios por uno solo y quitar espacios en extremos
+            cleaned = re.sub(r"\s+", " ", cleaned).strip().upper()
+            return cleaned
+
+        def _strip_accents(txt: str) -> str:
+            if not txt:
+                return ""
+            # Remueve tildes para búsqueda tolerante pero sin alterar el registro oficial
+            return "".join(c for c in unicodedata.normalize("NFD", txt) if unicodedata.category(c) != "Mn")
+
+        desarrollos_stmt = select(Desarrollo).where(Desarrollo.activo == True)
+        all_desarrollos = session.execute(desarrollos_stmt).scalars().all()
+        desarrollos_map = {}
+        for d in all_desarrollos:
+            key_exact = _clean_dev_name(d.nombre)
+            desarrollos_map[key_exact] = d
+            key_no_accent = _strip_accents(key_exact)
+            if key_no_accent not in desarrollos_map:
+                desarrollos_map[key_no_accent] = d
+
         validated_rows = []
         allocated_ref_ids = set()
         seen_locations_in_batch = {}
@@ -336,45 +365,42 @@ class ExcelInventoryHandler:
 
             row_result["rfc_id"] = resolved_rfc_id
             
-            # 1. Lookup/register Desarrollo first
+            # 1. Lookup Desarrollo (Validación estricta contra catálogo sin creación automática)
             if omitir_validacion and not desarrollo_name:
                 desarrollo = None
                 row_result["desarrollo_id"] = None
                 deleg_name = "SIN ASIGNAR"
                 row_result["delegacion_nombre"] = deleg_name
             else:
-                if not desarrollo_name:
-                    desarrollo_name = "GENERICO"
-                des_stmt = select(Desarrollo).where(Desarrollo.nombre == desarrollo_name)
-                desarrollo = session.execute(des_stmt).scalars().first()
-                
+                raw_dev_str = (desarrollo_name or "").strip()
+                if not raw_dev_str:
+                    row_result["status"] = "ERROR"
+                    row_result["error_message"] = "El campo Desarrollo es obligatorio."
+                    validated_rows.append(row_result)
+                    continue
+
+                clean_search = _clean_dev_name(raw_dev_str)
+                clean_no_accent = _strip_accents(clean_search)
+                desarrollo = desarrollos_map.get(clean_search) or desarrollos_map.get(clean_no_accent)
+
                 if not desarrollo:
-                    desarrollo = Desarrollo(nombre=desarrollo_name, activo=True)
-                    session.add(desarrollo)
-                    session.flush()
-
-                    # Default delegation logic
-                    deleg_id = 2 # default Cancun
-                    if "PLAYA" in desarrollo_name or "TULUM" in desarrollo_name:
-                        deleg_id = 3 # Playa del Carmen
-
-                    from sar.src.storage.models import DesarrolloEmpresa
-                    # resolved_rfc_id fallback to 1 if empty
-                    de = DesarrolloEmpresa(
-                        desarrollo_id=desarrollo.desarrollo_id,
-                        rfc_id=resolved_rfc_id if resolved_rfc_id else 1,
-                        delegacion_id=deleg_id,
-                        es_default=True,
-                        activo=True
+                    row_result["status"] = "ERROR"
+                    row_result["error_message"] = (
+                        f"El desarrollo '{raw_dev_str}' no existe en el catálogo maestro. "
+                        "Verifique la ortografía en el Excel o regístrelo formalmente en Administración."
                     )
-                    session.add(de)
-                    session.flush()
+                    validated_rows.append(row_result)
+                    continue
 
                 row_result["desarrollo_id"] = desarrollo.desarrollo_id
+                row_result["desarrollo"] = desarrollo.nombre  # Normalizar al nombre oficial de BD
 
                 # Fetch delegation_id from DesarrolloEmpresa associations
                 from sar.src.storage.models import DesarrolloEmpresa
-                de_stmt = select(DesarrolloEmpresa.delegacion_id).where(DesarrolloEmpresa.desarrollo_id == desarrollo.desarrollo_id)
+                de_stmt = select(DesarrolloEmpresa.delegacion_id).where(
+                    DesarrolloEmpresa.desarrollo_id == desarrollo.desarrollo_id,
+                    DesarrolloEmpresa.activo == True
+                )
                 deleg_id = session.execute(de_stmt).scalars().first()
                 if not deleg_id:
                     deleg_id = 2 # default Cancun fallback
