@@ -332,7 +332,7 @@ class MainView(QWidget):
             self.refs_view.refresh_data()
         elif view_key == "r2f_control":
             if not hasattr(self, "r2f_control_view") or not self.r2f_control_view:
-                from cancunbot.src.ui.views.r2f_control_view import R2FControlView
+                from satc.src.ui.views.r2f_control_view import R2FControlView
                 self.r2f_control_view = R2FControlView(self.db_connector, self)
                 self.stacked_widget.addWidget(self.r2f_control_view)
             self.stacked_widget.setCurrentWidget(self.r2f_control_view)
@@ -383,6 +383,8 @@ class MainView(QWidget):
         # Apply theme globally to the top-level window/app
         window = self.window()
         self.theme_manager.apply_theme(window, self.is_dark_theme)
+        if hasattr(self, 'sidebar') and hasattr(self.sidebar, 'update_theme_icons'):
+            self.sidebar.update_theme_icons()
         
     def hide_admin_menu(self):
         """Hides the administration menu button from the sidebar."""

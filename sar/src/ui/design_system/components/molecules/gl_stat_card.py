@@ -51,9 +51,7 @@ class StatCard(QFrame):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.setCursor(Qt.PointingHandCursor)
         
-        _bg_card = "#FFFFFF" if not ThemeManager.is_dark_active() else Colors.SURFACE_DARK
-        _border_card = Colors.SLATE_200 if not ThemeManager.is_dark_active() else Colors.BORDER_DARK
-        self.setStyleSheet(f"QFrame#cardFrame {{ background-color: {_bg_card}; border: 1px solid {_border_card}; border-radius: 12px; }}")
+        # El estilo de fondo, borde y radio es administrado centralizadamente por ThemeManager (QFrame#cardFrame)
         
         self.color_hex = color_hex
         self._current_value = initial_value

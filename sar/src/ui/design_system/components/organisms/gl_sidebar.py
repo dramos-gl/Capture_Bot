@@ -24,10 +24,7 @@ class NavigationSidebar(QFrame):
         self.setObjectName("sidebarFrame")
         self.setFixedWidth(250)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Ignored)
-        self.setMinimumHeight(0)
-        _bg_sidebar = Colors.SURFACE_LIGHT if not ThemeManager.is_dark_active() else Colors.SURFACE_DARK
-        _border_sidebar = Colors.BORDER_LIGHT if not ThemeManager.is_dark_active() else Colors.BORDER_DARK
-        self.setStyleSheet(f"QFrame#sidebarFrame {{ background-color: {_bg_sidebar}; border-right: 1px solid {_border_sidebar}; }}")
+        # El fondo y borde de QFrame#sidebarFrame son administrados centralizadamente por ThemeManager
         
         # Main outer layout to contain the 3 decoupled areas
         outer_layout = QVBoxLayout(self)
@@ -93,11 +90,8 @@ class NavigationSidebar(QFrame):
         # 3. Footer Area Container (Fixed Bottom - Pinned Logout and Profile)
         self.footer_widget = QWidget(self)
         self.footer_widget.setObjectName("sidebarFooterContainer")
-        # Borde del footer se adapta al tema activo
-        _border_color = Colors.BORDER_DARK if ThemeManager.is_dark_active() else Colors.BORDER_LIGHT
-        self.footer_widget.setStyleSheet(
-            f"QWidget#sidebarFooterContainer {{ background: transparent; border-top: 1px solid {_border_color}; }}"
-        )
+        # El borde de QWidget#sidebarFooterContainer es administrado por ThemeManager
+        self.footer_widget.setStyleSheet("QWidget#sidebarFooterContainer { background: transparent; }")
         self.footer_layout = QVBoxLayout(self.footer_widget)
         self.footer_layout.setContentsMargins(16, 12, 16, 16)
         self.footer_layout.setSpacing(8)
@@ -597,4 +591,29 @@ class NavigationSidebar(QFrame):
             self.logout_btn.setText(" Cerrar Sesión")
             self.logout_btn.setStyleSheet("")
             self.profile_widget.show()
+
+    def update_theme_icons(self):
+        """Refreshes sidebar dynamic icons when the theme changes."""
+        is_dark = ThemeManager.is_dark_active()
+        icon_color = "#94A3B8" if is_dark else "#475569"
+        profile_color = Colors.TEXT_DARK_SECONDARY if is_dark else Colors.TEXT_LIGHT_SECONDARY
+        
+        self.btn_hamburger.setIcon(Icons.menu(icon_color))
+        self.lbl_profile_icon.setPixmap(Icons.user(profile_color).pixmap(20, 20))
+        
+        # Actualizar chevrons de acordeón
+        color_ord = "#2563EB" if self.buttons.get("ordenes", QPushButton()).isChecked() else icon_color
+        if hasattr(self, 'chevron_label'):
+            if self.submenu_visible:
+                self.chevron_label.setPixmap(Icons.chevron_up(color_ord).pixmap(12, 12))
+            else:
+                self.chevron_label.setPixmap(Icons.chevron_down(color_ord).pixmap(12, 12))
+                
+        color_inv = "#2563EB" if self.buttons.get("inventario", QPushButton()).isChecked() else icon_color
+        if hasattr(self, 'chevron_label2'):
+            if self.inv_submenu_visible:
+                self.chevron_label2.setPixmap(Icons.chevron_up(color_inv).pixmap(12, 12))
+            else:
+                self.chevron_label2.setPixmap(Icons.chevron_down(color_inv).pixmap(12, 12))
+
 

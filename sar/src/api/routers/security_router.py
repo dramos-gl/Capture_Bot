@@ -81,7 +81,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db)):
     if not sesion_obj:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Credenciales inválidas o usuario inactivo",
+            detail="Credenciales inválidas",
             headers={"WWW-Authenticate": "Bearer"},
         )
     

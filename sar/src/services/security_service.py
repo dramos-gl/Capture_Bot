@@ -111,6 +111,23 @@ class SecurityService:
             )
             self.session.flush()
 
+    def get_user_permissions(self, usuario_id: int) -> dict:
+        """Fetches and builds the permissions matrix for all active modules for the user (symmetrical with API)."""
+        all_mods = self.user_repo.get_all_modulos()
+        user_perms_set = set(self.user_repo.get_user_permissions(usuario_id))
+        perms = {}
+        for m in all_mods:
+            mod = m.codigo
+            perms[mod] = {
+                "LEER": (mod, "LEER") in user_perms_set,
+                "CREAR": (mod, "CREAR") in user_perms_set,
+                "EDITAR": (mod, "EDITAR") in user_perms_set,
+                "ELIMINAR": (mod, "ELIMINAR") in user_perms_set,
+                "ASIGNAR": (mod, "ASIGNAR") in user_perms_set,
+                "EJECUTAR": (mod, "EJECUTAR") in user_perms_set,
+            }
+        return perms
+
     def has_permission(self, usuario_id: int, modulo_codigo: str, accion_codigo: str) -> bool:
         """Verifies if the user holds a permission mapped to Modulo + Accion."""
         permissions = self.user_repo.get_user_permissions(usuario_id)

@@ -52,90 +52,65 @@ class ReservasProcesoView(QWidget):
         subtitle_layout.addStretch()
         self.layout.addLayout(subtitle_layout)
 
-        # 2. Card 1: Configuration Form Container
+        # 2. Card 1: Configuration Form Container (Compact & Clean)
         self.form_card = QFrame()
         self.form_card.setObjectName("cardFrame")
-        self.form_card.setStyleSheet("""
-            QFrame#cardFrame {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-            }
-        """)
         
         form_card_layout = QVBoxLayout(self.form_card)
-        form_card_layout.setContentsMargins(20, 20, 20, 20)
-        form_card_layout.setSpacing(16)
+        form_card_layout.setContentsMargins(16, 14, 16, 14)
+        form_card_layout.setSpacing(12)
 
-        # Content Row (Colaborador on the left, Observations on the right)
+        # Content Row (Colaborador on the left, Observations on the right, balanced 1:1)
         row_layout = QHBoxLayout()
         row_layout.setSpacing(24)
+        row_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Left Column (Colaborador)
         left_col = QVBoxLayout()
-        left_col.setSpacing(6)
+        left_col.setSpacing(4)
+        left_col.setAlignment(Qt.AlignmentFlag.AlignTop)
         
         colab_title_lbl = QLabel()
         colab_title_lbl.setText("Colaborador Destino <font color='#EF4444'>*</font>")
-        colab_title_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #1E293B;")
+        colab_title_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
         left_col.addWidget(colab_title_lbl)
 
         self.cb_colaborador = CustomComboBox()
-        self.cb_colaborador.setFixedWidth(300)
-        self.cb_colaborador.setStyleSheet("""
-            QComboBox {
-                padding: 8px 12px;
-                border-radius: 6px;
-                border: 1px solid #CBD5E1;
-                background-color: #F8FAFC;
-                font-size: 13px;
-                color: #334155;
-            }
-        """)
+        self.cb_colaborador.setMinimumHeight(38)
         left_col.addWidget(self.cb_colaborador)
 
         colab_help_lbl = CustomLabel("Seleccione el colaborador que recibirá las referencias.", variant="muted")
         left_col.addWidget(colab_help_lbl)
-        left_col.addStretch()
         
-        row_layout.addLayout(left_col)
+        row_layout.addLayout(left_col, stretch=1)
 
-        # Right Column (Observations & Char Count)
+        # Right Column (Observations & Char Count, same width stretch 1)
         right_col = QVBoxLayout()
-        right_col.setSpacing(6)
+        right_col.setSpacing(4)
+        right_col.setAlignment(Qt.AlignmentFlag.AlignTop)
         
+        obs_header_layout = QHBoxLayout()
+        obs_header_layout.setSpacing(6)
         obs_title_lbl = CustomLabel("Observaciones del Lote", variant="body")
-        obs_title_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #1E293B;")
-        right_col.addWidget(obs_title_lbl)
+        obs_title_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        obs_header_layout.addWidget(obs_title_lbl)
+        obs_header_layout.addStretch()
+        self.lbl_char_counter = CustomLabel("0 / 500", variant="muted")
+        obs_header_layout.addWidget(self.lbl_char_counter)
+        right_col.addLayout(obs_header_layout)
 
         self.txt_observaciones = QTextEdit()
-        self.txt_observaciones.setFixedHeight(80)
+        self.txt_observaciones.setFixedHeight(50)
         self.txt_observaciones.setPlaceholderText("Ingrese el motivo o comentarios de esta reserva manual...")
-        self.txt_observaciones.setStyleSheet("""
-            QTextEdit {
-                padding: 10px;
-                border-radius: 6px;
-                border: 1px solid #CBD5E1;
-                background-color: #FFFFFF;
-                font-size: 13px;
-                color: #334155;
-            }
-        """)
         self.txt_observaciones.textChanged.connect(self._on_txt_changed)
         right_col.addWidget(self.txt_observaciones)
 
-        char_lbl_layout = QHBoxLayout()
-        char_lbl_layout.addStretch()
-        self.lbl_char_counter = CustomLabel("0 / 500", variant="muted")
-        char_lbl_layout.addWidget(self.lbl_char_counter)
-        right_col.addLayout(char_lbl_layout)
-
-        row_layout.addLayout(right_col)
+        row_layout.addLayout(right_col, stretch=1)
         form_card_layout.addLayout(row_layout)
 
         # Form Actions Row (Separate select excel vs confirm reservation actions)
         actions_row = QHBoxLayout()
-        actions_row.setSpacing(12)
+        actions_row.setSpacing(10)
         
         self.btn_descargar = CustomButton("Descargar Plantilla", is_secondary=True, icon_name="document")
         self.btn_descargar.setFixedWidth(160)
@@ -151,25 +126,18 @@ class ReservasProcesoView(QWidget):
         actions_row.addWidget(self.btn_confirmar_reserva)
 
         self.btn_cancelar = CustomButton("Cancelar", is_secondary=True, icon_name="close")
+        self.btn_cancelar.setObjectName("outlineDangerBtn")
         self.btn_cancelar.setFixedWidth(110)
-        self.btn_cancelar.setStyleSheet("QPushButton#secondaryBtn { color: #EF4444; border-color: #FCA5A5; } QPushButton#secondaryBtn:hover { background-color: #FEF2F2; }")
         actions_row.addWidget(self.btn_cancelar)
         
         actions_row.addStretch()
         form_card_layout.addLayout(actions_row)
 
-        self.layout.addWidget(self.form_card)
+        self.layout.addWidget(self.form_card, stretch=0)
 
-        # 3. Card 2: Results Container Card
+        # 3. Card 2: Results Container Card (Takes remaining vertical space)
         self.results_card = QFrame()
         self.results_card.setObjectName("cardFrame")
-        self.results_card.setStyleSheet("""
-            QFrame#cardFrame {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-            }
-        """)
         
         results_card_layout = QVBoxLayout(self.results_card)
         results_card_layout.setContentsMargins(20, 20, 20, 20)
@@ -279,7 +247,7 @@ class ReservasProcesoView(QWidget):
         self.footer_layout.addWidget(self.btn_next_page)
 
         results_card_layout.addLayout(self.footer_layout)
-        self.layout.addWidget(self.results_card)
+        self.layout.addWidget(self.results_card, stretch=1)
 
         # Connect actions
         self.btn_descargar.clicked.connect(self._on_descargar_plantilla)
@@ -348,12 +316,14 @@ class ReservasProcesoView(QWidget):
             ws.cell(row=1, column=1, value="REFERENCIA")
             ws.cell(row=1, column=2, value="ESTADO")
 
-            # Sample row
+            # Sample rows
             ws.cell(row=2, column=1, value="1234567890")
             ws.cell(row=2, column=2, value="RESERVADA")
+            ws.cell(row=3, column=1, value="0987654321")
+            ws.cell(row=3, column=2, value="DISPONIBLE")
 
             wb.save(file_path)
-            QMessageBox.information(self, "Plantilla Guardada", "Se ha guardado la plantilla correctamente.")
+            QMessageBox.information(self, "Plantilla Guardada", "Se ha guardado la plantilla correctamente.\nValores permitidos en ESTADO: RESERVADA, DISPONIBLE, ASIGNADA.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al guardar la plantilla: {e}")
 
@@ -402,17 +372,24 @@ class ReservasProcesoView(QWidget):
                 excel_entries.append((ref_val, est_val))
                 all_ref_strings.add(ref_val)
 
-            # 2. Consultar existencia en la base de datos en un solo batch eficiente
+            # 2. Consultar existencia en la base de datos o API en un solo batch eficiente
             existing_refs = set()
             if all_ref_strings:
-                with self.db_connector.get_session() as session:
-                    refs_list = list(all_ref_strings)
+                refs_list = list(all_ref_strings)
+                if self.api_client.connect_via_api:
                     chunk_size = 500
                     for i in range(0, len(refs_list), chunk_size):
                         chunk = refs_list[i:i + chunk_size]
-                        stmt = select(Referencia.referencia_portal).where(Referencia.referencia_portal.in_(chunk))
-                        chunk_existing = session.execute(stmt).scalars().all()
-                        existing_refs.update(chunk_existing)
+                        res = self.api_client.request("POST", "/api/admin/referencias/validar-batch", json={"referencias": chunk})
+                        existing_refs.update(res.get("existentes", []))
+                else:
+                    with self.db_connector.get_session() as session:
+                        chunk_size = 500
+                        for i in range(0, len(refs_list), chunk_size):
+                            chunk = refs_list[i:i + chunk_size]
+                            stmt = select(Referencia.referencia_portal).where(Referencia.referencia_portal.in_(chunk))
+                            chunk_existing = session.execute(stmt).scalars().all()
+                            existing_refs.update(chunk_existing)
 
             # 3. Clasificar y generar resultados en memoria O(1)
             for ref_val, est_val in excel_entries:
@@ -424,10 +401,11 @@ class ReservasProcesoView(QWidget):
                     })
                 else:
                     has_valid = True
+                    desc_action = "Liberar a DISPONIBLE" if est_val in ("DISPONIBLE", "DISPONIBLES", "LIBERAR", "LIBERADA") else f"Asignar/Reservar ({est_val})"
                     results_to_render.append({
                         "referencia": ref_val,
                         "valido": True,
-                        "msg": f"VÁLIDA: Lista para asignación ({est_val})."
+                        "msg": f"VÁLIDA: Lista para {desc_action}."
                     })
                     self.payload_validado.append({
                         "referencia_portal": ref_val,
@@ -496,17 +474,26 @@ class ReservasProcesoView(QWidget):
         try:
             obs = self.txt_observaciones.toPlainText()
 
-            # Save to Database
-            from sar.src.storage.repositories import InventarioRepository
-            with self.db_connector.get_session() as session:
-                repo = InventarioRepository(session)
-                result = repo.reservar_lote_manual_colaborador(
-                    colaborador_id=colab_id,
-                    observaciones=obs,
-                    usuario_id=self.current_user_id,
-                    referencias_estados=self.payload_validado
-                )
-                session.commit()
+            # Save to Database or API
+            if self.api_client.connect_via_api:
+                payload = {
+                    "colaborador_id": colab_id,
+                    "observaciones": obs,
+                    "usuario_id": self.current_user_id,
+                    "referencias_estados": self.payload_validado
+                }
+                result = self.api_client.request("POST", "/api/admin/referencias/reservar-lote-manual", json=payload)
+            else:
+                from sar.src.storage.repositories import InventarioRepository
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    result = repo.reservar_lote_manual_colaborador(
+                        colaborador_id=colab_id,
+                        observaciones=obs,
+                        usuario_id=self.current_user_id,
+                        referencias_estados=self.payload_validado
+                    )
+                    session.commit()
 
             # Success Dialog
             QMessageBox.information(

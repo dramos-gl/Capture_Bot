@@ -675,6 +675,19 @@ class OrdersView(QWidget):
 
     def _load_catalogs(self, es_cancelacion: bool = False, tipo_modulo: Optional[str] = None):
         try:
+            if tipo_modulo is None and hasattr(self, "combo_tipo_orden"):
+                current_tipo = self.combo_tipo_orden.currentData() or "ESTANDAR"
+                catalog_map = {
+                    "PAGADA": "ESTANDAR",
+                    "CANCELACION": "CANCELACION",
+                    "FOJAS": "FOJAS",
+                    "TESTIMONIO": "TESTIMONIO",
+                    "ESTANDAR": "ESTANDAR"
+                }
+                tipo_modulo = catalog_map.get(current_tipo, "ESTANDAR")
+            elif tipo_modulo is None:
+                tipo_modulo = "ESTANDAR"
+
             data = self.ordenes_ui_service.get_catalogos(es_cancelacion=es_cancelacion, tipo_modulo=tipo_modulo)
             rfcs = [
                 (

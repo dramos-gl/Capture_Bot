@@ -1551,7 +1551,7 @@ def api_asignar_referencias_directo(request: AsignarDirectoRequest, db: Session 
 def list_cancun_ordenes(db: Session = Depends(get_db)):
     """Retorna el listado de órdenes de R2F Cancún."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import OrdenCancunRepository
+        from satc.src.storage.satc_repos import OrdenCancunRepository
         repo = OrdenCancunRepository(db)
         ordenes = repo.list_all()
         return [
@@ -1574,7 +1574,7 @@ def list_cancun_ordenes(db: Session = Depends(get_db)):
 def list_cancun_lotes(db: Session = Depends(get_db)):
     """Retorna el listado completo de lotes de R2F Cancún."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository
+        from satc.src.storage.satc_repos import LoteFolioRepository
         repo = LoteFolioRepository(db)
         lotes = repo.list_all()
         return [
@@ -1595,7 +1595,7 @@ def list_cancun_lotes(db: Session = Depends(get_db)):
 def get_cancun_lote_detalles(lote_id: int, db: Session = Depends(get_db)):
     """Retorna la métrica y lista de folios de un lote específico de Cancún."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository
+        from satc.src.storage.satc_repos import LoteFolioRepository
         repo = LoteFolioRepository(db)
         lote = repo.get_by_id(lote_id)
         if not lote:
@@ -1656,7 +1656,7 @@ def get_cancun_bot_config(db: Session = Depends(get_db)):
 def iniciar_cancun_lote(lote_id: int, db: Session = Depends(get_db)):
     """Marca un lote como EN_PROCESO y devuelve los folios pendientes."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository, FolioCancunRepository
+        from satc.src.storage.satc_repos import LoteFolioRepository, FolioCancunRepository
         lote_repo = LoteFolioRepository(db)
         folio_repo = FolioCancunRepository(db)
 
@@ -1753,8 +1753,8 @@ def resolver_cancun_rfc(request: CancunResolverRfcRequest, db: Session = Depends
 def registrar_resultado_folio(folio_id: int, request: CancunFolioResultadoRequest, db: Session = Depends(get_db)):
     """Registra el resultado del procesamiento de un folio de Cancún."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import FolioCancunRepository, ReciboCancunRepository
-        from cancunbot.src.storage.cancunbot_models import FolioCancun
+        from satc.src.storage.satc_repos import FolioCancunRepository, ReciboCancunRepository
+        from satc.src.storage.cancunbot_models import FolioCancun
 
         f_repo = FolioCancunRepository(db)
         r_repo = ReciboCancunRepository(db)
@@ -1797,7 +1797,7 @@ def registrar_resultado_folio(folio_id: int, request: CancunFolioResultadoReques
 def finalizar_cancun_lote(lote_id: int, db: Session = Depends(get_db)):
     """Actualiza métricas y estado final de un lote de Cancún."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository
+        from satc.src.storage.satc_repos import LoteFolioRepository
         lote_repo = LoteFolioRepository(db)
         lote_repo.update_metrics_and_status(lote_id)
         db.commit()
@@ -1819,7 +1819,7 @@ def reactivar_errores_cancun_lote(lote_id: int, db: Session = Depends(get_db)):
 
         db.execute(
             text("""
-                UPDATE cancunbot_produccion.folio_cancun 
+                UPDATE satc_produccion.folio_cancun 
                 SET estado_id = :st_p, ultimo_error = NULL
                 WHERE lote_id = :lid AND estado_id = :st_e
             """),
@@ -1835,8 +1835,8 @@ def reactivar_errores_cancun_lote(lote_id: int, db: Session = Depends(get_db)):
 def importar_cancun_lote_pdf(request: CancunImportarPdfRequest, db: Session = Depends(get_db)):
     """Crea un nuevo Lote de Cancún a partir de folios extraídos de un archivo PDF omitiendo duplicados en BD."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository, FolioCancunRepository
-        from cancunbot.src.storage.cancunbot_models import FolioCancun
+        from satc.src.storage.satc_repos import LoteFolioRepository, FolioCancunRepository
+        from satc.src.storage.cancunbot_models import FolioCancun
         from sqlalchemy import select
 
         # Obtener folios ya existentes en la BD para evitar duplicados
@@ -1927,8 +1927,8 @@ def get_cancun_desarrollos(db: Session = Depends(get_db)):
 def importar_cancun_lote_excel(request: CancunImportarExcelRequest, db: Session = Depends(get_db)):
     """Crea un nuevo Lote de Cancún a partir de folios leídos de Excel omitiendo duplicados en BD."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import LoteFolioRepository, FolioCancunRepository
-        from cancunbot.src.storage.cancunbot_models import FolioCancun
+        from satc.src.storage.satc_repos import LoteFolioRepository, FolioCancunRepository
+        from satc.src.storage.cancunbot_models import FolioCancun
         from sqlalchemy import select
 
         db_pases = set(db.scalars(select(FolioCancun.folio_pase_caja).where(FolioCancun.folio_pase_caja.isnot(None))).all())
@@ -2023,7 +2023,7 @@ def list_cancun_recibos(
 ):
     """Retorna recibos paginados de Cancún con filtros aplicados."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import ReciboCancunRepository
+        from satc.src.storage.satc_repos import ReciboCancunRepository
         repo = ReciboCancunRepository(db)
         recibos, total_count = repo.get_recibos_paginated(limit, offset, search_text, estado_filter)
 
@@ -2064,8 +2064,8 @@ def check_cancun_duplicates(request: CancunCheckDuplicatesRequest, db: Session =
         if unique_elec or unique_pase:
             sql_dup = """
                 SELECT f.folio_electronico, f.folio_pase_caja, l.folio_lote
-                FROM cancunbot_produccion.folio_cancun f
-                LEFT JOIN cancunbot_produccion.lote_folio l ON f.lote_id = l.lote_id
+                FROM satc_produccion.folio_cancun f
+                LEFT JOIN satc_produccion.lote_folio l ON f.lote_id = l.lote_id
                 WHERE (f.folio_electronico = ANY(:elec_arr)) OR (f.folio_pase_caja = ANY(:pase_arr))
             """
             res_dup = db.execute(text(sql_dup), {
@@ -2091,7 +2091,7 @@ def check_cancun_duplicates(request: CancunCheckDuplicatesRequest, db: Session =
 def crear_o_anexar_cancun_orden(request: CancunCrearOAnexarOrdenRequest, db: Session = Depends(get_db)):
     """Crea una nueva orden o anexa un nuevo lote a una existente en una sola transacción atómica."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import (
+        from satc.src.storage.satc_repos import (
             OrdenCancunRepository, LoteFolioRepository, FolioCancunRepository
         )
 
@@ -2156,7 +2156,7 @@ def crear_o_anexar_cancun_orden(request: CancunCrearOAnexarOrdenRequest, db: Ses
 def liberar_cancun_recibos(request: CancunLiberarRecibosRequest, db: Session = Depends(get_db)):
     """Actualiza en lote el estado de los recibos seleccionados (por defecto a PENDIENTE_FACTURAR)."""
     try:
-        from cancunbot.src.storage.cancunbot_repos import ReciboCancunRepository
+        from satc.src.storage.satc_repos import ReciboCancunRepository
         repo = ReciboCancunRepository(db)
         liberados = 0
         for rid in request.recibo_ids:

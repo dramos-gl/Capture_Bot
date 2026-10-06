@@ -374,3 +374,48 @@ def get_operations_log(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class ValidarBatchRequest(BaseModel):
+    referencias: List[str]
+
+class ReservarLoteManualRequest(BaseModel):
+    colaborador_id: int
+    observaciones: Optional[str] = None
+    usuario_id: int
+    referencias_estados: List[Dict[str, str]]
+
+@router.post("/referencias/validar-batch")
+def validar_referencias_batch(payload: ValidarBatchRequest, db: Session = Depends(get_db)):
+    """Valida en lote qué referencias existen en la base de datos (O(N) por chunks)."""
+    try:
+        from sar.src.storage.models import Referencia
+        refs_set = set(payload.referencias)
+        existing_refs = set()
+        if refs_set:
+            refs_list = list(refs_set)
+            chunk_size = 500
+            for i in range(0, len(refs_list), chunk_size):
+                chunk = refs_list[i:i + chunk_size]
+                stmt = select(Referencia.referencia_portal).where(Referencia.referencia_portal.in_(chunk))
+                chunk_existing = db.execute(stmt).scalars().all()
+                existing_refs.update(chunk_existing)
+        return {"existentes": list(existing_refs)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al validar lote de referencias: {str(e)}")
+
+@router.post("/referencias/reservar-lote-manual")
+def reservar_lote_manual(payload: ReservarLoteManualRequest, db: Session = Depends(get_db)):
+    """Ejecuta la reserva manual de referencias con control transaccional estricto."""
+    try:
+        from sar.src.storage.repositories import InventarioRepository
+        repo = InventarioRepository(db)
+        result = repo.reservar_lote_manual_colaborador(
+            colaborador_id=payload.colaborador_id,
+            observaciones=payload.observaciones,
+            usuario_id=payload.usuario_id,
+            referencias_estados=payload.referencias_estados
+        )
+        db.commit()
+        return result
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al procesar reserva de lote: {str(e)}")

@@ -3861,12 +3861,13 @@ class InventarioRepository(BaseRepository):
         # 1. Resolve target states
         estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
         estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
+        estado_facturada_id = self._get_estado_id("referencia", "FACTURADA")
 
         # 2. Create the LoteAsignacion for this COLABORADOR
         lote = LoteAsignacion(
             tipo_destino="COLABORADOR",
             colaborador_id=colaborador_id,
-            observaciones=observaciones.strip() if observaciones else "Carga Masiva Manual de Reservas",
+            observaciones=observaciones.strip() if observaciones else "Carga Masiva Manual de Reservas/Liberación",
             usuario_creacion=usuario_id,
             fecha=datetime.datetime.now()
         )
@@ -3880,7 +3881,7 @@ class InventarioRepository(BaseRepository):
         # 3. Process each reference
         for item in referencias_estados:
             ref_str = item["referencia_portal"]
-            target_status = item["estado_codigo"]
+            raw_target_status = str(item.get("estado_codigo", "")).strip().upper()
 
             # Lookup reference by portal text
             ref = self.session.execute(
@@ -3892,41 +3893,67 @@ class InventarioRepository(BaseRepository):
                 details.append({"referencia": ref_str, "status": "ERROR", "message": "La referencia no existe."})
                 continue
 
-            desarrollo_id = None
-
-            # Determine state ID
-            status_id = estado_asignada_id if target_status == "ASIGNADA" else estado_reservada_id
-
-            # Create LoteDetalle for grouping
-            ld = LoteDetalle(
-                lote_asignacion_id=lote.lote_asignacion_id,
-                rfc_id=ref.grupo.rfc_id,
-                concepto_id=ref.grupo.concepto_id,
-                desarrollo_id=desarrollo_id,
-                cantidad_solicitada=1,
-                cantidad_confirmada=1 if target_status == "ASIGNADA" else 0
-            )
-            self.session.add(ld)
-            self.session.flush()
-
-            # Create the assignation record
-            asig = AsignacionReferencia(
-                lote_detalle_id=ld.lote_detalle_id,
-                referencia_id=ref.referencia_id,
-                ubicacion_id=None,
-                intento=1,
-                estado_id=status_id,
-                usuario_asignacion=usuario_id,
-                fecha_asignacion=datetime.datetime.now(),
-                observaciones="Asignación Masiva Manual"
-            )
-            self.session.add(asig)
+            # CASO A: Liberar / Devolver a DISPONIBLE (FACTURADA)
+            if raw_target_status in ("DISPONIBLE", "DISPONIBLES", "LIBERAR", "LIBERADA", "FACTURADA"):
+                # Si tenía asignación activa, removerla para que vuelva a estar 100% disponible
+                asig_existente = self.session.execute(
+                    select(AsignacionReferencia).where(AsignacionReferencia.referencia_id == ref.referencia_id)
+                ).scalars().first()
+                if asig_existente:
+                    self.session.delete(asig_existente)
+                
+                # Regresar estado a FACTURADA (Disponible para asignación en el sistema)
+                ref.estado_id = estado_facturada_id
+                
+                success_count += 1
+                details.append({"referencia": ref_str, "status": "CORRECTO", "message": "Liberada exitosamente a DISPONIBLE (FACTURADA)."})
             
-            # Update reference state
-            ref.estado_id = status_id
-            
-            success_count += 1
-            details.append({"referencia": ref_str, "status": "CORRECTO", "message": f"Promovida a {target_status}."})
+            # CASO B: Apartar o Asignar (RESERVADA / ASIGNADA)
+            else:
+                target_status = "ASIGNADA" if raw_target_status == "ASIGNADA" else "RESERVADA"
+                status_id = estado_asignada_id if target_status == "ASIGNADA" else estado_reservada_id
+
+                # Create LoteDetalle for grouping
+                ld = LoteDetalle(
+                    lote_asignacion_id=lote.lote_asignacion_id,
+                    rfc_id=ref.grupo.rfc_id,
+                    concepto_id=ref.grupo.concepto_id,
+                    desarrollo_id=None,
+                    cantidad_solicitada=1,
+                    cantidad_confirmada=1 if target_status == "ASIGNADA" else 0
+                )
+                self.session.add(ld)
+                self.session.flush()
+
+                # Buscar si ya tenía asignación previa para actualizarla o crear nueva
+                asig = self.session.execute(
+                    select(AsignacionReferencia).where(AsignacionReferencia.referencia_id == ref.referencia_id)
+                ).scalars().first()
+
+                if asig:
+                    asig.lote_detalle_id = ld.lote_detalle_id
+                    asig.estado_id = status_id
+                    asig.usuario_asignacion = usuario_id
+                    asig.fecha_asignacion = datetime.datetime.now()
+                    asig.observaciones = "Asignación/Reserva Masiva Manual"
+                else:
+                    asig = AsignacionReferencia(
+                        lote_detalle_id=ld.lote_detalle_id,
+                        referencia_id=ref.referencia_id,
+                        ubicacion_id=None,
+                        intento=1,
+                        estado_id=status_id,
+                        usuario_asignacion=usuario_id,
+                        fecha_asignacion=datetime.datetime.now(),
+                        observaciones="Asignación Masiva Manual"
+                    )
+                    self.session.add(asig)
+                
+                # Actualizar estado de la referencia
+                ref.estado_id = status_id
+                
+                success_count += 1
+                details.append({"referencia": ref_str, "status": "CORRECTO", "message": f"Promovida a {target_status}."})
 
         self.session.flush()
         return {

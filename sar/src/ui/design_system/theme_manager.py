@@ -45,13 +45,19 @@ class ThemeManager:
         QFrame#cardFrame {{
             background-color: {surf};
             border: {Spacing.BORDER_WIDTH_SM} solid {border};
-            border-radius: {Spacing.RADIUS_LG};
+            border-radius: 12px;
         }}
         
         /* Sidebar Styling */
         QFrame#sidebarFrame {{
             background-color: {surf};
             border-right: {Spacing.BORDER_WIDTH_SM} solid {border};
+        }}
+        
+        /* Sidebar Footer Container */
+        QWidget#sidebarFooterContainer {{
+            background: transparent;
+            border-top: 1px solid {border};
         }}
         
         /* Info Banner Callout Molecule */
@@ -105,17 +111,19 @@ class ThemeManager:
         }}
         
         /* Atoms: Inputs */
-        QLineEdit {{
+        QLineEdit, QTextEdit {{
             background-color: {surf};
             border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
-            padding: 3px 8px;
-            min-height: 34px;
-            max-height: 34px;
+            padding: 6px 8px;
             color: {txt_primary};
             font-size: 13px;
         }}
-        QLineEdit:focus {{
+        QLineEdit {{
+            min-height: 34px;
+            max-height: 34px;
+        }}
+        QLineEdit:focus, QTextEdit:focus {{
             border: 1.5px solid {Colors.ACCENT};
         }}
         

@@ -49,17 +49,17 @@ Para mantener limpios los paquetes productivos y evitar problemas de empaquetado
   - `sar/tests/storage/`: Pruebas de modelos ORM, repositorios y conectores DB.
   - `sar/tests/scraper/`: Pruebas de automatización web y POM.
   - `sar/tests/ui/`: Pruebas de vistas y componentes (`components/`).
-- **Pruebas Oficiales de CancunBot**: Deben ubicarse exclusivamente bajo `cancunbot/tests/`:
-  - `cancunbot/tests/core/`: Workers y procesos asíncronos.
-  - `cancunbot/tests/services/`: Extractores PDF, importadores Excel y gestores.
-  - `cancunbot/tests/ui/`: Vistas y diálogos de CancunBot.
+- **Pruebas Oficiales de SATC**: Deben ubicarse exclusivamente bajo `satc/tests/`:
+  - `satc/tests/core/`: Workers y procesos asíncronos.
+  - `satc/tests/services/`: Extractores PDF, importadores Excel y gestores.
+  - `satc/tests/ui/`: Vistas y diálogos de SATC.
 - **Laboratorio Exploratorio y Bocetos Rápidos**: Cualquier prueba ad-hoc, script de diagnóstico temporal o generación de capturas visuales preliminares debe crearse exclusivamente en la carpeta `scratch/` (la cual permanece excluida de Git en `.gitignore`).
 
-## 7. Principio de Aislamiento Estricto de Dominios (SAR vs. CancunBot)
+## 7. Principio de Aislamiento Estricto de Dominios (SAR vs. SATC)
 
 Queda estrictamente prohibido mezclar código, componentes, pruebas, recursos o extensiones entre ambos subsistemas:
 - **Dominio SAR (`sar/`)**: Todo lo perteneciente al Sistema de Administración de Referencias (su UI, API FastAPI, repositorios ORM de SAR, scripts de migración, vistas, diálogos, design system y pruebas) debe residir única y exclusivamente bajo la carpeta `sar/`.
-- **Dominio CancunBot (`cancunbot/`)**: Todo lo perteneciente al subsistema de captura, automatización R2F, workers de facturación/recibos, extractores PDF/Excel, vistas dedicadas de CancunBot, migraciones SQL de cancunbot y pruebas de cancunbot debe residir única y exclusivamente bajo la carpeta `cancunbot/`.
+- **Dominio SATC (`satc/`)**: Todo lo perteneciente al subsistema de captura, automatización R2F, workers de facturación/recibos, extractores PDF/Excel, vistas dedicadas de SATC, migraciones SQL de SATC y pruebas de SATC debe residir única y exclusivamente bajo la carpeta `satc/`.
 - **Cero Elementos Sueltos en la Raíz**: Ningún módulo funcional, carpeta de almacenamiento (`PDF_Recibos/`), test o componente debe crearse en la raíz del repositorio. La raíz queda reservada exclusivamente para archivos de configuración global (`.gitignore`, `.env`), specs de empaquetado (`*.spec`) y el laboratorio local transitorio (`scratch/`).
 
 

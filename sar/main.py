@@ -80,6 +80,7 @@ class MainWindow(QMainWindow):
         self.api_client = APIClient()
         self.current_sesion_id = None
         self._drag_pos = None
+        self._login_attempts = 0
         
         # Initialize Login View as the only widget
         self.login_view = LoginView(self.db_connector, self)
@@ -128,7 +129,15 @@ class MainWindow(QMainWindow):
                     "ip_equipo": client_ip,
                     "equipo_nombre": hostname
                 }
-                res = self.api_client.request("POST", "/api/auth/login", data=payload)
+                try:
+                    res = self.api_client.request("POST", "/api/auth/login", data=payload)
+                except Exception as api_err:
+                    err_str = str(api_err)
+                    if "401" in err_str or "Credenciales" in err_str:
+                        self._login_attempts += 1
+                        self.login_view.set_login_error(f"Credenciales inválidas. Intento no.{self._login_attempts}")
+                        return
+                    raise api_err
                 
                 # Verificar acceso al módulo seleccionado (Nivel 1)
                 access_res = self.api_client.request("GET", f"/api/auth/module-access/{res['usuario_id']}/{selected_mod_code}")
@@ -157,7 +166,8 @@ class MainWindow(QMainWindow):
                     )
                     
                     if not sesion_obj:
-                        self.login_view.set_login_error("Credenciales inválidas o usuario inactivo")
+                        self._login_attempts += 1
+                        self.login_view.set_login_error(f"Credenciales inválidas. Intento no.{self._login_attempts}")
                         return
                         
                     if not security_service.has_app_module_access(sesion_obj.usuario_id, selected_mod_code):
@@ -175,6 +185,9 @@ class MainWindow(QMainWindow):
                         self._warmup_worker.start()
                     except Exception:
                         pass
+
+            # Reset attempts on successful authentication
+            self._login_attempts = 0
 
             # Clear login form
             self.login_view.user_input.set_text("")
@@ -239,7 +252,7 @@ class MainWindow(QMainWindow):
                 # Hook up logout for BillingBotWindow
                 self.active_module.logout_requested.connect(self._handle_logout)
             elif selected_mod_code == "BOT_R2F":
-                from cancunbot.src.ui.views.r2f_cancun_view import R2FCancunWindow
+                from satc.src.ui.views.r2f_cancun_view import R2FCancunWindow
                 self.active_module = R2FCancunWindow(self.db_connector, self.current_sesion_id, self.current_usuario_id)
                 self.active_module.current_sesion_id = self.current_sesion_id
                 self.active_module.current_username = getattr(self, 'current_username', None)
@@ -248,7 +261,7 @@ class MainWindow(QMainWindow):
                 # Hook up logout for R2FCancunWindow
                 self.active_module.logout_requested.connect(self._handle_logout)
             elif selected_mod_code == "CTRL_R2F":
-                from cancunbot.src.ui.views.r2f_control_view import R2FControlView
+                from satc.src.ui.views.r2f_control_view import R2FControlView
                 self.active_module = SARModuleWindow(
                     title="SARF- Control de Recibos & Facturas (R2F)",
                     width=1200,
@@ -341,6 +354,7 @@ class MainWindow(QMainWindow):
             
         # Only show login if this was a normal logout, NOT a complete application exit
         if not exit_app:
+            self._login_attempts = 0
             self.show()
 
 
