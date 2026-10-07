@@ -24,7 +24,7 @@ class InventoryLoadWorker(QThread):
     result_ready = Signal(list, int, dict) # data, total_count, summary
     error_occurred = Signal(str)
     
-    def __init__(self, inventario_ui_service, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str, start_date: str = None, end_date: str = None, orden_ids: list = None):
+    def __init__(self, inventario_ui_service, limit: int, offset: int, search_text: str, concepto_id: int, rfc_id: int, filter_assigned: str, start_date: str = None, end_date: str = None, orden_ids: list = None, delegacion_nombre: str = None):
         super().__init__()
         self.inventario_ui_service = inventario_ui_service
         self.limit = limit
@@ -36,6 +36,7 @@ class InventoryLoadWorker(QThread):
         self.start_date = start_date
         self.end_date = end_date
         self.orden_ids = orden_ids
+        self.delegacion_nombre = delegacion_nombre
         self._is_cancelled = False
         
     def cancel(self):
@@ -54,7 +55,8 @@ class InventoryLoadWorker(QThread):
                 filter_assigned=self.filter_assigned,
                 start_date=self.start_date,
                 end_date=self.end_date,
-                orden_ids=self.orden_ids
+                orden_ids=self.orden_ids,
+                delegacion_nombre=self.delegacion_nombre
             )
             if self._is_cancelled:
                 return
@@ -1122,6 +1124,15 @@ class InventoryView(QWidget):
         self.labeled_empresa.setMaximumWidth(220)
         self.cb_empresa_filter.currentTextChanged.connect(self._on_empresa_filter_visor)
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.labeled_empresa)
+
+        # Add Labeled Delegacion combo filter to filter bar
+        self.labeled_delegacion = LabeledComboBox("Delegación", ["Todas las delegaciones"])
+        self.cb_delegacion_filter = self.labeled_delegacion.combo
+        self.cb_delegacion_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.cb_delegacion_filter.setMinimumContentsLength(12)
+        self.labeled_delegacion.setMaximumWidth(200)
+        self.cb_delegacion_filter.currentTextChanged.connect(self._on_delegacion_filter_visor)
+        self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.labeled_delegacion)
         
         layout.addWidget(self.filter_bar)
 
@@ -1241,7 +1252,7 @@ class InventoryView(QWidget):
         
         self.card.layout.addLayout(self.table_header_layout)
         
-        headers = ["✔", "ID", "Referencia", "Concepto", "Empresa", "Importe", "Estado", "Asignado A", "Tipo", "Solicitante", "Desarrollo", "Cliente", "Mz", "Lt", "Edif", "Viv", "No. Oficial", "Fecha Asignación"]
+        headers = ["✔", "ID", "Referencia", "Concepto", "Empresa", "Delegación", "Importe", "Estado", "Asignado A", "Tipo", "Solicitante", "Desarrollo", "Cliente", "Mz", "Lt", "Edif", "Viv", "No. Oficial", "Fecha Asignación"]
         self.table = StyledDataTable(headers, parent=self)
         self.table.setMinimumHeight(180)
         self.table.setMinimumWidth(200)
@@ -1322,6 +1333,7 @@ class InventoryView(QWidget):
         self._current_estado_filter = "Todos"
         self._current_concepto_id = None
         self._current_rfc_id = None
+        self._current_delegacion_nombre = None
         
         # Debounce timer para búsqueda responsiva sin latencia al escribir (700 ms óptimo para cualquier velocidad de escritura)
         self._search_timer = QTimer(self)
@@ -1349,6 +1361,7 @@ class InventoryView(QWidget):
             self._current_search_text,
             self._current_concepto_id,
             self._current_rfc_id,
+            self._current_delegacion_nombre,
             self._current_estado_filter,
             tuple(self.selected_orden_ids or [])
         )
@@ -1386,7 +1399,8 @@ class InventoryView(QWidget):
             filter_assigned=self._current_estado_filter,
             start_date=None,
             end_date=None,
-            orden_ids=self.selected_orden_ids
+            orden_ids=self.selected_orden_ids,
+            delegacion_nombre=self._current_delegacion_nombre
         )
         self.active_worker.result_ready.connect(self._on_visor_data_loaded)
         self.active_worker.error_occurred.connect(self._on_visor_load_error)
@@ -1432,12 +1446,14 @@ class InventoryView(QWidget):
                 state_desc = "Sustituido"
             else:
                 state_desc = "Asignada" if r.get("asignada") else "Disponible"
+            empresa_display = r.get("empresa_alias") or r.get("empresa") or ""
             rows_data.append([
                 "",
                 str(r.get("referencia_id", "")),
                 r.get("referencia_portal", ""),
                 r.get("concepto", ""),
-                r.get("empresa", ""),
+                empresa_display,
+                r.get("delegacion") or "Sin Delegación",
                 r.get("importe", ""),
                 state_desc,
                 r.get("asignado_a", ""),
@@ -1460,6 +1476,12 @@ class InventoryView(QWidget):
         pinned_bg_color = QColor("#EFF6FF") # Soft blue/primary tint for selected pinned rows
         
         for row_idx, r in enumerate(self.visible_table_data):
+            # Tooltip con razón social completa en la columna Empresa (columna 4)
+            empresa_full = r.get("empresa") or ""
+            empresa_item = self.table.item(row_idx, 4)
+            if empresa_item and empresa_full:
+                empresa_item.setToolTip(f"Empresa: {empresa_full}")
+
             check_item = self.table.item(row_idx, 0)
             if not check_item:
                 continue
@@ -1580,6 +1602,14 @@ class InventoryView(QWidget):
             self._current_rfc_id = None
         else:
             self._current_rfc_id = self._rfcs_map.get(text)
+        self.current_page = 1
+        self.refresh_visor_data()
+
+    def _on_delegacion_filter_visor(self, text):
+        if text == "Todas las delegaciones" or not hasattr(self, '_delegaciones_map'):
+            self._current_delegacion_nombre = None
+        else:
+            self._current_delegacion_nombre = text.strip() if text else None
         self.current_page = 1
         self.refresh_visor_data()
 
@@ -3101,7 +3131,14 @@ class InventoryView(QWidget):
             self._desarrollos_list = desarrollos
             self._delegations_map = {dg["nombre"] if isinstance(dg, dict) else dg.nombre: dg["delegacion_id"] if isinstance(dg, dict) else dg.delegacion_id for dg in delegations_list}
             self._concepts_map = {cp["nombre"] if isinstance(cp, dict) else cp.nombre: cp["concepto_id"] if isinstance(cp, dict) else cp.concepto_id for cp in concepts_list}
-            self._rfcs_map = {r["razon_social"] if isinstance(r, dict) else r.razon_social: r["rfc_id"] if isinstance(r, dict) else r.rfc_id for r in rfcs_list}
+            self._rfcs_map = {}
+            for r in rfcs_list:
+                label = (r.get("alias") or r.get("razon_social") if isinstance(r, dict) else getattr(r, "alias", None) or getattr(r, "razon_social", ""))
+                r_id = r.get("rfc_id") if isinstance(r, dict) else getattr(r, "rfc_id", None)
+                if label and r_id:
+                    self._rfcs_map[label] = r_id
+                if isinstance(r, dict) and r.get("razon_social") and r.get("razon_social") not in self._rfcs_map:
+                    self._rfcs_map[r["razon_social"]] = r_id
 
             # Populate Notaría combos — insert explicit placeholder so no record is auto-selected
             self.cb_notarias_masivo.clear()
@@ -3135,7 +3172,11 @@ class InventoryView(QWidget):
             self.cb_empresa_filter.blockSignals(True)
             self.cb_empresa_filter.clear()
             self.cb_empresa_filter.addItem("Todas las empresas")
-            self.cb_empresa_filter.addItems(list(self._rfcs_map.keys()))
+            empresa_display_labels = [
+                (r.get("alias") or r.get("razon_social") if isinstance(r, dict) else getattr(r, "alias", None) or getattr(r, "razon_social", ""))
+                for r in rfcs_list
+            ]
+            self.cb_empresa_filter.addItems([lbl for lbl in empresa_display_labels if lbl])
             if current_empresa_txt in self._rfcs_map:
                 self.cb_empresa_filter.setCurrentText(current_empresa_txt)
             else:
@@ -3197,14 +3238,23 @@ class InventoryView(QWidget):
 
     def _load_filters_data(self, force_reload: bool = False):
         try:
-            if not force_reload and getattr(self, '_concepts_map', None) and getattr(self, '_rfcs_map', None):
+            if not force_reload and getattr(self, '_concepts_map', None) and getattr(self, '_rfcs_map', None) and getattr(self, '_delegaciones_map', None):
                 return
             data = self.inventario_ui_service.get_filtros_data(force_refresh=force_reload)
             concepts_list = data["conceptos"]
             rfcs_list = self.inventario_ui_service.get_rfcs_con_stock_inventario(force_refresh=force_reload)
+            delegations_list = data.get("delegaciones", [])
             
             self._concepts_map = {cp["nombre"] if isinstance(cp, dict) else cp.nombre: cp["concepto_id"] if isinstance(cp, dict) else cp.concepto_id for cp in concepts_list}
-            self._rfcs_map = {r["razon_social"] if isinstance(r, dict) else r.razon_social: r["rfc_id"] if isinstance(r, dict) else r.rfc_id for r in rfcs_list}
+            self._rfcs_map = {}
+            for r in rfcs_list:
+                label = (r.get("alias") or r.get("razon_social") if isinstance(r, dict) else getattr(r, "alias", None) or getattr(r, "razon_social", ""))
+                r_id = r.get("rfc_id") if isinstance(r, dict) else getattr(r, "rfc_id", None)
+                if label and r_id:
+                    self._rfcs_map[label] = r_id
+                if isinstance(r, dict) and r.get("razon_social") and r.get("razon_social") not in self._rfcs_map:
+                    self._rfcs_map[r["razon_social"]] = r_id
+            self._delegaciones_map = {d["nombre"] if isinstance(d, dict) else d.nombre: d["delegacion_id"] if isinstance(d, dict) else d.delegacion_id for d in delegations_list}
 
             # Populate filter combos in visor with blocked signals to prevent redundant premature queries
             current_concept_txt = self.cb_concept_filter.currentText()
@@ -3222,12 +3272,27 @@ class InventoryView(QWidget):
             self.cb_empresa_filter.blockSignals(True)
             self.cb_empresa_filter.clear()
             self.cb_empresa_filter.addItem("Todas las empresas")
-            self.cb_empresa_filter.addItems(list(self._rfcs_map.keys()))
+            empresa_display_labels = [
+                (r.get("alias") or r.get("razon_social") if isinstance(r, dict) else getattr(r, "alias", None) or getattr(r, "razon_social", ""))
+                for r in rfcs_list
+            ]
+            self.cb_empresa_filter.addItems([lbl for lbl in empresa_display_labels if lbl])
             if current_empresa_txt in self._rfcs_map:
                 self.cb_empresa_filter.setCurrentText(current_empresa_txt)
             else:
                 self.cb_empresa_filter.setCurrentIndex(0)
             self.cb_empresa_filter.blockSignals(False)
+
+            current_delegacion_txt = self.cb_delegacion_filter.currentText()
+            self.cb_delegacion_filter.blockSignals(True)
+            self.cb_delegacion_filter.clear()
+            self.cb_delegacion_filter.addItem("Todas las delegaciones")
+            self.cb_delegacion_filter.addItems(list(self._delegaciones_map.keys()))
+            if current_delegacion_txt in self._delegaciones_map:
+                self.cb_delegacion_filter.setCurrentText(current_delegacion_txt)
+            else:
+                self.cb_delegacion_filter.setCurrentIndex(0)
+            self.cb_delegacion_filter.blockSignals(False)
 
 
         except Exception as e:

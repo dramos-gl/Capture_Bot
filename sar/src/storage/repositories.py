@@ -2292,6 +2292,8 @@ class InventarioRepository(BaseRepository):
         if search_text:
             search_conds = [
                 "r.referencia_portal ILIKE :search",
+                "rfc.alias ILIKE :search",
+                "rfc.razon_social ILIKE :search",
                 "ar.cliente ILIKE :search",
                 "des.nombre ILIKE :search",
                 "ar.no_oficial ILIKE :search",
@@ -2363,6 +2365,7 @@ class InventarioRepository(BaseRepository):
                 og.folio AS folio_orden,
                 rfc.rfc_id AS rfc_id,
                 rfc.razon_social AS empresa,
+                rfc.alias AS empresa_alias,
                 c.nombre AS concepto_nombre,
                 c.concepto_id AS concepto_id,
                 d.nombre AS delegacion_nombre,
@@ -2422,6 +2425,7 @@ class InventarioRepository(BaseRepository):
                 "folio_orden": row.folio_orden,
                 "rfc_id": row.rfc_id,
                 "empresa": row.empresa,
+                "empresa_alias": row.empresa_alias or row.empresa,
                 "concepto": row.concepto_nombre,
                 "concepto_id": row.concepto_id,
                 "delegacion": row.delegacion_nombre,

@@ -448,11 +448,11 @@ class InventarioUIService:
                     "desarrollos": desarrollos,
                     "conceptos": [{"concepto_id": c.concepto_id, "nombre": c.nombre} for c in concepts],
                     "delegaciones": [{"delegacion_id": d.delegacion_id, "nombre": d.nombre} for d in delegations],
-                    "rfcs": [{"rfc_id": r.rfc_id, "razon_social": r.razon_social} for r in rfcs]
+                    "rfcs": [{"rfc_id": r.rfc_id, "razon_social": r.razon_social, "alias": r.alias} for r in rfcs]
                 }
 
     def get_filtros_data(self, force_refresh: bool = False) -> Dict[str, Any]:
-        """Fetches only the lightweight catalogs needed for visor filters (conceptos and rfcs) with in-memory caching."""
+        """Fetches only the lightweight catalogs needed for visor filters (conceptos, rfcs y delegaciones) with in-memory caching."""
         if not force_refresh and self._cache_filtros_data is not None:
             return self._cache_filtros_data
 
@@ -460,7 +460,8 @@ class InventarioUIService:
             cats = self.api_client.request("GET", "/api/ops/catalogos")
             res = {
                 "conceptos": cats["conceptos"],
-                "rfcs": cats.get("rfcs", [])
+                "rfcs": cats.get("rfcs", []),
+                "delegaciones": cats.get("delegaciones", [])
             }
             self._cache_filtros_data = res
             return res
@@ -468,13 +469,15 @@ class InventarioUIService:
             if not self.db_connector:
                 raise ValueError("db_connector is required when connect_via_api is False")
             with self.db_connector.get_session() as session:
-                from sar.src.storage.models import Concepto, Rfc
+                from sar.src.storage.models import Concepto, Rfc, Delegacion
                 from sqlalchemy import select
                 concepts = session.execute(select(Concepto).where(Concepto.activo == True).order_by(Concepto.nombre)).scalars().all()
                 rfcs = session.execute(select(Rfc).where(Rfc.activo == True).order_by(Rfc.razon_social)).scalars().all()
+                delegations = session.execute(select(Delegacion).where(Delegacion.activo == True).order_by(Delegacion.nombre)).scalars().all()
                 res = {
                     "conceptos": [{"concepto_id": c.concepto_id, "nombre": c.nombre} for c in concepts],
-                    "rfcs": [{"rfc_id": r.rfc_id, "razon_social": r.razon_social} for r in rfcs]
+                    "rfcs": [{"rfc_id": r.rfc_id, "razon_social": r.razon_social, "alias": r.alias} for r in rfcs],
+                    "delegaciones": [{"delegacion_id": d.delegacion_id, "nombre": d.nombre} for d in delegations]
                 }
                 self._cache_filtros_data = res
                 return res

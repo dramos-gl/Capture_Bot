@@ -216,6 +216,7 @@ class KPIDetailExcelWorker(QThread):
                                 str(r.get("referencia_portal", "")),
                                 str(r.get("folio_orden", "")),
                                 str(r.get("empresa", "")),
+                                str(r.get("empresa_alias", "")),
                                 str(r.get("concepto", "")),
                                 str(r.get("delegacion", "")),
                                 str(r.get("cliente", "")),
@@ -331,12 +332,13 @@ class KPIDetailExcelWorker(QThread):
                 
                 estado_code = r.get("estado_codigo") or ("ASIGNADA" if r.get("asignada") else "FACTURADA")
                 imp_val = float(r.get("importe") or 0.0) if r.get("importe") else 0.0
+                empresa_export = r.get("empresa_alias") or r.get("empresa", "")
 
                 row_values = [
                     idx,
                     r.get("referencia_portal", ""),
                     r.get("folio_orden", ""),
-                    r.get("empresa", ""),
+                    empresa_export,
                     r.get("concepto", ""),
                     r.get("delegacion", ""),
                     imp_val,
@@ -1158,11 +1160,12 @@ class InventoryKPIDetailDialog(QDialog):
             global_idx = start_idx + offset_idx
             estado_code = r.get("estado_codigo") or ("ASIGNADA" if r.get("asignada") else "FACTURADA")
 
+            empresa_display = r.get("empresa_alias") or r.get("empresa") or ""
             table_rows.append([
                 str(global_idx),
                 str(r.get("referencia_portal", "")),
                 str(r.get("folio_orden", "")),
-                str(r.get("empresa", "")),
+                empresa_display,
                 str(r.get("concepto", "")),
                 str(r.get("delegacion", "")),
                 estado_code,
@@ -1191,6 +1194,12 @@ class InventoryKPIDetailDialog(QDialog):
         self.table.setUpdatesEnabled(False)
         try:
             self.table.populate_rows(table_rows, checkable_first_col=False)
+            # Configurar tooltip con la razón social completa en la columna Empresa (índice 3)
+            for row_idx, r in enumerate(page_records):
+                empresa_full = r.get("empresa") or ""
+                empresa_item = self.table.item(row_idx, 3)
+                if empresa_item and empresa_full:
+                    empresa_item.setToolTip(f"Empresa: {empresa_full}")
         finally:
             self.table.setUpdatesEnabled(True)
 
