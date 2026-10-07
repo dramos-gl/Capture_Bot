@@ -2875,7 +2875,17 @@ class InventoryView(QWidget):
         # Pre-load only RFCs that actually have 'FACTURADA' stock
         try:
             rfcs_con_stock = self.inventario_ui_service.get_rfcs_con_stock_facturadas()
-            rfcs_tuples = [(r["rfc_id"], r["razon_social"]) for r in rfcs_con_stock]
+            rfcs_tuples = []
+            for r in rfcs_con_stock:
+                alias = (r.get("alias") or "").strip()
+                rfc_code = (r.get("rfc") or "").strip()
+                if alias and rfc_code:
+                    lbl = f"{alias} | {rfc_code}"
+                elif rfc_code:
+                    lbl = rfc_code
+                else:
+                    lbl = r.get("razon_social") or ""
+                rfcs_tuples.append((r["rfc_id"], lbl))
             
             concepts_all_tuples = sorted(
                 [(c_id, c_name) for c_name, c_id in self._concepts_map.items()],
@@ -3209,7 +3219,17 @@ class InventoryView(QWidget):
             # Populate grid_individual consistently in independent mode (NOTARIA and COLABORADOR)
             # Pre-load only RFCs that actually have 'FACTURADA' stock
             rfcs_con_stock = self.inventario_ui_service.get_rfcs_con_stock_facturadas()
-            rfcs_tuples = [(r["rfc_id"], r["razon_social"]) for r in rfcs_con_stock]
+            rfcs_tuples = []
+            for r in rfcs_con_stock:
+                alias = (r.get("alias") or "").strip()
+                rfc_code = (r.get("rfc") or "").strip()
+                if alias and rfc_code:
+                    lbl = f"{alias} | {rfc_code}"
+                elif rfc_code:
+                    lbl = rfc_code
+                else:
+                    lbl = r.get("razon_social") or ""
+                rfcs_tuples.append((r["rfc_id"], lbl))
             concepts_all_tuples = sorted(
                 [(c_id, c_name) for c_name, c_id in self._concepts_map.items()],
                 key=lambda x: x[0]
