@@ -40,8 +40,8 @@ def test_facturacion_types_and_xml():
         print(f" -> [OK] get_solicitud_bot_context retorna tipo_orden: '{ctx['tipo_orden']}'.")
         
         # 4. Probar persistencia de factura con xml_path (Simulando llamada de Bot / API)
-        # Verificar o crear registro de prueba
-        test_pdf = "storage/facturas/2026/ORD_TEST/RFC123/CONCEPTO/12345_CAN1_1.pdf"
+        # Para órdenes no-estándar, PDF y XML comparten el mismo patrón de nombre
+        test_pdf = "storage/facturas/2026/ORD_TEST/RFC123/CONCEPTO/12345_CAN1.pdf"
         test_xml = "storage/facturas/2026/ORD_TEST/RFC123/CONCEPTO/12345_CAN1.xml"
         
         req = RegistrarFacturaBotRequest(

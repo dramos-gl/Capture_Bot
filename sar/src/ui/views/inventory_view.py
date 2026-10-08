@@ -4450,8 +4450,10 @@ class ManualAssignmentDialog(QDialog):
         main_vlayout.addWidget(self.nav_container)
 
         # Replicate checkbox con componente atómico CustomCheckBox
-        self.chk_replicar = CustomCheckBox("Aplicar mismos datos / observaciones a los siguientes derechos", self)
+        self.chk_replicar = CustomCheckBox("Aplicar todos los datos capturados / observaciones a los siguientes derechos", self)
+        self.chk_replicar.setToolTip("Al marcar esta casilla, todos los datos ingresados (cliente, notaría, desarrollo, coordenadas, fechas y observaciones) se replicarán automáticamente a los siguientes derechos.")
         self.chk_replicar.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {text_secondary}; margin-bottom: 2px;")
+        self.chk_replicar.toggled.connect(lambda checked: self._save_current_draft() if checked else None)
         main_vlayout.addWidget(self.chk_replicar)
         
         if self.total_refs <= 1 or self.is_read_only:
@@ -4895,19 +4897,40 @@ class ManualAssignmentDialog(QDialog):
             d["observaciones"] = self.txt_obs_colab.toPlainText().strip()
             d["cliente"] = "ASIGNACIÓN A COLABORADOR"
 
-        # If replicate is checked, copy observations/general data to subsequent drafts
+        # If replicate is checked, copy all captured data and observations to subsequent drafts
         if hasattr(self, "chk_replicar") and self.chk_replicar.isChecked():
             for future_idx in range(self.current_idx + 1, self.total_refs):
                 target = self._derechos_data[future_idx]
-                target["tipo_destino"] = d["tipo_destino"]
-                target["notaria_id"] = d.get("notaria_id")
-                target["notaria_name"] = d.get("notaria_name")
-                target["colaborador_id"] = d.get("colaborador_id")
-                target["colaborador_name"] = d.get("colaborador_name")
-                target["solicitante_externo"] = d.get("solicitante_externo", "")
-                target["fecha_sol"] = d.get("fecha_sol", "")
+                target["tipo_destino"] = d.get("tipo_destino")
+                target["desarrollo_id"] = d.get("desarrollo_id")
+                target["desarrollo_name"] = d.get("desarrollo_name", "")
                 target["observaciones"] = d.get("observaciones", "")
-                target["comentarios"] = d.get("comentarios", "")
+
+                if d.get("tipo_destino") == "NOTARIA":
+                    target["notaria_id"] = d.get("notaria_id")
+                    target["notaria_name"] = d.get("notaria_name", "")
+                    target["solicitante_externo"] = d.get("solicitante_externo", "")
+                    target["cliente"] = d.get("cliente", "")
+                    target["sm"] = d.get("sm", "")
+                    target["mz"] = d.get("mz", "")
+                    target["lote"] = d.get("lote", "")
+                    target["edif"] = d.get("edif", "")
+                    target["viv"] = d.get("viv", "")
+                    target["folio_electronico"] = d.get("folio_electronico", "")
+                    target["credito_titular"] = d.get("credito_titular", "")
+                    target["pa"] = d.get("pa", "")
+                    target["fecha_sol"] = d.get("fecha_sol", "")
+                    target["fecha_ingreso_rpp"] = d.get("fecha_ingreso_rpp", "")
+                    target["fecha_reporte_notaria"] = d.get("fecha_reporte_notaria", "")
+                    target["fecha_escritura"] = d.get("fecha_escritura", "")
+                    target["fecha_titulacion"] = d.get("fecha_titulacion", "")
+                    target["estatus_aviso"] = d.get("estatus_aviso", "NUEVO INGRESO")
+                    target["comentarios"] = d.get("comentarios", "")
+                elif d.get("tipo_destino") == "COLABORADOR":
+                    target["colaborador_id"] = d.get("colaborador_id")
+                    target["colaborador_name"] = d.get("colaborador_name", "")
+                    target["fecha_sol"] = d.get("fecha_sol", "")
+                    target["cliente"] = "ASIGNACIÓN A COLABORADOR"
 
     def _load_current_draft(self):
         if self.current_idx < 0 or self.current_idx >= len(self._derechos_data):

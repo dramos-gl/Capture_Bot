@@ -650,13 +650,18 @@ class BillingRpaWorker(QThread):
                     final_pdf_paths = []
                     for idx_pdf, temp_path in enumerate(temp_pdf_paths):
                         if temp_path and os.path.exists(temp_path):
-                            filename = f"{referencia_portal}_{del_part}{grupo_id}_{idx_pdf + 1}.pdf"
+                            if es_estandar:
+                                filename = f"{referencia_portal}_{del_part}{grupo_id}_{idx_pdf + 1}.pdf"
+                            else:
+                                # Órdenes no estándar: homólogo al XML ({referencia_portal}_{del_part}{grupo_id}.pdf)
+                                filename = f"{referencia_portal}_{del_part}{grupo_id}.pdf"
+                                
                             final_path = os.path.join(dest_dir, filename)
                             if os.path.exists(final_path):
                                 os.remove(final_path)
                             shutil.move(temp_path, final_path)
                             final_pdf_paths.append(final_path)
-                            self.status_changed.emit(f"Factura PDF {idx_pdf + 1} guardada como: {filename}")
+                            self.status_changed.emit(f"Factura PDF guardada como: {filename}")
                     
                     # Mover y renombrar XML al destino final (si aplica)
                     final_xml_path = None
