@@ -61,6 +61,7 @@ La tabla de módulos internos `sar_seguridad.modulo` incluye la columna **`orden
 ##### [3.1] Inventario (`CTRL:INVENTARIO`)
 * `LEER`: Búsqueda de derechos en inventario, filtros por empresa/concepto, apertura con **doble clic** o **clic derecho 🗂 "Ver PDF de Factura"** (`_on_ver_pdf_factura`) para visualizar la boleta/factura en el visor del sistema, y consulta del detalle de asignación existente.
 * `ASIGNAR`: Habilita el botón **"Asignar Seleccionados"** (`_on_asignar_seleccionados`) y las opciones del menú contextual de **clic derecho 👤 "Asignar Derecho"** (`_on_abrir_detalle_o_asignacion`) sobre derechos disponibles para aperturar el formulario de asignación a Notaría/Colaborador (`ManualAssignmentDialog`). En ausencia de permiso, deniega la acción e informa vía `QMessageBox.warning("Acceso Denegado")`.
+* `EDITAR`: Habilita el botón **"✏️ Habilitar Edición"** (`btn_enable_edit` $\rightarrow$ `_on_enable_edit`) dentro del formulario modal de asignación (`ManualAssignmentDialog`), permitiendo desbloquear campos y actualizar datos notariales/coordenadas de un derecho ya asignado en base de datos.
 * `EJECUTAR`: Habilita el botón de redirección **"Ver Métricas y Analítica de Producción"** (`_on_open_metrics_requested`) y el botón **"Exportar a Excel"** (`_on_export_excel`) dentro del diálogo de detalle KPI. En caso de ausencia de permiso, el sistema aplica el fallo seguro denegando el acceso vía `QMessageBox.warning`.
 
 ##### [3.2] Asignar Derecho (`CTRL:ASIGNAR_DERECHO`)

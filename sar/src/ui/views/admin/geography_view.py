@@ -38,7 +38,7 @@ class GeographyView(QWidget):
         self.layout.addWidget(self.tbl_muns)
         
         self.tbl_dels = CrudTablePanel("Delegaciones")
-        self.tbl_dels.setup_table(["ID", "Código Portal", "Nombre", "Estado"], ["delegacion_id", "codigo_portal", "nombre", "activo"])
+        self.tbl_dels.setup_table(["ID", "Código Portal", "Nombre", "Alias", "Estado"], ["delegacion_id", "codigo_portal", "nombre", "alias", "activo"])
         self.tbl_dels.add_requested.connect(self._on_new_del)
         self.tbl_dels.edit_requested.connect(self._on_edit_del)
         self.layout.addWidget(self.tbl_dels)
@@ -197,8 +197,15 @@ class GeographyView(QWidget):
         self.inp_d_nombre.set_text = self.inp_d_nombre.setText
         self.inp_d_nombre.set_focus = self.inp_d_nombre.setFocus
         
+        self.inp_d_alias = CustomInput("Alias o identificador corto (Opcional)", parent=card_d)
+        self.inp_d_alias.setMaxLength(50)
+        self.inp_d_alias.textEdited.connect(lambda t: self.inp_d_alias.setText(t.upper()))
+        self.inp_d_alias.text = self.inp_d_alias.text
+        self.inp_d_alias.set_text = self.inp_d_alias.setText
+        
         form_d.addRow("Código Portal:", self.inp_d_codigo_portal)
         form_d.addRow("Nombre Delegación *:", self.inp_d_nombre)
+        form_d.addRow("Alias Corto:", self.inp_d_alias)
         lay_d.addLayout(form_d)
         dialog.add_widget(card_d)
         
@@ -216,6 +223,7 @@ class GeographyView(QWidget):
             dialog.btn_save.setVisible(False)
             self.inp_d_codigo_portal.setReadOnly(True)
             self.inp_d_nombre.setReadOnly(True)
+            self.inp_d_alias.setReadOnly(True)
             self.chk_d_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
@@ -225,6 +233,7 @@ class GeographyView(QWidget):
     def _on_new_del(self):
         self.current_del_id = None
         dialog = self._create_del_dialog("Nueva Delegación")
+        self.inp_d_alias.set_text("")
         self.inp_d_nombre.set_focus()
         dialog.exec()
         
@@ -233,6 +242,7 @@ class GeographyView(QWidget):
         dialog = self._create_del_dialog(f"Editar Delegación: {data.get('nombre')}")
         self.inp_d_codigo_portal.set_text(data.get("codigo_portal", "") or "")
         self.inp_d_nombre.set_text(data.get("nombre", ""))
+        self.inp_d_alias.set_text(data.get("alias", "") or "")
         self.chk_d_activo.setChecked(bool(data.get("activo", False)))
         self.inp_d_nombre.set_focus()
         dialog.exec()
@@ -243,6 +253,7 @@ class GeographyView(QWidget):
             "municipio_id": self.current_mun_id,
             "codigo_portal": self.inp_d_codigo_portal.text().strip(),
             "nombre": self.inp_d_nombre.text().strip().upper(),
+            "alias": self.inp_d_alias.text().strip().upper() if self.inp_d_alias.text().strip() else None,
             "activo": self.chk_d_activo.isChecked()
         }
         try:
@@ -296,7 +307,7 @@ class GeographyView(QWidget):
                 with self.db_connector.get_session() as session:
                     repo = CatalogoRepository(session)
                     items = repo.get_delegaciones_by_municipio(self.current_mun_id)
-                    data = [{"delegacion_id": i.delegacion_id, "codigo_portal": i.codigo_portal, "nombre": i.nombre, "activo": i.activo} for i in items]
+                    data = [{"delegacion_id": i.delegacion_id, "codigo_portal": i.codigo_portal, "nombre": i.nombre, "alias": i.alias, "activo": i.activo} for i in items]
                     self.tbl_dels.populate(data)
         except Exception as e:
             print("Error refreshing delegaciones:", e)

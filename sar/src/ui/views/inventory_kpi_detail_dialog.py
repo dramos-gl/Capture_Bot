@@ -6,10 +6,11 @@ from typing import Optional, List, Dict, Any
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QFrame,
-    QLabel, QLineEdit, QPushButton, QFileDialog, QApplication, QStyle, QSizePolicy
+    QLabel, QLineEdit, QPushButton, QFileDialog, QApplication, QStyle, QSizePolicy,
+    QMenu
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer
-from PySide6.QtGui import QColor, QAction
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer, QUrl
+from PySide6.QtGui import QColor, QAction, QGuiApplication, QDesktopServices
 
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
@@ -439,6 +440,7 @@ class InventoryKPIDetailDialog(QDialog):
         self.current_page: int = 1
         self.page_size: int = 200
         self._total_pages: int = 1
+        self.current_page_records: list = []
 
         # Debounce timer para búsqueda en Detalle KPI (700 ms)
         self._search_timer = QTimer(self)
@@ -730,6 +732,9 @@ class InventoryKPIDetailDialog(QDialog):
         self.table = StyledDataTable(headers, parent=self)
         self.table.setMinimumHeight(240)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_table_context_menu)
+        self.table.cellDoubleClicked.connect(self._on_table_cell_double_clicked)
         root.addWidget(self.table)
 
         # ── 5. Footer Layout con Paginación Integrada (Idéntico a Inventario) ───
@@ -1117,6 +1122,7 @@ class InventoryKPIDetailDialog(QDialog):
         """Renders only the provided page records into the table.
         No in-memory filtering required: all filtering happened server-side.
         """
+        self.current_page_records = list(page_records or [])
         total_pages = max(1, (total_count + self.page_size - 1) // self.page_size)
         self._total_pages = total_pages
         start_idx = (self.current_page - 1) * self.page_size
@@ -1202,6 +1208,164 @@ class InventoryKPIDetailDialog(QDialog):
                     empresa_item.setToolTip(f"Empresa: {empresa_full}")
         finally:
             self.table.setUpdatesEnabled(True)
+
+    def _on_table_cell_double_clicked(self, row: int, column: int):
+        """Abre directamente la ficha / detalle de asignación al hacer doble clic sobre la fila."""
+        if not self.current_page_records or row < 0 or row >= len(self.current_page_records):
+            return
+        self._on_ver_detalle_asignacion(self.current_page_records[row])
+
+    def _on_table_context_menu(self, pos):
+        """Muestra el menú contextual de clic derecho enriquecido en la tabla de detalle de derechos."""
+        row = self.table.rowAt(pos.y())
+        if not self.current_page_records or row < 0 or row >= len(self.current_page_records):
+            return
+
+        col = self.table.columnAt(pos.x())
+        current_item = self.table.item(row, col)
+        cell_text = current_item.text().strip() if current_item else ""
+
+        ref_dict = self.current_page_records[row]
+        referencia_id = ref_dict.get("referencia_id")
+        referencia_portal = ref_dict.get("referencia_portal", "") or ref_dict.get("referencia", "")
+
+        menu = QMenu(self)
+
+        # --- Opciones Rápidas de Copia (Regla SAR-UX) ---
+        if cell_text:
+            display_cell = cell_text if len(cell_text) <= 28 else (cell_text[:25] + "...")
+            act_copy_cell = QAction(f"📋  Copiar: \"{display_cell}\"", menu)
+            act_copy_cell.setToolTip(f"Copiar el texto '{cell_text}' al portapapeles")
+            act_copy_cell.triggered.connect(lambda: QGuiApplication.clipboard().setText(cell_text))
+            menu.addAction(act_copy_cell)
+
+        if referencia_portal and referencia_portal != cell_text:
+            act_copy_ref = QAction(f"📋  Copiar Referencia ({referencia_portal})", menu)
+            act_copy_ref.setToolTip(f"Copiar la referencia portal '{referencia_portal}' al portapapeles")
+            act_copy_ref.triggered.connect(lambda: QGuiApplication.clipboard().setText(referencia_portal))
+            menu.addAction(act_copy_ref)
+
+        def _copy_full_row():
+            row_vals = []
+            for c in range(self.table.columnCount()):
+                it = self.table.item(row, c)
+                row_vals.append(it.text().strip() if it else "")
+            QGuiApplication.clipboard().setText("\t".join(row_vals))
+
+        act_copy_row = QAction("📄  Copiar Fila Completa", menu)
+        act_copy_row.setToolTip("Copiar todos los datos de esta fila tabulados")
+        act_copy_row.triggered.connect(_copy_full_row)
+        menu.addAction(act_copy_row)
+
+        menu.addSeparator()
+
+        # --- Acción 1: Ver PDF de Factura ---
+        act_pdf = QAction(Icons.pdf() if hasattr(Icons, 'pdf') else menu.style().standardIcon(menu.style().SP_FileIcon),
+                          "🗂  Ver PDF de Factura", menu)
+        act_pdf.setToolTip(f"Abrir PDF de la factura del derecho {referencia_portal}")
+        act_pdf.triggered.connect(lambda: self._on_ver_pdf_factura(referencia_id, referencia_portal))
+        menu.addAction(act_pdf)
+
+        # --- Acción 2: Ver Detalle de Asignación / Ficha ---
+        estado_codigo = (ref_dict.get("estado_codigo") or "").strip().upper()
+        is_asignada = ref_dict.get("asignada", False) or estado_codigo in ("ASIGNADA", "RESERVADA")
+        asig_label = "📋  Detalle de Asignación" if is_asignada else "👤  Asignar Derecho"
+
+        act_asig = QAction(Icons.usuario() if hasattr(Icons, 'usuario') else menu.style().standardIcon(menu.style().SP_FileDialogContentsView),
+                           asig_label, menu)
+        act_asig.setToolTip("Consultar y editar metadatos notariales de este derecho")
+        act_asig.triggered.connect(lambda: self._on_ver_detalle_asignacion(ref_dict))
+        menu.addAction(act_asig)
+
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _on_ver_pdf_factura(self, referencia_id: int, referencia_portal: str = ""):
+        """Abre el PDF de factura individual desde el modal de detalle de derechos."""
+        if not (self._check_permission("CTRL:INVENTARIO", "LEER") or self._check_permission("DERECHOS", "LEER")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes para consultar los PDFs de facturas (CTRL:INVENTARIO:LEER)."
+            )
+            return
+
+        if not referencia_id:
+            QMessageBox.warning(self, "Sin Referencia", "No se pudo determinar el ID del derecho seleccionado.")
+            return
+
+        from sar.src.ui.views.inventory_view import PdfFacturaWorker
+
+        loading_pdf = GLLoadingDialog(
+            f"Preparando PDF de factura\n'{referencia_portal}'...", self
+        )
+        worker = PdfFacturaWorker(self.inventario_ui_service, referencia_id, referencia_portal, parent=self)
+
+        def on_ready(pdf_path: str):
+            loading_pdf.accept()
+            try:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))
+            except Exception as e:
+                QMessageBox.critical(self, "Error al Abrir PDF", f"No se pudo abrir el archivo PDF:\n{e}")
+
+        def on_error(titulo: str, mensaje: str):
+            loading_pdf.accept()
+            QMessageBox.critical(self, titulo, mensaje)
+
+        def on_warning(titulo: str, mensaje: str):
+            loading_pdf.accept()
+            QMessageBox.warning(self, titulo, mensaje)
+
+        worker.pdf_ready.connect(on_ready)
+        worker.error_occurred.connect(on_error)
+        worker.warning_parcial.connect(on_warning)
+        worker.start()
+        loading_pdf.exec()
+
+    def _on_ver_detalle_asignacion(self, ref_dict: dict):
+        """Abre el diálogo modal ManualAssignmentDialog en modo consulta/edición para el derecho."""
+        estado_codigo = (ref_dict.get("estado_codigo") or "").strip().upper()
+        if estado_codigo in ("CANCELADA", "RECHAZADA"):
+            QMessageBox.information(
+                self,
+                "Derecho No Disponible",
+                f"El derecho '{ref_dict.get('referencia_portal', '')}' se encuentra en estado '{estado_codigo}' y no puede ser consultado ni editado."
+            )
+            return
+
+        ref_id = ref_dict.get("referencia_id")
+        ref_portal = ref_dict.get("referencia_portal", "") or ref_dict.get("referencia", "")
+        if not ref_id:
+            QMessageBox.warning(self, "Sin Referencia", "No se encontró el ID de la referencia seleccionada.")
+            return
+
+        if not (self._check_permission("CTRL:INVENTARIO", "LEER") or self._check_permission("REFERENCIAS", "LEER") or self._check_permission("CTRL:INVENTARIO", "ASIGNAR")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para consultar el detalle de asignación (CTRL:INVENTARIO:LEER)."
+            )
+            return
+
+        from sar.src.ui.views.inventory_view import ManualAssignmentDialog
+
+        can_edit = (
+            self._check_permission("CTRL:INVENTARIO", "EDITAR")
+            or self._check_permission("REFERENCIAS", "EDITAR")
+            or self._check_permission("CTRL:INVENTARIO", "ASIGNAR")
+        )
+
+        dialog = ManualAssignmentDialog(
+            self.db_connector,
+            [ref_id],
+            [ref_portal],
+            parent=self,
+            selected_refs=[ref_dict],
+            is_read_only=True,
+            can_edit=can_edit
+        )
+        if dialog.exec() == QDialog.Accepted:
+            # Si se actualizaron metadatos, recargar datos del modal
+            self._load_data(reset_page=False)
 
     def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
         """Helper to verify if current session/user holds permission for modulo + accion."""

@@ -32,6 +32,8 @@ class GLInfoBanner(QFrame):
         self.text_label.setTextFormat(Qt.RichText)
         self.text_label.setWordWrap(True)
         self.text_label.setText(self._text)
+        self.text_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.text_label.setCursor(Qt.IBeamCursor)
         self._layout.addWidget(self.text_label, stretch=1)
 
         self._apply_style()

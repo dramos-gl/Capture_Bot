@@ -400,7 +400,14 @@ Permite examinar el inventario global de referencias timbradas y realizar búsqu
 
 ### 8.2.3 Interacción con la Tabla de Datos y Acciones
 * **Selección Múltiple (Checkboxes):** Marca las casillas de verificación en las filas deseadas y haz clic en el botón **👤 Asignar Seleccionados** para abrir el flujo de asignación en bloque.
-* **Doble Clic en Fila (Detalle del Derecho):** Al hacer doble clic sobre cualquier referencia, el sistema abre la ventana emergente de **Detalle del Derecho**, mostrando los datos de facturación, folio de orden, comprobante XML/PDF vinculado e historial de estados.
+* **Menú Contextual de Clic Derecho Enriquecido (Regla SAR-UX):** Al hacer clic derecho sobre cualquier celda de la tabla, se despliega el menú contextual con las siguientes acciones:
+  * 📋 **Copiar: "Valor de Celda":** Copia directa al portapapeles del valor exacto bajo el cursor.
+  * 📋 **Copiar Referencia (`7002...`):** Copia rápida de la referencia portal limpia para búsquedas.
+  * 📄 **Copiar Fila Completa:** Copia estructurada y tabulada de todas las columnas de la fila (ideal para pegar en Excel).
+  * 🗂 **Ver PDF de Factura:** Abre de forma asíncrona la factura del derecho en el visor oficial del sistema.
+  * 📋 **Detalle de Asignación / 👤 Asignar Derecho:** Abre el formulario modal `ManualAssignmentDialog` precargando los datos asignados o permitiendo capturar la asignación.
+* **Doble Clic en Fila (Detalle o Asignación Rápida):** Al hacer doble clic sobre cualquier fila, el sistema ejecuta la consulta inteligente: abre directamente el PDF de factura si cuenta con comprobante o el diálogo modal de **Detalle de Asignación** en modo lectura/edición según los permisos asignados (`CTRL:INVENTARIO:EDITAR` o `ASIGNAR`).
+* **Diálogo Detalle de Derechos (KPI Drill-Down):** Al hacer clic en las StatCards o abrir el visor de derechos (*Disponibles*, *Asignadas*, *Reservadas* o *Total*), la tabla modal incorpora exactamente el mismo menú contextual de clic derecho enriquecido y soporte de doble clic, manteniendo consistencia operativa en todo el módulo.
 * **Exportar a Excel:** Haz clic en **📊 Exportar Excel** para descargar la relación filtrada en formato `.xlsx`.
 
 ---
@@ -494,8 +501,11 @@ Permite consultar el historial completo de lotes de asignación creados, editar 
 * Visualiza en la tabla el ID del Lote, fecha de creación, usuario responsable, total de referencias y estado.
 
 ### 8.6.2 Detalle de Asignación (Edición de Expedientes)
-* Selecciona un lote y haz clic en **👁️ Detalle de Asignación**.
-* Se abrirá la ventana emergente mostrando la lista completa de referencias del lote, permitiendo editar datos de escrituras, folios electrónicos o comentarios individuales.
+* Selecciona un lote y haz clic en **👁️ Detalle de Asignación** (o haz doble clic sobre el lote en la lista).
+* Se abrirá la ventana emergente mostrando la lista completa de referencias del lote.
+* **Menú Contextual y Doble Clic:** Al hacer clic derecho o doble clic sobre cualquier referencia en la tabla de detalles, se despliegan las opciones de copia rápida (celda, referencia, fila completa), **🗂 Ver PDF de Factura** y **📋 Detalle de Asignación**.
+* **Precarga Inteligente:** Al pulsar **Detalle de Asignación**, el sistema precarga de forma automática e inmediata la totalidad de los datos ya asignados al derecho (Notaría o Colaborador, cliente, crédito, desarrollo, coordenadas SM/MZ/LT/EDIF/VIV, No. oficial, fechas de solicitud/RPP/notaría/escritura/titulación y observaciones).
+* **Habilitar Edición y RBAC:** Si el usuario cuenta con el permiso `CTRL:INVENTARIO:EDITAR`, `REFERENCIAS:EDITAR` o `CTRL:INVENTARIO:ASIGNAR`, se muestra el botón **✏️ Habilitar Edición** para desbloquear los campos y guardar las modificaciones directamente en el expediente.
 
 ### 8.6.3 Generación de Excel y Paquete de PDFs
 * **Botón 📊 Generar Excel:** Crea la hoja de relación del lote en formato `.xlsx` estructurado para envío a la notaría o cliente.

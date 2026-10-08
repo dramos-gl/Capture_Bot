@@ -404,6 +404,10 @@ class CatalogoRepository(BaseRepository):
         stmt = select(Delegacion).where(Delegacion.municipio_id == municipio_id).order_by(Delegacion.nombre)
         return list(self.session.execute(stmt).scalars().all())
 
+    def get_delegaciones_by_municipio(self, municipio_id: int) -> List[Delegacion]:
+        """Alias para consistencia de API."""
+        return self.get_delegaciones_por_municipio(municipio_id)
+
     def save_delegacion(self, d: Delegacion) -> Delegacion:
         self.session.add(d)
         self.session.flush()
@@ -2977,9 +2981,11 @@ class InventarioRepository(BaseRepository):
                 ar.asignacion_referencia_id AS lote_detalle_id,
                 ar.referencia_id,
                 COALESCE(ar.cliente, '') AS cliente,
+                des.desarrollo_id AS desarrollo_id,
                 des.nombre AS desarrollo_nombre,
                 ar.fecha_solicitud AS fecha_solicitud,
                 COALESCE(ubi.mz, '') || ' ' || COALESCE(ubi.lote, '') AS ubicacion,
+                ubi.sm,
                 ubi.mz,
                 ubi.lote,
                 ubi.edif,
@@ -2988,21 +2994,40 @@ class InventarioRepository(BaseRepository):
                 ar.credito_titular AS credito_titular,
                 ar.pa AS pa,
                 ar.comentarios AS comentarios,
+                ar.observaciones AS observaciones_asignacion,
+                ar.fecha_ingreso_rpp AS fecha_ingreso_rpp,
+                ar.fecha_reporte_notaria AS fecha_reporte_notaria,
+                ar.fecha_escritura AS fecha_escritura,
+                ar.fecha_titulacion AS fecha_titulacion,
                 d.nombre AS delegacion,
+                d.delegacion_id AS delegacion_id,
                 c.alias AS concepto_solicitado,
                 ref.referencia_portal AS referencia_asignada,
                 d.nombre AS delegacion_nombre,
                 es.codigo AS estado_ref,
-                r.razon_social AS empresa
+                r.razon_social AS empresa,
+                COALESCE(r.alias, r.razon_social) AS empresa_alias,
+                og.folio AS folio_orden,
+                s.solicitud_id AS solicitud_id,
+                ld.rfc_id AS rfc_id,
+                la.tipo_destino AS tipo_destino,
+                la.solicitante_externo AS solicitante_externo,
+                COALESCE(n.nombre, col.nombre, '') AS asignado_a,
+                la.observaciones AS observaciones_lote
             FROM sar_archivo.asignacion_referencia ar
             JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
+            JOIN sar_archivo.lote_asignacion la ON ld.lote_asignacion_id = la.lote_asignacion_id
             JOIN sar_produccion.referencia ref ON ar.referencia_id = ref.referencia_id
+            JOIN sar_produccion.grupo_referencia gr ON ref.grupo_id = gr.grupo_id
+            JOIN sar_produccion.orden_generacion og ON gr.orden_id = og.orden_id
             JOIN sar_catalogo.concepto c ON ld.concepto_id = c.concepto_id
             LEFT JOIN sar_catalogo.desarrollo des ON ld.desarrollo_id = des.desarrollo_id
             LEFT JOIN sar_produccion.solicitud s ON ref.solicitud_id = s.solicitud_id
             LEFT JOIN sar_catalogo.delegacion d ON s.delegacion_id = d.delegacion_id
             JOIN sar_catalogo.estado_sistema es ON ar.estado_id = es.estado_id
             JOIN sar_catalogo.rfc r ON ld.rfc_id = r.rfc_id
+            LEFT JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
+            LEFT JOIN sar_catalogo.colaborador col ON la.colaborador_id = col.colaborador_id
             LEFT JOIN sar_archivo.ubicacion ubi ON ar.ubicacion_id = ubi.ubicacion_id
             WHERE ld.lote_asignacion_id = :lote_id
             ORDER BY ar.asignacion_referencia_id ASC
@@ -3013,10 +3038,14 @@ class InventarioRepository(BaseRepository):
                 "lote_detalle_id": row.lote_detalle_id,
                 "referencia_id": row.referencia_id,
                 "cliente": row.cliente,
+                "desarrollo_id": row.desarrollo_id,
                 "desarrollo": row.desarrollo_nombre or "SIN ASIGNAR",
                 "delegacion": row.delegacion_nombre or "SIN ASIGNAR",
+                "delegacion_id": row.delegacion_id,
+                "rfc_id": row.rfc_id,
                 "fecha_solicitud": row.fecha_solicitud.strftime("%Y-%m-%d") if row.fecha_solicitud else "",
                 "ubicacion": row.ubicacion or "",
+                "sm": row.sm or "",
                 "mz": row.mz or "",
                 "lote": row.lote or "",
                 "edif": row.edif or "",
@@ -3026,11 +3055,24 @@ class InventarioRepository(BaseRepository):
                 "credito_titular": row.credito_titular or "",
                 "pa": row.pa or "",
                 "comentarios": row.comentarios or "",
+                "observaciones": row.observaciones_asignacion or row.observaciones_lote or "",
+                "fecha_ingreso_rpp": row.fecha_ingreso_rpp.strftime("%Y-%m-%d") if row.fecha_ingreso_rpp else "",
+                "fecha_reporte_notaria": row.fecha_reporte_notaria.strftime("%Y-%m-%d") if row.fecha_reporte_notaria else "",
+                "fecha_escritura": row.fecha_escritura.strftime("%Y-%m-%d") if row.fecha_escritura else "",
+                "fecha_titulacion": row.fecha_titulacion.strftime("%Y-%m-%d") if row.fecha_titulacion else "",
                 "delegacion_original": row.delegacion or "",
                 "concepto": row.concepto_solicitado,
                 "referencia": row.referencia_asignada,
+                "referencia_portal": row.referencia_asignada,
                 "estado": row.estado_ref,
                 "empresa": row.empresa,
+                "empresa_alias": row.empresa_alias or row.empresa or "",
+                "folio_orden": row.folio_orden or "",
+                "solicitud_id": str(row.solicitud_id or ""),
+                "tipo_destino": row.tipo_destino or "",
+                "tipo_asignacion": row.tipo_destino or "",
+                "solicitante_externo": row.solicitante_externo or "",
+                "asignado_a": row.asignado_a or "",
             }
             for row in results
         ]

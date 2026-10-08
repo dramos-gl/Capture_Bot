@@ -22,6 +22,8 @@ class StatusBadge(QFrame):
 
         self.label = QLabel(text.upper().strip())
         self.label.setAlignment(Qt.AlignCenter)
+        self.label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.label.setCursor(Qt.IBeamCursor)
 
         normalized = text.upper().strip()
         variant = "neutral"

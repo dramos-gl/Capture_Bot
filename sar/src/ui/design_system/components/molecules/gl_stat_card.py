@@ -61,9 +61,10 @@ class StatCard(QFrame):
         self.layout.setSpacing(6)
         
         # 1. Title at the top spanning full width
-        self.lbl_title = CustomLabel(title, variant="body")
+        self.lbl_title = CustomLabel(title, variant="body", selectable=False)
         self.lbl_title.setObjectName("statCardTitle")
         self.lbl_title.setWordWrap(True)
+        self.lbl_title.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.lbl_title.setStyleSheet("font-weight: bold; background: transparent;")
         self.layout.addWidget(self.lbl_title)
         
@@ -107,13 +108,15 @@ class StatCard(QFrame):
         self.value_layout.setContentsMargins(0, 0, 0, 0)
         self.value_layout.setSpacing(0)
         
-        self.lbl_value = CustomLabel(initial_value, variant="header")
+        self.lbl_value = CustomLabel(initial_value, variant="header", selectable=False)
         self.lbl_value.setScaledContents(False)
+        self.lbl_value.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.lbl_value.setStyleSheet(f"color: {color_hex}; font-weight: bold; background: transparent;")
         
-        self.lbl_sub = CustomLabel(subtitle, variant="muted")
+        self.lbl_sub = CustomLabel(subtitle, variant="muted", selectable=False)
         self.lbl_sub.setObjectName("statCardSub")
         self.lbl_sub.setWordWrap(True)
+        self.lbl_sub.setAttribute(Qt.WA_TransparentForMouseEvents)
         
         self.value_layout.addWidget(self.lbl_value)
         self.value_layout.addWidget(self.lbl_sub)

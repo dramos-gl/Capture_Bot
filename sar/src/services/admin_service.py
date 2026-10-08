@@ -263,18 +263,23 @@ class AdminService:
         if data.get("desarrollo_id"):
             desarrollo = self.session.get(Desarrollo, data["desarrollo_id"])
             action = "ACTUALIZAR_REGISTRO"
-            old_val = {"nombre": desarrollo.nombre, "activo": desarrollo.activo}
+            old_val = {"nombre": desarrollo.nombre, "alias": desarrollo.alias, "activo": desarrollo.activo}
             desarrollo.nombre = data.get("nombre", desarrollo.nombre).strip().upper()
+            if "alias" in data:
+                raw_alias = data["alias"]
+                desarrollo.alias = raw_alias.strip().upper() if raw_alias and raw_alias.strip() else None
             if "activo" in data:
                 desarrollo.activo = data["activo"]
         else:
+            raw_alias = data.get("alias")
             desarrollo = Desarrollo(
                 nombre=data["nombre"].strip().upper(),
+                alias=raw_alias.strip().upper() if raw_alias and raw_alias.strip() else None,
                 activo=data.get("activo", True)
             )
 
         self.cat_repo.save_desarrollo(desarrollo)
-        new_val = {"desarrollo_id": desarrollo.desarrollo_id, "nombre": desarrollo.nombre, "activo": desarrollo.activo}
+        new_val = {"desarrollo_id": desarrollo.desarrollo_id, "nombre": desarrollo.nombre, "alias": desarrollo.alias, "activo": desarrollo.activo}
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": desarrollo.nombre})
         return desarrollo
 
@@ -628,22 +633,27 @@ class AdminService:
         if data.get("delegacion_id"):
             d = self.session.get(Delegacion, data["delegacion_id"])
             action = "ACTUALIZAR_REGISTRO"
-            old_val = {"codigo_portal": d.codigo_portal, "nombre": d.nombre, "municipio_id": d.municipio_id, "activo": d.activo}
+            old_val = {"codigo_portal": d.codigo_portal, "nombre": d.nombre, "alias": d.alias, "municipio_id": d.municipio_id, "activo": d.activo}
             
             d.codigo_portal = data.get("codigo_portal", d.codigo_portal)
             d.nombre = data.get("nombre", d.nombre)
+            if "alias" in data:
+                raw_alias = data["alias"]
+                d.alias = raw_alias.strip().upper() if raw_alias and raw_alias.strip() else None
             d.municipio_id = data.get("municipio_id", d.municipio_id)
             if "activo" in data:
                 d.activo = data["activo"]
         else:
+            raw_alias = data.get("alias")
             d = Delegacion(
                 codigo_portal=data.get("codigo_portal"),
                 nombre=data["nombre"],
+                alias=raw_alias.strip().upper() if raw_alias and raw_alias.strip() else None,
                 municipio_id=data["municipio_id"],
                 activo=data.get("activo", True)
             )
 
         self.cat_repo.save_delegacion(d)
-        new_val = {"delegacion_id": d.delegacion_id, "nombre": d.nombre, "municipio_id": d.municipio_id, "activo": d.activo}
+        new_val = {"delegacion_id": d.delegacion_id, "nombre": d.nombre, "alias": d.alias, "municipio_id": d.municipio_id, "activo": d.activo}
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": d.nombre})
         return d

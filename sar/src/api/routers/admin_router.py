@@ -93,7 +93,7 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: 
         elif entity == "desarrollos":
             items = cat_repo.get_all_desarrollos()
             return [
-                {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "activo": d.activo}
+                {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "alias": d.alias, "activo": d.activo}
                 for d in items
             ]
         elif entity == "desarrollo_empresas":
@@ -124,7 +124,7 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: 
         elif entity == "delegaciones":
             items = cat_repo.get_all_delegaciones_list()
             return [
-                {"delegacion_id": d.delegacion_id, "codigo_portal": d.codigo_portal, "nombre": d.nombre, "municipio_id": d.municipio_id, "activo": d.activo}
+                {"delegacion_id": d.delegacion_id, "codigo_portal": d.codigo_portal, "nombre": d.nombre, "alias": d.alias, "municipio_id": d.municipio_id, "activo": d.activo}
                 for d in items
             ]
         elif entity == "rfcs":

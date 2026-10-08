@@ -52,6 +52,11 @@ UIX-007
 
 Responsividad y Adaptabilidad de Pantalla:
 Toda ventana, formulario modal y diálogo del sistema debe adaptarse de forma fluida a resoluciones desde 1366×768 (laptops estándar) hasta monitores 4K y diferentes escalas de DPI (100% a 150%). Ningún formulario debe desbordar los límites físicos de la pantalla ni ocultar botones de acción críticos; los formularios extensos deben estructurarse obligatoriamente en 3 niveles: Cabecera de contexto fija, Cuerpo central desplazable (`QScrollArea`) y Pie fijo con botones de confirmación (`[Guardar]`, `[Cancelar]`).
+
+UIX-008
+
+Texto y Datos Informativos Seleccionables y Copiables (Regla SAR-UX):
+Todo dato informativo visible al usuario (referencias bancarias/portal, folios oficiales, clientes, RFCs, empresas, descripciones, importes, mensajes de sistema y metadatos) debe permitir de forma obligatoria la selección con el mouse (`Qt.TextSelectableByMouse`), selección con teclado (`Qt.TextSelectableByKeyboard`) y copiado directo (`Ctrl+C` o menú contextual). Las tablas de datos (`StyledDataTable`) deben soportar copia tabulada directa hacia el portapapeles. Solo queda expresamente excluida información confidencial o restringida por seguridad (como contraseñas en campos de autenticación).
 3. Roles
 Administrador
 
@@ -735,7 +740,11 @@ Trazabilidad completa desde Orden → Solicitud → Referencia.
   - **Normalización Dinámica de Delegaciones (`normalize_delegacion`)**: Soporte para delegaciones conocidas (`CUN`, `PYA`, `CHE`, `COZ`, `TUL`, `ISL`) con fallback dinámico de 3 caracteres en mayúsculas para nuevas plazas.
 * **Unificación Total en un Solo PDF (`PdfUnifiedWorker`)**: Botón **"Unificar"** que consolida **todas** las referencias seleccionadas en un **único archivo PDF**, concatenando todas las páginas de `pdf_path` y `pdf2_path` de cada referencia. El nombre sugerido sigue el patrón: `Asignacion_{LoteID}_{AsignadoA}_{Fecha}_{TotalRefs}refs_UNIFICADO.pdf`.
 * **Exploración de Archivos Optimizada (`GLFileDialog`)**: Las acciones de selección de ruta y guardado (Excel, PDF individual y PDF Unificado) utilizan la molécula centralizada `GLFileDialog`. Ésta garantiza un dimensionado responsivo adaptado a la resolución activa (pantalla / ventana padre), botones estándar de maximizar y minimizar visibles (`WindowMaximizeButtonHint`), centrado automático y redimensionamiento libre en esquinas, erradicando desbordes o ventanas fijas desproporcionadas.
-* **Reporte Detallado de Incidencias**: Al finalizar la generación (individual o unificada), el diálogo muestra el detalle explícito de cada referencia faltante o con error, indicando la causa (sin facturas en BD, archivos inaccesibles en red/disco, PDF corrupto, etc.).
+* **Estructura y Secuencia de Columnas en Tabla de Detalle**:
+  Para máxima claridad y ergonomía del operador, las referencias del lote se presentan con la siguiente secuencia estandarizada:
+  $$\mathbf{Estado} \mid \mathbf{Referencia} \mid \mathbf{Folio\ Orden} \mid \mathbf{Empresa\ (Alias)} \mid \mathbf{Concepto} \mid \mathbf{Delegaci\acute{o}n} \mid \mathbf{Desarrollo} \mid \mathbf{Cliente} \mid \mathbf{Mza} \mid \mathbf{Lote} \mid \mathbf{Ext} \mid \mathbf{Int} \mid \mathbf{No.\ Oficial} \mid \mathbf{P.A.} \mid \mathbf{Fecha} \mid \mathbf{Solicitud}$$
+  - **Eficiencia y Cero Saturación**: El folio de orden (`og.folio`) y el alias de la empresa (`r.alias`) se obtienen directamente mediante `JOIN` en la consulta SQL base, indexado por claves primarias existentes (`grupo_id`, `orden_id`), manteniendo el tiempo de respuesta por debajo de los 200 ms y sin impacto en memoria.
+  - **Integridad de Exportación**: La exportación a Excel y la generación de PDF operan sobre la misma selección de registros sin alterar sus esquemas de reporte.
 
 ### 26.6 Estandarización de Barras de Acción y Formularios en 2 Columnas
 
@@ -782,6 +791,13 @@ Los estados operativos del sistema se diferencian semántica y cromáticamente m
 ### 27.3 Controles de Entrada Interactivos (`QSpinBox`)
 * Botones de incremento y decremento configurados con `subcontrol-origin: padding` para preservar intacto el contorno exterior perimetral.
 * Vectores SVG dedicados (`chevron_up.svg`, `chevron_down.svg`, `chevron_up_dark.svg`, `chevron_down_dark.svg`) con retroalimentación en `:hover` para temas Claro y Oscuro.
+
+### 27.4 Políticas de Selección de Texto y Ergonomía Visual (UX Calibration)
+Para evitar la fricción operativa por selección accidental de texto estático y optimizar la respuesta táctil/clic del operador:
+1. **Etiquetas Estáticas y Títulos (`CustomLabel`)**: Por defecto `selectable=False` (`Qt.NoTextInteraction`). Los textos informativos, encabezados de módulo, leyendas y labels de formulario no muestran cursor `IBeamCursor` ni se sombrean accidentalmente al arrastrar o hacer clic.
+2. **Tarjetas KPI (`StatCard`)**: Títulos (`lbl_title`), métricas (`lbl_value`) y subtítulos (`lbl_sub`) no son seleccionables y tienen activado `Qt.WA_TransparentForMouseEvents`. Esto garantiza que el cursor permanezca en `PointingHandCursor` y que los eventos de clic y doble clic (para abrir modales de desglose de derechos) se propaguen limpiamente al contenedor sin interferencias.
+3. **Tablas de Datos (`StyledDataTable`) y Grillas**: Mantienen selección interactiva por celdas y filas completa, así como integración nativa con el portapapeles (menú contextual de clic derecho: Copiar Celda, Copiar Referencia, Copiar Fila).
+4. **Mensajes de Diálogo y Modales (`GLMessageDialog`)**: Mantienen habilitada la selección de texto (`Qt.TextSelectableByMouse`) en el cuerpo del mensaje y detalles técnicos para permitir al usuario copiar folios, números de error o diagnósticos hacia el portapapeles.
 
 ---
 

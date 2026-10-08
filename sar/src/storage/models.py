@@ -194,6 +194,7 @@ class Delegacion(Base):
     municipio_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.municipio.municipio_id", ondelete="RESTRICT"), nullable=False)
     codigo_portal: Mapped[Optional[str]] = mapped_column(String(300))
     nombre: Mapped[str] = mapped_column(String(200), nullable=False)
+    alias: Mapped[Optional[str]] = mapped_column(String(50))
     activo: Mapped[Optional[bool]] = mapped_column(Boolean, default=True)
 
     # Relaciones
@@ -274,6 +275,7 @@ class Desarrollo(Base):
 
     desarrollo_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     nombre: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    alias: Mapped[Optional[str]] = mapped_column(String(50))
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 

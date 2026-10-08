@@ -88,7 +88,7 @@ class CatalogsView(QWidget):
         
         # Left Table: Developments
         self.tbl_desarrollos = CrudTablePanel("Catálogo de Desarrollos")
-        self.tbl_desarrollos.setup_table(["ID", "Nombre", "Estado"], ["desarrollo_id", "nombre", "activo"])
+        self.tbl_desarrollos.setup_table(["ID", "Nombre", "Alias", "Estado"], ["desarrollo_id", "nombre", "alias", "activo"])
         self.tbl_desarrollos.add_requested.connect(self._on_new_desarrollo)
         self.tbl_desarrollos.edit_requested.connect(self._on_edit_desarrollo)
         self.tbl_desarrollos.item_selected.connect(self._on_desarrollo_selected)
@@ -455,7 +455,14 @@ class CatalogsView(QWidget):
         self.inp_d_nombre.set_text = self.inp_d_nombre.setText
         self.inp_d_nombre.set_focus = self.inp_d_nombre.setFocus
         
+        self.inp_d_alias = CustomInput("Alias corto para reportes / búsquedas (Opcional)", parent=card_d)
+        self.inp_d_alias.setMaxLength(50)
+        self.inp_d_alias.textEdited.connect(lambda t: self.inp_d_alias.setText(t.upper()))
+        self.inp_d_alias.text = self.inp_d_alias.text
+        self.inp_d_alias.set_text = self.inp_d_alias.setText
+
         form_d.addRow("Nombre Desarrollo *:", self.inp_d_nombre)
+        form_d.addRow("Alias Corto:", self.inp_d_alias)
         lay_d.addLayout(form_d)
         dialog.add_widget(card_d)
         
@@ -472,6 +479,7 @@ class CatalogsView(QWidget):
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
             self.inp_d_nombre.setReadOnly(True)
+            self.inp_d_alias.setReadOnly(True)
             self.chk_d_activo.setEnabled(False)
             
         dialog.btn_save.clicked.disconnect()
@@ -481,6 +489,7 @@ class CatalogsView(QWidget):
     def _on_new_desarrollo(self):
         self.current_desarrollo_id = None
         dialog = self._create_desarrollo_dialog("Nuevo Desarrollo")
+        self.inp_d_alias.set_text("")
         self.inp_d_nombre.set_focus()
         dialog.exec()
 
@@ -488,6 +497,7 @@ class CatalogsView(QWidget):
         self.current_desarrollo_id = data.get("desarrollo_id")
         dialog = self._create_desarrollo_dialog(f"Editar Desarrollo: {data.get('nombre')}")
         self.inp_d_nombre.set_text(data.get("nombre", ""))
+        self.inp_d_alias.set_text(data.get("alias", "") or "")
         self.chk_d_activo.setChecked(bool(data.get("activo", False)))
         self.inp_d_nombre.set_focus()
         dialog.exec()
@@ -496,6 +506,7 @@ class CatalogsView(QWidget):
         data = {
             "desarrollo_id": self.current_desarrollo_id,
             "nombre": self.inp_d_nombre.text().strip().upper(),
+            "alias": self.inp_d_alias.text().strip().upper() if self.inp_d_alias.text().strip() else None,
             "activo": self.chk_d_activo.isChecked()
         }
         if not data["nombre"]:
@@ -712,7 +723,7 @@ class CatalogsView(QWidget):
                     colaboradores_data = [{"colaborador_id": i.colaborador_id, "nombre": i.nombre, "activo": i.activo} for i in items_col]
                     
                     items_d = repo.get_all_desarrollos()
-                    desarrollos_data = [{"desarrollo_id": i.desarrollo_id, "nombre": i.nombre, "activo": i.activo} for i in items_d]
+                    desarrollos_data = [{"desarrollo_id": i.desarrollo_id, "nombre": i.nombre, "alias": i.alias, "activo": i.activo} for i in items_d]
                     
             self.delegaciones_activas_list = [d for d in self.delegaciones_list if d.get("activo", True)]
             self.delegaciones_map = {d["delegacion_id"]: d["nombre"] for d in self.delegaciones_list}

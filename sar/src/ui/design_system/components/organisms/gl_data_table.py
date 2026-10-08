@@ -2,7 +2,7 @@
 
 from typing import List
 from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QWidget, QHBoxLayout
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QKeySequence
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components.atoms.gl_badge import StatusBadge
 from sar.src.ui.design_system.tokens.colors import Colors
@@ -26,10 +26,10 @@ class StyledDataTable(QTableWidget):
         
         # Configure table behavior
         self.setAlternatingRowColors(True)
-        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.setFocusPolicy(self.focusPolicy().NoFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setShowGrid(False)
         
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -100,3 +100,37 @@ class StyledDataTable(QTableWidget):
                 self.setColumnWidth(last_col, 140)
             else:
                 self.horizontalHeader().setSectionResizeMode(last_col, QHeaderView.ResizeMode.Stretch)
+
+    def keyPressEvent(self, event):
+        """Captures Ctrl+C to copy selected row/cells to clipboard cleanly."""
+        if event.matches(QKeySequence.StandardKey.Copy):
+            selected_items = self.selectedItems()
+            if not selected_items:
+                super().keyPressEvent(event)
+                return
+            
+            # Caso 1: Solo una celda seleccionada -> Copia limpia del valor exacto
+            if len(selected_items) == 1:
+                QGuiApplication.clipboard().setText(selected_items[0].text())
+                event.accept()
+                return
+
+            # Caso 2: Rango múltiple de celdas -> Copia matricial ordenada con tabuladores
+            selected_ranges = self.selectedRanges()
+            lines = []
+            for r in selected_ranges:
+                for row in range(r.topRow(), r.bottomRow() + 1):
+                    row_cells = []
+                    for col in range(r.leftColumn(), r.rightColumn() + 1):
+                        item = self.item(row, col)
+                        val = item.text() if item else ""
+                        row_cells.append(val)
+                    lines.append("\t".join(row_cells))
+            
+            if lines:
+                clipboard_text = "\n".join(lines)
+                QGuiApplication.clipboard().setText(clipboard_text)
+                event.accept()
+                return
+        super().keyPressEvent(event)
+

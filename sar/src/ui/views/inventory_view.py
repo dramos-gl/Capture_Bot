@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize, QTimer, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QAction
+from PySide6.QtGui import QColor, QDesktopServices, QAction, QGuiApplication
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomSpinBox,
     LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid, GLLoadingDialog,
@@ -1941,11 +1941,43 @@ class InventoryView(QWidget):
         if row < 0 or row >= len(self.visible_table_data):
             return
 
+        col = self.table.columnAt(pos.x())
+        current_item = self.table.item(row, col)
+        cell_text = current_item.text().strip() if current_item else ""
+
         ref_dict = self.visible_table_data[row]
         referencia_id = ref_dict.get("referencia_id")
         referencia_portal = ref_dict.get("referencia_portal", "")
 
         menu = QMenu(self)
+
+        # --- Opciones Rápidas de Copia (Regla SAR-UX) ---
+        if cell_text:
+            display_cell = cell_text if len(cell_text) <= 28 else (cell_text[:25] + "...")
+            act_copy_cell = QAction(f"📋  Copiar: \"{display_cell}\"", menu)
+            act_copy_cell.setToolTip(f"Copiar el texto '{cell_text}' al portapapeles")
+            act_copy_cell.triggered.connect(lambda: QGuiApplication.clipboard().setText(cell_text))
+            menu.addAction(act_copy_cell)
+
+        if referencia_portal and referencia_portal != cell_text:
+            act_copy_ref = QAction(f"📋  Copiar Referencia ({referencia_portal})", menu)
+            act_copy_ref.setToolTip(f"Copiar la referencia portal '{referencia_portal}' al portapapeles")
+            act_copy_ref.triggered.connect(lambda: QGuiApplication.clipboard().setText(referencia_portal))
+            menu.addAction(act_copy_ref)
+
+        def _copy_full_row():
+            row_vals = []
+            for c in range(self.table.columnCount()):
+                it = self.table.item(row, c)
+                row_vals.append(it.text().strip() if it else "")
+            QGuiApplication.clipboard().setText("\t".join(row_vals))
+
+        act_copy_row = QAction("📄  Copiar Fila Completa", menu)
+        act_copy_row.setToolTip("Copiar todos los datos de esta fila tabulados")
+        act_copy_row.triggered.connect(_copy_full_row)
+        menu.addAction(act_copy_row)
+
+        menu.addSeparator()
 
         # --- Acción 1: Ver PDF de Factura ---
         act_pdf = QAction(Icons.pdf() if hasattr(Icons, 'pdf') else menu.style().standardIcon(menu.style().SP_FileIcon),
@@ -4417,6 +4449,8 @@ class ManualAssignmentDialog(QDialog):
         # -------------------------------------------------------------
         self.lbl_info = QLabel("", self)
         self.lbl_info.setStyleSheet("padding: 2px 0px;")
+        self.lbl_info.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self.lbl_info.setCursor(Qt.IBeamCursor)
         main_vlayout.addWidget(self.lbl_info)
 
         # Barra de Navegación Secuencial (Wizard / Paginador)
@@ -4971,9 +5005,15 @@ class ManualAssignmentDialog(QDialog):
                     if idx_not >= 0: self.cb_notarias.setCurrentIndex(idx_not)
                 self.txt_solicitante.setText(d.get("solicitante_externo", ""))
                 self.txt_cliente.setText(d.get("cliente", ""))
-                if d.get("desarrollo_name"):
-                    idx_des = self.cb_desarrollo.findText(d["desarrollo_name"])
-                    if idx_des >= 0: self.cb_desarrollo.setCurrentIndex(idx_des)
+                des_name = d.get("desarrollo_name")
+                if des_name and des_name != "SIN ASIGNAR":
+                    idx_des = self.cb_desarrollo.findText(des_name)
+                    if idx_des >= 0:
+                        self.cb_desarrollo.setCurrentIndex(idx_des)
+                    else:
+                        des_id = d.get("desarrollo_id")
+                        self.cb_desarrollo.addItem(des_name, des_id)
+                        self.cb_desarrollo.setCurrentIndex(self.cb_desarrollo.count() - 1)
                 else:
                     self.cb_desarrollo.setCurrentIndex(0)
                 self.txt_sm.setText(d.get("sm", ""))
@@ -4996,9 +5036,15 @@ class ManualAssignmentDialog(QDialog):
                 if d.get("colaborador_name"):
                     idx_col = self.cb_colaboradores.findText(d["colaborador_name"])
                     if idx_col >= 0: self.cb_colaboradores.setCurrentIndex(idx_col)
-                if d.get("desarrollo_name"):
-                    idx_des_col = self.cb_desarrollo_colab.findText(d["desarrollo_name"])
-                    if idx_des_col >= 0: self.cb_desarrollo_colab.setCurrentIndex(idx_des_col)
+                des_name_col = d.get("desarrollo_name")
+                if des_name_col and des_name_col != "SIN ASIGNAR":
+                    idx_des_col = self.cb_desarrollo_colab.findText(des_name_col)
+                    if idx_des_col >= 0:
+                        self.cb_desarrollo_colab.setCurrentIndex(idx_des_col)
+                    else:
+                        des_id = d.get("desarrollo_id")
+                        self.cb_desarrollo_colab.addItem(des_name_col, des_id)
+                        self.cb_desarrollo_colab.setCurrentIndex(self.cb_desarrollo_colab.count() - 1)
                 else:
                     self.cb_desarrollo_colab.setCurrentIndex(0)
                 self.txt_fecha_sol_colab.setText(d.get("fecha_sol", datetime.now().strftime("%Y-%m-%d")))
@@ -5644,10 +5690,10 @@ class LoteProcessingDialog(QDialog):
         # ── References Table (Visible con encabezados desde el inicio) ───────
         headers = [
             "✔", "ID", "Ref ID",
-            "Estado", "Empresa", "Concepto",
-            "Referencia", "Cliente", "Desarrollo", "Delegación",
+            "Estado", "Referencia", "Folio Orden", "Empresa",
+            "Concepto", "Delegación", "Desarrollo", "Cliente",
             "MZA", "Lote", "Ext", "Int",
-            "No.Oficial", "P.A.", "Fecha Solicitud",
+            "No.Oficial", "P.A.", "Fecha", "Solicitud",
         ]
         self.table_detalles = StyledDataTable(headers, parent=self)
         self.table_detalles.setColumnHidden(1, True)  # ID interno
@@ -5658,20 +5704,22 @@ class LoteProcessingDialog(QDialog):
         from PySide6.QtWidgets import QHeaderView
         init_col_widths = {
             0: 38,   # Checkbox
-            3: 130,  # Estado badge
-            4: 160,  # Empresa
-            5: 140,  # Concepto
-            6: 150,  # Referencia
-            7: 180,  # Cliente
-            8: 150,  # Desarrollo
-            9: 130,  # Delegación
-            10: 60,  # MZA
-            11: 60,  # Lote
-            12: 60,  # Ext
-            13: 60,  # Int
-            14: 130, # No. Oficial
-            15: 60,  # P.A.
-            16: 110, # Fecha Solicitud
+            3: 120,  # Estado badge
+            4: 155,  # Referencia
+            5: 165,  # Folio Orden
+            6: 120,  # Empresa.alias
+            7: 130,  # Concepto
+            8: 120,  # Delegación
+            9: 140,  # Desarrollo
+            10: 170, # Cliente
+            11: 55,  # MZA
+            12: 55,  # Lote
+            13: 55,  # Ext
+            14: 55,  # Int
+            15: 110, # No. Oficial
+            16: 60,  # P.A.
+            17: 100, # Fecha
+            18: 90,  # Solicitud
         }
         init_header = self.table_detalles.horizontalHeader()
         for c_idx, w in init_col_widths.items():
@@ -5743,6 +5791,9 @@ class LoteProcessingDialog(QDialog):
         root.addLayout(actions_layout)
 
         self.table_detalles.itemChanged.connect(self._on_table_item_changed)
+        self.table_detalles.cellDoubleClicked.connect(self._on_table_cell_double_clicked)
+        self.table_detalles.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_detalles.customContextMenuRequested.connect(self._on_table_context_menu)
 
         # Si tenemos initial_data de la fila seleccionada, pre-poblar el encabezado al instante (0 ms)
         if initial_data:
@@ -5909,19 +5960,21 @@ class LoteProcessingDialog(QDialog):
                     str(d.get("lote_detalle_id", "")),
                     str(d.get("referencia_id", "") or ""),
                     d.get("estado", ""),
-                    d.get("empresa", ""),
+                    d.get("referencia", "") or d.get("referencia_portal", ""),
+                    d.get("folio_orden", ""),
+                    d.get("empresa_alias", "") or d.get("empresa", ""),
                     d.get("concepto", ""),
-                    d.get("referencia", ""),
-                    d.get("cliente", ""),
-                    d.get("desarrollo", ""),
                     d.get("delegacion", ""),
+                    d.get("desarrollo", ""),
+                    d.get("cliente", ""),
                     d.get("mz", ""),
                     d.get("lote", ""),
                     d.get("edif", ""),
                     d.get("viv", ""),
-                    d.get("folio_electronico", ""),
+                    d.get("no_oficial", "") or d.get("folio_electronico", ""),
                     d.get("pa", ""),
                     d.get("fecha_solicitud", ""),
+                    str(d.get("solicitud_id", "") or ""),
                 ])
 
             self.table_detalles.populate_rows(rows, checkable_first_col=True)
@@ -5934,20 +5987,22 @@ class LoteProcessingDialog(QDialog):
 
             col_widths = {
                 0: 38,   # Checkbox
-                3: 130,  # Estado badge
-                4: 160,  # Empresa
-                5: 140,  # Concepto
-                6: 150,  # Referencia
-                7: 180,  # Cliente
-                8: 150,  # Desarrollo
-                9: 130,  # Delegación
-                10: 60,  # MZA
-                11: 60,  # Lote
-                12: 60,  # Ext
-                13: 60,  # Int
-                14: 130, # No. Oficial
-                15: 60,  # P.A.
-                16: 110, # Fecha Solicitud
+                3: 120,  # Estado badge
+                4: 155,  # Referencia
+                5: 165,  # Folio Orden
+                6: 120,  # Empresa.alias
+                7: 130,  # Concepto
+                8: 120,  # Delegación
+                9: 140,  # Desarrollo
+                10: 170, # Cliente
+                11: 55,  # MZA
+                12: 55,  # Lote
+                13: 55,  # Ext
+                14: 55,  # Int
+                15: 110, # No. Oficial
+                16: 60,  # P.A.
+                17: 100, # Fecha
+                18: 90,  # Solicitud
             }
             header = self.table_detalles.horizontalHeader()
             for col_idx, width in col_widths.items():
@@ -6367,6 +6422,162 @@ class LoteProcessingDialog(QDialog):
         self.pdf_unified_worker.finished.connect(on_unified_finished)
         self.pdf_unified_worker.start()
         self.loading_dialog.exec()
+
+    def _on_table_cell_double_clicked(self, row: int, column: int):
+        """Abre directamente la ficha / detalle de asignación al hacer doble clic sobre la fila."""
+        if column == 0:
+            # Ignorar la columna de selección de checkbox
+            return
+        start_idx = (self.current_page - 1) * self.page_size
+        global_idx = start_idx + row
+        if 0 <= global_idx < len(self.detalles):
+            self._on_ver_detalle_asignacion(self.detalles[global_idx])
+
+    def _on_table_context_menu(self, pos):
+        """Muestra el menú contextual de clic derecho enriquecido en la tabla de detalles del lote."""
+        row = self.table_detalles.rowAt(pos.y())
+        start_idx = (self.current_page - 1) * self.page_size
+        global_idx = start_idx + row
+        if row < 0 or global_idx >= len(self.detalles):
+            return
+
+        col = self.table_detalles.columnAt(pos.x())
+        current_item = self.table_detalles.item(row, col)
+        cell_text = current_item.text().strip() if current_item else ""
+
+        d = self.detalles[global_idx]
+        referencia_id = d.get("referencia_id")
+        referencia_portal = d.get("referencia", "") or d.get("referencia_portal", "")
+
+        menu = QMenu(self)
+
+        # --- Opciones Rápidas de Copia (Regla SAR-UX) ---
+        if cell_text:
+            display_cell = cell_text if len(cell_text) <= 28 else (cell_text[:25] + "...")
+            act_copy_cell = QAction(f"📋  Copiar: \"{display_cell}\"", menu)
+            act_copy_cell.setToolTip(f"Copiar el texto '{cell_text}' al portapapeles")
+            act_copy_cell.triggered.connect(lambda: QGuiApplication.clipboard().setText(cell_text))
+            menu.addAction(act_copy_cell)
+
+        if referencia_portal and referencia_portal != cell_text:
+            act_copy_ref = QAction(f"📋  Copiar Referencia ({referencia_portal})", menu)
+            act_copy_ref.setToolTip(f"Copiar la referencia portal '{referencia_portal}' al portapapeles")
+            act_copy_ref.triggered.connect(lambda: QGuiApplication.clipboard().setText(referencia_portal))
+            menu.addAction(act_copy_ref)
+
+        def _copy_full_row():
+            row_vals = []
+            for c in range(self.table_detalles.columnCount()):
+                it = self.table_detalles.item(row, c)
+                row_vals.append(it.text().strip() if it else "")
+            QGuiApplication.clipboard().setText("\t".join(row_vals))
+
+        act_copy_row = QAction("📄  Copiar Fila Completa", menu)
+        act_copy_row.setToolTip("Copiar todos los datos de esta fila tabulados")
+        act_copy_row.triggered.connect(_copy_full_row)
+        menu.addAction(act_copy_row)
+
+        menu.addSeparator()
+
+        # --- Acción 1: Ver PDF de Factura ---
+        act_pdf = QAction(Icons.pdf() if hasattr(Icons, 'pdf') else menu.style().standardIcon(menu.style().SP_FileIcon),
+                          "🗂  Ver PDF de Factura", menu)
+        act_pdf.setToolTip(f"Abrir PDF de la factura del derecho {referencia_portal}")
+        act_pdf.triggered.connect(lambda: self._on_ver_pdf_factura(referencia_id, referencia_portal))
+        menu.addAction(act_pdf)
+
+        # --- Acción 2: Ver Detalle de Asignación / Ficha ---
+        act_asig = QAction(Icons.usuario() if hasattr(Icons, 'usuario') else menu.style().standardIcon(menu.style().SP_FileDialogContentsView),
+                           "📋  Detalle de Asignación", menu)
+        act_asig.setToolTip("Consultar y editar metadatos notariales de este derecho")
+        act_asig.triggered.connect(lambda: self._on_ver_detalle_asignacion(d))
+        menu.addAction(act_asig)
+
+        menu.exec(self.table_detalles.viewport().mapToGlobal(pos))
+
+    def _on_ver_pdf_factura(self, referencia_id: int, referencia_portal: str = ""):
+        """Abre el PDF de factura individual desde el modal de lote."""
+        if not (self._check_permission("CTRL:INVENTARIO", "LEER") or self._check_permission("DERECHOS", "LEER")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos suficientes para consultar los PDFs de facturas (CTRL:INVENTARIO:LEER)."
+            )
+            return
+
+        if not referencia_id:
+            QMessageBox.warning(self, "Sin Referencia", "No se pudo determinar el ID del derecho seleccionado.")
+            return
+
+        loading = GLLoadingDialog(f"Preparando PDF de factura\n'{referencia_portal}'...", self)
+        worker = PdfFacturaWorker(self.inventario_ui_service, referencia_id, referencia_portal)
+
+        def on_ready(pdf_path: str):
+            loading.accept()
+            try:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(pdf_path))
+            except Exception as e:
+                QMessageBox.critical(self, "Error al Abrir PDF", f"No se pudo abrir el archivo PDF:\n{e}")
+
+        def on_error(titulo: str, mensaje: str):
+            loading.accept()
+            QMessageBox.critical(self, titulo, mensaje)
+
+        def on_warning(titulo: str, mensaje: str):
+            loading.accept()
+            QMessageBox.warning(self, titulo, mensaje)
+
+        worker.pdf_ready.connect(on_ready)
+        worker.error_occurred.connect(on_error)
+        worker.warning_parcial.connect(on_warning)
+        worker.start()
+        loading.exec()
+
+    def _on_ver_detalle_asignacion(self, d: dict):
+        """Abre el diálogo modal ManualAssignmentDialog en modo consulta/edición para el derecho."""
+        ref_id = d.get("referencia_id")
+        ref_portal = d.get("referencia", "") or d.get("referencia_portal", "")
+        if not ref_id:
+            QMessageBox.warning(self, "Sin Referencia", "No se encontró el ID de la referencia seleccionada.")
+            return
+
+        # Enriquecer datos de la fila con los metadatos globales del lote (header_data)
+        enriched = dict(d)
+        h = getattr(self, "header_data", {}) or {}
+        tipo_dest = (
+            enriched.get("tipo_destino")
+            or enriched.get("tipo_asignacion")
+            or h.get("tipo_destino")
+            or "NOTARIA"
+        )
+        if tipo_dest not in ("NOTARIA", "COLABORADOR"):
+            tipo_dest = "NOTARIA"
+        enriched["tipo_destino"] = tipo_dest
+        enriched["tipo_asignacion"] = tipo_dest
+        enriched["asignado_a"] = enriched.get("asignado_a") or h.get("asignado_a", "")
+        enriched["solicitante_externo"] = enriched.get("solicitante_externo") or h.get("solicitante_externo", "")
+        enriched["observaciones"] = (
+            enriched.get("observaciones")
+            or enriched.get("observaciones_asignacion")
+            or h.get("observaciones", "")
+        )
+        if not enriched.get("asignacion_referencia_id"):
+            enriched["asignacion_referencia_id"] = enriched.get("lote_detalle_id")
+
+        can_edit = self._check_permission("CTRL:INVENTARIO", "EDITAR") or self._check_permission("REFERENCIAS", "EDITAR") or self._check_permission("CTRL:INVENTARIO", "ASIGNAR")
+        dialog = ManualAssignmentDialog(
+            self.db_connector,
+            [ref_id],
+            [ref_portal],
+            parent=self,
+            selected_refs=[enriched],
+            is_read_only=True,
+            can_edit=can_edit
+        )
+        if dialog.exec() == QDialog.Accepted:
+            # Si se editaron metadatos, refrescar datos del lote
+            self._start_async_load()
+
 
 
 class ReservaGridRow(QFrame):
