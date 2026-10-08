@@ -378,6 +378,7 @@ CREATE TABLE sar_archivo.factura (
     fecha_factura TIMESTAMPTZ NOT NULL,
     pdf_path VARCHAR(1000),
     pdf2_path VARCHAR(1000),
+    xml_path VARCHAR(1000),
     estado VARCHAR(30) NOT NULL,
     delegacion VARCHAR(100),
     FOREIGN KEY (referencia_id) REFERENCES sar_produccion.referencia(referencia_id) ON DELETE RESTRICT
@@ -1023,6 +1024,7 @@ INSERT INTO sar_configuracion.localizador_portal (nombre_clave, label_visible, e
 ('input_domicilio_fiscal_receptor', 'CP Receptor',                           'CSS',   'input#DomicilioFiscalReceptor',                                    'Campo para ingresar el código postal del receptor en el timbrado',          'SAR'),
 ('btn_timbrar',                'Botón Timbrar CFDI',                          'CSS',   'button#btnTimbrar',                                                'Botón final para timbrar el CFDI',                                          'SAR'),
 ('btn_pdf',                    'Botón Descargar PDF Factura',                 'CSS',   'button:has-text("PDF"), a:has-text("PDF")',                         'Botón para descargar el PDF de la factura generada',                        'SAR'),
+('btn_xml',                    'Botón Descargar XML Factura',                 'CSS',   'a:has-text("XML"), a[href*="tipo=xml"]',                            'Enlace para descargar el archivo XML del CFDI timbrado en el portal SATQ', 'SAR'),
 ('btn_salir',                  'Botón Salir Portal Factura',                  'CSS',   'button:has-text("Salir"), a.btn.btn-default[href="./"], a:has-text("Salir")', 'Botón para salir de la consulta y regresar al inicio', 'SAR'),
 ('txtCantidadMultiplicar136',   'Cantidad Multiplicador (Detalle 136)',        'CSS',   'input.multiplicar136',                                             'Campo de cantidad multiplicadora para conceptos en Tributanet',              'SAR')
 ON CONFLICT (nombre_clave) DO NOTHING;

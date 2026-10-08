@@ -886,6 +886,7 @@ def get_solicitudes_facturacion(usuario_id: int, ver_facturadas: bool = False, d
 class RegistrarFacturaBotRequest(BaseModel):
     referencia_id: int
     pdf_paths: List[str]
+    xml_path: Optional[str] = None
     rfc_emisor: str
     consecutivo: int
     solicitud_id: int
@@ -906,13 +907,14 @@ def registrar_factura_bot(request: RegistrarFacturaBotRequest, db: Session = Dep
         
         pdf_path_1 = request.pdf_paths[0] if len(request.pdf_paths) > 0 else None
         pdf_path_2 = request.pdf_paths[1] if len(request.pdf_paths) > 1 else None
+        xml_path_val = request.xml_path
         filename_1 = os.path.basename(pdf_path_1) if pdf_path_1 else ""
         
         if not dup_id:
             factura_uuid = str(uuid.uuid4())
             ins_factura = text("""
-                INSERT INTO sar_archivo.factura (referencia_id, uuid, nombre_archivo, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado, delegacion)
-                VALUES (:rid, :uuid, :nombre_archivo, :rfc_emisor, :fecha, :pdf, :pdf2, :estado, :delegacion)
+                INSERT INTO sar_archivo.factura (referencia_id, uuid, nombre_archivo, rfc_emisor, fecha_factura, pdf_path, pdf2_path, xml_path, estado, delegacion)
+                VALUES (:rid, :uuid, :nombre_archivo, :rfc_emisor, :fecha, :pdf, :pdf2, :xml, :estado, :delegacion)
             """)
             db.execute(ins_factura, {
                 "rid": request.referencia_id,
@@ -922,18 +924,20 @@ def registrar_factura_bot(request: RegistrarFacturaBotRequest, db: Session = Dep
                 "fecha": datetime.datetime.now(datetime.timezone.utc),
                 "pdf": pdf_path_1,
                 "pdf2": pdf_path_2,
+                "xml": xml_path_val,
                 "estado": "TIMBRADA",
                 "delegacion": request.delegacion
             })
         else:
             upd_stmt = text("""
                 UPDATE sar_archivo.factura
-                SET pdf_path = :pdf, pdf2_path = :pdf2, estado = 'TIMBRADA', delegacion = :delegacion
+                SET pdf_path = :pdf, pdf2_path = :pdf2, xml_path = :xml, estado = 'TIMBRADA', delegacion = :delegacion
                 WHERE factura_id = :fid
             """)
             db.execute(upd_stmt, {
                 "pdf": pdf_path_1,
                 "pdf2": pdf_path_2,
+                "xml": xml_path_val,
                 "fid": dup_id,
                 "delegacion": request.delegacion
             })

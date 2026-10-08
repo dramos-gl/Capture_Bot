@@ -212,8 +212,11 @@ class BillingRpaWorker(QThread):
                 
                 retry_attempt = 0
                 step_success = False
-                # Lista de rutas temporales para ambas facturas de la referencia
+                tipo_orden_actual = str(self.ctx.get("tipo_orden") or "ESTANDAR").upper()
+                es_estandar = (tipo_orden_actual == "ESTANDAR")
+                # Rutas temporales para descargas de la referencia
                 temp_pdf_paths = [None, None]
+                temp_xml_path = None
                 
                 while retry_attempt < max_retries and not step_success:
                     if self._stop_requested:
@@ -262,6 +265,7 @@ class BillingRpaWorker(QThread):
                         # ── DETECCIÓN DE ESCENARIO (P1-Fix6: agrega caso INVALIDA) ───────────
                         escenario = "DESCONOCIDO"
                         sel_pdf = locators.get("btn_pdf") or "button:has-text('PDF'), a:has-text('PDF')"
+                        sel_xml = locators.get("btn_xml") or "a:has-text('XML'), a[href*='tipo=xml']"
                         sel_generar = locators.get("btn_generar_cfdi") or "button:has-text('Generar CFDI'), a:has-text('Generar CFDI')"
                         sel_salir = locators.get("btn_salir") or "a.btn.btn-default[href='./'], a:has-text('Salir')"
                         
@@ -301,7 +305,7 @@ class BillingRpaWorker(QThread):
                         if escenario == "INVALIDA":
                             raise ValueError(f"VALIDACION: Referencia {referencia_portal} no encontrada o inválida en el portal SATQ.")
                         if escenario == "YA_GENERADA":
-                            self.status_changed.emit(f"La referencia {referencia_portal} ya está generada. Omitiendo timbrado y procediendo a descargar PDFs...")
+                            self.status_changed.emit(f"La referencia {referencia_portal} ya está generada. Omitiendo timbrado y procediendo a descargar comprobantes...")
                         
                         if escenario == "NO_GENERADA":
                             # Click Generar CFDI
@@ -425,59 +429,109 @@ class BillingRpaWorker(QThread):
                                         pass
                                 raise Exception("Timeout (35s) esperando respuesta de timbrado CFDI del portal SATQ.")
                                 
-                        # ── DESCARGA ROBUSTA DE PDFs (P1-Fix3) ───────────────────────────────
-                        # Esperar explícitamente a que los botones PDF aparezcan (igual que legacy)
+                        # ── DESCARGA ROBUSTA DE COMPROBANTES (ADAPTATIVA POR TIPO DE ORDEN) ──────────────────
+                        # Esperar explícitamente a que los botones PDF aparezcan
                         try:
                             main_frame.wait_for_selector(sel_pdf, timeout=30000)
                         except Exception:
                             self.status_changed.emit("Timeout esperando botones PDF. Intentando continuar...")
                         
-                        # Descargar ambos PDFs de la referencia (cada referencia genera 2 facturas)
                         botones = main_frame.query_selector_all(sel_pdf)
                         if not botones:
                             raise Exception("No se encontraron botones de descarga de PDF tras espera de 30s.")
                         
-                        # Descargar cada botón PDF encontrado (máximo 2)
-                        num_pdfs = min(len(botones), 2)
-                        for idx_pdf in range(num_pdfs):
-                            # Re-consultar botones en el DOM para evitar que queden obsoletos (stale elements)
-                            botones_actuales = main_frame.query_selector_all(sel_pdf)
-                            if len(botones_actuales) <= idx_pdf:
-                                raise Exception(f"No se encontró el botón PDF con índice {idx_pdf} en la re-consulta.")
+                        if es_estandar:
+                            # FLUJO ORIGINAL ESTÁNDAR: Descargar hasta 2 PDFs
+                            num_pdfs = min(len(botones), 2)
+                            for idx_pdf in range(num_pdfs):
+                                botones_actuales = main_frame.query_selector_all(sel_pdf)
+                                if len(botones_actuales) <= idx_pdf:
+                                    raise Exception(f"No se encontró el botón PDF con índice {idx_pdf} en la re-consulta.")
+                                
+                                btn = botones_actuales[idx_pdf]
+                                try:
+                                    main_frame.evaluate("(el) => el.removeAttribute('target')", btn)
+                                except Exception as eval_err:
+                                    self.status_changed.emit(f"Advertencia al remover target: {str(eval_err)}")
+                                
+                                temp_path = os.path.join(
+                                    os.environ.get("TEMP", "C:\\Temp"),
+                                    f"temp_factura_{referencia_portal}_{idx_pdf + 1}.pdf"
+                                )
+                                
+                                self.status_changed.emit(f"Descargando PDF {idx_pdf + 1} de {num_pdfs} (ESTANDAR)...")
+                                with page.expect_download(timeout=45000) as download_info:
+                                    btn.click()
+                                dl = download_info.value
+                                dl.save_as(temp_path)
+                                
+                                if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                                    temp_pdf_paths[idx_pdf] = temp_path
+                                else:
+                                    raise Exception(f"Archivo PDF {idx_pdf + 1} de referencia {referencia_portal} está vacío o no se guardó.")
+                                
+                                if idx_pdf < num_pdfs - 1:
+                                    time.sleep(1)
                             
-                            btn = botones_actuales[idx_pdf]
-                            
-                            # Remover target="_new" o target="_blank" para forzar la descarga en la misma pestaña
-                            try:
-                                main_frame.evaluate("(el) => el.removeAttribute('target')", btn)
-                            except Exception as eval_err:
-                                self.status_changed.emit(f"Advertencia al remover target: {str(eval_err)}")
-                            
-                            temp_path = os.path.join(
-                                os.environ.get("TEMP", "C:\\Temp"),
-                                f"temp_factura_{referencia_portal}_{idx_pdf + 1}.pdf"
-                            )
-                            
-                            self.status_changed.emit(f"Descargando PDF {idx_pdf + 1} de 2 (latencia del portal)...")
-                            with page.expect_download(timeout=45000) as download_info:  # Aumentado a 45s por latencia
-                                btn.click()
-                            dl = download_info.value
-                            dl.save_as(temp_path)
-                            
-                            if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
-                                temp_pdf_paths[idx_pdf] = temp_path
+                            if temp_pdf_paths[0]:
+                                step_success = True
                             else:
-                                raise Exception(f"Archivo PDF {idx_pdf + 1} de referencia {referencia_portal} está vacío o no se guardó.")
-                            
-                            # Pequeña pausa entre descargas para no saturar el portal
-                            if idx_pdf < num_pdfs - 1:
-                                time.sleep(1)
-                        
-                        # Verificar que al menos el primer PDF fue descargado
-                        if temp_pdf_paths[0]:
-                            step_success = True
+                                raise Exception("El primer archivo PDF de la referencia no fue descargado correctamente.")
                         else:
-                            raise Exception("El primer archivo PDF de la referencia no fue descargado correctamente.")
+                            # FLUJO ÓRDENES ESPECIALES (CANCELACION, TESTIMONIO, FOJAS, PAGADAS): 1 PDF + 1 XML
+                            # 1. Descargar 1 solo PDF
+                            btn_pdf_unico = botones[0]
+                            try:
+                                main_frame.evaluate("(el) => el.removeAttribute('target')", btn_pdf_unico)
+                            except Exception as eval_err:
+                                self.status_changed.emit(f"Advertencia al remover target PDF: {str(eval_err)}")
+                            
+                            temp_pdf_path = os.path.join(
+                                os.environ.get("TEMP", "C:\\Temp"),
+                                f"temp_factura_{referencia_portal}_1.pdf"
+                            )
+                            self.status_changed.emit(f"Descargando comprobante PDF ({tipo_orden_actual})...")
+                            with page.expect_download(timeout=45000) as download_info_pdf:
+                                btn_pdf_unico.click()
+                            dl_pdf = download_info_pdf.value
+                            dl_pdf.save_as(temp_pdf_path)
+                            
+                            if os.path.exists(temp_pdf_path) and os.path.getsize(temp_pdf_path) > 0:
+                                temp_pdf_paths[0] = temp_pdf_path
+                            else:
+                                raise Exception(f"Archivo PDF de referencia {referencia_portal} está vacío o no se guardó.")
+                            
+                            # 2. Descargar archivo XML correspondiente
+                            try:
+                                main_frame.wait_for_selector(sel_xml, timeout=15000)
+                            except Exception:
+                                self.status_changed.emit("Esperando aparición del enlace XML del portal...")
+                            
+                            btn_xml = main_frame.query_selector(sel_xml)
+                            if not btn_xml:
+                                raise Exception("No se encontró el enlace o botón de descarga de XML en el portal.")
+                            
+                            try:
+                                main_frame.evaluate("(el) => el.removeAttribute('target')", btn_xml)
+                            except Exception as eval_xml_err:
+                                self.status_changed.emit(f"Advertencia al remover target XML: {str(eval_xml_err)}")
+                            
+                            temp_xml = os.path.join(
+                                os.environ.get("TEMP", "C:\\Temp"),
+                                f"temp_factura_{referencia_portal}.xml"
+                            )
+                            self.status_changed.emit(f"Descargando comprobante XML ({tipo_orden_actual})...")
+                            with page.expect_download(timeout=45000) as download_info_xml:
+                                btn_xml.click()
+                            dl_xml = download_info_xml.value
+                            dl_xml.save_as(temp_xml)
+                            
+                            if os.path.exists(temp_xml) and os.path.getsize(temp_xml) > 0:
+                                temp_xml_path = temp_xml
+                            else:
+                                raise Exception(f"Archivo XML de referencia {referencia_portal} está vacío o no se guardó.")
+                            
+                            step_success = True
                             
                     except Exception as e:
                         # Check if the page/browser is dead
@@ -517,7 +571,11 @@ class BillingRpaWorker(QThread):
                                 if tp and os.path.exists(tp):
                                     try: os.remove(tp)
                                     except: pass
+                            if temp_xml_path and os.path.exists(temp_xml_path):
+                                try: os.remove(temp_xml_path)
+                                except: pass
                             temp_pdf_paths = [None, None]
+                            temp_xml_path = None
                             continue
                             
                         if isinstance(e, ValueError) and str(e).startswith("VALIDACION:"):
@@ -530,7 +588,11 @@ class BillingRpaWorker(QThread):
                             if tp and os.path.exists(tp):
                                 try: os.remove(tp)
                                 except: pass
+                        if temp_xml_path and os.path.exists(temp_xml_path):
+                            try: os.remove(temp_xml_path)
+                            except: pass
                         temp_pdf_paths = [None, None]
+                        temp_xml_path = None
                         if retry_attempt >= max_retries:
                             err_trace = traceback.format_exc()
                             if isinstance(e, ValueError) and str(e).startswith("VALIDACION:"):
@@ -584,7 +646,7 @@ class BillingRpaWorker(QThread):
                         
                     os.makedirs(dest_dir, exist_ok=True)
                     
-                    # Mover y renombrar ambos PDFs al destino final
+                    # Mover y renombrar PDFs al destino final
                     final_pdf_paths = []
                     for idx_pdf, temp_path in enumerate(temp_pdf_paths):
                         if temp_path and os.path.exists(temp_path):
@@ -594,10 +656,20 @@ class BillingRpaWorker(QThread):
                                 os.remove(final_path)
                             shutil.move(temp_path, final_path)
                             final_pdf_paths.append(final_path)
-                            self.status_changed.emit(f"Factura {idx_pdf + 1} guardada como: {filename}")
+                            self.status_changed.emit(f"Factura PDF {idx_pdf + 1} guardada como: {filename}")
+                    
+                    # Mover y renombrar XML al destino final (si aplica)
+                    final_xml_path = None
+                    if temp_xml_path and os.path.exists(temp_xml_path):
+                        xml_filename = f"{referencia_portal}_{del_part}{grupo_id}.xml"
+                        final_xml_path = os.path.join(dest_dir, xml_filename)
+                        if os.path.exists(final_xml_path):
+                            os.remove(final_xml_path)
+                        shutil.move(temp_xml_path, final_xml_path)
+                        self.status_changed.emit(f"Comprobante XML guardado como: {xml_filename}")
                     
                     # Persistir registros de facturas en BD
-                    self._save_facturas_db(referencia_id, final_pdf_paths, current)
+                    self._save_facturas_db(referencia_id, final_pdf_paths, current, xml_path=final_xml_path)
                     
                     success_count += 1
                     self.metric_updated.emit("exitosos", success_count)
@@ -754,13 +826,14 @@ class BillingRpaWorker(QThread):
             self.status_changed.emit(f"Advertencia al extraer delegación de PDF: {str(e)}")
         return None
 
-    def _save_facturas_db(self, referencia_id: int, pdf_paths: list, consecutivo: int):
-        """Persiste los registros de factura para una referencia con múltiples archivos PDF."""
+    def _save_facturas_db(self, referencia_id: int, pdf_paths: list, consecutivo: int, xml_path: Optional[str] = None):
+        """Persiste los registros de factura para una referencia con múltiples archivos PDF y/o XML."""
         delegacion_val = self._extract_delegacion(pdf_paths)
         if self.api_client.connect_via_api:
             payload = {
                 "referencia_id": referencia_id,
                 "pdf_paths": pdf_paths,
+                "xml_path": xml_path,
                 "rfc_emisor": self.ctx["rfc"],
                 "consecutivo": consecutivo,
                 "solicitud_id": self.ctx["solicitud_id"],
@@ -782,8 +855,8 @@ class BillingRpaWorker(QThread):
                     # Insertar nuevo registro de factura
                     factura_uuid = str(uuid.uuid4())
                     ins_factura = text("""
-                        INSERT INTO sar_archivo.factura (referencia_id, uuid, nombre_archivo, rfc_emisor, fecha_factura, pdf_path, pdf2_path, estado, delegacion)
-                        VALUES (:rid, :uuid, :nombre_archivo, :rfc_emisor, :fecha, :pdf, :pdf2, :estado, :delegacion)
+                        INSERT INTO sar_archivo.factura (referencia_id, uuid, nombre_archivo, rfc_emisor, fecha_factura, pdf_path, pdf2_path, xml_path, estado, delegacion)
+                        VALUES (:rid, :uuid, :nombre_archivo, :rfc_emisor, :fecha, :pdf, :pdf2, :xml, :estado, :delegacion)
                     """)
                     session.execute(ins_factura, {
                         "rid": referencia_id,
@@ -793,19 +866,21 @@ class BillingRpaWorker(QThread):
                         "fecha": datetime.datetime.now(datetime.timezone.utc),
                         "pdf": pdf_path_1,
                         "pdf2": pdf_path_2,
+                        "xml": xml_path,
                         "estado": "TIMBRADA",
                         "delegacion": delegacion_val
                     })
                 else:
-                    # Actualizar rutas de PDFs si ya existe el registro
+                    # Actualizar rutas de PDFs y XML si ya existe el registro
                     upd_stmt = text("""
                         UPDATE sar_archivo.factura
-                        SET pdf_path = :pdf, pdf2_path = :pdf2, estado = 'TIMBRADA', delegacion = :delegacion
+                        SET pdf_path = :pdf, pdf2_path = :pdf2, xml_path = :xml, estado = 'TIMBRADA', delegacion = :delegacion
                         WHERE factura_id = :fid
                     """)
                     session.execute(upd_stmt, {
                         "pdf": pdf_path_1,
                         "pdf2": pdf_path_2,
+                        "xml": xml_path,
                         "fid": dup_id,
                         "delegacion": delegacion_val
                     })

@@ -764,6 +764,7 @@ class OperacionRepository(BaseRepository):
                 c.concepto_id, c.nombre as concepto_nombre, c.alias as concepto_alias, c.codigo_portal as concepto_codigo_portal,
                 d.nombre as delegacion_nombre,
                 o.folio as orden_folio,
+                o.tipo_orden,
                 s.cantidad_actos,
                 -- Conteo real de referencias ya timbradas por Face C (fuente de verdad para reanudación)
                 COALESCE((
@@ -819,6 +820,7 @@ class OperacionRepository(BaseRepository):
             "concepto_codigo_portal": row.concepto_codigo_portal,
             "delegacion_nombre": row.delegacion_nombre,
             "orden_folio": row.orden_folio,
+            "tipo_orden": row.tipo_orden or "ESTANDAR",
             "cantidad_actos": row.cantidad_actos
         }
 
