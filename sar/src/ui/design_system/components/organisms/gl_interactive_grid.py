@@ -35,7 +35,7 @@ class InteractiveGridRow(QFrame):
         self.setObjectName("interactiveGridRow")
 
         self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setContentsMargins(8, 1, 8, 1)
         self.layout.setSpacing(12)
         self.layout.setAlignment(Qt.AlignVCenter)
 
@@ -50,26 +50,26 @@ class InteractiveGridRow(QFrame):
         self.combo_desarrollo = CustomComboBox()
         self.combo_desarrollo.setPlaceholderText("Seleccionar Desarrollo")
         self.combo_desarrollo.setMinimumWidth(120)
-        self.combo_desarrollo.setFixedHeight(36)
+        self.combo_desarrollo.setFixedHeight(28)
         self.combo_desarrollo.setVisible(False)
 
         # RFC / Empresa
         self.combo_rfc = CustomComboBox()
         self.combo_rfc.setPlaceholderText("Seleccionar RFC")
         self.combo_rfc.setMinimumWidth(130)
-        self.combo_rfc.setFixedHeight(36)
+        self.combo_rfc.setFixedHeight(28)
 
         # Delegación
         self.combo_delegacion = CustomComboBox()
         self.combo_delegacion.setPlaceholderText("Delegación")
         self.combo_delegacion.setMinimumWidth(90)
-        self.combo_delegacion.setFixedHeight(36)
+        self.combo_delegacion.setFixedHeight(28)
 
         # Concepto
         self.combo_concepto = CustomComboBox()
         self.combo_concepto.setPlaceholderText("Seleccionar Concepto")
         self.combo_concepto.setMinimumWidth(110)
-        self.combo_concepto.setFixedHeight(36)
+        self.combo_concepto.setFixedHeight(28)
 
         # Cantidad
         self.spin_cantidad = CustomSpinBox(self)
@@ -78,7 +78,7 @@ class InteractiveGridRow(QFrame):
         self.spin_cantidad.setValue(1)
         self.spin_cantidad.setMinimumWidth(75)
         self.spin_cantidad.setMaximumWidth(110)
-        self.spin_cantidad.setFixedHeight(36)
+        self.spin_cantidad.setFixedHeight(28)
 
         # Cantidad de Actos (Multiplicador 136 - Fojas)
         self.spin_cantidad_actos = CustomSpinBox(self)
@@ -87,7 +87,7 @@ class InteractiveGridRow(QFrame):
         self.spin_cantidad_actos.setValue(1)
         self.spin_cantidad_actos.setMinimumWidth(75)
         self.spin_cantidad_actos.setMaximumWidth(110)
-        self.spin_cantidad_actos.setFixedHeight(36)
+        self.spin_cantidad_actos.setFixedHeight(28)
         self.spin_cantidad_actos.setToolTip("Cantidad de Actos / Fojas a declarar en el portal")
         self.spin_cantidad_actos.setVisible(False)
 
@@ -96,13 +96,13 @@ class InteractiveGridRow(QFrame):
         self.lbl_disponibles.setAlignment(Qt.AlignCenter)
         self.lbl_disponibles.setMinimumWidth(65)
         self.lbl_disponibles.setMaximumWidth(90)
-        self.lbl_disponibles.setFixedHeight(36)
+        self.lbl_disponibles.setFixedHeight(28)
         self._update_disponibles_style("neutral", "—")
 
         # Delete button
         self.btn_delete = CustomButton("", is_secondary=True)
         self.btn_delete.setIcon(Icons.trash("#EF4444"))
-        self.btn_delete.setFixedSize(36, 36)
+        self.btn_delete.setFixedSize(28, 28)
         self.btn_delete.setStyleSheet("border: none; background: transparent;")
         self.btn_delete.clicked.connect(lambda: self.deleted.emit(self))
 
@@ -504,7 +504,7 @@ class InteractiveGrid(QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.scroll_area.setMinimumHeight(240)
+        self.scroll_area.setMinimumHeight(160)
         self.scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         
         self.rows_container = QWidget()
@@ -513,38 +513,47 @@ class InteractiveGrid(QWidget):
         self.rows_layout = QVBoxLayout(self.rows_container)
         self.rows_layout.setAlignment(Qt.AlignTop)
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
-        self.rows_layout.setSpacing(8)
+        self.rows_layout.setSpacing(5)
         
-        # Table Headers — use same spacing/margins as rows (8px margin, 12px spacing)
+        # Table Headers — use compact spacing/margins aligned with rows (8px horizontal, 2px vertical, 12px spacing)
         self.table_header_layout = QHBoxLayout()
-        self.table_header_layout.setContentsMargins(8, 4, 8, 4)
+        self.table_header_layout.setContentsMargins(8, 2, 8, 2)
         self.table_header_layout.setSpacing(12)
 
+        header_font_style = "font-size: 12px; font-weight: 500;"
+
         self.lbl_h_desarrollo = CustomLabel("Desarrollo", variant="muted")
+        self.lbl_h_desarrollo.setStyleSheet(header_font_style)
         self.lbl_h_desarrollo.setVisible(False)
 
         self.lbl_h_rfc = CustomLabel("Empresa (RFC)", variant="muted")
+        self.lbl_h_rfc.setStyleSheet(header_font_style)
         self.lbl_h_del = CustomLabel("Delegación", variant="muted")
+        self.lbl_h_del.setStyleSheet(header_font_style)
         self.lbl_h_concepto = CustomLabel("Concepto", variant="muted")
+        self.lbl_h_concepto.setStyleSheet(header_font_style)
 
         self.lbl_h_cant = CustomLabel("Cantidad", variant="muted")
+        self.lbl_h_cant.setStyleSheet(header_font_style)
         self.lbl_h_cant.setMinimumWidth(75)
         self.lbl_h_cant.setMaximumWidth(110)
         self.lbl_h_cant.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self.lbl_h_cant_actos = CustomLabel("No. Actos", variant="muted")
+        self.lbl_h_cant_actos.setStyleSheet(header_font_style)
         self.lbl_h_cant_actos.setMinimumWidth(75)
         self.lbl_h_cant_actos.setMaximumWidth(110)
         self.lbl_h_cant_actos.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.lbl_h_cant_actos.setVisible(False)
 
         self.lbl_h_disp = CustomLabel("Disponibles", variant="muted")
+        self.lbl_h_disp.setStyleSheet(header_font_style)
         self.lbl_h_disp.setMinimumWidth(65)
         self.lbl_h_disp.setMaximumWidth(90)
         self.lbl_h_disp.setAlignment(Qt.AlignCenter)
 
         self.lbl_h_empty = CustomLabel("", variant="muted")
-        self.lbl_h_empty.setFixedSize(36, 20)
+        self.lbl_h_empty.setFixedSize(32, 20)
 
         # Build header layout — order matches the row widget layout:
         # Desarrollo | RFC | Delegación | Concepto | Cantidad | No. Actos | Disponibles | (del)

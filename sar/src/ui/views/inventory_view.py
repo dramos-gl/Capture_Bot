@@ -2763,8 +2763,10 @@ class InventoryView(QWidget):
         layout.setSpacing(16)
 
         card_ind = CustomCard(parent=self)
+        card_ind.card_layout.setContentsMargins(16, 10, 16, 10)
+        card_ind.card_layout.setSpacing(8)
         form_layout = QVBoxLayout()
-        form_layout.setSpacing(16)
+        form_layout.setSpacing(8)
 
         # Header
         card_header_layout = QHBoxLayout()
@@ -2776,15 +2778,16 @@ class InventoryView(QWidget):
         
         form_layout.addLayout(card_header_layout)
 
-        # Destino Selectors
+        # Destino Selectors (Compact Vertical Footprint)
         dest_layout = QHBoxLayout()
-        dest_layout.setSpacing(16)
+        dest_layout.setSpacing(12)
 
         vbox_tipo = QVBoxLayout()
+        vbox_tipo.setSpacing(4)
         lbl_tipo = CustomLabel("Tipo de Destino *", variant="body")
-        lbl_tipo.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        lbl_tipo.setStyleSheet("font-weight: bold; background: transparent; border: none; font-size: 13px;")
         self.cb_tipo_destino_ind = CustomComboBox(self)
-        self.cb_tipo_destino_ind.setFixedHeight(36)
+        self.cb_tipo_destino_ind.setFixedHeight(28)
         self.cb_tipo_destino_ind.addItem("-- Seleccione Destino --", None)
         self.cb_tipo_destino_ind.addItems(["NOTARIA", "COLABORADOR"])
         self.cb_tipo_destino_ind.setCurrentIndex(0)
@@ -2793,10 +2796,11 @@ class InventoryView(QWidget):
         vbox_tipo.addWidget(self.cb_tipo_destino_ind)
 
         vbox_dest = QVBoxLayout()
+        vbox_dest.setSpacing(4)
         lbl_dest = CustomLabel("Destinatario *", variant="body")
-        lbl_dest.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        lbl_dest.setStyleSheet("font-weight: bold; background: transparent; border: none; font-size: 13px;")
         self.cb_destinatario_ind = CustomComboBox(self)
-        self.cb_destinatario_ind.setFixedHeight(36)
+        self.cb_destinatario_ind.setFixedHeight(28)
         vbox_dest.addWidget(lbl_dest)
         vbox_dest.addWidget(self.cb_destinatario_ind)
 
@@ -2804,9 +2808,9 @@ class InventoryView(QWidget):
         dest_layout.addLayout(vbox_dest, stretch=1)
         form_layout.addLayout(dest_layout)
         
-        # Interactive Grid for filters and counts
+        # Interactive Grid for filters and counts (Guarantees 2-3 rows visible without scroll on 1366x768)
         self.grid_individual = InteractiveGrid(self)
-        self.grid_individual.setMinimumHeight(180)
+        self.grid_individual.setMinimumHeight(210)
         self.grid_individual.set_third_column_label("Delegación")
         self.grid_individual.set_show_cantidad_actos(False)
         self.grid_individual.btn_save.setVisible(False)
@@ -2836,7 +2840,7 @@ class InventoryView(QWidget):
 
         self.btn_filter_orden_ind = CustomButton("", is_secondary=True, parent=self)
         self.btn_filter_orden_ind.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_filter_orden_ind.setFixedSize(36, 36)
+        self.btn_filter_orden_ind.setFixedSize(28, 28)
         self.btn_filter_orden_ind.setToolTip("Filtrar derechos por órdenes de generación")
         self.btn_filter_orden_ind.clicked.connect(self._show_order_filter_menu)
 
@@ -2853,8 +2857,10 @@ class InventoryView(QWidget):
 
         # Preview list table
         self.card_preview_ind = CustomCard(title="Referencias Disponibles a Asignar", parent=self)
+        self.card_preview_ind.card_layout.setContentsMargins(16, 10, 16, 10)
+        self.card_preview_ind.card_layout.setSpacing(8)
         self.table_preview_ind = StyledDataTable(["✔", "ID", "Referencia (Portal)", "Concepto", "Empresa", "Importe", "Delegación"], parent=self)
-        self.table_preview_ind.setMinimumHeight(240)
+        self.table_preview_ind.setMinimumHeight(160)
         self.table_preview_ind.setColumnHidden(1, True) # Hide internal ID
         self.card_preview_ind.add_widget(self.table_preview_ind)
         layout.addWidget(self.card_preview_ind)

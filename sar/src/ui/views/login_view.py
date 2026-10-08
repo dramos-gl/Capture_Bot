@@ -47,6 +47,7 @@ class LoginView(QWidget):
         
         # Module Selection
         self.cb_modulo = CustomComboBox(self)
+        self.cb_modulo.setFixedHeight(36)
         self.cb_modulo.setPlaceholderText("Seleccionar un módulo")
         self.cb_modulo_original_stylesheet = self.cb_modulo.styleSheet()
         self._load_modules()

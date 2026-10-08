@@ -44,9 +44,10 @@ class StyledDataTable(QTableWidget):
         header.setHighlightSections(False)
         header.setMinimumSectionSize(50)
         
-        # Vertical header styling
+        # Vertical header styling (Row height calibrated for high-density ERP layout)
         self.verticalHeader().setVisible(False)
-        self.verticalHeader().setDefaultSectionSize(36)
+        self.verticalHeader().setDefaultSectionSize(26)
+        header.setDefaultSectionSize(28)
         
     def populate_rows(self, data: List[List[str]], checkable_first_col: bool = False):
         """Populates the table rows with string data and styled widgets."""

@@ -17,7 +17,7 @@ class LabeledDateEdit(QGroupBox):
         layout.setSpacing(0)
 
         self.date_edit = QDateEdit(self)
-        self.date_edit.setFixedHeight(35)
+        self.date_edit.setFixedHeight(26)
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDate(QDate.currentDate())
         self.date_edit.setCursor(QCursor(Qt.PointingHandCursor))

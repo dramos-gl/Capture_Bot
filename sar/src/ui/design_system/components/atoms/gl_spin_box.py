@@ -13,7 +13,7 @@ class CustomSpinBox(QSpinBox):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(36)
+        self.setFixedHeight(28)
 
     def wheelEvent(self, event: QWheelEvent):
         """Suppress passive wheel events so parent scrollable containers can scroll."""

@@ -52,6 +52,7 @@ UIX-007
 
 Responsividad y Adaptabilidad de Pantalla:
 Toda ventana, formulario modal y diálogo del sistema debe adaptarse de forma fluida a resoluciones desde 1366×768 (laptops estándar) hasta monitores 4K y diferentes escalas de DPI (100% a 150%). Ningún formulario debe desbordar los límites físicos de la pantalla ni ocultar botones de acción críticos; los formularios extensos deben estructurarse obligatoriamente en 3 niveles: Cabecera de contexto fija, Cuerpo central desplazable (`QScrollArea`) y Pie fijo con botones de confirmación (`[Guardar]`, `[Cancelar]`).
+En componentes de captura y asignación de alta densidad (`InteractiveGrid` / `InteractiveGridRow`), los espaciados verticales deben seguir la escala compacta del design system (paddings verticales de 3px a 4px por fila y espaciado inter-filas de 5px, con cabeceras a 12px) garantizando que al menos 3 renglones completos sean visibles simultáneamente en resoluciones 1366×768 sin colapsar el área de tablas de previsualización.
 
 UIX-008
 

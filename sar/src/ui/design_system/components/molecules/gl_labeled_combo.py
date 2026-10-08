@@ -17,7 +17,7 @@ class LabeledComboBox(QGroupBox):
         layout.setSpacing(0)
 
         self.combo = CustomComboBox(self)
-        self.combo.setFixedHeight(35)
+        self.combo.setFixedHeight(26)
 
         if options:
             self.combo.addItems(options)
