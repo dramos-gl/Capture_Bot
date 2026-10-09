@@ -59,6 +59,15 @@ class ThemeManager:
             background: transparent;
             border-top: 1px solid {border};
         }}
+
+        /* Clean Scroll Area Containers */
+        QScrollArea#cleanScrollArea {{
+            border: none;
+            background-color: transparent;
+        }}
+        QWidget#scrollableContent, QWidget#visorScrollContent, QWidget#masivoScrollContent, QWidget#lotesScrollContent, QWidget#indScrollContent, QWidget#apartarScrollContent {{
+            background-color: transparent;
+        }}
         
         /* Info Banner Callout Molecule */
         QFrame#glInfoBanner {{
@@ -133,8 +142,8 @@ class ThemeManager:
             border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
             padding: 1px 10px;
-            min-height: 28px;
-            max-height: 28px;
+            min-height: 26px;
+            max-height: 26px;
             color: {txt_primary};
             font-size: 13px;
         }}
@@ -365,6 +374,8 @@ class ThemeManager:
             background-color: {Colors.ACCENT};
             color: #FFFFFF;
             border: none;
+            padding: 3px 14px;
+            font-size: 13px;
         }}
         QPushButton#primaryBtn:hover {{
             background-color: {Colors.ACCENT_HOVER};
@@ -375,6 +386,8 @@ class ThemeManager:
             background-color: {Colors.ERROR};
             color: #FFFFFF;
             border: none;
+            padding: 3px 14px;
+            font-size: 13px;
         }}
         QPushButton#dangerBtn:hover {{
             background-color: #DC2626;
@@ -386,6 +399,8 @@ class ThemeManager:
             color: {Colors.ERROR};
             border: {Spacing.BORDER_WIDTH_SM} solid {"#FCA5A5" if not is_dark else Colors.ERROR};
             font-weight: {Typography.WEIGHT_BOLD};
+            padding: 3px 14px;
+            font-size: 13px;
         }}
         QPushButton#outlineDangerBtn:hover, QPushButton#orderProcessingRejectBtn:hover {{
             background-color: {"#FEF2F2" if not is_dark else "rgba(239, 68, 68, 0.18)"};
@@ -398,6 +413,8 @@ class ThemeManager:
             background-color: transparent;
             color: {txt_secondary};
             border: {Spacing.BORDER_WIDTH_SM} solid {border};
+            padding: 3px 14px;
+            font-size: 13px;
         }}
         QPushButton#secondaryBtn:hover {{
             background-color: {surf};
@@ -425,6 +442,22 @@ class ThemeManager:
         QLabel#mutedLabel {{
             font-size: {Typography.SIZE_SM};
             color: {txt_muted};
+        }}
+
+        QLabel#formFieldLabel {{
+            font-weight: {Typography.WEIGHT_BOLD};
+            font-size: 13px;
+            color: {txt_primary};
+            background: transparent;
+            border: none;
+        }}
+
+        QLabel#subHintLabel {{
+            font-size: 11px;
+            color: {txt_muted};
+            background: transparent;
+            border: none;
+            margin-left: 24px;
         }}
         
         /* Configuración de la Orden / Header Labels */
@@ -572,8 +605,8 @@ class ThemeManager:
         
         QLineEdit#filterBarSearch {{
             padding: 3px 10px;
-            min-height: 34px;
-            max-height: 34px;
+            min-height: 28px;
+            max-height: 28px;
             border: {Spacing.BORDER_WIDTH_SM} solid {border};
             border-radius: {Spacing.RADIUS_MD};
             background-color: {surf};
@@ -713,6 +746,19 @@ class ThemeManager:
             font-size: {Typography.SIZE_SM};
             color: {txt_muted};
         }}
+
+        /* Table Footer Selection Badge */
+        QLabel#footerSelectedBadge {{
+            font-weight: {Typography.WEIGHT_BOLD};
+            font-size: 12px;
+            color: {"#1D4ED8" if not is_dark else "#93C5FD"};
+            background-color: {"#EFF6FF" if not is_dark else "rgba(37, 99, 235, 0.20)"};
+            border: 1px solid {"#BFDBFE" if not is_dark else "rgba(37, 99, 235, 0.40)"};
+            border-radius: 6px;
+            padding: 2px 8px;
+            min-height: 24px;
+            max-height: 24px;
+        }}
         
         /* Pagination Buttons */
         QPushButton#paginationPageBtn {{
@@ -721,12 +767,12 @@ class ThemeManager:
             border: 1px solid {border};
             border-radius: 6px;
             font-weight: {Typography.WEIGHT_BOLD};
-            font-size: {Typography.SIZE_SM};
-            padding: 4px 8px;
+            font-size: 12px;
+            padding: 1px 4px;
             min-width: 28px;
-            max-width: 28px;
-            min-height: 28px;
-            max-height: 28px;
+            min-height: 26px;
+            max-height: 26px;
+            outline: none;
         }}
         QPushButton#paginationPageBtn:hover {{
             background-color: {bg};
@@ -739,12 +785,12 @@ class ThemeManager:
             border: none;
             border-radius: 6px;
             font-weight: {Typography.WEIGHT_BOLD};
-            font-size: {Typography.SIZE_SM};
-            padding: 4px 8px;
+            font-size: 12px;
+            padding: 1px 4px;
             min-width: 28px;
-            max-width: 28px;
             min-height: 28px;
             max-height: 28px;
+            outline: none;
         }}
         
         QPushButton#paginationNavBtn {{
@@ -753,12 +799,12 @@ class ThemeManager:
             border: 1px solid {border};
             border-radius: 6px;
             font-weight: {Typography.WEIGHT_BOLD};
-            font-size: {Typography.SIZE_SM};
-            padding: 4px 8px;
+            font-size: 12px;
+            padding: 1px 4px;
             min-width: 28px;
-            max-width: 28px;
-            min-height: 28px;
-            max-height: 28px;
+            min-height: 26px;
+            max-height: 26px;
+            outline: none;
         }}
         QPushButton#paginationNavBtn:hover {{
             background-color: {bg};

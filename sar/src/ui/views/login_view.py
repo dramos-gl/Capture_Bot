@@ -76,12 +76,14 @@ class LoginView(QWidget):
         
         # Login button
         self.login_btn = CustomButton("Iniciar Sesión", is_secondary=False, parent=self)
+        self.login_btn.setFixedHeight(40)
         self.login_btn.clicked.connect(self._on_login_clicked)
         self.btn_layout.addWidget(self.login_btn)
         
         # Cancel button
         self.cancel_btn = CustomButton("Cancelar", is_secondary=False, parent=self)
         self.cancel_btn.setObjectName("dangerBtn") # Override to use danger color
+        self.cancel_btn.setFixedHeight(40)
         self.cancel_btn.clicked.connect(self._on_cancel_clicked)
         self.btn_layout.addWidget(self.cancel_btn)
         

@@ -1078,13 +1078,10 @@ class InventoryView(QWidget):
         tab_layout.setSpacing(0)
 
         scroll_area = QScrollArea(self.tab_visor)
+        scroll_area.setObjectName("cleanScrollArea")
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea { border: none; background-color: transparent; }
-            QWidget#visorScrollContent { background-color: transparent; }
-        """)
 
         scroll_content = QWidget()
         scroll_content.setObjectName("visorScrollContent")
@@ -1215,7 +1212,9 @@ class InventoryView(QWidget):
         self.table_header_layout.addStretch()
         
         # Search Box inside Table Header
-        self.search_input_visor = QLineEdit(self)
+        self.search_input_visor = CustomInput(parent=self)
+        self.search_input_visor.setObjectName("filterBarSearch")
+        self.search_input_visor.setFixedHeight(36)
         self.search_input_visor.setPlaceholderText("Buscar por referencia, cliente, desarrollo, MZ, LT, EDIF, VIV...")
         self.search_input_visor.setMinimumWidth(320)
         self.search_input_visor.setMaximumWidth(520)
@@ -1259,18 +1258,53 @@ class InventoryView(QWidget):
         self.table.setColumnHidden(1, True) # Hide internal ID
         self.card.add_widget(self.table)
 
-        layout.addWidget(self.card)
-
-        scroll_area.setWidget(scroll_content)
-        tab_layout.addWidget(scroll_area)
-
-        # Paging Info and Size
+        # Unified One-Line Footer Layout (Context + Selection + Page Size + Pagination + Action)
         footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(0, 8, 0, 0)
+        footer_layout.setSpacing(10)
+        footer_layout.setAlignment(Qt.AlignVCenter)
+
+        # Left side: Paging text & dynamic selection controls
         self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 derechos", variant="muted")
         footer_layout.addWidget(self.lbl_pagination_info)
+
+        self.btn_limpiar_seleccion = CustomButton(
+            "Limpiar",
+            is_clean_btn=True,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            parent=self
+        )
+        self.btn_limpiar_seleccion.setFixedHeight(30)
+        self.btn_limpiar_seleccion.setToolTip("Limpiar casillas de selección")
+        self.btn_limpiar_seleccion.clicked.connect(self._on_limpiar_seleccion)
+        self.btn_limpiar_seleccion.setVisible(False)
+        footer_layout.addWidget(self.btn_limpiar_seleccion)
+
+        self.lbl_selected_badge = QLabel("", self)
+        self.lbl_selected_badge.setObjectName("footerSelectedBadge")
+        self.lbl_selected_badge.setFixedHeight(30)
+        self.lbl_selected_badge.setAlignment(Qt.AlignCenter)
+        self.lbl_selected_badge.setVisible(False)
+        footer_layout.addWidget(self.lbl_selected_badge)
+
         footer_layout.addStretch()
 
+        # Right side: Primary action button, page size dropdown & pagination nav buttons
+        self.btn_asignar_seleccionados = CustomButton(
+            "Asignar",
+            is_secondary=False,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            parent=self
+        )
+        self.btn_asignar_seleccionados.setFixedHeight(30)
+        self.btn_asignar_seleccionados.setIcon(Icons.usuario("#FFFFFF"))
+        self.btn_asignar_seleccionados.setToolTip("Asignar derechos seleccionados")
+        self.btn_asignar_seleccionados.setEnabled(False)
+        self.btn_asignar_seleccionados.clicked.connect(self._on_asignar_seleccionados)
+        footer_layout.addWidget(self.btn_asignar_seleccionados)
+
         self.cb_page_size = CustomComboBox(self)
+        self.cb_page_size.setFixedHeight(30)
         self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
         self.cb_page_size.setCurrentIndex(2) # Default 200
         self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
@@ -1279,46 +1313,14 @@ class InventoryView(QWidget):
         self.pagination_widget = QWidget(self)
         self.pag_btn_layout = QHBoxLayout(self.pagination_widget)
         self.pag_btn_layout.setContentsMargins(0, 0, 0, 0)
+        self.pag_btn_layout.setSpacing(4)
         footer_layout.addWidget(self.pagination_widget)
-        
+
         self.card.layout.addLayout(footer_layout)
-
-        # Action Buttons
-        actions_layout = QHBoxLayout()
-        actions_layout.setSpacing(10)
-
-        self.btn_limpiar_seleccion = CustomButton(
-            "Limpiar",
-            is_clean_btn=True,
-            min_width=CustomButton.DEFAULT_MIN_WIDTH,
-            parent=self
-        )
-        self.btn_limpiar_seleccion.setToolTip("Limpiar casillas de selección")
-        self.btn_limpiar_seleccion.clicked.connect(self._on_limpiar_seleccion)
-        self.btn_limpiar_seleccion.setVisible(False)
-        actions_layout.addWidget(self.btn_limpiar_seleccion)
-
-        self.lbl_selected_badge = QLabel("", self)
-        self.lbl_selected_badge.setStyleSheet("font-weight: bold; color: #1D4ED8; font-size: 12px; padding: 4px 8px; background-color: #EFF6FF; border-radius: 6px; border: 1px solid #BFDBFE;")
-        self.lbl_selected_badge.setVisible(False)
-        actions_layout.addWidget(self.lbl_selected_badge)
-
-        actions_layout.addStretch()
-
-        self.btn_asignar_seleccionados = CustomButton(
-            "Asignar",
-            is_secondary=False,
-            min_width=CustomButton.DEFAULT_MIN_WIDTH,
-            parent=self
-        )
-        self.btn_asignar_seleccionados.setIcon(Icons.usuario("#FFFFFF"))
-        self.btn_asignar_seleccionados.setToolTip("Asignar derechos seleccionados")
-        self.btn_asignar_seleccionados.setEnabled(False)
-        self.btn_asignar_seleccionados.clicked.connect(self._on_asignar_seleccionados)
-        actions_layout.addWidget(self.btn_asignar_seleccionados)
-        
-        self.card.layout.addLayout(actions_layout)
         layout.addWidget(self.card)
+
+        scroll_area.setWidget(scroll_content)
+        tab_layout.addWidget(scroll_area)
 
         # Pagination & selection state
         self.current_page = 1
@@ -2121,18 +2123,10 @@ class InventoryView(QWidget):
 
         # 1. Scroll Area to guarantee responsiveness in 1366x768 and small screens
         scroll_area = QScrollArea(self.tab_masivo)
+        scroll_area.setObjectName("cleanScrollArea")
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-            QWidget#masivoScrollContent {
-                background-color: transparent;
-            }
-        """)
 
         scroll_content = QWidget()
         scroll_content.setObjectName("masivoScrollContent")
@@ -2165,7 +2159,7 @@ class InventoryView(QWidget):
         self.chk_completar_reserva.stateChanged.connect(self._on_completar_reserva_changed)
         chk1_box.addWidget(self.chk_completar_reserva)
         lbl_desc1 = QLabel("Asigna ubicación definitiva a derechos que ya han sido reservados.")
-        lbl_desc1.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 24px;")
+        lbl_desc1.setObjectName("subHintLabel")
         chk1_box.addWidget(lbl_desc1)
         chk_layout.addLayout(chk1_box, stretch=1)
 
@@ -2176,7 +2170,7 @@ class InventoryView(QWidget):
         self.chk_solo_reservar.stateChanged.connect(self._on_solo_reservar_changed)
         chk2_box.addWidget(self.chk_solo_reservar)
         lbl_desc2 = QLabel("Reserva derechos ya usados de forma manual sin validación de clientes/dirección.")
-        lbl_desc2.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 24px;")
+        lbl_desc2.setObjectName("subHintLabel")
         chk2_box.addWidget(lbl_desc2)
         chk_layout.addLayout(chk2_box, stretch=1)
 
@@ -2186,9 +2180,6 @@ class InventoryView(QWidget):
         self.chk_asignar_directo = CustomCheckBox("Asignar Derechos (Directo)", self)
         self.chk_asignar_directo.stateChanged.connect(self._on_asignar_directo_changed)
         chk3_box.addWidget(self.chk_asignar_directo)
-        # lbl_desc3 = QLabel("Asigna derechos de forma directa omitiendo validación de clientes o dirección.")
-        # lbl_desc3.setStyleSheet("color: #64748B; font-size: 11px; margin-left: 24px;")
-        # chk3_box.addWidget(lbl_desc3)
         chk_layout.addLayout(chk3_box, stretch=1)
 
         card_form.layout.addWidget(chk_container)
@@ -2203,7 +2194,7 @@ class InventoryView(QWidget):
 
         col_destino = QVBoxLayout()
         lbl_tipo_destino = CustomLabel("Tipo Destino *", variant="body")
-        lbl_tipo_destino.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        lbl_tipo_destino.setObjectName("formFieldLabel")
         self.cb_destino_masivo = CustomComboBox(self)
         self.cb_destino_masivo.setFixedHeight(36)
         self.cb_destino_masivo.addItems(["-- Seleccione un tipo de destino --", "NOTARIA", "COLABORADOR"])
@@ -2213,7 +2204,7 @@ class InventoryView(QWidget):
 
         self.col_destinatario = QVBoxLayout()
         self.lbl_destinatario_masivo = CustomLabel("Destinatario *", variant="body")
-        self.lbl_destinatario_masivo.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.lbl_destinatario_masivo.setObjectName("formFieldLabel")
         self.cb_notarias_masivo = CustomComboBox(self)
         self.cb_notarias_masivo.setFixedHeight(36)
         self.cb_colaboradores_masivo = CustomComboBox(self)
@@ -2232,7 +2223,7 @@ class InventoryView(QWidget):
 
         self.col_solicitante = QVBoxLayout()
         self.lbl_solicitante_masivo = CustomLabel("Solicitante Externo (Persona)", variant="body")
-        self.lbl_solicitante_masivo.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        self.lbl_solicitante_masivo.setObjectName("formFieldLabel")
         self.txt_solicitante_masivo = CustomInput("Ej. Pedro Gómez")
         self.txt_solicitante_masivo.setFixedHeight(36)
         self.col_solicitante.addWidget(self.lbl_solicitante_masivo)
@@ -2240,7 +2231,7 @@ class InventoryView(QWidget):
 
         col_obs = QVBoxLayout()
         lbl_obs = CustomLabel("Observaciones del Lote", variant="body")
-        lbl_obs.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        lbl_obs.setObjectName("formFieldLabel")
         self.txt_obs_masivo = CustomInput("Notas u observaciones adicionales para el lote (opcional)...")
         self.txt_obs_masivo.setFixedHeight(36)
         col_obs.addWidget(lbl_obs)
@@ -2748,13 +2739,10 @@ class InventoryView(QWidget):
         tab_layout.setSpacing(0)
 
         scroll_area = QScrollArea(self.tab_individual)
+        scroll_area.setObjectName("cleanScrollArea")
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea { border: none; background-color: transparent; }
-            QWidget#indScrollContent { background-color: transparent; }
-        """)
 
         scroll_content = QWidget()
         scroll_content.setObjectName("indScrollContent")
@@ -2785,9 +2773,9 @@ class InventoryView(QWidget):
         vbox_tipo = QVBoxLayout()
         vbox_tipo.setSpacing(4)
         lbl_tipo = CustomLabel("Tipo de Destino *", variant="body")
-        lbl_tipo.setStyleSheet("font-weight: bold; background: transparent; border: none; font-size: 13px;")
+        lbl_tipo.setObjectName("formFieldLabel")
         self.cb_tipo_destino_ind = CustomComboBox(self)
-        self.cb_tipo_destino_ind.setFixedHeight(28)
+        self.cb_tipo_destino_ind.setFixedHeight(36)
         self.cb_tipo_destino_ind.addItem("-- Seleccione Destino --", None)
         self.cb_tipo_destino_ind.addItems(["NOTARIA", "COLABORADOR"])
         self.cb_tipo_destino_ind.setCurrentIndex(0)
@@ -2798,9 +2786,9 @@ class InventoryView(QWidget):
         vbox_dest = QVBoxLayout()
         vbox_dest.setSpacing(4)
         lbl_dest = CustomLabel("Destinatario *", variant="body")
-        lbl_dest.setStyleSheet("font-weight: bold; background: transparent; border: none; font-size: 13px;")
+        lbl_dest.setObjectName("formFieldLabel")
         self.cb_destinatario_ind = CustomComboBox(self)
-        self.cb_destinatario_ind.setFixedHeight(28)
+        self.cb_destinatario_ind.setFixedHeight(36)
         vbox_dest.addWidget(lbl_dest)
         vbox_dest.addWidget(self.cb_destinatario_ind)
 
@@ -3399,13 +3387,10 @@ class InventoryView(QWidget):
         tab_layout.setSpacing(0)
 
         scroll_area = QScrollArea(self.tab_apartar)
+        scroll_area.setObjectName("cleanScrollArea")
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea { border: none; background-color: transparent; }
-            QWidget#apartarScrollContent { background-color: transparent; }
-        """)
 
         scroll_content = QWidget()
         scroll_content.setObjectName("apartarScrollContent")
@@ -3436,7 +3421,7 @@ class InventoryView(QWidget):
         # Left side: Notaria — with explicit placeholder so no item is pre-selected
         not_layout = QVBoxLayout()
         lbl_notaria = CustomLabel("Notaría de Destino *", variant="body")
-        lbl_notaria.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        lbl_notaria.setObjectName("formFieldLabel")
         self.cb_notarias_apartar = CustomComboBox(self)
         self.cb_notarias_apartar.setFixedHeight(36)
         self.cb_notarias_apartar.setPlaceholderText("-- Seleccione una notaría --")
@@ -3446,7 +3431,7 @@ class InventoryView(QWidget):
         # Right side: Observaciones (obligatorio)
         obs_layout = QVBoxLayout()
         lbl_obs = CustomLabel("Observaciones del Lote *", variant="body")
-        lbl_obs.setStyleSheet("font-weight: bold; background: transparent; border: none;")
+        lbl_obs.setObjectName("formFieldLabel")
         self.txt_obs_apartar = CustomInput("Observaciones obligatorias para el apartado...")
         self.txt_obs_apartar.setFixedHeight(36)
         obs_layout.addWidget(lbl_obs)
@@ -3847,13 +3832,10 @@ class InventoryView(QWidget):
         tab_layout.setSpacing(0)
 
         scroll_area = QScrollArea(self.tab_lotes)
+        scroll_area.setObjectName("cleanScrollArea")
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea { border: none; background-color: transparent; }
-            QWidget#lotesScrollContent { background-color: transparent; }
-        """)
 
         scroll_content = QWidget()
         scroll_content.setObjectName("lotesScrollContent")
@@ -3927,7 +3909,9 @@ class InventoryView(QWidget):
         self.table_header_layout_lotes.addStretch()
 
         # Search Input inside Table Header for Lotes
-        self.search_lotes = QLineEdit(self)
+        self.search_lotes = CustomInput(parent=self)
+        self.search_lotes.setObjectName("filterBarSearch")
+        self.search_lotes.setFixedHeight(36)
         self.search_lotes.setPlaceholderText("Buscar por ID, notaría, colaborador, solicitante...")
         self.search_lotes.setMinimumWidth(280)
         self.search_lotes.setMaximumWidth(480)
@@ -3961,6 +3945,7 @@ class InventoryView(QWidget):
         footer_layout.addStretch()
 
         self.cb_page_size_lotes = CustomComboBox(self)
+        self.cb_page_size_lotes.setFixedHeight(30)
         self.cb_page_size_lotes.addItems(["50 por página", "100 por página", "200 por página"])
         self.cb_page_size_lotes.setCurrentIndex(0)
         self.cb_page_size_lotes.currentTextChanged.connect(self._on_page_size_changed_lotes)
