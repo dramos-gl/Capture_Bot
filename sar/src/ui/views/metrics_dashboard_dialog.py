@@ -18,6 +18,7 @@ from sar.src.ui.design_system.components.molecules.gl_menu import KeepOpenMenu
 from sar.src.ui.design_system.components.molecules.gl_chart_widgets import DonutChartWidget, BarChartWidget
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.theme_manager import Colors
+from sar.src.ui.design_system.tokens.spacing import Spacing
 from sar.src.services.referencias_service import ReferenciasService
 from sar.src.services.ordenes_ui_service import OrdenesUIService
 
@@ -168,10 +169,10 @@ class MetricsDashboardDialog(QWidget):
         header_layout = QHBoxLayout()
         header_layout.setSpacing(12)
 
-        # Botón Volver / Atrás minimalista
+        # Botón Volver / Atrás minimalista (30px estándar)
         self.btn_back = QPushButton()
         self.btn_back.setObjectName("secondaryBtn")
-        self.btn_back.setFixedSize(32, 32)
+        self.btn_back.setFixedSize(Spacing.CONTROL_HEIGHT_COMPACT, Spacing.CONTROL_HEIGHT_COMPACT)
         self.btn_back.setIcon(Icons.volver(Colors.TEXT_LIGHT_PRIMARY))
         self.btn_back.clicked.connect(self.back_requested.emit)
         header_layout.addWidget(self.btn_back)
@@ -190,19 +191,13 @@ class MetricsDashboardDialog(QWidget):
         header_layout.addLayout(txt)
         header_layout.addStretch()
 
-
-
         self.main_layout.addLayout(header_layout)
 
     # =========================================================================
     # Filters
     # =========================================================================
-    # =========================================================================
-    # Filters
-    # =========================================================================
     def _setup_filters(self):
         self.card_filters = CustomCard(title="Filtros Analíticos", parent=self)
-        # Ajustamos márgenes del layout interno para hacerlo más compacto
         self.card_filters.layout.setContentsMargins(12, 4, 12, 8)
         self.card_filters.layout.setSpacing(10)
         
@@ -210,10 +205,7 @@ class MetricsDashboardDialog(QWidget):
         fl.setSpacing(14)
         fl.setAlignment(Qt.AlignTop)
 
-        CONTROL_H = 34
         LBL_H = 18
-        # Ajuste de hoja de estilo para que QComboBox mida exactamente 34px como los botones QPushButton
-        combo_style = "QComboBox { min-height: 28px; max-height: 28px; padding: 2px 8px; }"
 
         # Orden
         v = QVBoxLayout()
@@ -225,7 +217,7 @@ class MetricsDashboardDialog(QWidget):
         self.btn_orden_filter = QPushButton("  Seleccionar Orden")
         self.btn_orden_filter.setObjectName("secondaryBtn")
         self.btn_orden_filter.setIcon(Icons.filter_icon(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_orden_filter.setFixedHeight(CONTROL_H)
+        self.btn_orden_filter.setFixedHeight(Spacing.CONTROL_HEIGHT_DEFAULT)
         self.btn_orden_filter.clicked.connect(self._show_orden_filter_menu)
         v.addWidget(self.btn_orden_filter)
         fl.addLayout(v, stretch=1)
@@ -237,9 +229,7 @@ class MetricsDashboardDialog(QWidget):
         lbl_rfc = CustomLabel("Empresa (RFC):", variant="body")
         lbl_rfc.setFixedHeight(LBL_H)
         v2.addWidget(lbl_rfc)
-        self.cb_rfc = CustomComboBox(self)
-        self.cb_rfc.setStyleSheet(combo_style)
-        self.cb_rfc.setFixedHeight(CONTROL_H)
+        self.cb_rfc = CustomComboBox(self, control_size="md")
         self.cb_rfc.currentIndexChanged.connect(self.refresh_metrics)
         v2.addWidget(self.cb_rfc)
         fl.addLayout(v2, stretch=1)
@@ -251,9 +241,7 @@ class MetricsDashboardDialog(QWidget):
         lbl_concepto = CustomLabel("Concepto:", variant="body")
         lbl_concepto.setFixedHeight(LBL_H)
         v3.addWidget(lbl_concepto)
-        self.cb_concepto = CustomComboBox(self)
-        self.cb_concepto.setStyleSheet(combo_style)
-        self.cb_concepto.setFixedHeight(CONTROL_H)
+        self.cb_concepto = CustomComboBox(self, control_size="md")
         self.cb_concepto.currentIndexChanged.connect(self.refresh_metrics)
         v3.addWidget(self.cb_concepto)
         fl.addLayout(v3, stretch=1)
@@ -265,22 +253,19 @@ class MetricsDashboardDialog(QWidget):
         lbl_deleg = CustomLabel("Delegación:", variant="body")
         lbl_deleg.setFixedHeight(LBL_H)
         v4.addWidget(lbl_deleg)
-        self.cb_deleg = CustomComboBox(self)
-        self.cb_deleg.setStyleSheet(combo_style)
-        self.cb_deleg.setFixedHeight(CONTROL_H)
+        self.cb_deleg = CustomComboBox(self, control_size="md")
         self.cb_deleg.currentIndexChanged.connect(self.refresh_metrics)
         v4.addWidget(self.cb_deleg)
         fl.addLayout(v4, stretch=1)
 
-        # Reset — usando patrón is_clean_btn del Design System (ícono + estilo correcto)
+        # Reset — usando patrón is_clean_btn del Design System (36px estándar)
         v_reset = QVBoxLayout()
         v_reset.setSpacing(4)
         v_reset.setContentsMargins(0, 0, 0, 0)
-        lbl_reset = CustomLabel("\u00A0", variant="body")  # spacer label tipográfico exacto para alinear con los otros campos
+        lbl_reset = CustomLabel("\u00A0", variant="body")
         lbl_reset.setFixedHeight(LBL_H)
         v_reset.addWidget(lbl_reset)
-        btn_reset = CustomButton("Limpiar Filtros", is_clean_btn=True)
-        btn_reset.setFixedHeight(CONTROL_H)
+        btn_reset = CustomButton("Limpiar Filtros", is_clean_btn=True, control_size="md", parent=self)
         btn_reset.setMinimumWidth(140)
         btn_reset.clicked.connect(self._reset_filters)
         v_reset.addWidget(btn_reset)

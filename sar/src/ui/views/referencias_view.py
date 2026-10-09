@@ -122,7 +122,9 @@ class ReferenciasView(QWidget):
         self.lbl_pagination_info.setObjectName("referenciasPaginationInfo")
         self.footer_layout.addWidget(self.lbl_pagination_info)
         
-        # Action Buttons aligned after the pagination label
+        self.footer_layout.addStretch()
+        
+        # Action Buttons aligned to the right
         self.btn_marcar_visibles = CustomButton(
             "Marcar Visibles",
             is_secondary=True,
@@ -147,8 +149,6 @@ class ReferenciasView(QWidget):
         
         self.footer_layout.addWidget(self.btn_marcar_visibles)
         self.footer_layout.addWidget(self.btn_estado)
-        
-        self.footer_layout.addStretch()
         
         # Page size combobox
         self.cb_page_size = CustomComboBox(self, control_size="sm")

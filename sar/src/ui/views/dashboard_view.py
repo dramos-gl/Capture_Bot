@@ -4,10 +4,11 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QLineEdit, QPushButton, QComboBox, QLabel, QDialog, QScrollArea, QSizePolicy
 )
 from PySide6.QtCore import Qt, QDateTime, QThread, Signal, QTimer, QSize
-from sar.src.ui.design_system.components import CustomCard, CustomLabel, StyledDataTable, CustomButton, CustomComboBox, KeepOpenMenu
+from sar.src.ui.design_system.components import CustomCard, CustomLabel, StyledDataTable, CustomButton, CustomComboBox, CustomInput, KeepOpenMenu
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.tokens.spacing import Spacing
 from sar.src.ui.design_system.theme_manager import ThemeManager
 from sar.src.services.referencias_service import ReferenciasService
 
@@ -206,7 +207,7 @@ class DashboardView(QWidget):
         self.btn_update.setObjectName("filterBarActionBtn")
         self.btn_update.setIcon(Icons.actualizar("#FFFFFF"))
         self.btn_update.setIconSize(QSize(20, 20))
-        self.btn_update.setFixedSize(35, 35)
+        self.btn_update.setFixedSize(Spacing.CONTROL_HEIGHT_DEFAULT, Spacing.CONTROL_HEIGHT_DEFAULT)
         self.btn_update.setToolTip("Actualizar Tablero")
         self.btn_update.clicked.connect(self._on_manual_refresh)
         self.header_layout.addWidget(self.btn_update)
@@ -262,12 +263,11 @@ class DashboardView(QWidget):
         self.table_header_layout.addWidget(self.lbl_table_title)
         self.table_header_layout.addStretch()
         
-        # Search Box (Replicated sizing & elasticity from Inventory module)
-        self.search_input = QLineEdit(self)
+        # Search Box (36px default control height with sizePolicy Expanding)
+        self.search_input = CustomInput(control_size="md", parent=self)
         self.search_input.setPlaceholderText("Buscar por referencia, consecutivo, estado...")
         self.search_input.setMinimumWidth(320)
         self.search_input.setMaximumWidth(520)
-        self.search_input.setFixedHeight(36)
         self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input.setClearButtonEnabled(True)
         self.search_input.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
@@ -279,7 +279,7 @@ class DashboardView(QWidget):
         self.btn_buscar = QPushButton()
         self.btn_buscar.setObjectName("secondaryBtn")
         self.btn_buscar.setIcon(Icons.buscar("#FFFFFF") if ThemeManager.is_dark_active() else Icons.buscar("#334155"))
-        self.btn_buscar.setFixedSize(36, 36)
+        self.btn_buscar.setFixedSize(Spacing.CONTROL_HEIGHT_DEFAULT, Spacing.CONTROL_HEIGHT_DEFAULT)
         self.btn_buscar.setToolTip("Buscar (o presione Enter)")
         self.btn_buscar.clicked.connect(self._on_search_trigger)
         self.table_header_layout.addWidget(self.btn_buscar)
@@ -288,14 +288,14 @@ class DashboardView(QWidget):
         self.btn_filter = QPushButton()
         self.btn_filter.setObjectName("secondaryBtn")
         self.btn_filter.setIcon(Icons.filter_icon("#475569"))
-        self.btn_filter.setFixedSize(36, 36)
+        self.btn_filter.setFixedSize(Spacing.CONTROL_HEIGHT_DEFAULT, Spacing.CONTROL_HEIGHT_DEFAULT)
         self.table_header_layout.addWidget(self.btn_filter)
         
         # More Options Button
         self.btn_more = QPushButton()
         self.btn_more.setObjectName("secondaryBtn")
         self.btn_more.setIcon(Icons.more_vertical("#475569"))
-        self.btn_more.setFixedSize(36, 36)
+        self.btn_more.setFixedSize(Spacing.CONTROL_HEIGHT_DEFAULT, Spacing.CONTROL_HEIGHT_DEFAULT)
         self.table_header_layout.addWidget(self.btn_more)
         
         self.activity_layout.addLayout(self.table_header_layout)
@@ -317,8 +317,8 @@ class DashboardView(QWidget):
         
         self.footer_layout.addStretch()
         
-        # Page size combobox
-        self.cb_page_size = CustomComboBox(self)
+        # Page size combobox (30px compact height)
+        self.cb_page_size = CustomComboBox(self, control_size="sm")
         self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
         self.cb_page_size.setCurrentIndex(2) # Default to 200 por página
         self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
@@ -827,15 +827,18 @@ class ErrorDetailDialog(QDialog):
 
         # Header Row: Search, Status and Export
         header_layout = QHBoxLayout()
-        self.txt_search = QLineEdit(self)
+        header_layout.setSpacing(12)
+        
+        self.txt_search = CustomInput(control_size="md", parent=self)
         self.txt_search.setPlaceholderText("🔍 Buscar referencia, RFC o empresa...")
+        self.txt_search.setClearButtonEnabled(True)
         self.txt_search.textChanged.connect(self._on_search_changed)
-        header_layout.addWidget(self.txt_search)
+        header_layout.addWidget(self.txt_search, stretch=1)
 
         self.lbl_status = CustomLabel("Cargando derechos...", variant="caption")
         header_layout.addWidget(self.lbl_status)
 
-        btn_export = CustomButton("Exportar Excel", is_secondary=True)
+        btn_export = CustomButton("Exportar Excel", is_secondary=True, control_size="sm", parent=self)
         btn_export.setIcon(Icons.file_excel("#16A34A"))
         btn_export.clicked.connect(self._export_to_excel)
         header_layout.addWidget(btn_export)
