@@ -147,6 +147,12 @@ class ThemeManager:
             color: {txt_primary};
             font-size: 13px;
         }}
+        QComboBox#formFieldControl, QLineEdit#formFieldControl {{
+            min-height: 32px;
+            max-height: 32px;
+            padding-top: 1px;
+            padding-bottom: 1px;
+        }}
         QComboBox:focus, QComboBox:on {{
             border: 1.5px solid {Colors.ACCENT};
         }}
@@ -198,9 +204,9 @@ class ThemeManager:
             font-weight: bold;
             color: {"#2563EB" if not is_dark else "#60A5FA"};
             font-size: 10.5px;
-            height: 30px;
-            min-height: 30px;
-            max-height: 30px;
+            height: 29px;
+            min-height: 29px;
+            max-height: 29px;
         }}
         QGroupBox#labeledGroup::title {{
             subcontrol-origin: margin;
@@ -304,8 +310,8 @@ class ThemeManager:
             border: 1px solid {border};
             border-radius: {Spacing.RADIUS_MD};
             padding: 1px 26px 1px 10px;
-            min-height: 28px;
-            max-height: 28px;
+            min-height: 26px;
+            max-height: 26px;
             color: {txt_primary};
             font-size: 13px;
         }}
@@ -478,12 +484,11 @@ class ThemeManager:
             font-size: {Typography.SIZE_SM};
         }}
         
-        /* Total General Frame & Labels */
+        /* Total General Frame & Labels (Sin contorno visual) */
         QFrame#totalGeneralFrame {{
-            border: 1px solid {border};
-            border-radius: {Spacing.RADIUS_MD};
-            padding: 6px 16px;
-            background-color: {surf};
+            border: none;
+            background-color: transparent;
+            padding: 4px 12px;
         }}
         
         QLabel#totalGeneralTitle {{
@@ -629,6 +634,29 @@ class ThemeManager:
         QPushButton#filterBarActionBtn:hover {{
             background-color: {Colors.ACCENT_HOVER};
         }}
+
+        /* Modal Circle Close Button */
+        QPushButton#modalCircleCloseBtn {{
+            background-color: {"#F1F5F9" if not is_dark else "rgba(255, 255, 255, 0.08)"};
+            color: {txt_secondary};
+            border: 1px solid {border};
+            border-radius: 14px;
+            font-size: 13px;
+            font-weight: {Typography.WEIGHT_BOLD};
+        }}
+        QPushButton#modalCircleCloseBtn:hover {{
+            background-color: {"#E2E8F0" if not is_dark else "rgba(255, 255, 255, 0.16)"};
+            color: {txt_primary};
+        }}
+
+        /* KPI Header Inline Separator */
+        QLabel#kpiHeaderSeparator {{
+            color: {border};
+            font-weight: {Typography.WEIGHT_BOLD};
+            font-size: 14px;
+            margin: 0 4px;
+            background: transparent;
+        }}
         
         /* OrderProcessingDialog Styling */
         QDialog#orderProcessingDialog {{
@@ -667,10 +695,9 @@ class ThemeManager:
         }}
         
         QFrame#orderProcessingMetricBar {{
-            background-color: {surf};
-            border: 1px solid {border};
-            border-radius: {Spacing.RADIUS_MD};
-            padding: 10px;
+            background-color: transparent;
+            border: none;
+            padding: 0px;
         }}
         
         QLabel#orderProcessingMetricPending {{

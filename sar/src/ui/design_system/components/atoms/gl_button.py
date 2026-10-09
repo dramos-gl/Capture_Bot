@@ -3,6 +3,7 @@
 from PySide6.QtWidgets import QPushButton
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.tokens.spacing import Spacing
 
 class CustomButton(QPushButton):
     """A styled button widget representing a basic UI Atom."""
@@ -32,6 +33,7 @@ class CustomButton(QPushButton):
         is_clean_btn: bool = False,
         min_width: int = None,
         variant: str = None,
+        control_size: str = None,
         parent=None
     ):
         v_obj = None
@@ -45,6 +47,14 @@ class CustomButton(QPushButton):
                 min_width = self.DEFAULT_MIN_WIDTH
 
         super().__init__(text, parent)
+
+        # Apply control size token if specified
+        if control_size == "sm":
+            self.setFixedHeight(Spacing.CONTROL_HEIGHT_COMPACT)
+        elif control_size == "md":
+            self.setFixedHeight(Spacing.CONTROL_HEIGHT_DEFAULT)
+        elif control_size == "lg":
+            self.setFixedHeight(Spacing.CONTROL_HEIGHT_LARGE)
 
         if v_obj:
             self.setObjectName(v_obj)
@@ -82,45 +92,45 @@ class CustomButton(QPushButton):
 
     # Class factory helpers for standard design system actions
     @classmethod
-    def action_autorizar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="autorizar", min_width=min_width, parent=parent)
+    def action_autorizar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="autorizar", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_rechazar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="rechazar", min_width=min_width, parent=parent)
+    def action_rechazar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="rechazar", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_cancelar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="cancelar", min_width=min_width, parent=parent)
+    def action_cancelar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="cancelar", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_cerrar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="cerrar", min_width=min_width, parent=parent)
+    def action_cerrar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="cerrar", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_editar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="editar", min_width=min_width, parent=parent)
+    def action_editar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="editar", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_asignar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="asignar", min_width=min_width, parent=parent)
+    def action_asignar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="asignar", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_agregar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="agregar", min_width=min_width, parent=parent)
+    def action_agregar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="agregar", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_guardar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="guardar", min_width=min_width, parent=parent)
+    def action_guardar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="guardar", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_buscar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="buscar", min_width=min_width, parent=parent)
+    def action_buscar(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="buscar", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_excel(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="excel", min_width=min_width, parent=parent)
+    def action_excel(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="excel", min_width=min_width, control_size=control_size, parent=parent)
 
     @classmethod
-    def action_pdf(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH) -> "CustomButton":
-        return cls(variant="pdf", min_width=min_width, parent=parent)
+    def action_pdf(cls, parent=None, min_width: int = DEFAULT_MIN_WIDTH, control_size: str = None) -> "CustomButton":
+        return cls(variant="pdf", min_width=min_width, control_size=control_size, parent=parent)

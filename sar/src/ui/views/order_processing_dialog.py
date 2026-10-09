@@ -2,15 +2,16 @@
 
 from typing import List
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFrame, QLineEdit, QComboBox, QCheckBox, QTableWidgetItem, QLabel, QWidget, QApplication
+    QDialog, QVBoxLayout, QHBoxLayout, QFrame, QLineEdit, QComboBox, QCheckBox, QTableWidgetItem, QLabel, QWidget, QApplication, QSizePolicy
 )
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components import (
-    CustomLabel, CustomButton, StyledDataTable, CustomComboBox,
+    CustomLabel, CustomButton, StyledDataTable, CustomComboBox, CustomInput,
     GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.tokens.spacing import Spacing
 from sar.src.storage.repositories import ProduccionRepository
 from sar.src.storage.api_client import APIClient
 from sar.src.utils.telemetry import track_perf
@@ -46,45 +47,40 @@ class OrderProcessingDialog(QDialog):
         self.main_layout.setContentsMargins(24, 24, 24, 24)
         self.main_layout.setSpacing(16)
 
-        # 1. Header Section
+        # 1. Header Section (Single line title + subtitle to maximize workspace)
         self.header_layout = QHBoxLayout()
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout.setSpacing(12)
+        
         self.lbl_title = CustomLabel("Procesar Derechos", variant="header")
-        self.lbl_desc = CustomLabel(
-            "Modulo de Autorizacion/Rechazo generacion de lote de archivos excel y pdf para el proceso de Autorizacion",
-            variant="muted"
-        )
-        self.lbl_desc.setStyleSheet("color: #64748B; font-size: 11px; font-weight: 400;")
-        self.lbl_subtitle = CustomLabel("Orden: ... | Total de solicitudes: 0 | Derechos pendientes por autorización: 0", variant="body")
+        self.lbl_subtitle = CustomLabel("|  Orden: ... | Total solicitudes: 0 | Derechos pendientes de autorización: 0", variant="muted")
         self.lbl_subtitle.setObjectName("orderProcessingSubtitle")
         
-        title_block = QVBoxLayout()
-        title_block.setSpacing(4)
-        title_block.addWidget(self.lbl_title)
-        title_block.addWidget(self.lbl_desc)
-        title_block.addWidget(self.lbl_subtitle)
-        self.header_layout.addLayout(title_block)
+        self.header_layout.addWidget(self.lbl_title)
+        self.header_layout.addWidget(self.lbl_subtitle, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.header_layout.addStretch()
         
         self.main_layout.addLayout(self.header_layout)
 
-        # 2. Information Row (Metrics Card stretching full-width)
+        # 2. Information Row (Pill Indicators without background card)
         self.banner_row = QWidget()
-        self.banner_row.setStyleSheet("background: transparent;")
+        self.banner_row.setObjectName("orderProcessingBannerRow")
         banner_row_layout = QHBoxLayout(self.banner_row)
         banner_row_layout.setContentsMargins(0, 0, 0, 0)
         banner_row_layout.setSpacing(0)
         
-        # Metrics block
+        # Metrics block (clean, transparent layout)
         self.metric_frame = QFrame()
         self.metric_frame.setObjectName("orderProcessingMetricBar")
         metric_layout = QHBoxLayout(self.metric_frame)
-        metric_layout.setContentsMargins(16, 6, 16, 6)
+        metric_layout.setContentsMargins(0, 4, 0, 4)
         metric_layout.setSpacing(16)
         metric_layout.setAlignment(Qt.AlignCenter)
         
         # Color dots indicators using design system Colors
         self.dot_solicitadas = QLabel()
         self.dot_solicitadas.setFixedSize(10, 10)
-        self.dot_solicitadas.setStyleSheet(f"background-color: #64748B; border-radius: 5px; border: none;")
+        self.dot_solicitadas.setStyleSheet(f"background-color: {Colors.TEXT_LIGHT_MUTED}; border-radius: 5px; border: none;")
         
         self.lbl_metric_solicitadas = CustomLabel("Solicitadas: 0", variant="body")
         self.lbl_metric_solicitadas.setObjectName("orderProcessingMetricSolicitadas")
@@ -138,27 +134,19 @@ class OrderProcessingDialog(QDialog):
         # Cancelled Warning Banner (Hidden by default, shown only if order is CANCELADA)
         self.cancelled_banner = QFrame()
         self.cancelled_banner.setObjectName("orderProcessingBanner")
-        self.cancelled_banner.setStyleSheet("""
-            QFrame#orderProcessingBanner {
-                background-color: #FEF2F2;
-                border: 1px solid #FCA5A5;
-                border-radius: 8px;
-                padding: 12px;
-            }
-        """)
         cb_layout = QHBoxLayout(self.cancelled_banner)
         cb_layout.setContentsMargins(12, 12, 12, 12)
         cb_layout.setSpacing(10)
         
         self.lbl_cb_icon = QLabel()
-        self.lbl_cb_icon.setPixmap(Icons.alert_triangle("#EF4444").pixmap(18, 18))
+        self.lbl_cb_icon.setPixmap(Icons.alert_triangle(Colors.ERROR).pixmap(18, 18))
         cb_layout.addWidget(self.lbl_cb_icon)
         
         self.lbl_cb_text = CustomLabel(
             "Esta orden se encuentra CANCELADA. Solo se permite la visualización de sus solicitudes.",
             variant="body"
         )
-        self.lbl_cb_text.setStyleSheet("color: #991B1B; font-weight: bold;")
+        self.lbl_cb_text.setObjectName("bannerDangerText")
         cb_layout.addWidget(self.lbl_cb_text, stretch=1)
         
         self.cancelled_banner.setVisible(False)
@@ -166,25 +154,26 @@ class OrderProcessingDialog(QDialog):
  
         # 3. Filter and Selection Bar
         self.filter_layout = QHBoxLayout()
+        self.filter_layout.setSpacing(12)
         
         self.chk_select_all = QCheckBox("Seleccionar todas (0)")
         self.chk_select_all.clicked.connect(self._on_select_all_clicked)
         self.filter_layout.addWidget(self.chk_select_all)
-        self.filter_layout.addStretch()
         
-        # Search Box
-        self.txt_search = QLineEdit()
-        self.txt_search.setPlaceholderText("Buscar solicitud...")
-        self.txt_search.setFixedWidth(220)
+        # Search Box (Expanding dynamically to fill available width)
+        self.txt_search = CustomInput(control_size="sm")
+        self.txt_search.setPlaceholderText("Buscar solicitud por empresa, concepto, delegación o ID...")
+        self.txt_search.setClearButtonEnabled(True)
+        self.txt_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.txt_search.textChanged.connect(self._filter_table_rows)
-        self.filter_layout.addWidget(self.txt_search)
+        self.filter_layout.addWidget(self.txt_search, stretch=1)
         
         # Status Filter Combo
         self.lbl_filter = CustomLabel("Filtrar por estado", variant="body")
-        self.lbl_filter.setStyleSheet("font-weight: bold; margin-left: 10px; background: transparent;")
+        self.lbl_filter.setObjectName("formFieldLabel")
         self.filter_layout.addWidget(self.lbl_filter)
         
-        self.cmb_filter = CustomComboBox()
+        self.cmb_filter = CustomComboBox(control_size="sm")
         self.cmb_filter.addItems(["Todos", "Pendientes", "Autorizadas", "Rechazadas"])
         self.cmb_filter.currentTextChanged.connect(self._filter_table_rows)
         self.filter_layout.addWidget(self.cmb_filter)
@@ -205,25 +194,25 @@ class OrderProcessingDialog(QDialog):
         self.bottom_layout.addStretch()
         
         # Action Buttons (Standard Design System Factories)
-        self.btn_fase_b_excel = CustomButton.action_excel(parent=self)
+        self.btn_fase_b_excel = CustomButton.action_excel(control_size="sm", parent=self)
         self.btn_fase_b_excel.setToolTip("Generar lotes archivos excel")
         self.btn_fase_b_excel.clicked.connect(self._on_generar_excel_lotes)
         
-        self.btn_fase_b_pdf = CustomButton.action_pdf(parent=self)
+        self.btn_fase_b_pdf = CustomButton.action_pdf(control_size="sm", parent=self)
         self.btn_fase_b_pdf.setToolTip("Generar lotes archivos pdf")
         self.btn_fase_b_pdf.clicked.connect(self._on_generar_pdf_unificado)
 
-        self.btn_authorize = CustomButton.action_autorizar(parent=self)
+        self.btn_authorize = CustomButton.action_autorizar(control_size="sm", parent=self)
         self.btn_authorize.setObjectName("orderProcessingAuthBtn")
         self.btn_authorize.setToolTip("Autorizar solicitudes seleccionadas")
         self.btn_authorize.clicked.connect(self._on_authorize_selected)
 
-        self.btn_reject = CustomButton.action_rechazar(parent=self)
+        self.btn_reject = CustomButton.action_rechazar(control_size="sm", parent=self)
         self.btn_reject.setObjectName("orderProcessingRejectBtn")
         self.btn_reject.setToolTip("Rechazar solicitudes seleccionadas")
         self.btn_reject.clicked.connect(self._on_reject_selected)
 
-        self.btn_cancel = CustomButton.action_cerrar(parent=self)
+        self.btn_cancel = CustomButton.action_cerrar(control_size="sm", parent=self)
         self.btn_cancel.setToolTip("Cerrar ventana")
         self.btn_cancel.clicked.connect(self.reject)
         
@@ -350,7 +339,7 @@ class OrderProcessingDialog(QDialog):
         folio = self.solicitudes_data[0]["folio_orden"] if self.solicitudes_data else "N/A"
         
         self.lbl_subtitle.setText(
-            f"Orden: {folio} | Total de solicitudes: {total_sols} | Derechos pendientes por autorización: {total_pendientes}"
+            f"|  Orden: {folio} | Total solicitudes: {total_sols} | Derechos pendientes de autorización: {total_pendientes}"
         )
         
         self.lbl_metric_solicitadas.setText(f"Solicitadas: {total_solicitadas}")

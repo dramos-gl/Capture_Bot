@@ -116,15 +116,42 @@ class ReferenciasView(QWidget):
         # Table Footer Pagination Layout
         self.footer_layout = QHBoxLayout()
         self.footer_layout.setContentsMargins(0, 8, 0, 0)
+        self.footer_layout.setSpacing(12)
         
         self.lbl_pagination_info = CustomLabel("Mostrando 0 a 0 de 0 derechos", variant="muted")
         self.lbl_pagination_info.setObjectName("referenciasPaginationInfo")
         self.footer_layout.addWidget(self.lbl_pagination_info)
         
+        # Action Buttons aligned after the pagination label
+        self.btn_marcar_visibles = CustomButton(
+            "Marcar Visibles",
+            is_secondary=True,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            control_size="sm",
+            parent=self
+        )
+        self.btn_marcar_visibles.setIcon(Icons.checkbox(Colors.TEXT_LIGHT_PRIMARY))
+        self.btn_marcar_visibles.setToolTip("Marcar o desmarcar todos los derechos visibles en la página")
+        self.btn_marcar_visibles.clicked.connect(self._on_marcar_visibles)
+        
+        self.btn_estado = CustomButton(
+            "Cambiar Estado",
+            is_secondary=False,
+            min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            control_size="sm",
+            parent=self
+        )
+        self.btn_estado.setIcon(Icons.actualizar(Colors.SURFACE_LIGHT))
+        self.btn_estado.setToolTip("Cambiar estado de los derechos seleccionados")
+        self.btn_estado.clicked.connect(self._on_cambiar_estado)
+        
+        self.footer_layout.addWidget(self.btn_marcar_visibles)
+        self.footer_layout.addWidget(self.btn_estado)
+        
         self.footer_layout.addStretch()
         
         # Page size combobox
-        self.cb_page_size = CustomComboBox(self)
+        self.cb_page_size = CustomComboBox(self, control_size="sm")
         self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
         self.cb_page_size.setCurrentIndex(2) # Default to 200 por página
         self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
@@ -138,35 +165,6 @@ class ReferenciasView(QWidget):
         
         self.footer_layout.addWidget(self.pagination_widget)
         self.card.layout.addLayout(self.footer_layout)
-        
-        # Action Buttons Layout
-        actions_layout = QHBoxLayout()
-        actions_layout.addStretch()
-        
-        self.btn_marcar_visibles = CustomButton(
-            "Marcar Visibles",
-            is_secondary=True,
-            min_width=CustomButton.DEFAULT_MIN_WIDTH,
-            parent=self
-        )
-        self.btn_marcar_visibles.setIcon(Icons.checkbox(Colors.TEXT_LIGHT_PRIMARY))
-        self.btn_marcar_visibles.setToolTip("Marcar o desmarcar todos los derechos visibles en la página")
-        self.btn_marcar_visibles.clicked.connect(self._on_marcar_visibles)
-        
-        self.btn_estado = CustomButton(
-            "Cambiar Estado",
-            is_secondary=False,
-            min_width=CustomButton.DEFAULT_MIN_WIDTH,
-            parent=self
-        )
-        self.btn_estado.setIcon(Icons.actualizar("#FFFFFF"))
-        self.btn_estado.setToolTip("Cambiar estado de los derechos seleccionados")
-        self.btn_estado.clicked.connect(self._on_cambiar_estado)
-        
-        actions_layout.addWidget(self.btn_marcar_visibles)
-        actions_layout.addWidget(self.btn_estado)
-        
-        self.card.layout.addLayout(actions_layout)
         self.layout.addWidget(self.card)
 
         scroll_area.setWidget(scroll_content)

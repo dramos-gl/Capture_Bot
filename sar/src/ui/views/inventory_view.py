@@ -15,6 +15,7 @@ from sar.src.ui.design_system.components import (
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
 from sar.src.ui.design_system.theme_manager import Colors, ThemeManager
+from sar.src.ui.design_system.tokens.spacing import Spacing
 from sar.src.services.inventario_ui_service import InventarioUIService
 from sar.src.services.excel_inventory_handler import ExcelInventoryHandler
 from sar.src.ui.design_system.utils.icons import Icons
@@ -1212,9 +1213,8 @@ class InventoryView(QWidget):
         self.table_header_layout.addStretch()
         
         # Search Box inside Table Header
-        self.search_input_visor = CustomInput(parent=self)
+        self.search_input_visor = CustomInput(control_size="md", parent=self)
         self.search_input_visor.setObjectName("filterBarSearch")
-        self.search_input_visor.setFixedHeight(36)
         self.search_input_visor.setPlaceholderText("Buscar por referencia, cliente, desarrollo, MZ, LT, EDIF, VIV...")
         self.search_input_visor.setMinimumWidth(320)
         self.search_input_visor.setMaximumWidth(520)
@@ -1226,25 +1226,25 @@ class InventoryView(QWidget):
         self.table_header_layout.addWidget(self.search_input_visor)
 
         # Botón Buscar explícito
-        self.btn_buscar_visor = CustomButton("", is_secondary=True, parent=self)
+        self.btn_buscar_visor = CustomButton("", is_secondary=True, control_size="md", parent=self)
         self.btn_buscar_visor.setIcon(Icons.buscar(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_buscar_visor.setFixedSize(36, 36)
+        self.btn_buscar_visor.setFixedWidth(Spacing.CONTROL_HEIGHT_DEFAULT)
         self.btn_buscar_visor.setToolTip("Buscar en inventario (o presione Enter)")
         self.btn_buscar_visor.clicked.connect(self._on_search_visor_trigger)
         self.table_header_layout.addWidget(self.btn_buscar_visor)
         
         # Filter Button (Funnel) inside Table Header
-        self.btn_filter_orden = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden = CustomButton("", is_secondary=True, control_size="md", parent=self)
         self.btn_filter_orden.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_filter_orden.setFixedSize(36, 36)
+        self.btn_filter_orden.setFixedWidth(Spacing.CONTROL_HEIGHT_DEFAULT)
         self.btn_filter_orden.setToolTip("Filtrar derechos por órdenes de generación")
         self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
         self.table_header_layout.addWidget(self.btn_filter_orden)
         
         # Botón de Redirección a Métricas y Analítica de Producción
-        self.btn_metrics_visor = CustomButton("", is_secondary=True, parent=self)
+        self.btn_metrics_visor = CustomButton("", is_secondary=True, control_size="md", parent=self)
         self.btn_metrics_visor.setIcon(Icons.grafico(Colors.CHART_EMERALD_DARK))
-        self.btn_metrics_visor.setFixedSize(36, 36)
+        self.btn_metrics_visor.setFixedWidth(Spacing.CONTROL_HEIGHT_DEFAULT)
         self.btn_metrics_visor.setToolTip("Ver métricas y analítica de inventario")
         self.btn_metrics_visor.clicked.connect(self._on_open_metrics_requested)
         self.table_header_layout.addWidget(self.btn_metrics_visor)
@@ -1272,9 +1272,9 @@ class InventoryView(QWidget):
             "Limpiar",
             is_clean_btn=True,
             min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            control_size="sm",
             parent=self
         )
-        self.btn_limpiar_seleccion.setFixedHeight(30)
         self.btn_limpiar_seleccion.setToolTip("Limpiar casillas de selección")
         self.btn_limpiar_seleccion.clicked.connect(self._on_limpiar_seleccion)
         self.btn_limpiar_seleccion.setVisible(False)
@@ -1282,7 +1282,7 @@ class InventoryView(QWidget):
 
         self.lbl_selected_badge = QLabel("", self)
         self.lbl_selected_badge.setObjectName("footerSelectedBadge")
-        self.lbl_selected_badge.setFixedHeight(30)
+        self.lbl_selected_badge.setFixedHeight(Spacing.CONTROL_HEIGHT_COMPACT)
         self.lbl_selected_badge.setAlignment(Qt.AlignCenter)
         self.lbl_selected_badge.setVisible(False)
         footer_layout.addWidget(self.lbl_selected_badge)
@@ -1294,17 +1294,16 @@ class InventoryView(QWidget):
             "Asignar",
             is_secondary=False,
             min_width=CustomButton.DEFAULT_MIN_WIDTH,
+            control_size="sm",
             parent=self
         )
-        self.btn_asignar_seleccionados.setFixedHeight(30)
-        self.btn_asignar_seleccionados.setIcon(Icons.usuario("#FFFFFF"))
+        self.btn_asignar_seleccionados.setIcon(Icons.usuario(Colors.SURFACE_LIGHT))
         self.btn_asignar_seleccionados.setToolTip("Asignar derechos seleccionados")
         self.btn_asignar_seleccionados.setEnabled(False)
         self.btn_asignar_seleccionados.clicked.connect(self._on_asignar_seleccionados)
         footer_layout.addWidget(self.btn_asignar_seleccionados)
 
-        self.cb_page_size = CustomComboBox(self)
-        self.cb_page_size.setFixedHeight(30)
+        self.cb_page_size = CustomComboBox(self, control_size="sm")
         self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
         self.cb_page_size.setCurrentIndex(2) # Default 200
         self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
@@ -2147,7 +2146,7 @@ class InventoryView(QWidget):
         
         # Checkboxes Container in a sleek 2-column horizontal layout
         chk_container = QWidget(self)
-        chk_container.setStyleSheet("background: transparent;")
+        chk_container.setObjectName("masivoChkContainer")
         chk_layout = QHBoxLayout(chk_container)
         chk_layout.setContentsMargins(4, 4, 4, 8)
         chk_layout.setSpacing(20)
@@ -2195,8 +2194,7 @@ class InventoryView(QWidget):
         col_destino = QVBoxLayout()
         lbl_tipo_destino = CustomLabel("Tipo Destino *", variant="body")
         lbl_tipo_destino.setObjectName("formFieldLabel")
-        self.cb_destino_masivo = CustomComboBox(self)
-        self.cb_destino_masivo.setFixedHeight(36)
+        self.cb_destino_masivo = CustomComboBox(self, control_size="sm")
         self.cb_destino_masivo.addItems(["-- Seleccione un tipo de destino --", "NOTARIA", "COLABORADOR"])
         self.cb_destino_masivo.currentTextChanged.connect(self._on_destino_masivo_changed)
         col_destino.addWidget(lbl_tipo_destino)
@@ -2205,10 +2203,8 @@ class InventoryView(QWidget):
         self.col_destinatario = QVBoxLayout()
         self.lbl_destinatario_masivo = CustomLabel("Destinatario *", variant="body")
         self.lbl_destinatario_masivo.setObjectName("formFieldLabel")
-        self.cb_notarias_masivo = CustomComboBox(self)
-        self.cb_notarias_masivo.setFixedHeight(36)
-        self.cb_colaboradores_masivo = CustomComboBox(self)
-        self.cb_colaboradores_masivo.setFixedHeight(36)
+        self.cb_notarias_masivo = CustomComboBox(self, control_size="sm")
+        self.cb_colaboradores_masivo = CustomComboBox(self, control_size="sm")
         self.col_destinatario.addWidget(self.lbl_destinatario_masivo)
         self.col_destinatario.addWidget(self.cb_notarias_masivo)
         self.col_destinatario.addWidget(self.cb_colaboradores_masivo)
@@ -2224,16 +2220,14 @@ class InventoryView(QWidget):
         self.col_solicitante = QVBoxLayout()
         self.lbl_solicitante_masivo = CustomLabel("Solicitante Externo (Persona)", variant="body")
         self.lbl_solicitante_masivo.setObjectName("formFieldLabel")
-        self.txt_solicitante_masivo = CustomInput("Ej. Pedro Gómez")
-        self.txt_solicitante_masivo.setFixedHeight(36)
+        self.txt_solicitante_masivo = CustomInput("Ej. Pedro Gómez", control_size="sm")
         self.col_solicitante.addWidget(self.lbl_solicitante_masivo)
         self.col_solicitante.addWidget(self.txt_solicitante_masivo)
 
         col_obs = QVBoxLayout()
         lbl_obs = CustomLabel("Observaciones del Lote", variant="body")
         lbl_obs.setObjectName("formFieldLabel")
-        self.txt_obs_masivo = CustomInput("Notas u observaciones adicionales para el lote (opcional)...")
-        self.txt_obs_masivo.setFixedHeight(36)
+        self.txt_obs_masivo = CustomInput("Notas u observaciones adicionales para el lote (opcional)...", control_size="sm")
         col_obs.addWidget(lbl_obs)
         col_obs.addWidget(self.txt_obs_masivo)
 
@@ -2245,38 +2239,34 @@ class InventoryView(QWidget):
         row3_layout = QHBoxLayout()
         row3_layout.setSpacing(10)
 
-        self.btn_pick_excel = CustomButton("Importar Excel", is_secondary=True, min_width=135, parent=self)
+        self.btn_pick_excel = CustomButton("Importar Excel", is_secondary=True, min_width=135, control_size="sm", parent=self)
         self.btn_pick_excel.setIcon(Icons.excel())
-        self.btn_pick_excel.setFixedHeight(36)
         self.btn_pick_excel.setToolTip("Seleccionar archivo Excel para asignación masiva")
         self.btn_pick_excel.clicked.connect(self._on_pick_excel_masivo)
         
-        self.btn_download_template = CustomButton("Descargar Plantilla", is_secondary=True, min_width=150, parent=self)
+        self.btn_download_template = CustomButton("Descargar Plantilla", is_secondary=True, min_width=150, control_size="sm", parent=self)
         self.btn_download_template.setIcon(Icons.documento_descargar(Colors.TEXT_LIGHT_PRIMARY))
-        self.btn_download_template.setFixedHeight(36)
         self.btn_download_template.setToolTip("Descargar formato de plantilla Excel para asignación masiva")
         self.btn_download_template.clicked.connect(self._on_download_template)
 
-        self.btn_confirmar_masivo = CustomButton("Confirmar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
-        self.btn_confirmar_masivo.setIcon(Icons.aceptar("#FFFFFF"))
-        self.btn_confirmar_masivo.setFixedHeight(36)
+        self.btn_confirmar_masivo = CustomButton("Confirmar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, control_size="sm", parent=self)
+        self.btn_confirmar_masivo.setIcon(Icons.aceptar(Colors.SURFACE_LIGHT))
         self.btn_confirmar_masivo.setToolTip("Confirmar y procesar asignación masiva de derechos")
         self.btn_confirmar_masivo.setEnabled(False)
         self.btn_confirmar_masivo.clicked.connect(self._on_confirmar_masivo)
 
-        self.btn_limpiar_preview = CustomButton("Limpiar", is_clean_btn=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
-        self.btn_limpiar_preview.setFixedHeight(36)
+        self.btn_limpiar_preview = CustomButton("Limpiar", is_clean_btn=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, control_size="sm", parent=self)
         self.btn_limpiar_preview.setToolTip("Limpiar tabla de previsualización")
         self.btn_limpiar_preview.clicked.connect(self._on_limpiar_preview)
 
-        self.btn_filter_orden_masivo = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden_masivo = CustomButton("", is_secondary=True, control_size="sm", parent=self)
         self.btn_filter_orden_masivo.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_filter_orden_masivo.setFixedSize(36, 36)
+        self.btn_filter_orden_masivo.setFixedWidth(Spacing.CONTROL_HEIGHT_COMPACT)
         self.btn_filter_orden_masivo.setToolTip("Filtrar derechos por órdenes de generación")
         self.btn_filter_orden_masivo.clicked.connect(self._show_order_filter_menu)
 
-        self.lbl_excel_path = QLabel("Ningún archivo seleccionado", self)
-        self.lbl_excel_path.setStyleSheet("color: #64748B; font-style: italic; margin-left: 8px;")
+        self.lbl_excel_path = CustomLabel("Ningún archivo seleccionado", variant="caption", parent=self)
+        self.lbl_excel_path.setObjectName("subHintLabel")
 
         row3_layout.addWidget(self.btn_pick_excel)
         row3_layout.addWidget(self.btn_download_template)
@@ -2774,8 +2764,8 @@ class InventoryView(QWidget):
         vbox_tipo.setSpacing(4)
         lbl_tipo = CustomLabel("Tipo de Destino *", variant="body")
         lbl_tipo.setObjectName("formFieldLabel")
-        self.cb_tipo_destino_ind = CustomComboBox(self)
-        self.cb_tipo_destino_ind.setFixedHeight(36)
+        self.cb_tipo_destino_ind = CustomComboBox(self, control_size="md")
+        self.cb_tipo_destino_ind.setObjectName("formFieldControl")
         self.cb_tipo_destino_ind.addItem("-- Seleccione Destino --", None)
         self.cb_tipo_destino_ind.addItems(["NOTARIA", "COLABORADOR"])
         self.cb_tipo_destino_ind.setCurrentIndex(0)
@@ -2787,8 +2777,8 @@ class InventoryView(QWidget):
         vbox_dest.setSpacing(4)
         lbl_dest = CustomLabel("Destinatario *", variant="body")
         lbl_dest.setObjectName("formFieldLabel")
-        self.cb_destinatario_ind = CustomComboBox(self)
-        self.cb_destinatario_ind.setFixedHeight(36)
+        self.cb_destinatario_ind = CustomComboBox(self, control_size="md")
+        self.cb_destinatario_ind.setObjectName("formFieldControl")
         vbox_dest.addWidget(lbl_dest)
         vbox_dest.addWidget(self.cb_destinatario_ind)
 
@@ -2803,6 +2793,7 @@ class InventoryView(QWidget):
         self.grid_individual.set_show_cantidad_actos(False)
         self.grid_individual.btn_save.setVisible(False)
         self.grid_individual.btn_cancel.setVisible(False)
+        self.grid_individual.btn_add.setFixedHeight(Spacing.CONTROL_HEIGHT_COMPACT)
         
         # Connect availability and cascade signals for individual grid
         self.grid_individual.availability_requested.connect(self._on_availability_requested_ind)
@@ -2811,24 +2802,24 @@ class InventoryView(QWidget):
         self.grid_individual.cascade_conceptos_needed.connect(self._on_cascade_conceptos_needed)
 
         # Action Buttons aligned with Agregar (Order: Agregar -> Buscar -> Continuar -> Limpiar -> Filtrar Orden)
-        self.btn_buscar_ind = CustomButton("Buscar", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_buscar_ind = CustomButton("Buscar", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, control_size="sm", parent=self)
         self.btn_buscar_ind.setIcon(Icons.buscar(Colors.TEXT_LIGHT_PRIMARY))
         self.btn_buscar_ind.setToolTip("Buscar derechos disponibles que cumplan con las partidas")
         self.btn_buscar_ind.clicked.connect(self._on_buscar_referencias_ind)
 
-        self.btn_confirmar_ind = CustomButton("Continuar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
-        self.btn_confirmar_ind.setIcon(Icons.siguiente("#FFFFFF"))
+        self.btn_confirmar_ind = CustomButton("Continuar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, control_size="sm", parent=self)
+        self.btn_confirmar_ind.setIcon(Icons.siguiente(Colors.SURFACE_LIGHT))
         self.btn_confirmar_ind.setToolTip("Continuar al formulario de captura y asignación de datos")
         self.btn_confirmar_ind.setEnabled(False)
         self.btn_confirmar_ind.clicked.connect(self._on_confirmar_asignacion_ind)
 
-        self.btn_limpiar_ind = CustomButton("Limpiar", is_clean_btn=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_limpiar_ind = CustomButton("Limpiar", is_clean_btn=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, control_size="sm", parent=self)
         self.btn_limpiar_ind.setToolTip("Limpiar partidas y destinatario")
         self.btn_limpiar_ind.clicked.connect(self._on_limpiar_ind)
 
-        self.btn_filter_orden_ind = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden_ind = CustomButton("", is_secondary=True, control_size="sm", parent=self)
         self.btn_filter_orden_ind.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_filter_orden_ind.setFixedSize(28, 28)
+        self.btn_filter_orden_ind.setFixedWidth(Spacing.CONTROL_HEIGHT_COMPACT)
         self.btn_filter_orden_ind.setToolTip("Filtrar derechos por órdenes de generación")
         self.btn_filter_orden_ind.clicked.connect(self._show_order_filter_menu)
 
@@ -3422,8 +3413,8 @@ class InventoryView(QWidget):
         not_layout = QVBoxLayout()
         lbl_notaria = CustomLabel("Notaría de Destino *", variant="body")
         lbl_notaria.setObjectName("formFieldLabel")
-        self.cb_notarias_apartar = CustomComboBox(self)
-        self.cb_notarias_apartar.setFixedHeight(36)
+        self.cb_notarias_apartar = CustomComboBox(self, control_size="md")
+        self.cb_notarias_apartar.setObjectName("formFieldControl")
         self.cb_notarias_apartar.setPlaceholderText("-- Seleccione una notaría --")
         not_layout.addWidget(lbl_notaria)
         not_layout.addWidget(self.cb_notarias_apartar)
@@ -3432,8 +3423,8 @@ class InventoryView(QWidget):
         obs_layout = QVBoxLayout()
         lbl_obs = CustomLabel("Observaciones del Lote *", variant="body")
         lbl_obs.setObjectName("formFieldLabel")
-        self.txt_obs_apartar = CustomInput("Observaciones obligatorias para el apartado...")
-        self.txt_obs_apartar.setFixedHeight(36)
+        self.txt_obs_apartar = CustomInput("Observaciones obligatorias para el apartado...", control_size="md")
+        self.txt_obs_apartar.setObjectName("formFieldControl")
         obs_layout.addWidget(lbl_obs)
         obs_layout.addWidget(self.txt_obs_apartar)
 
@@ -3447,6 +3438,7 @@ class InventoryView(QWidget):
         self.grid_apartar.btn_save.setVisible(False)
         self.grid_apartar.set_show_cantidad_actos(False)
         self.grid_apartar.btn_cancel.setVisible(False)
+        self.grid_apartar.btn_add.setFixedHeight(Spacing.CONTROL_HEIGHT_COMPACT)
         self.grid_apartar.availability_requested.connect(self._on_availability_requested)
         # Connect cascade signals to the view's handler methods
         self.grid_apartar.cascade_rfcs_needed.connect(self._on_cascade_rfcs_needed)
@@ -3454,18 +3446,18 @@ class InventoryView(QWidget):
         self.grid_apartar.cascade_conceptos_needed.connect(self._on_cascade_conceptos_needed)
 
         # Action Buttons aligned with Agregar (Order: Agregar -> Confirmar -> Limpiar -> Filtrar Orden)
-        self.btn_save_apartar = CustomButton("Confirmar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
-        self.btn_save_apartar.setIcon(Icons.aceptar("#FFFFFF"))
+        self.btn_save_apartar = CustomButton("Confirmar", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, control_size="sm", parent=self)
+        self.btn_save_apartar.setIcon(Icons.aceptar(Colors.SURFACE_LIGHT))
         self.btn_save_apartar.setToolTip("Confirmar y guardar reserva de derechos para la notaría seleccionada")
         self.btn_save_apartar.clicked.connect(self._on_save_apartar)
 
-        self.btn_limpiar_apartar = CustomButton("Limpiar", is_clean_btn=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_limpiar_apartar = CustomButton("Limpiar", is_clean_btn=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, control_size="sm", parent=self)
         self.btn_limpiar_apartar.setToolTip("Limpiar partidas y formulario")
         self.btn_limpiar_apartar.clicked.connect(self._on_limpiar_apartar)
 
-        self.btn_filter_orden_apartar = CustomButton("", is_secondary=True, parent=self)
+        self.btn_filter_orden_apartar = CustomButton("", is_secondary=True, control_size="sm", parent=self)
         self.btn_filter_orden_apartar.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_filter_orden_apartar.setFixedSize(36, 36)
+        self.btn_filter_orden_apartar.setFixedWidth(Spacing.CONTROL_HEIGHT_COMPACT)
         self.btn_filter_orden_apartar.setToolTip("Filtrar derechos por órdenes de generación")
         self.btn_filter_orden_apartar.clicked.connect(self._show_order_filter_menu)
 
@@ -3843,33 +3835,39 @@ class InventoryView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
         
-        # --- Filter bar (Clean top area matching Solicitudes) ---
+        # --- Filter bar (Clean top area matching Solicitudes, right-aligned) ---
         filter_bar_frame = QFrame(self)
         filter_bar_frame.setObjectName("filterBarFrame")
         filter_row = QHBoxLayout(filter_bar_frame)
         filter_row.setContentsMargins(16, 12, 16, 12)
         filter_row.setSpacing(12)
 
-        # 1. Tipo Destino
+        # Alinear componentes hacia la derecha
+        filter_row.addStretch()
+
+        # 1. Tipo Destino (Mismo ancho y alto: 200x36 px)
         self.labeled_destino_lotes = LabeledComboBox("Tipo Destino", ["Todos", "NOTARIA", "COLABORADOR"])
+        self.labeled_destino_lotes.setFixedWidth(200)
         self.cb_destino_filter_lotes = self.labeled_destino_lotes.combo
         self.cb_destino_filter_lotes.currentTextChanged.connect(self._on_destino_filter_lotes)
         filter_row.addWidget(self.labeled_destino_lotes)
 
-        # 2. Date Filters (Atomic Design Molecules)
+        # 2. Date Filters (Mismo ancho y alto: 200x36 px)
         self.group_start_date = LabeledDateEdit("Desde", parent=self)
+        self.group_start_date.setFixedWidth(200)
         self.start_date_filter = self.group_start_date.date_edit
         self.group_start_date.setDate(QDate.currentDate().addMonths(-3))
         self.start_date_filter.dateChanged.connect(self._on_date_changed_lotes)
         filter_row.addWidget(self.group_start_date)
 
         self.group_end_date = LabeledDateEdit("Hasta", parent=self)
+        self.group_end_date.setFixedWidth(200)
         self.end_date_filter = self.group_end_date.date_edit
         self.group_end_date.setDate(QDate.currentDate())
         self.end_date_filter.dateChanged.connect(self._on_date_changed_lotes)
         filter_row.addWidget(self.group_end_date)
 
-        # 3. Refresh button
+        # 3. Refresh button (Mismo alto 36px: 36x36 px)
         self.btn_refresh_lotes = CustomButton("", is_secondary=True, parent=self)
         self.btn_refresh_lotes.setObjectName("filterBarActionBtn")
         self.btn_refresh_lotes.setIcon(Icons.actualizar("#FFFFFF"))
@@ -3879,20 +3877,12 @@ class InventoryView(QWidget):
         self.btn_refresh_lotes.clicked.connect(self.refresh_lotes_data)
         filter_row.addWidget(self.btn_refresh_lotes)
 
-        # 4. Filter Button (Funnel) for Lotes
-        self.btn_filter_orden_lotes = CustomButton("", is_secondary=True, parent=self)
-        self.btn_filter_orden_lotes.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_filter_orden_lotes.setFixedSize(36, 36)
-        self.btn_filter_orden_lotes.setToolTip("Filtrar derechos por órdenes de generación")
-        self.btn_filter_orden_lotes.clicked.connect(self._show_order_filter_menu)
-        filter_row.addWidget(self.btn_filter_orden_lotes)
-
         layout.addWidget(filter_bar_frame)
 
         # --- Main Card & Table ---
         self.card_lotes = CustomCard(title="", parent=self)
 
-        # Table Header Layout (Title + Search)
+        # Table Header Layout (Title + Search + Filter Order)
         self.table_header_layout_lotes = QHBoxLayout()
         self.table_header_layout_lotes.setContentsMargins(0, 0, 0, 0)
         self.table_header_layout_lotes.setSpacing(12)
@@ -3909,9 +3899,8 @@ class InventoryView(QWidget):
         self.table_header_layout_lotes.addStretch()
 
         # Search Input inside Table Header for Lotes
-        self.search_lotes = CustomInput(parent=self)
+        self.search_lotes = CustomInput(control_size="md", parent=self)
         self.search_lotes.setObjectName("filterBarSearch")
-        self.search_lotes.setFixedHeight(36)
         self.search_lotes.setPlaceholderText("Buscar por ID, notaría, colaborador, solicitante...")
         self.search_lotes.setMinimumWidth(280)
         self.search_lotes.setMaximumWidth(480)
@@ -3923,12 +3912,20 @@ class InventoryView(QWidget):
         self.table_header_layout_lotes.addWidget(self.search_lotes)
 
         # Botón Buscar explícito para Lotes
-        self.btn_buscar_lotes = CustomButton("", is_secondary=True, parent=self)
+        self.btn_buscar_lotes = CustomButton("", is_secondary=True, control_size="md", parent=self)
         self.btn_buscar_lotes.setIcon(Icons.buscar(Colors.TEXT_LIGHT_SECONDARY))
-        self.btn_buscar_lotes.setFixedSize(36, 36)
+        self.btn_buscar_lotes.setFixedWidth(Spacing.CONTROL_HEIGHT_DEFAULT)
         self.btn_buscar_lotes.setToolTip("Buscar asignaciones (o presione Enter)")
         self.btn_buscar_lotes.clicked.connect(self._on_search_lotes_trigger)
         self.table_header_layout_lotes.addWidget(self.btn_buscar_lotes)
+
+        # Botón Filtro de Órdenes (Funnel) para Lotes (trasladado al encabezado de tabla a 36px)
+        self.btn_filter_orden_lotes = CustomButton("", is_secondary=True, control_size="md", parent=self)
+        self.btn_filter_orden_lotes.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
+        self.btn_filter_orden_lotes.setFixedWidth(Spacing.CONTROL_HEIGHT_DEFAULT)
+        self.btn_filter_orden_lotes.setToolTip("Filtrar derechos por órdenes de generación")
+        self.btn_filter_orden_lotes.clicked.connect(self._show_order_filter_menu)
+        self.table_header_layout_lotes.addWidget(self.btn_filter_orden_lotes)
 
         self.card_lotes.layout.addLayout(self.table_header_layout_lotes)
 
@@ -3938,14 +3935,17 @@ class InventoryView(QWidget):
         self.table_lotes.setMinimumWidth(200)
         self.card_lotes.add_widget(self.table_lotes)
 
-        # Pagination footer
+        # Unified One-Line Footer Layout (Context Hint / Pagination Info + Page Size + Pagination Nav)
         footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(0, 8, 0, 0)
+        footer_layout.setSpacing(10)
+        footer_layout.setAlignment(Qt.AlignVCenter)
+
         self.lbl_pagination_info_lotes = CustomLabel("0 asignaciones encontradas", variant="muted")
         footer_layout.addWidget(self.lbl_pagination_info_lotes)
         footer_layout.addStretch()
 
-        self.cb_page_size_lotes = CustomComboBox(self)
-        self.cb_page_size_lotes.setFixedHeight(30)
+        self.cb_page_size_lotes = CustomComboBox(self, control_size="sm")
         self.cb_page_size_lotes.addItems(["50 por página", "100 por página", "200 por página"])
         self.cb_page_size_lotes.setCurrentIndex(0)
         self.cb_page_size_lotes.currentTextChanged.connect(self._on_page_size_changed_lotes)
@@ -3954,28 +3954,10 @@ class InventoryView(QWidget):
         self.pagination_widget_lotes = QWidget(self)
         self.pag_btn_layout_lotes = QHBoxLayout(self.pagination_widget_lotes)
         self.pag_btn_layout_lotes.setContentsMargins(0, 0, 0, 0)
+        self.pag_btn_layout_lotes.setSpacing(4)
         footer_layout.addWidget(self.pagination_widget_lotes)
         self.card_lotes.layout.addLayout(footer_layout)
 
-        # Action buttons & table footer hint
-        actions_layout = QHBoxLayout()
-        self.lbl_table_hint_lotes = CustomLabel("💡 Doble clic sobre cualquier asignación para ver detalle, generar Excel o generar PDF", variant="muted")
-        actions_layout.addWidget(self.lbl_table_hint_lotes)
-        actions_layout.addStretch()
-
-        self.btn_exportar_reporte_lotes = CustomButton("Exportar", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
-        self.btn_exportar_reporte_lotes.setIcon(Icons.excel())
-        self.btn_exportar_reporte_lotes.setToolTip("Exportar asignación seleccionada a archivo Excel")
-        self.btn_exportar_reporte_lotes.clicked.connect(self._on_exportar_lote_seleccionado)
-        
-        self.btn_ver_detalles_lote = CustomButton("Ver Detalle", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
-        self.btn_ver_detalles_lote.setIcon(Icons.buscar(Colors.TEXT_LIGHT_PRIMARY))
-        self.btn_ver_detalles_lote.setToolTip("Ver información detallada de la asignación seleccionada")
-        self.btn_ver_detalles_lote.clicked.connect(self._on_ver_detalle_lote)
-
-        actions_layout.addWidget(self.btn_exportar_reporte_lotes)
-        actions_layout.addWidget(self.btn_ver_detalles_lote)
-        self.card_lotes.layout.addLayout(actions_layout)
         layout.addWidget(self.card_lotes)
         self._update_order_filter_banners()
 
@@ -4404,14 +4386,14 @@ class ManualAssignmentDialog(QDialog):
         # Obtenemos tokens dinámicos del Design System según el tema activo
         is_dark = ThemeManager.is_dark_active()
         bg_card = Colors.SURFACE_DARK if is_dark else Colors.SURFACE_LIGHT
-        bg_sub = Colors.BG_DARK if is_dark else "#F8FAFC"
-        nav_bg = Colors.SURFACE_DARK if is_dark else "#F1F5F9"
-        nav_border = Colors.BORDER_DARK if is_dark else "#CBD5E1"
-        border_color = Colors.BORDER_DARK if is_dark else "#E2E8F0"
+        bg_sub = Colors.BG_DARK if is_dark else Colors.NEUTRAL_BG
+        nav_bg = Colors.SURFACE_DARK if is_dark else Colors.NEUTRAL_BG
+        nav_border = Colors.BORDER_DARK if is_dark else Colors.BORDER_LIGHT
+        border_color = Colors.BORDER_DARK if is_dark else Colors.BORDER_LIGHT
         text_primary = Colors.TEXT_DARK_PRIMARY if is_dark else Colors.TEXT_LIGHT_PRIMARY
         text_secondary = Colors.TEXT_DARK_SECONDARY if is_dark else Colors.TEXT_LIGHT_SECONDARY
         text_muted = Colors.TEXT_DARK_MUTED if is_dark else Colors.TEXT_LIGHT_MUTED
-        accent_color = "#60A5FA" if is_dark else "#1D4ED8"
+        accent_color = Colors.ACCENT_DARK_TEXT if is_dark else Colors.ACCENT
         success_color = Colors.SUCCESS_DARK_TEXT if is_dark else Colors.SUCCESS
 
         if self.is_read_only:
@@ -4452,7 +4434,7 @@ class ManualAssignmentDialog(QDialog):
         nav_lay.setContentsMargins(4, 2, 4, 2)
         nav_lay.setSpacing(10)
         
-        self.btn_prev = CustomButton("Anterior", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
+        self.btn_prev = CustomButton("Anterior", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, control_size="sm", parent=self)
         self.btn_prev.setIcon(Icons.anterior(Colors.TEXT_LIGHT_PRIMARY))
         self.btn_prev.setToolTip("Ir al derecho anterior")
         self.btn_prev.clicked.connect(self._on_prev)
@@ -4461,8 +4443,8 @@ class ManualAssignmentDialog(QDialog):
         self.lbl_step.setAlignment(Qt.AlignCenter)
         self.lbl_step.setStyleSheet(f"font-weight: bold; font-size: 12px; color: {text_primary};")
         
-        self.btn_next = CustomButton("Siguiente", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, parent=self)
-        self.btn_next.setIcon(Icons.siguiente("#FFFFFF"))
+        self.btn_next = CustomButton("Siguiente", is_secondary=False, min_width=CustomButton.DEFAULT_MIN_WIDTH, control_size="sm", parent=self)
+        self.btn_next.setIcon(Icons.siguiente(Colors.SURFACE_LIGHT))
         self.btn_next.setToolTip("Ir al siguiente derecho")
         self.btn_next.clicked.connect(self._on_next)
         
@@ -4490,7 +4472,8 @@ class ManualAssignmentDialog(QDialog):
         dest_form.setContentsMargins(0, 0, 0, 2)
         dest_form.setSpacing(8)
         
-        self.cb_destino = CustomComboBox(self)
+        self.cb_destino = CustomComboBox(self, control_size="md")
+        self.cb_destino.setObjectName("formFieldControl")
         self.cb_destino.addItems(["-- Seleccione Tipo Destino --", "NOTARIA", "COLABORADOR"])
         self.cb_destino.setCurrentIndex(0)
         self.cb_destino.currentTextChanged.connect(self._on_destino_changed)
@@ -4716,12 +4699,12 @@ class ManualAssignmentDialog(QDialog):
         btns = QHBoxLayout()
         btns.setContentsMargins(0, 6, 0, 0)
         
-        btn_cancel = CustomButton.action_cancelar(parent=self)
+        btn_cancel = CustomButton.action_cancelar(control_size="sm", parent=self)
         btn_cancel.setText("Cerrar" if self.is_read_only else "Cancelar")
         btn_cancel.setToolTip("Cerrar ventana")
         btn_cancel.clicked.connect(self.reject)
         
-        self.btn_save = CustomButton.action_guardar(parent=self)
+        self.btn_save = CustomButton.action_guardar(control_size="sm", parent=self)
         self.btn_save.setToolTip("Guardar asignación de derechos")
         self.btn_save.clicked.connect(self._on_save)
         
@@ -4731,7 +4714,7 @@ class ManualAssignmentDialog(QDialog):
         if self.is_read_only:
             self.btn_save.hide()
             if self.can_edit:
-                self.btn_enable_edit = CustomButton.action_editar(parent=self)
+                self.btn_enable_edit = CustomButton.action_editar(control_size="sm", parent=self)
                 self.btn_enable_edit.setText("✏️ Habilitar Edición")
                 self.btn_enable_edit.setToolTip("Habilitar la edición de los metadatos de este derecho")
                 self.btn_enable_edit.clicked.connect(self._on_enable_edit)
@@ -5616,58 +5599,61 @@ class LoteProcessingDialog(QDialog):
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(16)
 
-        # ── Header Section using CustomLabel ─────────────────────────────────
+        # ── 1. Unified Header Section (One-Line Title + Live Metrics Summary) ──
         self.header_layout = QHBoxLayout()
-        self.lbl_title = CustomLabel(f"Detalle de Asignación #{lote_id}", variant="header")
-        self.lbl_subtitle = CustomLabel("Cargando información del lote...", variant="body")
-        self.lbl_subtitle.setObjectName("assignmentProcessingSubtitle")
-        
-        title_block = QVBoxLayout()
-        title_block.addWidget(self.lbl_title)
-        title_block.addWidget(self.lbl_subtitle)
-        self.header_layout.addLayout(title_block)
-        root.addLayout(self.header_layout)
+        self.header_layout.setContentsMargins(0, 0, 0, 2)
+        self.header_layout.setSpacing(10)
+        self.header_layout.setAlignment(Qt.AlignVCenter)
 
-        # ── Metrics Bar using design system components ───────────────────────
-        self.banner_row = QWidget()
-        self.banner_row.setStyleSheet("background: transparent;")
-        banner_row_layout = QHBoxLayout(self.banner_row)
-        banner_row_layout.setContentsMargins(0, 0, 0, 0)
-        banner_row_layout.setSpacing(0)
-        
-        self.metric_frame = QFrame()
-        self.metric_frame.setObjectName("assignmentMetricBar")
-        self.metric_frame.setStyleSheet("""
-            QFrame#assignmentMetricBar {
-                background-color: #F8FAFC;
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-            }
-        """)
-        metric_layout = QHBoxLayout(self.metric_frame)
-        metric_layout.setContentsMargins(16, 8, 16, 8)
-        metric_layout.setSpacing(20)
-        metric_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.lbl_title = CustomLabel(f"Detalle de asignación #{lote_id}", variant="header")
+        self.lbl_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.header_layout.addWidget(self.lbl_title)
 
-        self.lbl_metric_solicitante = CustomLabel("Solicitante: —", variant="body")
-        self.lbl_metric_solicitante.setStyleSheet("font-weight: bold;")
-        
+        # Separador 1
+        sep1 = QLabel("|", self)
+        sep1.setObjectName("kpiHeaderSeparator")
+        self.header_layout.addWidget(sep1)
+
+        # Asignado a
+        self.lbl_metric_asignado = CustomLabel("Asignado a: —", variant="body")
+        self.lbl_metric_asignado.setStyleSheet("font-weight: 500;")
+        self.header_layout.addWidget(self.lbl_metric_asignado)
+
+        # Separador 2
+        sep2 = QLabel("|", self)
+        sep2.setObjectName("kpiHeaderSeparator")
+        self.header_layout.addWidget(sep2)
+
+        # Fecha
         self.lbl_metric_fecha = CustomLabel("Fecha: —", variant="body")
-        
+        self.header_layout.addWidget(self.lbl_metric_fecha)
+
+        # Separador 3
+        sep3 = QLabel("|", self)
+        sep3.setObjectName("kpiHeaderSeparator")
+        self.header_layout.addWidget(sep3)
+
+        # Estado
         self.lbl_metric_estado = CustomLabel("Estado: —", variant="body")
         self.lbl_metric_estado.setStyleSheet("font-weight: bold;")
+        self.header_layout.addWidget(self.lbl_metric_estado)
 
-        metric_layout.addWidget(self.lbl_metric_solicitante)
-        metric_layout.addWidget(self.lbl_metric_fecha)
-        metric_layout.addWidget(self.lbl_metric_estado)
-        
-        banner_row_layout.addWidget(self.metric_frame)
-        root.addWidget(self.banner_row)
+        self.header_layout.addStretch()
+
+        # Botón cerrar superior (ThemeManager)
+        btn_top_close = QPushButton("✕", self)
+        btn_top_close.setObjectName("modalCircleCloseBtn")
+        btn_top_close.setFixedSize(28, 28)
+        btn_top_close.setToolTip("Cerrar ventana (Esc)")
+        btn_top_close.clicked.connect(self.reject)
+        self.header_layout.addWidget(btn_top_close)
+
+        root.addLayout(self.header_layout)
 
         # ── Section Title for References Table ──────────────────────────────
         table_title_layout = QHBoxLayout()
         table_title_layout.setContentsMargins(0, 4, 0, 0)
-        self.lbl_table_title = CustomLabel("Referencias del Lote", variant="subtitle")
+        self.lbl_table_title = CustomLabel("Referencias de la asignación", variant="subtitle")
         self.lbl_table_title.setStyleSheet("font-weight: 600; font-size: 14px; color: #1E293B;")
         
         self.lbl_table_status = CustomLabel("Cargando referencias...", variant="caption")
@@ -5721,16 +5707,20 @@ class LoteProcessingDialog(QDialog):
 
         root.addWidget(self.table_detalles)
 
-        # ── Table Footer Layout (Exacto a la Imagen de Referencia) ───────────
+        # ── Table Footer Layout (Exacto a la Imagen de Referencia: 30px) ─────
         footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(0, 8, 0, 0)
+        footer_layout.setSpacing(10)
+        footer_layout.setAlignment(Qt.AlignVCenter)
+
         self.lbl_footer_info = CustomLabel("Mostrando 0 a 0 de 0 asignaciones", variant="muted")
         footer_layout.addWidget(self.lbl_footer_info)
         footer_layout.addStretch()
 
         # Selector de tamaño de página (activación dinámica si total > 50)
-        self.cb_page_size = CustomComboBox(self)
+        self.cb_page_size = CustomComboBox(self, control_size="sm")
         self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
-        self.cb_page_size.setCurrentIndex(0)  # Default 50 por página (como en la referencia)
+        self.cb_page_size.setCurrentIndex(0)  # Default 50 por página
         self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
         self.cb_page_size.setVisible(False)
         footer_layout.addWidget(self.cb_page_size)
@@ -5739,6 +5729,7 @@ class LoteProcessingDialog(QDialog):
         self.pagination_widget = QWidget(self)
         self.pag_btn_layout = QHBoxLayout(self.pagination_widget)
         self.pag_btn_layout.setContentsMargins(0, 0, 0, 0)
+        self.pag_btn_layout.setSpacing(4)
         footer_layout.addWidget(self.pagination_widget)
 
         root.addLayout(footer_layout)
@@ -5840,7 +5831,7 @@ class LoteProcessingDialog(QDialog):
             self._loading_dialog = None
 
         self.lbl_table_status.setText("Error al cargar referencias")
-        self.lbl_table_status.setStyleSheet("color: #DC2626; font-weight: 500;")
+        self.lbl_table_status.setStyleSheet(f"color: {Colors.ERROR}; font-weight: 500;")
         self.lbl_footer_info.setText("Error al cargar referencias.")
         self.table_detalles.setRowCount(0)
         self._update_selection_controls()
@@ -5848,23 +5839,31 @@ class LoteProcessingDialog(QDialog):
                              f"No se pudieron cargar los detalles de la asignación:\n{err_msg}")
 
     def _apply_header(self, h: dict):
-        tipo       = h.get("tipo_destino", "")
-        asignado   = h.get("asignado_a", "—")
-        fecha      = h.get("fecha", "—")
-        estado     = h.get("estado_refs", h.get("estado", "—"))
+        tipo        = h.get("tipo_destino", "")
+        asignado    = h.get("asignado_a", "—")
+        fecha       = h.get("fecha", "—")
+        estado      = h.get("estado_refs", h.get("estado", "—"))
         solicitante = h.get("solicitante_externo", "")
         icon = "🏛" if tipo == "NOTARIA" else "🤝"
 
-        self.lbl_title.setText(f"Detalle de Asignación #{self.lote_id}")
-        self.lbl_subtitle.setText(f"{icon} {tipo}: {asignado}")
+        self.lbl_title.setText(f"Detalle de asignación #{self.lote_id}")
         
-        self.lbl_metric_solicitante.setText(f"Solicitante: {solicitante}" if solicitante else f"Asignado a: {asignado}")
-        self.lbl_metric_fecha.setText(f"Fecha: {fecha}")
-        self.lbl_metric_estado.setText(f"Estado: {estado}")
-        
-        # Color metrics conditionally
-        estado_color = "#16A34A" if estado == "ASIGNADA" else "#D97706"
-        self.lbl_metric_estado.setStyleSheet(f"font-weight: bold; color: {estado_color};")
+        # Asignado a (indicando notaría o colaborador de forma limpia)
+        asig_texto = f"{icon} {tipo}: {asignado}" if tipo and asignado != "—" else f"{asignado}"
+        if solicitante and solicitante != asignado:
+            asig_texto += f" ({solicitante})"
+        if hasattr(self, "lbl_metric_asignado"):
+            self.lbl_metric_asignado.setText(f"Asignado a: {asig_texto}")
+
+        if hasattr(self, "lbl_metric_fecha"):
+            # Limpiar fecha para formato legible si viene con hora
+            clean_fecha = fecha.split()[0] if fecha and " " in str(fecha) else str(fecha)
+            self.lbl_metric_fecha.setText(f"Fecha: {clean_fecha}")
+
+        if hasattr(self, "lbl_metric_estado"):
+            self.lbl_metric_estado.setText(f"Estado: {estado.upper()}")
+            estado_color = Colors.SUCCESS if estado == "ASIGNADA" else Colors.WARNING
+            self.lbl_metric_estado.setStyleSheet(f"font-weight: bold; color: {estado_color};")
 
     def _on_page_size_changed(self, text: str):
         """Ajusta el tamaño de página y recalcula la vista."""

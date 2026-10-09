@@ -14,6 +14,7 @@ from PySide6.QtGui import QColor, QAction, QGuiApplication, QDesktopServices
 
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
+from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.components.molecules.gl_labeled_combo import LabeledComboBox
@@ -21,6 +22,7 @@ from sar.src.ui.design_system.components.molecules.gl_menu import KeepOpenMenu
 from sar.src.ui.design_system.components.organisms.gl_data_table import StyledDataTable
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.tokens.spacing import Spacing
 from sar.src.ui.design_system.theme_manager import ThemeManager
 from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.utils.formatters import format_orden_filter_label
@@ -507,71 +509,57 @@ class InventoryKPIDetailDialog(QDialog):
         root.setContentsMargins(16, 12, 16, 12)
         root.setSpacing(10)
 
-        # ── 1. Header Section ────────────────────────────────────────────────
+        # ── 1. Unified Header Section (One-Line Title + Live Metrics Summary) ──
         header_layout = QHBoxLayout()
-        title_block = QVBoxLayout()
-        title_block.setSpacing(2)
-        
+        header_layout.setContentsMargins(0, 0, 0, 2)
+        header_layout.setSpacing(10)
+        header_layout.setAlignment(Qt.AlignVCenter)
+
         self.lbl_title = CustomLabel(self.title_text, variant="header")
-        self.lbl_title.setStyleSheet(f"color: {self.header_color}; font-size: 18px; font-weight: bold;")
-        
-        self.lbl_subtitle = CustomLabel("Filtros avanzados activos y vista detallada para auditoría y reportes", variant="body")
-        self.lbl_subtitle.setStyleSheet("color: #64748B; font-size: 12px;")
+        self.lbl_title.setStyleSheet(f"color: {self.header_color}; font-size: 16px; font-weight: bold;")
+        header_layout.addWidget(self.lbl_title)
 
-        title_block.addWidget(self.lbl_title)
-        title_block.addWidget(self.lbl_subtitle)
-        header_layout.addLayout(title_block)
-        header_layout.addStretch()
+        # Separator 1
+        sep1 = QLabel("|", self)
+        sep1.setObjectName("kpiHeaderSeparator")
+        header_layout.addWidget(sep1)
 
-        # Close button in header
-        btn_top_close = QPushButton("✕", self)
-        btn_top_close.setFixedSize(30, 30)
-        btn_top_close.setStyleSheet("""
-            QPushButton {
-                background: #F1F5F9;
-                color: #64748B;
-                border: 1px solid #E2E8F0;
-                border-radius: 15px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background: #E2E8F0;
-                color: #0F172A;
-            }
-        """)
-        btn_top_close.clicked.connect(self.reject)
-        header_layout.addWidget(btn_top_close)
-        root.addLayout(header_layout)
-
-        # ── 2. Metric Chips Bar ──────────────────────────────────────────────
-        self.metric_frame = QFrame()
-        self.metric_frame.setStyleSheet("""
-            QFrame {
-                background-color: #F8FAFC;
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-            }
-        """)
-        metric_layout = QHBoxLayout(self.metric_frame)
-        metric_layout.setContentsMargins(14, 6, 14, 6)
-        metric_layout.setSpacing(20)
-
+        # Total Registros
         self.lbl_metric_count = CustomLabel("Total Registros: 0", variant="body")
         self.lbl_metric_count.setStyleSheet("font-weight: bold; color: #1E293B;")
+        header_layout.addWidget(self.lbl_metric_count)
 
+        # Separator 2
+        sep2 = QLabel("|", self)
+        sep2.setObjectName("kpiHeaderSeparator")
+        header_layout.addWidget(sep2)
+
+        # Filtro Estado
         self.lbl_metric_estado = CustomLabel(f"Filtro Estado: {self.state_filter.upper()}", variant="body")
         self.lbl_metric_estado.setStyleSheet(f"font-weight: bold; color: {self.header_color};")
+        header_layout.addWidget(self.lbl_metric_estado)
 
+        # Separator 3
+        sep3 = QLabel("|", self)
+        sep3.setObjectName("kpiHeaderSeparator")
+        header_layout.addWidget(sep3)
+
+        # Órdenes seleccionadas
         self.lbl_metric_ordenes = CustomLabel(f"Órdenes: {len(self.selected_orden_ids)} sel.", variant="body")
         self.lbl_metric_ordenes.setStyleSheet("color: #475569;")
+        header_layout.addWidget(self.lbl_metric_ordenes)
 
-        metric_layout.addWidget(self.lbl_metric_count)
-        metric_layout.addWidget(self.lbl_metric_estado)
-        metric_layout.addWidget(self.lbl_metric_ordenes)
-        metric_layout.addStretch()
+        header_layout.addStretch()
 
-        root.addWidget(self.metric_frame)
+        # Close button in header (Styled through ThemeManager)
+        btn_top_close = QPushButton("✕", self)
+        btn_top_close.setObjectName("modalCircleCloseBtn")
+        btn_top_close.setFixedSize(28, 28)
+        btn_top_close.setToolTip("Cerrar ventana (Esc)")
+        btn_top_close.clicked.connect(self.reject)
+        header_layout.addWidget(btn_top_close)
+
+        root.addLayout(header_layout)
 
         # ── 3. Advanced Multi-Criteria Filter Bar (Ergonomic 2-Row Responsive Layout) ───
         # ── 3. Advanced Multi-Criteria Filter Bar (Parametric Categorical Selectors) ───
@@ -656,12 +644,11 @@ class InventoryKPIDetailDialog(QDialog):
         self.table_header_layout.addStretch()
 
         # Search Box inside Table Header (Responsive & Elastic)
-        self.search_input = QLineEdit(self)
+        self.search_input = CustomInput(control_size="md", parent=self)
         self.search_input.setObjectName("filterBarSearch")
         self.search_input.setPlaceholderText("Buscar por referencia, cliente, MZ, LT, EDIF, VIV...")
         self.search_input.setMinimumWidth(280)
         self.search_input.setMaximumWidth(480)
-        self.search_input.setFixedHeight(34)
         self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input.setClearButtonEnabled(True)
         self.search_input.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
@@ -670,52 +657,30 @@ class InventoryKPIDetailDialog(QDialog):
         self.table_header_layout.addWidget(self.search_input)
 
         # Botón Buscar explícito
-        self.btn_buscar_kpi = QPushButton(self)
-        self.btn_buscar_kpi.setObjectName("secondaryBtn")
-        self.btn_buscar_kpi.setIcon(Icons.buscar("#FFFFFF") if ThemeManager.is_dark_active() else Icons.buscar("#334155"))
-        self.btn_buscar_kpi.setFixedSize(34, 34)
+        self.btn_buscar_kpi = CustomButton("", is_secondary=True, control_size="md", parent=self)
+        self.btn_buscar_kpi.setIcon(Icons.buscar(Colors.TEXT_LIGHT_SECONDARY))
+        self.btn_buscar_kpi.setFixedWidth(Spacing.CONTROL_HEIGHT_DEFAULT)
         self.btn_buscar_kpi.setToolTip("Buscar (o presione Enter)")
         self.btn_buscar_kpi.clicked.connect(self._on_search_trigger)
         self.table_header_layout.addWidget(self.btn_buscar_kpi)
 
         # Botón Recargar datos (Refresh)
-        self.btn_refresh = QPushButton(self)
+        self.btn_refresh = CustomButton("", is_secondary=True, control_size="md", parent=self)
         self.btn_refresh.setObjectName("filterBarActionBtn")
-        self.btn_refresh.setFixedSize(34, 34)
-        self.btn_refresh.setIcon(Icons.actualizar("#FFFFFF"))
+        self.btn_refresh.setFixedWidth(Spacing.CONTROL_HEIGHT_DEFAULT)
+        self.btn_refresh.setIcon(Icons.actualizar(Colors.SURFACE_LIGHT))
         self.btn_refresh.setIconSize(QSize(18, 18))
         self.btn_refresh.setToolTip("Recargar datos desde BD")
         self.btn_refresh.clicked.connect(self._load_data)
         self.table_header_layout.addWidget(self.btn_refresh)
 
-        # Botón Filtro Órdenes (Embudo) - Ubicado inmediatamente al lado del botón Exportar Excel
-        self.btn_filter_orden = QPushButton(self)
-        self.btn_filter_orden.setObjectName("secondaryBtn")
-        self.btn_filter_orden.setIcon(Icons.filter_icon("#475569"))
-        self.btn_filter_orden.setFixedSize(34, 34)
+        # Botón Filtro Órdenes (Embudo)
+        self.btn_filter_orden = CustomButton("", is_secondary=True, control_size="md", parent=self)
+        self.btn_filter_orden.setIcon(Icons.filtrar(Colors.TEXT_LIGHT_SECONDARY))
+        self.btn_filter_orden.setFixedWidth(Spacing.CONTROL_HEIGHT_DEFAULT)
         self.btn_filter_orden.setToolTip("Filtrar por Órdenes de Generación")
         self.btn_filter_orden.clicked.connect(self._show_order_filter_menu)
         self.table_header_layout.addWidget(self.btn_filter_orden)
-
-        # Botón Exportar a Excel
-        self.btn_excel = CustomButton("Exportar Excel", is_secondary=False)
-        self.btn_excel.setIcon(Icons.file_excel("#FFFFFF"))
-        self.btn_excel.setFixedHeight(34)
-        self.btn_excel.setStyleSheet("""
-            QPushButton {
-                background-color: #16A34A;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 8px;
-                font-weight: bold;
-                padding: 0 14px;
-            }
-            QPushButton:hover {
-                background-color: #15803D;
-            }
-        """)
-        self.btn_excel.clicked.connect(self._on_export_excel)
-        self.table_header_layout.addWidget(self.btn_excel)
 
         root.addLayout(self.table_header_layout)
 
@@ -737,37 +702,32 @@ class InventoryKPIDetailDialog(QDialog):
         self.table.cellDoubleClicked.connect(self._on_table_cell_double_clicked)
         root.addWidget(self.table)
 
-        # ── 5. Footer Layout con Paginación Integrada (Idéntico a Inventario) ───
+        # ── 5. Footer Layout con Paginación Integrada y Exportación Excel ─────
         footer = QHBoxLayout()
         self.lbl_footer_info = CustomLabel("Mostrando 0 a 0 de 0 derechos", variant="muted")
         footer.addWidget(self.lbl_footer_info)
         footer.addStretch()
 
-        # Selector de tamaño de página
-        self.cb_page_size = CustomComboBox(self)
+        # Botón Exportar a Excel integrado en el pie de página a 30px
+        self.btn_excel = CustomButton("Exportar Excel", is_secondary=True, min_width=CustomButton.DEFAULT_MIN_WIDTH, icon_name="excel", control_size="sm", parent=self)
+        self.btn_excel.setToolTip("Exportar registros actuales a archivo Excel")
+        self.btn_excel.clicked.connect(self._on_export_excel)
+        footer.addWidget(self.btn_excel)
+
+        # Selector de tamaño de página a 30px
+        self.cb_page_size = CustomComboBox(self, control_size="sm")
         self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
         self.cb_page_size.setCurrentIndex(2)  # Default 200 por página
         self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
         footer.addWidget(self.cb_page_size)
 
-        # Contenedor de botones de navegación de página
+        # Contenedor de botones de navegación de página a 30px
         self.pagination_widget = QWidget(self)
         self.pag_btn_layout = QHBoxLayout(self.pagination_widget)
         self.pag_btn_layout.setContentsMargins(0, 0, 0, 0)
         footer.addWidget(self.pagination_widget)
 
         root.addLayout(footer)
-
-        # ── 6. Botones de Acción Inferiores ───────────────────────────────────
-        actions_layout = QHBoxLayout()
-        actions_layout.addStretch()
-
-        btn_close = CustomButton("Cerrar", is_secondary=True)
-        btn_close.setFixedHeight(36)
-        btn_close.clicked.connect(self.accept)
-        actions_layout.addWidget(btn_close)
-
-        root.addLayout(actions_layout)
 
         # Trigger: load dimension dropdowns + first data page
         QTimer.singleShot(50, self._load_dimensiones)

@@ -9,6 +9,8 @@ from sar.src.ui.design_system.components import (
     GLInfoBanner, GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.utils.icons import Icons
+from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.tokens.spacing import Spacing
 from sar.src.services.ordenes_ui_service import OrdenesUIService
 from sar.src.ui.design_system.components.molecules.gl_labeled_input import LabeledInput
 
@@ -424,7 +426,7 @@ class OrdersView(QWidget):
         self.footer_layout.addStretch()
         
         # Page size combobox (activación dinámica si total > 50)
-        self.cb_page_size = CustomComboBox(self)
+        self.cb_page_size = CustomComboBox(self, control_size="sm")
         self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
         self.cb_page_size.setCurrentIndex(0) # Default 50 por página
         self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
@@ -449,19 +451,19 @@ class OrdersView(QWidget):
         actions_layout.addWidget(self.lbl_table_hint, stretch=1)
         actions_layout.addSpacing(12)
         
-        self.btn_editar_orden = CustomButton.action_editar(parent=self)
+        self.btn_editar_orden = CustomButton.action_editar(control_size="sm", parent=self)
         self.btn_editar_orden.setToolTip("Editar orden seleccionada")
         self.btn_editar_orden.clicked.connect(self._on_editar_orden_clicked)
 
-        self.btn_autorizar_orden = CustomButton.action_autorizar(parent=self)
+        self.btn_autorizar_orden = CustomButton.action_autorizar(control_size="sm", parent=self)
         self.btn_autorizar_orden.setToolTip("Autorizar orden seleccionada")
         self.btn_autorizar_orden.clicked.connect(self._on_autorizar_orden)
         
-        self.btn_rechazar_orden = CustomButton.action_rechazar(parent=self)
+        self.btn_rechazar_orden = CustomButton.action_rechazar(control_size="sm", parent=self)
         self.btn_rechazar_orden.setToolTip("Rechazar orden seleccionada")
         self.btn_rechazar_orden.clicked.connect(self._on_rechazar_orden)
         
-        self.btn_cancelar_orden = CustomButton.action_cancelar(parent=self)
+        self.btn_cancelar_orden = CustomButton.action_cancelar(control_size="sm", parent=self)
         self.btn_cancelar_orden.setToolTip("Cancelar orden seleccionada")
         self.btn_cancelar_orden.clicked.connect(self._on_cancelar_orden)
         
@@ -515,16 +517,16 @@ class OrdersView(QWidget):
         card_header_layout.addWidget(self.total_anterior_frame)
         self.total_anterior_frame.setVisible(False)
 
-        # General total box
+        # General total box (Visible sin contorno visual)
         self.total_general_frame = QFrame()
         self.total_general_frame.setObjectName("totalGeneralFrame")
         total_general_layout = QHBoxLayout(self.total_general_frame)
-        total_general_layout.setContentsMargins(6, 6, 6, 6)
-        total_general_layout.setSpacing(12)
+        total_general_layout.setContentsMargins(0, 0, 0, 0)
+        total_general_layout.setSpacing(8)
         
         lbl_tot_text = CustomLabel("Total General:", variant="body")
         lbl_tot_text.setObjectName("totalGeneralTitle")
-        self.lbl_tot_val = CustomLabel("1", variant="header")
+        self.lbl_tot_val = CustomLabel("0", variant="header")
         self.lbl_tot_val.setObjectName("totalGeneralValue")
         
         total_general_layout.addWidget(lbl_tot_text)
@@ -532,51 +534,35 @@ class OrdersView(QWidget):
         card_header_layout.addWidget(self.total_general_frame)
 
         # Botón de Validación Fiscal de Empresas (Regla de Oro)
-        self.btn_validar_fiscal = CustomButton("Validar Domicilio Fiscal", is_secondary=True, parent=self)
-        self.btn_validar_fiscal.setIcon(Icons.advertencia("#D97706"))
+        self.btn_validar_fiscal = CustomButton("Validar Domicilio Fiscal", is_secondary=True, control_size="sm", parent=self)
+        self.btn_validar_fiscal.setIcon(Icons.advertencia(Colors.WARNING))
         self.btn_validar_fiscal.setObjectName("btnValidarDomicilioFiscal")
         self.btn_validar_fiscal.setToolTip(
             "REGLA DE ORO: Validar visualmente el domicilio fiscal registrado de las empresas (RFC) "
             "antes de generar la orden y procesar derechos con los BOTs."
         )
-        self.btn_validar_fiscal.setStyleSheet("""
-            QPushButton#btnValidarDomicilioFiscal {
-                background-color: rgba(217, 119, 6, 0.15);
-                color: #D97706;
-                border: 1px solid rgba(217, 119, 6, 0.40);
-                font-weight: bold;
-                padding: 6px 12px;
-                border-radius: 6px;
-            }
-            QPushButton#btnValidarDomicilioFiscal:hover {
-                background-color: rgba(217, 119, 6, 0.25);
-                border: 1px solid #D97706;
-            }
-        """)
         self.btn_validar_fiscal.clicked.connect(self._on_abrir_validador_fiscal)
         card_header_layout.addWidget(self.btn_validar_fiscal)
         
         card_layout.addLayout(card_header_layout)
         
-        # Three-column input layout: Municipio, Tipo de Orden, Descripción
+        # Three-column input layout: Municipio, Tipo de Orden, Descripción (Estandarizados a 30px)
         inputs_layout = QHBoxLayout()
         inputs_layout.setSpacing(16)
         
         # Column 1: Municipio
         mun_layout = QVBoxLayout()
         lbl_mun_title = CustomLabel("Municipio de Acceso (Tributanet)", variant="body")
-        lbl_mun_title.setStyleSheet("font-weight: bold; background: transparent; border: none;")
-        self.combo_municipio = CustomComboBox()
-        self.combo_municipio.setMinimumHeight(35)
+        lbl_mun_title.setObjectName("formFieldLabel")
+        self.combo_municipio = CustomComboBox(control_size="sm")
         mun_layout.addWidget(lbl_mun_title)
         mun_layout.addWidget(self.combo_municipio)
         
         # Column 2: Tipo de Orden (Desplegable)
         tipo_layout = QVBoxLayout()
         lbl_tipo_title = CustomLabel("Tipo de Orden", variant="body")
-        lbl_tipo_title.setStyleSheet("font-weight: bold; background: transparent; border: none;")
-        self.combo_tipo_orden = CustomComboBox()
-        self.combo_tipo_orden.setMinimumHeight(35)
+        lbl_tipo_title.setObjectName("formFieldLabel")
+        self.combo_tipo_orden = CustomComboBox(control_size="sm")
         self.combo_tipo_orden.addItem("Estándar (Subsidios)", "ESTANDAR")
         self.combo_tipo_orden.addItem("Derechos Pagados (Anual)", "PAGADA")
         self.combo_tipo_orden.addItem("Cancelación de Avisos (Anual)", "CANCELACION")
@@ -589,9 +575,8 @@ class OrdersView(QWidget):
         # Column 3: Descripción
         desc_layout = QVBoxLayout()
         lbl_desc_title = CustomLabel("Descripción de la Orden", variant="body")
-        lbl_desc_title.setStyleSheet("font-weight: bold; background: transparent; border: none;")
-        self.desc_input = CustomInput("Ingresa una descripción...")
-        self.desc_input.setMinimumHeight(35)
+        lbl_desc_title.setObjectName("formFieldLabel")
+        self.desc_input = CustomInput("Ingresa una descripción...", control_size="sm")
         desc_layout.addWidget(lbl_desc_title)
         desc_layout.addWidget(self.desc_input)
         

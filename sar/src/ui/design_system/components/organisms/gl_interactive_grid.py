@@ -50,26 +50,26 @@ class InteractiveGridRow(QFrame):
         self.combo_desarrollo = CustomComboBox()
         self.combo_desarrollo.setPlaceholderText("Seleccionar Desarrollo")
         self.combo_desarrollo.setMinimumWidth(120)
-        self.combo_desarrollo.setFixedHeight(28)
+        self.combo_desarrollo.setFixedHeight(30)
         self.combo_desarrollo.setVisible(False)
 
         # RFC / Empresa
         self.combo_rfc = CustomComboBox()
         self.combo_rfc.setPlaceholderText("Seleccionar RFC")
         self.combo_rfc.setMinimumWidth(130)
-        self.combo_rfc.setFixedHeight(28)
+        self.combo_rfc.setFixedHeight(30)
 
         # Delegación
         self.combo_delegacion = CustomComboBox()
         self.combo_delegacion.setPlaceholderText("Delegación")
         self.combo_delegacion.setMinimumWidth(90)
-        self.combo_delegacion.setFixedHeight(28)
+        self.combo_delegacion.setFixedHeight(30)
 
         # Concepto
         self.combo_concepto = CustomComboBox()
         self.combo_concepto.setPlaceholderText("Seleccionar Concepto")
         self.combo_concepto.setMinimumWidth(110)
-        self.combo_concepto.setFixedHeight(28)
+        self.combo_concepto.setFixedHeight(30)
 
         # Cantidad
         self.spin_cantidad = CustomSpinBox(self)
@@ -78,7 +78,7 @@ class InteractiveGridRow(QFrame):
         self.spin_cantidad.setValue(1)
         self.spin_cantidad.setMinimumWidth(75)
         self.spin_cantidad.setMaximumWidth(110)
-        self.spin_cantidad.setFixedHeight(28)
+        self.spin_cantidad.setFixedHeight(30)
 
         # Cantidad de Actos (Multiplicador 136 - Fojas)
         self.spin_cantidad_actos = CustomSpinBox(self)
@@ -87,7 +87,7 @@ class InteractiveGridRow(QFrame):
         self.spin_cantidad_actos.setValue(1)
         self.spin_cantidad_actos.setMinimumWidth(75)
         self.spin_cantidad_actos.setMaximumWidth(110)
-        self.spin_cantidad_actos.setFixedHeight(28)
+        self.spin_cantidad_actos.setFixedHeight(30)
         self.spin_cantidad_actos.setToolTip("Cantidad de Actos / Fojas a declarar en el portal")
         self.spin_cantidad_actos.setVisible(False)
 
@@ -96,13 +96,13 @@ class InteractiveGridRow(QFrame):
         self.lbl_disponibles.setAlignment(Qt.AlignCenter)
         self.lbl_disponibles.setMinimumWidth(65)
         self.lbl_disponibles.setMaximumWidth(90)
-        self.lbl_disponibles.setFixedHeight(28)
+        self.lbl_disponibles.setFixedHeight(30)
         self._update_disponibles_style("neutral", "—")
 
         # Delete button
         self.btn_delete = CustomButton("", is_secondary=True)
         self.btn_delete.setIcon(Icons.trash("#EF4444"))
-        self.btn_delete.setFixedSize(28, 28)
+        self.btn_delete.setFixedSize(30, 30)
         self.btn_delete.setStyleSheet("border: none; background: transparent;")
         self.btn_delete.clicked.connect(lambda: self.deleted.emit(self))
 

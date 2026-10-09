@@ -18,3 +18,9 @@ class Spacing:
     
     BORDER_WIDTH_SM = "1px"
     BORDER_WIDTH_MD = "2px"
+
+    # --- Component Heights (Atomic Standards) ---
+    CONTROL_HEIGHT_COMPACT = 30
+    CONTROL_HEIGHT_DEFAULT = 36
+    CONTROL_HEIGHT_LARGE = 42
+

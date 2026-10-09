@@ -8,6 +8,7 @@ from sar.src.ui.design_system.components import (
     GLInfoBanner, GLMessageBox as QMessageBox
 )
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.tokens.spacing import Spacing
 from sar.src.services.solicitudes_ui_service import SolicitudesUIService
 from sar.src.services.fase_b_service import FaseBService, FaseBWorker
 
@@ -60,16 +61,14 @@ class EditQuantityDialog(QDialog):
         
         # Field 1: Cantidad Actual (read-only)
         layout.addWidget(CustomLabel("Cantidad Actual:", variant="body"))
-        self.txt_actual = CustomInput(str(cant_actual))
+        self.txt_actual = CustomInput(str(cant_actual), control_size="md")
         self.txt_actual.setReadOnly(True)
-        self.txt_actual.setFixedHeight(36)
         layout.addWidget(self.txt_actual)
         
         # Field 2: Nueva Cantidad
         layout.addWidget(CustomLabel("Nueva Cantidad:", variant="body"))
-        self.txt_nueva = CustomInput("Ingresa la nueva cantidad")
+        self.txt_nueva = CustomInput("Ingresa la nueva cantidad", control_size="md")
         self.txt_nueva.setValidator(QIntValidator(1, 999999, self))
-        self.txt_nueva.setFixedHeight(36)
         layout.addWidget(self.txt_nueva)
         
         layout.addStretch()
@@ -80,12 +79,10 @@ class EditQuantityDialog(QDialog):
         btn_layout.setSpacing(12)
         btn_layout.addStretch()
         
-        self.btn_cancel = CustomButton.action_cancelar(parent=self)
-        self.btn_cancel.setFixedHeight(36)
+        self.btn_cancel = CustomButton.action_cancelar(control_size="sm", parent=self)
         self.btn_cancel.clicked.connect(self.reject)
         
-        self.btn_save = CustomButton.action_guardar(parent=self)
-        self.btn_save.setFixedHeight(36)
+        self.btn_save = CustomButton.action_guardar(control_size="sm", parent=self)
         self.btn_save.clicked.connect(self.accept)
         
         btn_layout.addWidget(self.btn_cancel)
@@ -172,7 +169,7 @@ class RequestsView(QWidget):
         self.footer_layout.addStretch()
         
         # Page size combobox (activación dinámica si total > 50)
-        self.cb_page_size = CustomComboBox(self)
+        self.cb_page_size = CustomComboBox(self, control_size="sm")
         self.cb_page_size.addItems(["50 por página", "100 por página", "200 por página"])
         self.cb_page_size.setCurrentIndex(0) # Default 50 por página
         self.cb_page_size.currentTextChanged.connect(self._on_page_size_changed)
@@ -188,22 +185,22 @@ class RequestsView(QWidget):
         
         self.card.layout.addLayout(self.footer_layout)
         
-        # Action Buttons & Footer Hint Layout
+        # Action Buttons & Footer Hint Layout (Botones a 30px)
         actions_layout = QHBoxLayout()
         self.lbl_table_hint = CustomLabel("💡 Doble clic en 'Folio Orden' para ver detalle / lotes • Doble clic en 'Asignado a' para asignar usuario", variant="muted")
         self.lbl_table_hint.setWordWrap(True)
         actions_layout.addWidget(self.lbl_table_hint, stretch=1)
         actions_layout.addSpacing(12)
         
-        self.btn_editar = CustomButton.action_editar(parent=self)
+        self.btn_editar = CustomButton.action_editar(control_size="sm", parent=self)
         self.btn_editar.setToolTip("Editar cantidad de la solicitud seleccionada")
         self.btn_editar.clicked.connect(self._on_editar)
 
-        self.btn_asignar = CustomButton.action_asignar(parent=self)
+        self.btn_asignar = CustomButton.action_asignar(control_size="sm", parent=self)
         self.btn_asignar.setToolTip("Asignar usuario a solicitudes seleccionadas")
         self.btn_asignar.clicked.connect(self._on_asignar)
         
-        self.btn_cancelar = CustomButton.action_cancelar(parent=self)
+        self.btn_cancelar = CustomButton.action_cancelar(control_size="sm", parent=self)
         self.btn_cancelar.setToolTip("Cancelar solicitud seleccionada")
         self.btn_cancelar.clicked.connect(self._on_cancelar)
         

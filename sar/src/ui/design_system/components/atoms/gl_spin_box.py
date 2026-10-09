@@ -1,7 +1,6 @@
-"""Custom SpinBox atom with passive scroll protection."""
-
 from PySide6.QtWidgets import QSpinBox
 from PySide6.QtGui import QWheelEvent
+from sar.src.ui.design_system.tokens.spacing import Spacing
 
 
 class CustomSpinBox(QSpinBox):
@@ -11,9 +10,16 @@ class CustomSpinBox(QSpinBox):
     on scroll/hover and ensures events propagate smoothly to parent scroll areas.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, control_size: str = None):
         super().__init__(parent)
-        self.setFixedHeight(28)
+        if control_size == "sm":
+            self.setFixedHeight(Spacing.CONTROL_HEIGHT_COMPACT)
+        elif control_size == "md":
+            self.setFixedHeight(Spacing.CONTROL_HEIGHT_DEFAULT)
+        elif control_size == "lg":
+            self.setFixedHeight(Spacing.CONTROL_HEIGHT_LARGE)
+        else:
+            self.setFixedHeight(Spacing.CONTROL_HEIGHT_COMPACT)
 
     def wheelEvent(self, event: QWheelEvent):
         """Suppress passive wheel events so parent scrollable containers can scroll."""
