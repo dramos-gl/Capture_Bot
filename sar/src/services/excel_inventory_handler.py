@@ -416,8 +416,10 @@ class ExcelInventoryHandler:
             expected_aliases = get_expected_concept_aliases(concept_req)
 
             # Check for intra-batch duplicate (same Excel file) and DB historical duplicate
-            has_dup = False
+            is_intra_batch_dup = False
+            has_db_dup = False
             dup_msg = ""
+            prev_ref = ""
             intento_num = 1
             if not omitir_validacion and concept_id_req:
                 loc_key = (desarrollo_name.upper(), mz.strip().upper(), lote.strip().upper(), edif.strip().upper(), viv.strip().upper(), concept_id_req)
@@ -440,47 +442,96 @@ class ExcelInventoryHandler:
                 )
                 db_prevs = session.execute(dup_stmt).scalars().all()
                 base_db_intento = db_prevs[0].intento if db_prevs else 0
-                
+                if base_db_intento > 0:
+                    prev_ref = db_prevs[0].referencia.referencia_portal if db_prevs[0].referencia else "N/A"
+
                 if loc_key in seen_locations_in_batch:
                     prev_info = seen_locations_in_batch[loc_key]
                     current_count = prev_info["count"] + 1
                     seen_locations_in_batch[loc_key]["count"] = current_count
                     intento_num = base_db_intento + current_count
-                    has_dup = True
-                    dup_msg = f"Intento {intento_num}: Ubicación duplicada en el archivo (coincide con fila {prev_info['first_row']})."
+                    is_intra_batch_dup = True
+                    dup_msg = f"Ubicación duplicada dentro del archivo Excel (coincide con fila {prev_info['first_row']})."
+                    # Tag all previous rows of this location group with duplicate info
+                    for prev_idx in prev_info["indices"]:
+                        if prev_idx < len(validated_rows):
+                            validated_rows[prev_idx]["is_batch_duplicate"] = True
+                            if validated_rows[prev_idx].get("status") == "CORRECTO":
+                                validated_rows[prev_idx]["status"] = "WARNING"
+                                validated_rows[prev_idx]["error_message"] = f"Ubicación con trámites múltiples en este archivo (coincide con fila {row.get('excel_row', 0)})."
+                    prev_info["indices"].append(len(validated_rows))
                 else:
                     intento_num = base_db_intento + 1
-                    seen_locations_in_batch[loc_key] = {"first_row": row.get("excel_row", 0), "count": 1}
+                    seen_locations_in_batch[loc_key] = {
+                        "first_row": row.get("excel_row", 0),
+                        "count": 1,
+                        "indices": [len(validated_rows)]
+                    }
                     if base_db_intento > 0:
-                        has_dup = True
-                        prev_ref = db_prevs[0].referencia.referencia_portal if db_prevs[0].referencia else "N/A"
-                        dup_msg = f"Intento {intento_num}: Ubicación con {base_db_intento} trámite(s) previo(s) en la base de datos (Última Ref: {prev_ref})."
+                        has_db_dup = True
+                        dup_msg = f"Ubicación con {base_db_intento} trámite(s) previo(s) en la base de datos (Última Ref: {prev_ref})."
 
             row_result["intento"] = intento_num
+            row_result["ultima_ref_previa"] = prev_ref
+            row_result["is_batch_duplicate"] = is_intra_batch_dup
 
             # Scenario A: We are completing a Notary Reservation
             if completar_notaria_id:
+                # In completar_notaria_id, explicit reference is STRICTLY MANDATORY (no autolink / X allowed)
+                if req_autolink or not ref_str:
+                    row_result["status"] = "ERROR"
+                    row_result["error_message"] = "El modo 'Completar Lote Reservado' requiere obligatoriamente la referencia explícita del derecho reservado en el archivo Excel."
+                    validated_rows.append(row_result)
+                    continue
+
+                # Find specific placeholder matching reference string and concept
                 placeholder_match = None
                 placeholder_idx = -1
-                
-                if req_autolink or not ref_str:
-                    # Find first placeholder matching concept
-                    for idx, (ld_p, ref_p) in enumerate(reserved_placeholders):
-                        if concept_id_req is None or ld_p.lote_detalle.concepto_id == concept_id_req:
-                            placeholder_match = (ld_p, ref_p)
-                            placeholder_idx = idx
-                            break
-                else:
-                    # Find specific placeholder matching reference string and concept
-                    for idx, (ld_p, ref_p) in enumerate(reserved_placeholders):
-                        if ref_p.referencia_portal == ref_str and (concept_id_req is None or ld_p.lote_detalle.concepto_id == concept_id_req):
-                            placeholder_match = (ld_p, ref_p)
-                            placeholder_idx = idx
-                            break
+                for idx, (ld_p, ref_p) in enumerate(reserved_placeholders):
+                    if ref_p.referencia_portal == ref_str and (concept_id_req is None or ld_p.lote_detalle.concepto_id == concept_id_req):
+                        placeholder_match = (ld_p, ref_p)
+                        placeholder_idx = idx
+                        break
 
                 if not placeholder_match:
                     row_result["status"] = "ERROR"
-                    row_result["error_message"] = f"No hay facturas RESERVADAS disponibles para el concepto '{concept_req}' de esta Notaría."
+                    # Precise diagnostic of reference state in database
+                    diag_stmt = (
+                        select(Referencia, EstadoSistema.codigo, Concepto.alias)
+                        .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+                        .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
+                        .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
+                        .where(Referencia.referencia_portal == ref_str)
+                    )
+                    diag_res = session.execute(diag_stmt).first()
+                    if not diag_res:
+                        row_result["error_message"] = f"La referencia '{ref_str}' no existe en el catálogo de referencias del sistema."
+                    else:
+                        r_ref_obj, r_estado_cod, r_concept_alias = diag_res
+                        row_result["referencia_id"] = r_ref_obj.referencia_id
+                        if r_estado_cod == "ASIGNADA":
+                            # Lookup assigned client and lot details for rich diagnostics
+                            ar_diag = session.execute(
+                                select(AsignacionReferencia)
+                                .where(AsignacionReferencia.referencia_id == r_ref_obj.referencia_id)
+                            ).scalars().first()
+                            cli_info = f" (Cliente: {ar_diag.cliente})" if ar_diag and ar_diag.cliente else ""
+                            row_result["error_message"] = f"La referencia '{ref_str}' ya fue previamente ASIGNADA{cli_info}."
+                        elif r_estado_cod == "RESERVADA":
+                            # Check which notary holds the reservation
+                            ar_diag = session.execute(
+                                select(AsignacionReferencia)
+                                .where(AsignacionReferencia.referencia_id == r_ref_obj.referencia_id)
+                            ).scalars().first()
+                            not_holder = ""
+                            if ar_diag and ar_diag.lote_detalle and ar_diag.lote_detalle.lote_asignacion and ar_diag.lote_detalle.lote_asignacion.notaria:
+                                not_holder = f" (Notaría: {ar_diag.lote_detalle.lote_asignacion.notaria.nombre})"
+                            row_result["error_message"] = f"La referencia '{ref_str}' se encuentra RESERVADA para otra notaría o bajo otro concepto{not_holder}."
+                        elif r_estado_cod == "FACTURADA":
+                            row_result["error_message"] = f"La referencia '{ref_str}' está disponible ('FACTURADA') pero no ha sido apartada/reservada previamente para esta Notaría."
+                        else:
+                            row_result["error_message"] = f"La referencia '{ref_str}' no está disponible para completar (Estado actual: '{r_estado_cod}')."
+
                     validated_rows.append(row_result)
                     continue
 
@@ -492,16 +543,26 @@ class ExcelInventoryHandler:
                 row_result["referencia_asignada"] = ref_p.referencia_portal
                 row_result["lote_detalle_id"] = ld_p.asignacion_referencia_id
 
-                # Warning if development doesn't match the reserved one
+                # Warning if development doesn't match the reserved one, or intra-batch duplicate, or DB historical duplicate
                 if ld_p.lote_detalle.desarrollo_id != desarrollo.desarrollo_id:
                     row_result["status"] = "WARNING"
                     row_result["error_message"] = f"El desarrollo no coincide con el desarrollo reservado en el lote original ({ld_p.lote_detalle.lote_asignacion_id})."
-                elif has_dup:
+                elif is_intra_batch_dup:
+                    row_result["status"] = "WARNING"
+                    row_result["error_message"] = dup_msg
+                elif has_db_dup:
                     row_result["status"] = "WARNING"
                     row_result["error_message"] = dup_msg
                 else:
                     row_result["status"] = "CORRECTO"
 
+                validated_rows.append(row_result)
+                continue
+
+            # In standard modes: intra-batch duplicate is treated as ERROR immediately
+            if is_intra_batch_dup:
+                row_result["status"] = "ERROR"
+                row_result["error_message"] = dup_msg
                 validated_rows.append(row_result)
                 continue
 
@@ -544,7 +605,7 @@ class ExcelInventoryHandler:
                 row_result["referencia_id"] = ref_obj.referencia_id
                 row_result["referencia_asignada"] = ref_obj.referencia_portal
                 allocated_ref_ids.add(ref_obj.referencia_id)
-                if has_dup:
+                if has_db_dup:
                     row_result["status"] = "WARNING"
                     row_result["error_message"] = dup_msg
                 else:
@@ -643,7 +704,7 @@ class ExcelInventoryHandler:
 
             # Valid reference!
             allocated_ref_ids.add(ref_obj.referencia_id)
-            if has_dup:
+            if has_db_dup:
                 row_result["status"] = "WARNING"
                 row_result["error_message"] = dup_msg
             else:

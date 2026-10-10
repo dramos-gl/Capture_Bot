@@ -649,6 +649,75 @@ class ThemeManager:
             color: {txt_primary};
         }}
 
+        /* Quick Filter Chips (Table Header and Diagnostic Banners) */
+        QPushButton#filterChipBtn {{
+            background-color: {surf};
+            color: {txt_secondary};
+            border: 1px solid {border};
+            border-radius: 13px;
+            padding: 2px 10px;
+            font-size: 11.5px;
+            font-weight: {Typography.WEIGHT_SEMI_BOLD};
+            min-height: 24px;
+            max-height: 24px;
+        }}
+        QPushButton#filterChipBtn:hover {{
+            background-color: {bg};
+            color: {txt_primary};
+            border-color: {Colors.PRIMARY};
+        }}
+        QPushButton#filterChipBtn[chip_state="active"] {{
+            background-color: {Colors.ACCENT};
+            color: #FFFFFF;
+            border: none;
+            font-weight: {Typography.WEIGHT_BOLD};
+        }}
+        QPushButton#filterChipBtn[chip_variant="error"] {{
+            color: {Colors.ERROR};
+            border-color: {"#FCA5A5" if not is_dark else Colors.ERROR};
+            background-color: {"#FEF2F2" if not is_dark else Colors.ERROR_DARK_BG};
+        }}
+        QPushButton#filterChipBtn[chip_variant="error"]:hover {{
+            background-color: {Colors.ERROR};
+            color: #FFFFFF;
+        }}
+        QPushButton#filterChipBtn[chip_variant="error"][chip_state="active"] {{
+            background-color: {Colors.ERROR};
+            color: #FFFFFF;
+            border: none;
+            font-weight: {Typography.WEIGHT_BOLD};
+        }}
+        QPushButton#filterChipBtn[chip_variant="warning"] {{
+            color: {"#D97706" if not is_dark else "#FBBF24"};
+            border-color: {"#FCD34D" if not is_dark else "#D97706"};
+            background-color: {"#FFFBEB" if not is_dark else Colors.WARNING_DARK_BG};
+        }}
+        QPushButton#filterChipBtn[chip_variant="warning"]:hover {{
+            background-color: {Colors.WARNING};
+            color: #FFFFFF;
+        }}
+        QPushButton#filterChipBtn[chip_variant="warning"][chip_state="active"] {{
+            background-color: {Colors.WARNING};
+            color: #FFFFFF;
+            border: none;
+            font-weight: {Typography.WEIGHT_BOLD};
+        }}
+        QPushButton#filterChipBtn[chip_variant="success"] {{
+            color: {Colors.SUCCESS};
+            border-color: {"#86EFAC" if not is_dark else Colors.SUCCESS};
+            background-color: {"#F0FDF4" if not is_dark else Colors.SUCCESS_DARK_BG};
+        }}
+        QPushButton#filterChipBtn[chip_variant="success"]:hover {{
+            background-color: {Colors.SUCCESS};
+            color: #FFFFFF;
+        }}
+        QPushButton#filterChipBtn[chip_variant="success"][chip_state="active"] {{
+            background-color: {Colors.SUCCESS};
+            color: #FFFFFF;
+            border: none;
+            font-weight: {Typography.WEIGHT_BOLD};
+        }}
+
         /* KPI Header Inline Separator */
         QLabel#kpiHeaderSeparator {{
             color: {border};

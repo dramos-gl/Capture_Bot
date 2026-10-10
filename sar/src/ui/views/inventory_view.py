@@ -3,7 +3,8 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget,
     QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
-    QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox, QCheckBox, QSizePolicy
+    QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox, QCheckBox, QSizePolicy,
+    QHeaderView, QTableWidgetItem
 )
 
 from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize, QTimer, QUrl
@@ -2144,54 +2145,31 @@ class InventoryView(QWidget):
         header_layout_masivo.addStretch()
         card_form.layout.addLayout(header_layout_masivo)
         
-        # Checkboxes Container in a sleek 2-column horizontal layout
-        chk_container = QWidget(self)
-        chk_container.setObjectName("masivoChkContainer")
-        chk_layout = QHBoxLayout(chk_container)
-        chk_layout.setContentsMargins(4, 4, 4, 8)
-        chk_layout.setSpacing(20)
-
-        # Checkbox 1 (Completar Lote Reservado)
-        chk1_box = QVBoxLayout()
-        chk1_box.setSpacing(2)
-        self.chk_completar_reserva = CustomCheckBox("Completar Lote Reservado", self)
-        self.chk_completar_reserva.stateChanged.connect(self._on_completar_reserva_changed)
-        chk1_box.addWidget(self.chk_completar_reserva)
-        lbl_desc1 = QLabel("Asigna ubicación definitiva a derechos que ya han sido reservados.")
-        lbl_desc1.setObjectName("subHintLabel")
-        chk1_box.addWidget(lbl_desc1)
-        chk_layout.addLayout(chk1_box, stretch=1)
-
-        # Checkbox 2 (Reservar Derechos)
-        chk2_box = QVBoxLayout()
-        chk2_box.setSpacing(2)
-        self.chk_solo_reservar = CustomCheckBox("Reservar Derechos", self)
-        self.chk_solo_reservar.stateChanged.connect(self._on_solo_reservar_changed)
-        chk2_box.addWidget(self.chk_solo_reservar)
-        lbl_desc2 = QLabel("Reserva derechos ya usados de forma manual sin validación de clientes/dirección.")
-        lbl_desc2.setObjectName("subHintLabel")
-        chk2_box.addWidget(lbl_desc2)
-        chk_layout.addLayout(chk2_box, stretch=1)
-
-        # Checkbox 3 (Asignar Derechos Directo)
-        chk3_box = QVBoxLayout()
-        chk3_box.setSpacing(2)
-        self.chk_asignar_directo = CustomCheckBox("Asignar Derechos (Directo)", self)
-        self.chk_asignar_directo.stateChanged.connect(self._on_asignar_directo_changed)
-        chk3_box.addWidget(self.chk_asignar_directo)
-        chk_layout.addLayout(chk3_box, stretch=1)
-
-        card_form.layout.addWidget(chk_container)
-
-        # Two-Column Form Layout
+        # Two-Row Form Layout (3 columns in row 1, 2 columns in row 2)
         form_grid = QVBoxLayout()
-        form_grid.setSpacing(12)
+        form_grid.setSpacing(8)
 
-        # Row 1: Tipo de Destino (Col 1) | Destinatario Notaria / Colaborador (Col 2)
+        # Row 1: Modo de Asignación (Col 1) | Tipo de Destino (Col 2) | Destinatario (Col 3)
         row1_layout = QHBoxLayout()
-        row1_layout.setSpacing(16)
+        row1_layout.setSpacing(14)
+
+        col_modo = QVBoxLayout()
+        col_modo.setSpacing(2)
+        lbl_modo = CustomLabel("Modo de Asignación / Validación *", variant="body")
+        lbl_modo.setObjectName("formFieldLabel")
+        self.cb_modo_masivo = CustomComboBox(self, control_size="sm")
+        self.cb_modo_masivo.addItems([
+            "Asignación Estándar (Por Defecto)",
+            "Asignar Derechos (Directo)",
+            "Reservar Derechos",
+            "Completar Lote Reservado"
+        ])
+        self.cb_modo_masivo.currentTextChanged.connect(self._on_modo_masivo_changed)
+        col_modo.addWidget(lbl_modo)
+        col_modo.addWidget(self.cb_modo_masivo)
 
         col_destino = QVBoxLayout()
+        col_destino.setSpacing(2)
         lbl_tipo_destino = CustomLabel("Tipo Destino *", variant="body")
         lbl_tipo_destino.setObjectName("formFieldLabel")
         self.cb_destino_masivo = CustomComboBox(self, control_size="sm")
@@ -2201,23 +2179,30 @@ class InventoryView(QWidget):
         col_destino.addWidget(self.cb_destino_masivo)
 
         self.col_destinatario = QVBoxLayout()
+        self.col_destinatario.setSpacing(2)
         self.lbl_destinatario_masivo = CustomLabel("Destinatario *", variant="body")
         self.lbl_destinatario_masivo.setObjectName("formFieldLabel")
+        self.cb_destinatario_placeholder = CustomComboBox(self, control_size="sm")
+        self.cb_destinatario_placeholder.addItem("-- Seleccione primero el Tipo Destino --")
+        self.cb_destinatario_placeholder.setEnabled(False)
         self.cb_notarias_masivo = CustomComboBox(self, control_size="sm")
         self.cb_colaboradores_masivo = CustomComboBox(self, control_size="sm")
         self.col_destinatario.addWidget(self.lbl_destinatario_masivo)
+        self.col_destinatario.addWidget(self.cb_destinatario_placeholder)
         self.col_destinatario.addWidget(self.cb_notarias_masivo)
         self.col_destinatario.addWidget(self.cb_colaboradores_masivo)
 
+        row1_layout.addLayout(col_modo, stretch=1)
         row1_layout.addLayout(col_destino, stretch=1)
         row1_layout.addLayout(self.col_destinatario, stretch=1)
         form_grid.addLayout(row1_layout)
 
-        # Row 2: Solicitante Externo (Col 1) | Observaciones (Col 2)
+        # Row 2: Solicitante Externo (Col 1) | Observaciones del Lote (Col 2, stretch=2)
         row2_layout = QHBoxLayout()
-        row2_layout.setSpacing(16)
+        row2_layout.setSpacing(14)
 
         self.col_solicitante = QVBoxLayout()
+        self.col_solicitante.setSpacing(2)
         self.lbl_solicitante_masivo = CustomLabel("Solicitante Externo (Persona)", variant="body")
         self.lbl_solicitante_masivo.setObjectName("formFieldLabel")
         self.txt_solicitante_masivo = CustomInput("Ej. Pedro Gómez", control_size="sm")
@@ -2225,6 +2210,7 @@ class InventoryView(QWidget):
         self.col_solicitante.addWidget(self.txt_solicitante_masivo)
 
         col_obs = QVBoxLayout()
+        col_obs.setSpacing(2)
         lbl_obs = CustomLabel("Observaciones del Lote", variant="body")
         lbl_obs.setObjectName("formFieldLabel")
         self.txt_obs_masivo = CustomInput("Notas u observaciones adicionales para el lote (opcional)...", control_size="sm")
@@ -2232,7 +2218,7 @@ class InventoryView(QWidget):
         col_obs.addWidget(self.txt_obs_masivo)
 
         row2_layout.addLayout(self.col_solicitante, stretch=1)
-        row2_layout.addLayout(col_obs, stretch=1)
+        row2_layout.addLayout(col_obs, stretch=2)
         form_grid.addLayout(row2_layout)
 
         # Row 3: Acciones (Importar Excel -> Descargar Plantilla -> Confirmar -> Limpiar -> Filtrar Órdenes)
@@ -2281,14 +2267,52 @@ class InventoryView(QWidget):
         card_form.layout.addLayout(form_grid)
         layout.addWidget(card_form)
 
-        # Preview list card
+        # Preview list card with Header Quick Filter Chips
         self.card_preview = CustomCard(title="Previsualización de Coincidencias y Validaciones", parent=self)
-        self.preview_table = StyledDataTable(["Fila Excel", "Cliente", "Desarrollo", "Delegación", "Concepto", "Referencia", "Ubicación", "Estatus Validation"], parent=self)
-        self.preview_table.setMinimumHeight(160)
+        
+        # Quick Filter Chips in header (Atomic Design: CustomButton with filterChipBtn styling)
+        self._preview_filter_mode = "TODOS"
+        self.btn_filter_preview_todos = CustomButton("Todos (0)", parent=self)
+        self.btn_filter_preview_todos.setObjectName("filterChipBtn")
+        self.btn_filter_preview_todos.setProperty("chip_state", "active")
+        self.btn_filter_preview_todos.clicked.connect(lambda: self._set_preview_filter("TODOS"))
+
+        self.btn_filter_preview_errores = CustomButton("🔴 Solo Errores (0)", parent=self)
+        self.btn_filter_preview_errores.setObjectName("filterChipBtn")
+        self.btn_filter_preview_errores.setProperty("chip_variant", "error")
+        self.btn_filter_preview_errores.clicked.connect(lambda: self._set_preview_filter("ERROR"))
+
+        self.btn_filter_preview_warnings = CustomButton("🟡 Solo Advertencias (0)", parent=self)
+        self.btn_filter_preview_warnings.setObjectName("filterChipBtn")
+        self.btn_filter_preview_warnings.setProperty("chip_variant", "warning")
+        self.btn_filter_preview_warnings.clicked.connect(lambda: self._set_preview_filter("WARNING"))
+
+        self.btn_filter_preview_duplicados = CustomButton("🟠 Duplicados (0)", parent=self)
+        self.btn_filter_preview_duplicados.setObjectName("filterChipBtn")
+        self.btn_filter_preview_duplicados.setProperty("chip_variant", "warning")
+        self.btn_filter_preview_duplicados.clicked.connect(lambda: self._set_preview_filter("DUPLICADOS"))
+        self.btn_filter_preview_duplicados.hide()
+
+        self.btn_filter_preview_validos = CustomButton("🟢 Solo Válidos (0)", parent=self)
+        self.btn_filter_preview_validos.setObjectName("filterChipBtn")
+        self.btn_filter_preview_validos.setProperty("chip_variant", "success")
+        self.btn_filter_preview_validos.clicked.connect(lambda: self._set_preview_filter("VALIDO"))
+
+        self.card_preview.add_header_widget(self.btn_filter_preview_todos)
+        self.card_preview.add_header_widget(self.btn_filter_preview_errores)
+        self.card_preview.add_header_widget(self.btn_filter_preview_warnings)
+        self.card_preview.add_header_widget(self.btn_filter_preview_duplicados)
+        self.card_preview.add_header_widget(self.btn_filter_preview_validos)
+
+        self.preview_table = StyledDataTable(["Fila Excel", "Cliente", "Desarrollo", "Delegación", "Concepto", "Referencia", "Ubicación", "Estatus Validación"], parent=self)
+        self.preview_table.setMinimumHeight(320)
         self.preview_table.setMinimumWidth(200)
+        self.preview_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.preview_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.preview_table.customContextMenuRequested.connect(self._on_preview_table_context_menu)
         self.card_preview.add_widget(self.preview_table)
 
-        layout.addWidget(self.card_preview)
+        layout.addWidget(self.card_preview, stretch=1)
 
         scroll_area.setWidget(scroll_content)
         tab_layout.addWidget(scroll_area)
@@ -2296,97 +2320,65 @@ class InventoryView(QWidget):
         self.parsed_records = []
         self.validated_records = []
         
-        # Hide internal widgets initially
+        # Hide specific destination combos initially; keep placeholder visible
         self.cb_colaboradores_masivo.hide()
         self.cb_notarias_masivo.hide()
-        self.lbl_destinatario_masivo.hide()
+        self.cb_destinatario_placeholder.show()
+        self.lbl_destinatario_masivo.show()
 
-    def _on_completar_reserva_changed(self, state):
-        is_checked = (state == 2 or state == Qt.CheckState.Checked)
-        if is_checked:
+    def _on_modo_masivo_changed(self, text):
+        if text != "Asignación Estándar (Por Defecto)":
             if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
-                self.chk_completar_reserva.blockSignals(True)
-                self.chk_completar_reserva.setChecked(False)
-                self.chk_completar_reserva.blockSignals(False)
+                self.cb_modo_masivo.blockSignals(True)
+                self.cb_modo_masivo.setCurrentText("Asignación Estándar (Por Defecto)")
+                self.cb_modo_masivo.blockSignals(False)
                 return
-            # Uncheck and disable mutual conflict
-            self.chk_solo_reservar.blockSignals(True)
-            self.chk_solo_reservar.setChecked(False)
-            self.chk_solo_reservar.blockSignals(False)
 
-            self.chk_asignar_directo.blockSignals(True)
-            self.chk_asignar_directo.setChecked(False)
-            self.chk_asignar_directo.blockSignals(False)
-
+        if text == "Completar Lote Reservado":
             self.cb_destino_masivo.setCurrentText("NOTARIA")
             self.cb_destino_masivo.setEnabled(False)
             self._on_destino_masivo_changed("NOTARIA")
             self.txt_solicitante_masivo.setEnabled(False)
             self.txt_obs_masivo.setEnabled(False)
-        else:
+        elif text in ("Asignar Derechos (Directo)", "Reservar Derechos"):
+            self.cb_destino_masivo.setEnabled(True)
+            self.txt_solicitante_masivo.setEnabled(True)
+            self.txt_obs_masivo.setEnabled(True)
+        else: # Asignación Estándar (Por Defecto)
             self.cb_destino_masivo.setEnabled(True)
             self.txt_solicitante_masivo.setEnabled(True)
             self.txt_obs_masivo.setEnabled(True)
 
-    def _on_solo_reservar_changed(self, state):
-        is_checked = (state == 2 or state == Qt.CheckState.Checked)
-        if is_checked:
-            if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
-                self.chk_solo_reservar.blockSignals(True)
-                self.chk_solo_reservar.setChecked(False)
-                self.chk_solo_reservar.blockSignals(False)
-                return
-            # Uncheck and disable mutual conflict
-            self.chk_completar_reserva.blockSignals(True)
-            self.chk_completar_reserva.setChecked(False)
-            self.chk_completar_reserva.blockSignals(False)
+    def _is_completar_reserva(self) -> bool:
+        return self.cb_modo_masivo.currentText() == "Completar Lote Reservado"
 
-            self.chk_asignar_directo.blockSignals(True)
-            self.chk_asignar_directo.setChecked(False)
-            self.chk_asignar_directo.blockSignals(False)
-            
-            self.cb_destino_masivo.setEnabled(True)
-            self.txt_solicitante_masivo.setEnabled(True)
-            self.txt_obs_masivo.setEnabled(True)
+    def _is_solo_reservar(self) -> bool:
+        return self.cb_modo_masivo.currentText() == "Reservar Derechos"
 
-    def _on_asignar_directo_changed(self, state):
-        is_checked = (state == 2 or state == Qt.CheckState.Checked)
-        if is_checked:
-            if not self._check_permission("CTRL:ASIGNAR_VALIDAR", "ASIGNAR") and not self._check_permission("REFERENCIAS", "ASIGNAR"):
-                self.chk_asignar_directo.blockSignals(True)
-                self.chk_asignar_directo.setChecked(False)
-                self.chk_asignar_directo.blockSignals(False)
-                return
-            # Uncheck and disable mutual conflict
-            self.chk_completar_reserva.blockSignals(True)
-            self.chk_completar_reserva.setChecked(False)
-            self.chk_completar_reserva.blockSignals(False)
-
-            self.chk_solo_reservar.blockSignals(True)
-            self.chk_solo_reservar.setChecked(False)
-            self.chk_solo_reservar.blockSignals(False)
-
-            self.cb_destino_masivo.setEnabled(True)
-            self.txt_solicitante_masivo.setEnabled(True)
-            self.txt_obs_masivo.setEnabled(True)
+    def _is_asignar_directo(self) -> bool:
+        return self.cb_modo_masivo.currentText() == "Asignar Derechos (Directo)"
 
     def _on_destino_masivo_changed(self, text):
         if text == "NOTARIA":
             self.lbl_destinatario_masivo.setText("Notaría *")
             self.lbl_destinatario_masivo.show()
+            self.cb_destinatario_placeholder.hide()
             self.cb_notarias_masivo.show()
             self.cb_colaboradores_masivo.hide()
             self.txt_solicitante_masivo.setEnabled(True)
         elif text == "COLABORADOR":
             self.lbl_destinatario_masivo.setText("Colaborador *")
             self.lbl_destinatario_masivo.show()
+            self.cb_destinatario_placeholder.hide()
             self.cb_notarias_masivo.hide()
             self.cb_colaboradores_masivo.show()
             self.txt_solicitante_masivo.setEnabled(False)
             self.txt_solicitante_masivo.clear()
         else:
-            # Hide both if '-- Seleccione un tipo de destino --' is selected
-            self.lbl_destinatario_masivo.hide()
+            # Show placeholder when '-- Seleccione un tipo de destino --' is selected
+            self.lbl_destinatario_masivo.setText("Destinatario *")
+            self.lbl_destinatario_masivo.show()
+            self.cb_destinatario_placeholder.show()
             self.cb_notarias_masivo.hide()
             self.cb_colaboradores_masivo.hide()
             self.txt_solicitante_masivo.setEnabled(False)
@@ -2411,9 +2403,19 @@ class InventoryView(QWidget):
     def _on_limpiar_preview(self):
         self.parsed_records = []
         self.validated_records = []
-        self.lbl_excel_path.setText("Ningún archivo seleccionado")
+        if hasattr(self, "_visible_preview_records"):
+            self._visible_preview_records = []
         self.preview_table.clearContents()
         self.preview_table.setRowCount(0)
+        self.lbl_excel_path.setText("Ningún archivo seleccionado")
+        self.btn_filter_preview_todos.setText("Todos (0)")
+        self.btn_filter_preview_errores.setText("🔴 Solo Errores (0)")
+        self.btn_filter_preview_warnings.setText("🟡 Solo Advertencias (0)")
+        self.btn_filter_preview_duplicados.setText("🟠 Duplicados (0)")
+        self.btn_filter_preview_duplicados.hide()
+        self.btn_filter_preview_validos.setText("🟢 Solo Válidos (0)")
+        self._preview_filter_mode = "TODOS"
+        self._set_preview_filter("TODOS")
         self.btn_confirmar_masivo.setEnabled(False)
         if hasattr(self, "_excel_file_path"):
             del self._excel_file_path
@@ -2488,7 +2490,7 @@ class InventoryView(QWidget):
         default_rfc_id = None
 
         completar_notaria_id = None
-        if self.chk_completar_reserva.isChecked():
+        if self._is_completar_reserva():
             not_name = self.cb_notarias_masivo.currentText()
             completar_notaria_id = self._notarias_map.get(not_name)
             if not completar_notaria_id:
@@ -2504,8 +2506,8 @@ class InventoryView(QWidget):
             default_rfc_id=default_rfc_id,
             completar_notaria_id=completar_notaria_id,
             orden_ids=self.selected_orden_ids,
-            solo_reservar=self.chk_solo_reservar.isChecked(),
-            asignar_directo=self.chk_asignar_directo.isChecked(),
+            solo_reservar=self._is_solo_reservar(),
+            asignar_directo=self._is_asignar_directo(),
             api_client=self.api_client,
             db_connector=self.db_connector
         )
@@ -2514,6 +2516,234 @@ class InventoryView(QWidget):
         self._batch_worker.start()
         self._batch_loading_dialog.exec()
 
+    def _set_preview_filter(self, mode: str):
+        """Filters the preview table in real time according to the selected chip."""
+        self._preview_filter_mode = mode
+        
+        # Update chip active visual states using dynamic property 'chip_state'
+        chips = [
+            (self.btn_filter_preview_todos, "TODOS"),
+            (self.btn_filter_preview_errores, "ERROR"),
+            (self.btn_filter_preview_warnings, "WARNING"),
+            (self.btn_filter_preview_duplicados, "DUPLICADOS"),
+            (self.btn_filter_preview_validos, "VALIDO")
+        ]
+        for btn, btn_mode in chips:
+            btn.setProperty("chip_state", "active" if mode == btn_mode else "inactive")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+            
+        self._render_preview_table()
+
+    def _render_preview_table(self):
+        """Renders filtered validated rows into the preview table with full multiline tooltips and grouped duplicate ordering."""
+        if not hasattr(self, "validated_records") or not self.validated_records:
+            self.preview_table.clearContents()
+            self.preview_table.setRowCount(0)
+            return
+
+        filter_mode = getattr(self, "_preview_filter_mode", "TODOS")
+        
+        filtered_records = []
+        for r in self.validated_records:
+            status = r.get("status", "VALIDO")
+            is_dup = bool(r.get("is_batch_duplicate"))
+            if filter_mode == "TODOS":
+                filtered_records.append(r)
+            elif filter_mode == "ERROR" and status == "ERROR":
+                filtered_records.append(r)
+            elif filter_mode == "WARNING" and (status == "WARNING" or is_dup):
+                filtered_records.append(r)
+            elif filter_mode == "DUPLICADOS" and is_dup:
+                filtered_records.append(r)
+            elif filter_mode == "VALIDO" and status not in ("ERROR", "WARNING") and not is_dup:
+                filtered_records.append(r)
+
+        # In WARNING or DUPLICADOS mode, sort so that duplicate location groups appear first and grouped consecutively
+        if filter_mode in ("WARNING", "DUPLICADOS"):
+            def _sort_key(rec):
+                is_batch_dup = 0 if rec.get("is_batch_duplicate") else 1
+                loc_group = f"{rec.get('desarrollo', '')}_{rec.get('mz', '')}_{rec.get('lote', '')}_{rec.get('edif', '')}_{rec.get('viv', '')}"
+                excel_row = rec.get("excel_row", 0)
+                return (is_batch_dup, loc_group, excel_row)
+            filtered_records = sorted(filtered_records, key=_sort_key)
+
+        preview_rows = []
+        for r in filtered_records:
+            intento = r.get("intento", 1)
+            status = r.get("status", "VALIDO")
+            error_msg = r.get("error_message", "")
+
+            if status == "ERROR":
+                status_txt = f"🔴 ERROR: {error_msg}"
+            elif status == "WARNING" or r.get("is_batch_duplicate"):
+                status_txt = f"🟡 WARNING: {error_msg}"
+            else:
+                status_txt = f"🟢 CORRECTO (Intento {intento})" if intento > 1 else "🟢 CORRECTO"
+
+            loc_str = f"Mz {r.get('mz', '')} Lt {r.get('lote', '')}"
+            if r.get("edif"): loc_str += f" Edif {r['edif']}"
+            if r.get("viv"): loc_str += f" Viv {r['viv']}"
+            if intento > 1: loc_str += f" [Intento {intento}]"
+
+            client_raw = str(r.get("cliente", "") or "").strip()
+            client_display = client_raw if len(client_raw) <= 30 else f"{client_raw[:27]}..."
+
+            preview_rows.append([
+                str(r.get("excel_row", "")),
+                client_display,
+                r.get("desarrollo", ""),
+                r.get("delegacion_nombre", ""),
+                r.get("concepto_solicitado", ""),
+                r.get("referencia_asignada", ""),
+                loc_str,
+                status_txt
+            ])
+
+        self._visible_preview_records = filtered_records
+        self.preview_table.populate_rows(preview_rows)
+
+        # Set tooltip with full client name if truncated
+        for row_idx, r in enumerate(filtered_records):
+            client_full = str(r.get("cliente", "") or "").strip()
+            client_item = self.preview_table.item(row_idx, 1)
+            if client_item and client_full:
+                client_item.setToolTip(client_full)
+
+        # Configure optimized column widths and modes specifically for this preview table:
+        # Col 0: Fila Excel (75px)
+        # Col 1: Cliente (delimitado a ancho fijo de 200px para ~30 caracteres)
+        # Col 2: Desarrollo (160px)
+        # Col 3: Delegación (130px)
+        # Col 4: Concepto (130px)
+        # Col 5: Referencia (130px)
+        # Col 6: Ubicación (160px)
+        col_widths = [75, 200, 160, 130, 130, 130, 160]
+        header = self.preview_table.horizontalHeader()
+        for col_idx, width in enumerate(col_widths):
+            if col_idx < self.preview_table.columnCount():
+                self.preview_table.setColumnWidth(col_idx, width)
+                header.setSectionResizeMode(col_idx, QHeaderView.ResizeMode.Interactive)
+
+        # Col 7: Estatus Validación - Expandir al contenido para que nunca se corte en pantallas grandes o pequeñas
+        last_col = self.preview_table.columnCount() - 1
+        if last_col >= 0:
+            header.setSectionResizeMode(last_col, QHeaderView.ResizeMode.ResizeToContents)
+            # Asegurar ancho mínimo de 350px para el estatus
+            if self.preview_table.columnWidth(last_col) < 350:
+                self.preview_table.setColumnWidth(last_col, 350)
+
+    def _on_preview_table_context_menu(self, pos):
+        """Shows context menu on right-click over preview table to copy or view historical assignment details."""
+        row = self.preview_table.rowAt(pos.y())
+        if row < 0 or not hasattr(self, "_visible_preview_records") or row >= len(self._visible_preview_records):
+            return
+
+        col = self.preview_table.columnAt(pos.x())
+        current_item = self.preview_table.item(row, col)
+        cell_text = current_item.text().strip() if current_item else ""
+
+        rec = self._visible_preview_records[row]
+        status = rec.get("status", "VALIDO")
+        is_dup = bool(rec.get("is_batch_duplicate"))
+        ultima_ref = rec.get("ultima_ref_previa", "").strip()
+        ref_asignada = rec.get("referencia_asignada", "").strip()
+
+        # Only provide historical inspection if there is an actual prior reference (DB warning or duplicate)
+        target_ref_portal = ultima_ref if ultima_ref and ultima_ref != "N/A" else ""
+        if not target_ref_portal and (status in ("ERROR", "WARNING") or is_dup):
+            target_ref_portal = ref_asignada if ref_asignada and ref_asignada != "N/A" else ""
+
+        menu = QMenu(self)
+
+        # 1. Quick Copy Options
+        if cell_text:
+            display_cell = cell_text if len(cell_text) <= 30 else (cell_text[:27] + "...")
+            act_copy_cell = QAction(f"📋  Copiar: \"{display_cell}\"", menu)
+            act_copy_cell.triggered.connect(lambda: QGuiApplication.clipboard().setText(cell_text))
+            menu.addAction(act_copy_cell)
+
+        # Copiar referencia solo si hay una referencia previa/objetivo identificada
+        if target_ref_portal and target_ref_portal != cell_text:
+            act_copy_ref = QAction(f"📋  Copiar Referencia Previa ({target_ref_portal})", menu)
+            act_copy_ref.triggered.connect(lambda: QGuiApplication.clipboard().setText(target_ref_portal))
+            menu.addAction(act_copy_ref)
+
+        def _copy_preview_row():
+            row_vals = []
+            for c in range(self.preview_table.columnCount()):
+                it = self.preview_table.item(row, c)
+                row_vals.append(it.text().strip() if it else "")
+            QGuiApplication.clipboard().setText("\t".join(row_vals))
+
+        act_copy_row = QAction("📄  Copiar Fila Completa", menu)
+        act_copy_row.triggered.connect(_copy_preview_row)
+        menu.addAction(act_copy_row)
+
+        # 2. Detalle de Asignación Histórica (Exclusivo para Advertencias / Trámites previos en BD)
+        if target_ref_portal and target_ref_portal != "N/A" and (status == "WARNING" or is_dup or bool(ultima_ref)):
+            menu.addSeparator()
+            act_detalle = QAction(f"🔍  Detalle de Asignación Previa ({target_ref_portal})", menu)
+            act_detalle.setToolTip("Abrir el formulario de la asignación previa en modo lectura")
+            act_detalle.triggered.connect(lambda: self._on_ver_detalle_asignacion_historica(target_ref_portal))
+            menu.addAction(act_detalle)
+
+        menu.exec(self.preview_table.viewport().mapToGlobal(pos))
+
+    def _on_ver_detalle_asignacion_historica(self, ref_portal: str):
+        """Fetches reference assignment record via InventarioUIService (simetric API/DB) and opens ManualAssignmentDialog in read-only mode."""
+        if not (self._check_permission("CTRL:INVENTARIO", "LEER") or self._check_permission("REFERENCIAS", "LEER") or self._check_permission("CTRL:INVENTARIO", "ASIGNAR")):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para consultar el detalle de asignación (CTRL:INVENTARIO:LEER)."
+            )
+            return
+
+        try:
+            # Query reference record with transparent transport (Local SQLAlchemy or FastAPI)
+            clean_ref = ref_portal.strip()
+            res = self.inventario_ui_service.get_referencias_facturadas_paginated(
+                limit=1,
+                offset=0,
+                search_text=clean_ref,
+                concepto_id=0,
+                rfc_id=0,
+                filter_assigned="Todos"
+            )
+            # Both API and Local return dictionary with 'records' key
+            data_list = (res.get("records") if isinstance(res, dict) else None) or (res.get("data") if isinstance(res, dict) else None) or []
+            if not data_list:
+                QMessageBox.information(
+                    self,
+                    "Referencia No Encontrada",
+                    f"No se encontró el registro detallado para la referencia '{clean_ref}'."
+                )
+                return
+
+            ref_dict = data_list[0]
+            ref_id = ref_dict.get("referencia_id")
+            actual_ref_portal = ref_dict.get("referencia_portal", ref_portal)
+
+            can_edit = self._check_permission("CTRL:INVENTARIO", "EDITAR") or self._check_permission("REFERENCIAS", "EDITAR") or self._check_permission("CTRL:INVENTARIO", "ASIGNAR")
+            dialog = ManualAssignmentDialog(
+                self.db_connector,
+                [ref_id],
+                [actual_ref_portal],
+                parent=self,
+                selected_refs=[ref_dict],
+                is_read_only=True,
+                can_edit=can_edit
+            )
+            dialog.exec()
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error al Consultar Asignación",
+                f"No se pudo cargar el detalle de la asignación '{ref_portal}':\n{str(e)}"
+            )
+
     def _on_batch_validation_success(self, parsed_records, validated_records):
         if hasattr(self, "_batch_loading_dialog") and self._batch_loading_dialog:
             self._batch_loading_dialog.accept()
@@ -2521,59 +2751,56 @@ class InventoryView(QWidget):
         self.parsed_records = parsed_records
         self.validated_records = validated_records
 
-        # Populate preview table
-        preview_rows = []
-        has_errors = False
-        for r in self.validated_records:
-            intento = r.get("intento", 1)
-            status_txt = r["status"]
-            if r["status"] == "ERROR":
-                has_errors = True
-                status_txt = f"🔴 ERROR: {r['error_message']}"
-            elif r["status"] == "WARNING":
-                status_txt = f"🟡 WARNING: {r['error_message']}"
-            else:
-                status_txt = f"🟢 CORRECTO (Intento {intento})" if intento > 1 else "🟢 CORRECTO"
+        # Calculate KPI counts for real-time quick filter badges
+        total_count = len(self.validated_records)
+        error_count = sum(1 for r in self.validated_records if r.get("status") == "ERROR")
+        warning_count = sum(1 for r in self.validated_records if r.get("status") == "WARNING")
+        dup_count = sum(1 for r in self.validated_records if r.get("is_batch_duplicate"))
+        valid_count = sum(1 for r in self.validated_records if r.get("status") not in ("ERROR", "WARNING") and not r.get("is_batch_duplicate"))
 
-            loc_str = f"Mz {r['mz']} Lt {r['lote']}"
-            if r["edif"]: loc_str += f" Edif {r['edif']}"
-            if r["viv"]: loc_str += f" Viv {r['viv']}"
-            if intento > 1: loc_str += f" [Intento {intento}]"
+        self.btn_filter_preview_todos.setText(f"Todos ({total_count})")
+        self.btn_filter_preview_errores.setText(f"🔴 Solo Errores ({error_count})")
+        self.btn_filter_preview_warnings.setText(f"🟡 Solo Advertencias ({warning_count})")
+        
+        if dup_count > 0:
+            self.btn_filter_preview_duplicados.setText(f"🟠 Duplicados ({dup_count})")
+            self.btn_filter_preview_duplicados.show()
+        else:
+            self.btn_filter_preview_duplicados.hide()
 
-            preview_rows.append([
-                str(r["excel_row"]),
-                r["cliente"],
-                r["desarrollo"],
-                r["delegacion_nombre"],
-                r["concepto_solicitado"],
-                r["referencia_asignada"],
-                loc_str,
-                status_txt
-            ])
+        self.btn_filter_preview_validos.setText(f"🟢 Solo Válidos ({valid_count})")
 
-        self.preview_table.populate_rows(preview_rows)
-        self.btn_confirmar_masivo.setEnabled(len(self.validated_records) > 0)
+        # Auto-focus the most relevant view: if errors exist, stay on TODOS or highlight count
+        self._set_preview_filter("TODOS")
+        self.btn_confirmar_masivo.setEnabled(valid_count > 0 or warning_count > 0 or dup_count > 0)
 
-        if has_errors:
+        if error_count > 0:
             # Group error types to show a clear diagnostic report to the QA Auditor
             error_types = set()
             for r in self.validated_records:
-                if r["status"] == "ERROR":
-                    if "no existe" in r["error_message"].lower():
-                        error_types.add("Referencias inexistentes en la base de datos")
-                    elif "reservada" in r["error_message"].lower():
+                if r.get("status") == "ERROR":
+                    err_msg = r.get("error_message", "")
+                    if "no existe" in err_msg.lower():
+                        error_types.add("Referencias o desarrollos inexistentes en el catálogo maestro")
+                    elif "reservada" in err_msg.lower():
                         error_types.add("Referencias ya reservadas previamente (Notaría / Colaborador)")
-                    elif "asignada" in r["error_message"].lower():
+                    elif "asignada" in err_msg.lower():
                         error_types.add("Referencias ya asignadas/confirmadas previamente a clientes")
+                    elif "obligatorios" in err_msg.lower():
+                        error_types.add("Campos de ubicación faltantes (Mz, Lote, Ext, Int)")
                     else:
-                        error_types.add(r["error_message"])
+                        error_types.add(err_msg)
             
-            err_summary = "\n- ".join(error_types)
+            err_summary = "\n• ".join(error_types)
             QMessageBox.warning(
                 self, 
                 "Inconsistencias y Errores Detectados", 
-                f"Se identificaron los siguientes problemas en el archivo Excel:\n\n- {err_summary}\n\n"
-                "Por seguridad, estos registros marcados en ROJO se omitirán durante la importación. Puede corregirlos en el Excel y volver a validar."
+                f"📊 Diagnóstico de Validación del Archivo:\n\n"
+                f"• Total analizados: {total_count}\n"
+                f"• Listos para asignar: {valid_count + warning_count}\n"
+                f"• Errores críticos: {error_count}\n\n"
+                f"Detalle de Inconsistencias:\n• {err_summary}\n\n"
+                "💡 Tip: Utilice el filtro '🔴 Solo Errores' en el encabezado de la tabla para revisar los casos puntuales."
             )
 
     def _on_batch_validation_error(self, error_msg):
@@ -2602,7 +2829,7 @@ class InventoryView(QWidget):
                 return
 
         solicitante_externo = self.txt_solicitante_masivo.text().strip()
-        if tipo_destino == "NOTARIA" and not self.chk_completar_reserva.isChecked() and not solicitante_externo:
+        if tipo_destino == "NOTARIA" and not self._is_completar_reserva() and not solicitante_externo:
             QMessageBox.warning(self, "Falta Acreditación", "Ingresa el nombre del Solicitante Externo (ej. Pedro Gómez) para la Notaría.")
             return
 
@@ -2657,11 +2884,11 @@ class InventoryView(QWidget):
             usuario_id = getattr(parent_window, "current_usuario_id", 1) # Default admin
 
             # Show GLLoadingDialog with multiline centered message
-            if self.chk_completar_reserva.isChecked():
+            if self._is_completar_reserva():
                 msg = "Completando asignaciones\nreservadas..."
-            elif self.chk_asignar_directo.isChecked():
+            elif self._is_asignar_directo():
                 msg = "Asignando derechos de lote\n(Directo)..."
-            elif self.chk_solo_reservar.isChecked():
+            elif self._is_solo_reservar():
                 msg = "Reservando derechos\nde lote..."
             else:
                 msg = "Guardando y confirmando\nlote de asignación..."
@@ -2669,7 +2896,7 @@ class InventoryView(QWidget):
 
             # Launch background confirmation worker
             self._confirm_worker = BatchConfirmationWorker(
-                is_completar=self.chk_completar_reserva.isChecked(),
+                is_completar=self._is_completar_reserva(),
                 api_client=self.api_client,
                 db_connector=self.db_connector,
                 valid_details=valid_details,
@@ -2679,8 +2906,8 @@ class InventoryView(QWidget):
                 colaborador_id=colaborador_id,
                 solicitante_externo=solicitante_externo,
                 observaciones=observaciones,
-                solo_reservar=self.chk_solo_reservar.isChecked(),
-                asignar_directo=self.chk_asignar_directo.isChecked()
+                solo_reservar=self._is_solo_reservar(),
+                asignar_directo=self._is_asignar_directo()
             )
             self._confirm_worker.success.connect(self._on_confirm_batch_success)
             self._confirm_worker.error_occurred.connect(self._on_confirm_batch_error)
@@ -2703,14 +2930,9 @@ class InventoryView(QWidget):
             QMessageBox.information(self, "Lote Guardado", f"Se ha registrado exitosamente el lote ID {lote_id} con {total} asignaciones.")
 
         # Reset values
-        self.lbl_excel_path.setText("Ningún archivo seleccionado")
         self.txt_obs_masivo.clear()
         self.txt_solicitante_masivo.clear()
-        self.preview_table.clearContents()
-        self.preview_table.setRowCount(0)
-        self.btn_confirmar_masivo.setEnabled(False)
-        self.parsed_records = []
-        self.validated_records = []
+        self._on_limpiar_preview()
 
         self.inventario_ui_service.clear_catalogs_cache()
         self.refresh_all(refresh_both=True)
