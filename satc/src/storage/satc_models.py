@@ -165,3 +165,167 @@ class FacturaCancun(Base):
 
     # Relaciones
     recibo: Mapped[ReciboCancun] = relationship(back_populates="factura")
+
+
+# =============================================================================
+# MODELOS DE GOBERNANZA DEL CICLO DE VIDA DE VIVIENDAS Y TRÁMITES (SATC)
+# =============================================================================
+
+class TipoTramite(Base):
+    """Mapea el catálogo de trámites municipales y derechos."""
+    __tablename__ = "tipo_tramite"
+    __table_args__ = {"schema": "satc_catalogo"}
+
+    tipo_tramite_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    nombre: Mapped[str] = mapped_column(String(200), nullable=False)
+    aplica_a: Mapped[str] = mapped_column(String(30), default="AMBOS", nullable=False)
+    etapa_disparador: Mapped[str] = mapped_column(String(30), nullable=False)
+    dias_vigencia: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    es_obligatorio: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+
+class EstadoVivienda(Base):
+    """Mapea el catálogo de estados del ciclo de vida físico-comercial de la vivienda."""
+    __tablename__ = "estado_vivienda"
+    __table_args__ = {"schema": "satc_catalogo"}
+
+    estado_vivienda_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    nombre: Mapped[str] = mapped_column(String(100), nullable=False)
+    descripcion: Mapped[Optional[str]] = mapped_column(String(250))
+    orden_flujo: Mapped[int] = mapped_column(Integer, nullable=False)
+    permite_venta: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    permite_escrituracion: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class EstadoTramite(Base):
+    """Mapea el catálogo de estados operativos y financieros del trámite."""
+    __tablename__ = "estado_tramite"
+    __table_args__ = {"schema": "satc_catalogo"}
+
+    estado_tramite_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    nombre: Mapped[str] = mapped_column(String(100), nullable=False)
+    fase: Mapped[str] = mapped_column(String(50), nullable=False)
+    es_bloqueante: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    es_terminal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class RegimenCondominio(Base):
+    """Mapea el macro-lote fiduciario del régimen en condominio."""
+    __tablename__ = "regimen_condominio"
+    __table_args__ = {"schema": "satc_catalogo"}
+
+    regimen_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    desarrollo_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id"), nullable=False)
+    nombre_regimen: Mapped[str] = mapped_column(String(200), nullable=False)
+    sm: Mapped[Optional[str]] = mapped_column(String(50))
+    mz: Mapped[str] = mapped_column(String(50), nullable=False)
+    lt: Mapped[str] = mapped_column(String(50), nullable=False)
+    total_upes: Mapped[int] = mapped_column(Integer, nullable=False)
+    upes_generadas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    licencia_construccion_matriz: Mapped[Optional[str]] = mapped_column(String(100))
+    clave_catastral_matriz: Mapped[Optional[str]] = mapped_column(String(100))
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Relaciones
+    desarrollo = relationship("Desarrollo", foreign_keys=[desarrollo_id])
+    viviendas: Mapped[List["Vivienda"]] = relationship(back_populates="regimen")
+
+
+class Vivienda(Base):
+    """Mapea cada vivienda individual o Unidad de Propiedad Exclusiva (UPE)."""
+    __tablename__ = "vivienda"
+    __table_args__ = {"schema": "satc_catalogo"}
+
+    vivienda_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    desarrollo_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id"), nullable=False)
+    regimen_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.regimen_condominio.regimen_id", ondelete="SET NULL"))
+    tipo_proyecto: Mapped[str] = mapped_column(String(30), default="REGIMEN_CONDOMINIO", nullable=False)
+    sm: Mapped[Optional[str]] = mapped_column(String(50))
+    mz: Mapped[str] = mapped_column(String(50), nullable=False)
+    lt: Mapped[str] = mapped_column(String(50), nullable=False)
+    edificio: Mapped[Optional[str]] = mapped_column(String(50))
+    vivienda: Mapped[str] = mapped_column(String(50), nullable=False)
+    numero_upe: Mapped[Optional[str]] = mapped_column(String(50))
+    calle: Mapped[Optional[str]] = mapped_column(String(200))
+    clave_catastral: Mapped[Optional[str]] = mapped_column(String(100))
+    cuenta_predial: Mapped[Optional[str]] = mapped_column(String(100))
+    descripcion: Mapped[Optional[str]] = mapped_column(Text)
+    estado_vivienda_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.estado_vivienda.estado_vivienda_id"), nullable=False)
+    estatus_obra: Mapped[str] = mapped_column(String(50), default="EN_CONSTRUCCION", nullable=False)
+    fecha_venta: Mapped[Optional[date]] = mapped_column(Date)
+    fecha_escrituracion: Mapped[Optional[date]] = mapped_column(Date)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Relaciones
+    desarrollo = relationship("Desarrollo", foreign_keys=[desarrollo_id])
+    regimen: Mapped[Optional[RegimenCondominio]] = relationship(back_populates="viviendas")
+    estado: Mapped[EstadoVivienda] = relationship()
+    tramites: Mapped[List["TramiteVivienda"]] = relationship(back_populates="vivienda", cascade="all, delete-orphan")
+
+
+class TramiteVivienda(Base):
+    """Mapea el expediente del ciclo de vida de un trámite por vivienda o régimen."""
+    __tablename__ = "tramite_vivienda"
+    __table_args__ = {"schema": "satc_produccion"}
+
+    tramite_vivienda_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    vivienda_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.vivienda.vivienda_id", ondelete="CASCADE"))
+    regimen_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.regimen_condominio.regimen_id", ondelete="CASCADE"))
+    tipo_tramite_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.tipo_tramite.tipo_tramite_id"), nullable=False)
+    estado_tramite_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.estado_tramite.estado_tramite_id"), nullable=False)
+    folio_pase_caja: Mapped[Optional[str]] = mapped_column(String(100))
+    folio_electronico: Mapped[Optional[str]] = mapped_column(String(100))
+    recibo_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_produccion.recibo_cancun.recibo_id", ondelete="SET NULL"))
+    factura_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_produccion.factura_cancun.factura_id", ondelete="SET NULL"))
+    orden_compra_erp: Mapped[Optional[str]] = mapped_column(String(50))
+    poliza_comprobacion_erp: Mapped[Optional[str]] = mapped_column(String(50))
+    comprobado_erp: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    fecha_inicio: Mapped[date] = mapped_column(Date, default=date.today, nullable=False)
+    fecha_conclusion: Mapped[Optional[date]] = mapped_column(Date)
+    usuario_responsable_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id", ondelete="SET NULL"))
+    observaciones: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Relaciones
+    vivienda: Mapped[Optional[Vivienda]] = relationship(back_populates="tramites")
+    regimen: Mapped[Optional[RegimenCondominio]] = relationship()
+    tipo_tramite: Mapped[TipoTramite] = relationship()
+    estado: Mapped[EstadoTramite] = relationship()
+    recibo: Mapped[Optional[ReciboCancun]] = relationship()
+    factura: Mapped[Optional[FacturaCancun]] = relationship()
+    usuario_responsable = relationship("Usuario", foreign_keys=[usuario_responsable_id])
+    requisitos: Mapped[List["RequisitoDocumento"]] = relationship(back_populates="tramite", cascade="all, delete-orphan")
+
+
+class RequisitoDocumento(Base):
+    """Mapea las evidencias documentales de un trámite resguardadas con hash SHA-256."""
+    __tablename__ = "requisito_documento"
+    __table_args__ = {"schema": "satc_produccion"}
+
+    documento_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    tramite_vivienda_id: Mapped[int] = mapped_column(ForeignKey("satc_produccion.tramite_vivienda.tramite_vivienda_id", ondelete="CASCADE"), nullable=False)
+    tipo_documento: Mapped[str] = mapped_column(String(50), nullable=False)
+    nombre_archivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    ruta_archivo: Mapped[str] = mapped_column(String(1000), nullable=False)
+    hash_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    tamano_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    fecha_emision: Mapped[Optional[date]] = mapped_column(Date)
+    fecha_vencimiento: Mapped[Optional[date]] = mapped_column(Date)
+    vigente: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    tramite: Mapped[TramiteVivienda] = relationship(back_populates="requisitos")
+

@@ -11,73 +11,71 @@
 
 ### 1.1 Propósito
 
-**SATC (Sistema de Automatización de Trámites Cancún)** es un sistema de automatización interno diseñado para eliminar el trabajo manual en el proceso de descarga de recibos electrónicos de la Tesorería Municipal de Cancún y la posterior generación de facturas electrónicas (CFDI).
+**SATC (Sistema de Automatización y Control de Trámites Cancún)** es la plataforma empresarial de gobernanza y automatización encargada de controlar el ciclo de vida completo de los trámites de cada vivienda —en desarrollos tipo **Fraccionamiento** y bajo **Régimen de Condominio (UPEs)**—, desde la detección de la necesidad administrativa/fiscal hasta la obtención de recibos, emisión de facturas CFDI y su debida comprobación contable contra el ERP corporativo.
 
-SATC (Sistema de Automatización de Trámites Cancún) automatiza:
-- Consulta de recibos por folio electrónico o folio pase de caja en `recibo.tesoreriacancun.com`.
-- Descarga, renombrado y organización de archivos PDF de recibos.
-- Extracción de datos estructurados del PDF hacia la base de datos.
-- Facturación electrónica automática en `benitojuarez.expidefactura.com`.
+SATC automatiza y gobierna:
+- Inventario y control de trámites por desarrollo, manzana, lote y Unidad de Propiedad Exclusiva (UPE).
+- Identificación proactiva de trámites faltantes y prevención de omisiones en etapas de construcción, venta y escrituración.
+- Consulta y descarga desasistida de recibos oficiales de Tesorería (`recibo.tesoreriacancun.com`).
+- Extracción estructurada y renombrado estandarizado de comprobantes PDF con sellos de integridad SHA-256.
+- Facturación electrónica CFDI automática en el portal fiscal (`benitojuarez.expidefactura.com`).
+- Conciliación trilateral entre Solicitud/Pago, Recibo Oficial, Factura SAT y Órdenes de Compra del ERP.
 
-### 1.2 Problema Actual
+### 1.2 Problema que Resuelve
 
-El proceso requiere actualmente:
-1. Recolectar folios impresos en recibos físicos.
-2. Acceder manualmente al portal de Tesorería Cancún.
-3. Capturar el folio uno por uno.
-4. Descargar el PDF de cada recibo.
-5. Renombrar y organizar los archivos manualmente.
-6. Capturar datos del recibo en hojas de cálculo.
-7. Acceder al portal de facturación con los datos capturados.
-8. Generar cada factura manualmente.
-
-Lo anterior genera:
-- Alto tiempo operativo.
-- Errores humanos en captura.
-- Falta de trazabilidad.
-- Dependencia de personal operativo.
+La operación inmobiliaria y fiscal enfrentaba los siguientes cuellos de botella:
+1. **Falta de Control Integral por Vivienda:** No existía visibilidad de qué trámites correspondían a cada lote o UPE en un régimen de condominio (ej. desarrollos con cientos de viviendas en un solo macro-lote).
+2. **Riesgo Crítico de Omisiones:** Omisiones en la individualización catastral o pago de derechos que retrasaban la escrituración y entrega a clientes.
+3. **Desconexión con el ERP:** Pagos municipales y facturas timbradas sin comprobación oportuna contra órdenes de compra o pólizas contables.
+4. **Carga Operativa Manual:** Consulta, descarga, extracción y facturación manual folio por folio en portales web municipales.
 
 ### 1.3 Objetivo Estratégico
 
-Automatizar completamente el ciclo: **Folio Recibo → PDF Descargado → Datos Capturados → Factura Generada**.
+Asegurar que el 100% de las viviendas cuenten con sus trámites controlados, sus evidencias documentales blindadas y sus obligaciones financieras conciliadas, reduciendo en más de un 85% la intervención manual mediante automatización robótica (RPA).
 
 ---
 
 ## 2. Principios Fundamentales
 
-**PF-001** — El folio electrónico es la entidad de ingreso del sistema.
+**PF-001** — La entidad soberana del negocio es la **VIVIENDA / UPE**, vinculada a su desarrollo, manzana, lote o régimen de condominio.
 
-**PF-002** — El recibo es la entidad principal de negocio.
+**PF-002** — Todo desarrollo bajo Régimen de Condominio debe declarar su macro-lote (MZ/LT) y su total de Unidades de Propiedad Exclusiva (UPEs) autorizadas.
 
-**PF-003** — Toda operación debe ser auditable.
+**PF-003** — El sistema debe prevenir proactivamente omisiones: no se permite avanzar a la fase de escrituración si existen trámites obligatorios incompletos o sin recibo oficial.
 
-**PF-004** — Ningún selector de portal debe estar hardcodeado en el código fuente. Todos viven en la base de datos (`localizador_portal`).
+**PF-004** — Toda operación crítica, descarga o facturación debe ser auditable y conservar evidencia digital con sellos SHA-256.
 
-**PF-005** — La ruta y convención de renombrado de PDFs debe ser configurable, no hardcodeada.
+**PF-005** — Ningún selector de portal debe estar hardcodeado en el código fuente (`satc_configuracion.localizador_portal`).
 
-**PF-006** — El correo electrónico del contribuyente vive en el catálogo de contribuyentes, asociado a su RFC.
+**PF-006** — La ruta y convención de renombrado de documentos PDF/XML debe ser configurable y organizada por jerarquía física (`Desarrollo/Manzana/Lote_o_UPE/Tramite`).
 
-**PF-007** — Una solicitud agrupa N folios. Puede originarse desde importación Excel o captura manual.
+**PF-007** — Todo recibo y factura timbrada debe mantener trazabilidad financiera con la Orden de Compra del ERP y su respectiva póliza contable de comprobación.
 
 ---
 
 ## 3. Arquitectura Conceptual
 
 ```
-SOLICITUD
-(lote de folios: Excel o Manual)
+DESARROLLO (Fraccionamiento o Régimen de Condominio)
     │
-    ▼
-FOLIO
-(unidad de trabajo de los Bots)
-    │
-    ▼
-RECIBO
-(datos extraídos del PDF descargado)
-    │
-    ▼
-FACTURA
-(CFDI generado en portal de facturación)
+    ├── Régimen de Condominio (MZ / LT / Total UPEs)
+    │        │
+    │        ▼
+    └── VIVIENDA / UPE (Unidad individual de control)
+             │
+             ▼
+        TRÁMITE DE VIVIENDA (Catálogo y Matriz de Obligaciones)
+             │
+             ├── [1] Solicitud / Pago / Orden de Compra ERP
+             │        │
+             │        ▼
+             ├── [2] Bot A: Descarga de Recibo Oficial (PDF + SHA256)
+             │        │
+             │        ▼
+             ├── [3] Bot C: Timbrado de Factura CFDI (PDF + XML)
+             │        │
+             │        ▼
+             └── [4] Comprobación Contable y Conciliación ERP (Póliza)
 ```
 
 ---

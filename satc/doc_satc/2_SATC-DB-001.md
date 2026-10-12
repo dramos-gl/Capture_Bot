@@ -22,15 +22,19 @@ Definir la estructura física definitiva de la base de datos `db_satc`, incluyen
 
 ## 2. Principios de Diseño
 
-**DBD-001** — La entidad principal del sistema es: `RECIBO`
+**DBD-001** — La entidad soberana del sistema es: `VIVIENDA` / `UNIDAD PRIVATIVA (UPE)`. Los recibos y facturas son documentos probatorios del ciclo de vida de dicha unidad.
 
-**DBD-002** — Los archivos PDF se almacenan fuera de la base de datos. La BD conserva: ruta, hash SHA256, nombre.
+**DBD-002** — Todo desarrollo bajo Régimen de Condominio debe declarar su macro-lote (MZ, LT) y su número de Unidades de Propiedad Exclusiva (`total_upes`), vinculando sus viviendas hijas mediante `regimen_id`.
 
-**DBD-003** — Toda operación crítica debe ser auditable.
+**DBD-003** — Los archivos PDF y XML se almacenan en sistema de archivos estructurado jerárquicamente (`Desarrollo/Manzana/Lote_o_UPE/`). La BD conserva: ruta, hash SHA256, nombre y fecha.
 
-**DBD-004** — Ningún selector de portal debe estar hardcodeado. Viven en `satc_configuracion.localizador_portal`.
+**DBD-004** — Toda operación crítica debe ser auditable en `satc_auditoria.bitacora_evento`.
 
-**DBD-005** — El correo del contribuyente vive en `satc_catalogo.contribuyente`.
+**DBD-005** — Ningún selector de portal debe estar hardcodeado. Viven en `satc_configuracion.localizador_portal`.
+
+**DBD-006** — El correo del contribuyente vive en `satc_catalogo.contribuyente` y se complementa con `sar_catalogo.rfc`.
+
+**DBD-007** — Trazabilidad ERP: Toda factura y recibo debe asociarse opcionalmente a un número de Orden de Compra (`orden_compra_erp`) y bandera de comprobación contable (`comprobado_erp`).
 
 ---
 
@@ -38,10 +42,10 @@ Definir la estructura física definitiva de la base de datos `db_satc`, incluyen
 
 ```text
 satc_configuracion   → Parámetros, localizadores de portales
-satc_catalogo        → Estados, contribuyentes
-satc_produccion      → Solicitudes, folios, recibos
-satc_archivo         → Facturas generadas
-satc_auditoria       → Bitácora de eventos y errores
+satc_catalogo        → Tipos de proyecto, regímenes de condominio, viviendas/UPEs, tipos de trámite, estados, contribuyentes
+satc_produccion      → Trámites de vivienda, solicitudes/órdenes, folios, recibos
+satc_archivo         → Facturas generadas (CFDI PDF/XML)
+satc_auditoria       → Bitácora de eventos, cambios y errores
 ```
 
 ---
@@ -113,35 +117,72 @@ satc_auditoria       → Bitácora de eventos y errores
 
 ## 5. Catálogos
 
-### Tabla: `satc_catalogo.estado_sistema`
-Catálogo de estados por entidad.
+### Tabla: `satc_catalogo.estado_vivienda`
+Catálogo dedicado para los estados del ciclo de vida físico, jurídico y comercial de la vivienda.
 
 | Campo | Tipo | Descripción |
 | :--- | :--- | :--- |
-| `estado_id` | BIGSERIAL PK | |
-| `entidad` | VARCHAR(100) NOT NULL | `SOLICITUD` / `FOLIO` / `RECIBO` |
-| `codigo` | VARCHAR(50) NOT NULL | Código del estado |
-| `descripcion` | VARCHAR(200) | |
+| `estado_vivienda_id` | BIGSERIAL PK | Identificador único |
+| `codigo` | VARCHAR(50) UNIQUE NOT NULL | Ej: `EN_CONSTRUCCION`, `EN_INDIVIDUALIZACION`, `ESCRITURADA` |
+| `nombre` | VARCHAR(100) NOT NULL | Nombre legible para UI |
+| `descripcion` | VARCHAR(250) | Explicación del estado |
+| `orden_flujo` | INTEGER NOT NULL | Secuencia lógica en el embudo (1 a 8) |
+| `permite_venta` | BOOLEAN DEFAULT FALSE | Candado comercial |
+| `permite_escrituracion` | BOOLEAN DEFAULT FALSE | Candado notarial estricto |
+| `activo` | BOOLEAN DEFAULT TRUE | |
 
-Restricción: `UNIQUE(entidad, codigo)`
+**Seed de estados de vivienda:**
+1. `PROYECTADA` (Orden 1, permite_venta: FALSE, permite_escrituracion: FALSE)
+2. `EN_CONSTRUCCION` (Orden 2, permite_venta: FALSE, permite_escrituracion: FALSE)
+3. `EN_INDIVIDUALIZACION` (Orden 3, permite_venta: FALSE, permite_escrituracion: FALSE)
+4. `LISTA_PARA_VENTA` (Orden 4, permite_venta: TRUE, permite_escrituracion: FALSE)
+5. `EN_ESCRITURACION` (Orden 5, permite_venta: TRUE, permite_escrituracion: FALSE)
+6. `ESCRITURADA` (Orden 6, permite_venta: TRUE, permite_escrituracion: TRUE)
+7. `EN_GARANTIA` (Orden 7, permite_venta: FALSE, permite_escrituracion: TRUE)
+8. `CONCLUIDA` (Orden 8, permite_venta: FALSE, permite_escrituracion: TRUE)
 
-**Seed de estados:**
+---
 
-| Entidad | Código | Descripción |
+### Tabla: `satc_catalogo.estado_tramite`
+Catálogo dedicado para los estados operativos, documentales y financieros de cada trámite.
+
+| Campo | Tipo | Descripción |
 | :--- | :--- | :--- |
-| `SOLICITUD` | `NUEVA` | Solicitud recién creada |
-| `SOLICITUD` | `EN_PROCESO` | Bot procesando folios |
-| `SOLICITUD` | `COMPLETADA` | Todos los folios procesados |
-| `SOLICITUD` | `CON_ERRORES` | Completada con errores parciales |
-| `FOLIO` | `PENDIENTE` | Folio en espera de descarga |
-| `FOLIO` | `DESCARGANDO` | Bot descargando recibo |
-| `FOLIO` | `DESCARGADO` | Recibo descargado correctamente |
-| `FOLIO` | `ERROR_DESCARGA` | Error al descargar el recibo |
-| `RECIBO` | `CAPTURADO` | Datos extraídos y guardados |
-| `RECIBO` | `PENDIENTE_FACTURAR` | Listo para facturación |
-| `RECIBO` | `FACTURANDO` | Bot generando factura |
-| `RECIBO` | `FACTURADO` | Factura generada exitosamente |
-| `RECIBO` | `ERROR_FACTURA` | Error en proceso de facturación |
+| `estado_tramite_id` | BIGSERIAL PK | Identificador único |
+| `codigo` | VARCHAR(50) UNIQUE NOT NULL | Ej: `NO_INICIADO`, `INGRESADO_MUNICIPIO`, `FACTURADO`, `COMPROBADO_ERP` |
+| `nombre` | VARCHAR(100) NOT NULL | Nombre legible |
+| `fase` | VARCHAR(50) NOT NULL | `PREVENTIVA`, `DOCUMENTAL`, `OPERATIVA`, `AUTOMATIZADA`, `FINANCIERA`, `CIERRE` |
+| `es_bloqueante` | BOOLEAN DEFAULT TRUE | Si detiene el avance de la vivienda a la siguiente etapa |
+| `es_terminal` | BOOLEAN DEFAULT FALSE | Si representa la conclusión exitosa del trámite |
+| `activo` | BOOLEAN DEFAULT TRUE | |
+
+**Seed de estados de trámite:**
+1. `NO_INICIADO` (Fase: PREVENTIVA, bloqueante: TRUE, terminal: FALSE)
+2. `REQUISITOS_PENDIENTES` (Fase: DOCUMENTAL, bloqueante: TRUE, terminal: FALSE)
+3. `INGRESADO_MUNICIPIO` (Fase: OPERATIVA, bloqueante: TRUE, terminal: FALSE)
+4. `OBSERVADO` (Fase: OPERATIVA, bloqueante: TRUE, terminal: FALSE)
+5. `ORDEN_COMPRA_ERP` (Fase: FINANCIERA, bloqueante: TRUE, terminal: FALSE)
+6. `PAGO_EMITIDO` (Fase: FINANCIERA, bloqueante: TRUE, terminal: FALSE)
+7. `RECIBO_DESCARGADO` (Fase: AUTOMATIZADA, bloqueante: TRUE, terminal: FALSE) — *Bot A*
+8. `FACTURADO` (Fase: AUTOMATIZADA, bloqueante: FALSE, terminal: FALSE) — *Bot C*
+9. `COMPROBADO_ERP` (Fase: FINANCIERA, bloqueante: FALSE, terminal: FALSE) — *ERP Póliza*
+10. `CONCLUIDO` (Fase: CIERRE, bloqueante: FALSE, terminal: TRUE)
+
+---
+
+### Tabla: `satc_catalogo.tipo_tramite`
+Catálogo maestro de trámites disponibles por vivienda o régimen.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `tipo_tramite_id` | BIGSERIAL PK | Identificador único |
+| `codigo` | VARCHAR(50) UNIQUE NOT NULL | Ej: `INDIVIDUALIZACION_CATASTRAL`, `NO_ADEUDO_PREDIAL` |
+| `nombre` | VARCHAR(200) NOT NULL | Nombre descriptivo |
+| `aplica_a` | VARCHAR(30) NOT NULL | `REGIMEN_MATRIZ`, `VIVIENDA_INDIVIDUAL`, `AMBOS` |
+| `etapa_disparador` | VARCHAR(30) NOT NULL | `CONSTRUCCION`, `VENTA`, `ESCRITURACION` |
+| `dias_vigencia` | INTEGER DEFAULT 0 | Días de vigencia del documento (0 = sin caducidad) |
+| `es_obligatorio` | BOOLEAN DEFAULT TRUE | Si bloquea la fase de escrituración |
+| `activo` | BOOLEAN DEFAULT TRUE | |
 
 ---
 
@@ -160,7 +201,103 @@ Catálogo de contribuyentes. Fuente del correo para facturación.
 
 ---
 
+### Tabla: `satc_catalogo.regimen_condominio`
+Gobierna los macro-lotes que constituyen un Régimen en Condominio con $N$ UPEs.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `regimen_id` | BIGSERIAL PK | Identificador único del régimen |
+| `desarrollo_id` | BIGINT FK NOT NULL | Desarrollo inmobiliario matriz (`sar_catalogo.desarrollo`) |
+| `nombre_regimen` | VARCHAR(200) NOT NULL | Ej: "REGIMEN AURA NOVA PLAYA MZ1 LT1" |
+| `sm` | VARCHAR(50) | Supermanzana |
+| `mz` | VARCHAR(50) NOT NULL | Manzana física |
+| `lt` | VARCHAR(50) NOT NULL | Lote físico |
+| `total_upes` | INTEGER NOT NULL | Número total de UPEs autorizadas (ej: 577) |
+| `upes_generadas` | INTEGER NOT NULL DEFAULT 0 | Contador de UPEs dadas de alta en el sistema |
+| `licencia_construccion_matriz` | VARCHAR(100) | Folio de la licencia de construcción general |
+| `clave_catastral_matriz` | VARCHAR(100) | Clave catastral del macro-lote previo a individualizar |
+| `activo` | BOOLEAN DEFAULT TRUE | |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | |
+| `updated_at` | TIMESTAMPTZ | |
+
+---
+
+### Tabla: `satc_catalogo.vivienda`
+Unidad individual de control de trámites (Lote individual en fraccionamiento o UPE en régimen de condominio).
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `vivienda_id` | BIGSERIAL PK | Identificador único de la vivienda / UPE |
+| `desarrollo_id` | BIGINT FK NOT NULL | Desarrollo al que pertenece (`sar_catalogo.desarrollo`) |
+| `regimen_id` | BIGINT FK NULL | Régimen en condominio (`satc_catalogo.regimen_condominio`). NULL si es Fraccionamiento |
+| `tipo_proyecto` | VARCHAR(30) NOT NULL | `FRACCIONAMIENTO` / `REGIMEN_CONDOMINIO` |
+| `sm` | VARCHAR(50) NULL | Supermanzana (heredada de régimen o directa de lote) |
+| `mz` | VARCHAR(50) NOT NULL | Manzana física |
+| `lt` | VARCHAR(50) NOT NULL | Lote físico |
+| `edificio` | VARCHAR(50) NULL | Edificio / Torre / Clúster (ej. "Torre A", "Edif 2", NULL si unifamiliar) |
+| `vivienda` | VARCHAR(50) NOT NULL | Número de vivienda, casa o interior (ej. "101", "Casa 4", "Depto 3B") |
+| `numero_upe` | VARCHAR(50) NULL | Consecutivo de Unidad de Propiedad Exclusiva (ej: "UPE-001" a "UPE-577") |
+| `calle` | VARCHAR(200) NULL | Nombre de la vialidad, calle o avenida |
+| `clave_catastral` | VARCHAR(100) NULL | Clave catastral individualizada asignada por Catastro |
+| `cuenta_predial` | VARCHAR(100) NULL | Número de cuenta de impuesto predial individual |
+| `descripcion` | TEXT NULL | Notas descriptivas de la vivienda (orientación, prototipo, etc.) |
+| `estado_vivienda_id` | BIGINT FK NOT NULL | Estado actual de la vivienda (`satc_catalogo.estado_vivienda`) |
+| `estatus_obra` | VARCHAR(50) DEFAULT 'EN_CONSTRUCCION' | `EN_CONSTRUCCION`, `TERMINADA`, `ENTREGADA` |
+| `fecha_venta` | DATE NULL | Fecha de contrato de compraventa |
+| `fecha_escrituracion` | DATE NULL | Fecha de firma notarial |
+| `activo` | BOOLEAN DEFAULT TRUE | |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | |
+| `updated_at` | TIMESTAMPTZ | |
+
+---
+
 ## 6. Producción
+
+### Tabla: `satc_produccion.tramite_vivienda`
+Instancia del ciclo de vida de un trámite asociado a una vivienda individual o macro-régimen.
+Gobierna el estado operativo, documental y financiero.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `tramite_vivienda_id` | BIGSERIAL PK | |
+| `vivienda_id` | BIGINT FK NULL | Vivienda o UPE asociada (NULL si es trámite matriz) |
+| `regimen_id` | BIGINT FK NULL | Régimen asociado (si aplica) |
+| `tipo_tramite_id` | BIGINT FK NOT NULL | Tipo de trámite (`satc_catalogo.tipo_tramite`) |
+| `estado_tramite_id` | BIGINT FK NOT NULL | Estado actual del trámite (`satc_catalogo.estado_tramite`) |
+| `folio_pase_caja` | VARCHAR(100) NULL | Folio de pago municipal previo |
+| `folio_electronico` | VARCHAR(100) NULL | Folio emitido por Tesorería |
+| `recibo_id` | BIGINT FK NULL | Recibo oficial asociado (`satc_produccion.recibo_cancun`) |
+| `factura_id` | BIGINT FK NULL | Factura CFDI timbrada (`satc_produccion.factura_cancun`) |
+| `orden_compra_erp` | VARCHAR(50) NULL | Orden de Compra registrada en el ERP |
+| `poliza_comprobacion_erp` | VARCHAR(50) NULL | Folio de póliza contable de comprobación en ERP |
+| `comprobado_erp` | BOOLEAN DEFAULT FALSE | Bandera de cierre financiero en ERP |
+| `fecha_inicio` | DATE DEFAULT CURRENT_DATE | Fecha de apertura de gestión |
+| `fecha_conclusion` | DATE NULL | Fecha de obtención de documento final / cierre |
+| `usuario_responsable_id` | BIGINT FK NULL | Gestor o tramitador asignado |
+| `observaciones` | TEXT NULL | Notas de seguimiento |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | |
+| `updated_at` | TIMESTAMPTZ | |
+
+---
+
+### Tabla: `satc_produccion.requisito_documento`
+Expediente digital de evidencias documentales (planos, acuses, constancias, cédulas).
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `documento_id` | BIGSERIAL PK | |
+| `tramite_vivienda_id` | BIGINT FK NOT NULL | Trámite al que pertenece la evidencia |
+| `tipo_documento` | VARCHAR(50) NOT NULL | `PLANO`, `ACUSE_INGRESO`, `CEDULA_CATASTRAL`, `CERTIFICADO_NO_ADEUDO`, `OTRO` |
+| `nombre_archivo` | VARCHAR(255) NOT NULL | Nombre físico del archivo |
+| `ruta_archivo` | VARCHAR(1000) NOT NULL | Ruta física o URI en almacenamiento central |
+| `hash_sha256` | VARCHAR(64) NOT NULL | Sello criptográfico de integridad |
+| `tamano_bytes` | BIGINT NOT NULL | Tamaño del archivo |
+| `fecha_emision` | DATE NULL | Fecha del documento |
+| `fecha_vencimiento` | DATE NULL | Fecha límite de vigencia (alerta de caducidad) |
+| `vigente` | BOOLEAN DEFAULT TRUE | Estado de validez del documento |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | |
+
+---
 
 ### Tabla: `satc_produccion.solicitud`
 Agrupa un conjunto de folios a procesar. Análogo a `sar_produccion.solicitud`.

@@ -18,21 +18,25 @@
 | **SATC-TEC-001** | Arquitectura Técnica | Arquitectura de Solución | [4_SATC-TEC-001.md](4_SATC-TEC-001.md) |
 | **SATC-RPA-001** | Resiliencia, Captcha & UX Portal Cancún | Automatización & RPA | [5_SATC-RPA-001.md](5_SATC-RPA-001.md) |
 | **SATC-AISLAMIENTO-001** | Principio de Aislamiento Estricto | Arquitectura y Coexistencia | [6_SATC-AISLAMIENTO-001.md](6_SATC-AISLAMIENTO-001.md) |
+| **SATC-CICLO-VIDA-001** | Ciclo de Vida de Trámites por Vivienda (UPEs) | Gobernanza & Ciclo de Vida | [7_SATC-CICLO-VIDA-001.md](7_SATC-CICLO-VIDA-001.md) |
 
 ---
 
 ## Visión General del Sistema
 
-El **SATC (Sistema de Automatización de Trámites Cancún)** es la plataforma empresarial encargada de la gestión, orquestación y automatización (RPA) de trámites administrativos y fiscales de Cancún. Agrupa un módulo de **Control y Orquestación** junto a módulos bot especializados:
+El **SATC (Sistema de Automatización y Control de Trámites Cancún)** es la plataforma empresarial de gobernanza y automatización encargada del **control y seguimiento integral del ciclo de vida de los trámites de cada vivienda** (en Fraccionamientos y Regímenes de Condominio con UPEs), articulando:
 
-### 🎛️ Módulo de Control y Orquestación
-Gestión de lotes de entrada (Excel/PDF/Manual), validación de RFCs, asignación a ordenes de trabajo y monitoreo de estado en tiempo real.
+### 🏢 Módulo de Gobernanza de Viviendas y Regímenes (UPEs)
+Control de catálogo territorial: Desarrollos, Manzanas, Lotes, Regímenes en Condominio (ej. macro-lotes con $N$ UPEs como Aura Nova Playa MZ 1 LT 1 con 577 UPEs) e inventario individual de viviendas.
+
+### 📋 Módulo de Matriz de Trámites y Prevención de Omisiones
+Motor de reglas que determina qué trámites corresponden a cada vivienda según su avance (Construcción, Venta, Escrituración), emite alertas de documentos faltantes y previene la escrituración con adeudos.
 
 ### 🤖 Bot A — Descarga de Recibos Electrónicos
-Automatiza la consulta y descarga de recibos electrónicos desde el portal **recibo.tesoreriacancun.com**, a partir de folios electrónicos o folios pase de caja. Extrae los datos del PDF descargado y los registra en el esquema `satc_produccion`.
+Automatiza la consulta y descarga de recibos oficiales desde **recibo.tesoreriacancun.com**, renombrando, sellando con hash SHA-256 e integrando los datos estructurados en la base de datos.
 
-### 🤖 Bot C — Facturación Electrónica
-A partir de los datos capturados en la fase del Bot A, automatiza el proceso de facturación en el portal **benitojuarez.expidefactura.com**, completando el ciclo: Recibo → Factura.
+### 🤖 Bot C — Facturación Electrónica (CFDI)
+A partir de los recibos descargados, automatiza el timbrado y descarga de PDF/XML en **benitojuarez.expidefactura.com**, completando la conciliación y dejando los comprobantes listos para el ERP.
 
 ---
 
