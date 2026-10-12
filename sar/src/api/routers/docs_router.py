@@ -1100,6 +1100,11 @@ class LoteAsignacionCreateRequest(BaseModel):
     solo_reservar: bool = False
     asignar_directo: bool = False
 
+class LoteRevertirRequest(BaseModel):
+    lote_asignacion_id: int
+    usuario_id: int
+    motivo: str
+
 class LoteValidarRequest(BaseModel):
     parsed_rows: List[dict]
     default_rfc_id: Optional[int] = None
@@ -1392,6 +1397,22 @@ def create_lote_asignacion(request: LoteAsignacionCreateRequest, db: Session = D
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/inventario/lotes/{lote_id}/revertir")
+def revert_lote_asignacion(lote_id: int, request: LoteRevertirRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        res = repo.revertir_lote_asignacion(
+            lote_asignacion_id=lote_id,
+            usuario_id=request.usuario_id,
+            motivo=request.motivo
+        )
+        db.commit()
+        return res
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/inventario/lotes/validar")
 def api_validar_lote(request: LoteValidarRequest, db: Session = Depends(get_db)):
     from sar.src.services.excel_inventory_handler import ExcelInventoryHandler
@@ -1511,10 +1532,20 @@ def get_referencias_disponibles_filtro(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/inventario/lotes/destinatarios")
+def get_destinatarios_con_asignaciones(tipo_destino: Optional[str] = None, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        return repo.get_destinatarios_con_asignaciones(tipo_destino=tipo_destino)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/inventario/lotes/filtrados")
 def get_lotes_asignacion_filtered(
     search: Optional[str] = None,
     tipo_destino: Optional[str] = None,
+    destinatario_id: Optional[int] = None,
     limit: int = 50,
     offset: int = 0,
     start_date: Optional[str] = None,
@@ -1528,7 +1559,8 @@ def get_lotes_asignacion_filtered(
     try:
         repo = InventarioRepository(db)
         lotes, total = repo.get_lotes_asignacion_filtered(
-            search=search, tipo_destino=tipo_destino, limit=limit, offset=offset,
+            search=search, tipo_destino=tipo_destino, destinatario_id=destinatario_id,
+            limit=limit, offset=offset,
             start_date=start_date, end_date=end_date, orden_ids=orden_ids
         )
         return {"lotes": lotes, "total": total}

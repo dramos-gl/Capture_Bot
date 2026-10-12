@@ -465,6 +465,157 @@ class CatalogoRepository(BaseRepository):
         self.session.flush()
         return de
 
+    def get_ubicaciones_by_desarrollo(self, desarrollo_id: int) -> List[Dict[str, Any]]:
+        """Retorna todas las ubicaciones existentes registradas para un desarrollo ordenadas."""
+        from sar.src.storage.models import Ubicacion
+        stmt = (
+            select(Ubicacion)
+            .where(Ubicacion.desarrollo_id == desarrollo_id)
+            .order_by(Ubicacion.sm, Ubicacion.mz, Ubicacion.lote, Ubicacion.edif, Ubicacion.viv)
+        )
+        ubis = self.session.execute(stmt).scalars().all()
+        return [
+            {
+                "ubicacion_id": u.ubicacion_id,
+                "desarrollo_id": u.desarrollo_id,
+                "sm": u.sm or "",
+                "mz": u.mz or "",
+                "lote": u.lote or "",
+                "edif": u.edif or "",
+                "viv": u.viv or "",
+                "no_oficial": u.no_oficial or "",
+                "descripcion": u.descripcion or "",
+                "created_at": u.created_at.strftime("%Y-%m-%d %H:%M") if u.created_at else ""
+            }
+            for u in ubis
+        ]
+
+    def importar_catalogo_ubicaciones(
+        self, desarrollo_id: int, records: List[Dict[str, Any]], usuario_id: int, sesion_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Importa en lote una cuadrícula de ubicaciones/viviendas con deduplicación y actualización segura."""
+        from sar.src.storage.models import Ubicacion, Desarrollo
+        from sqlalchemy import func
+        from datetime import datetime
+
+        des = self.session.get(Desarrollo, desarrollo_id)
+        if not des:
+            raise ValueError(f"El desarrollo con ID {desarrollo_id} no existe.")
+
+        # Obtener todas las ubicaciones existentes para deduplicación rápida en memoria O(1)
+        stmt_exist = select(Ubicacion).where(Ubicacion.desarrollo_id == desarrollo_id)
+        existentes = self.session.execute(stmt_exist).scalars().all()
+        
+        # Mapeo por clave normalizada (sm, mz, lote, edif, viv, no_oficial)
+        def _make_key(sm, mz, lt, ed, vi, no):
+            return (
+                (sm.strip().upper() if sm else "") or "",
+                (mz.strip().upper() if mz else "") or "",
+                (lt.strip().upper() if lt else "") or "",
+                (ed.strip().upper() if ed else "") or "",
+                (vi.strip().upper() if vi else "") or "",
+                (no.strip().upper() if no else "") or ""
+            )
+
+        map_existentes = {
+            _make_key(u.sm, u.mz, u.lote, u.edif, u.viv, u.no_oficial): u
+            for u in existentes
+        }
+
+        def _strip_spaces(val):
+            if not val:
+                return None
+            clean = "".join(str(val).split()).upper()
+            return clean if clean else None
+
+        insertadas = 0
+        actualizadas = 0
+        omitidas = 0
+        detalles_procesados = []
+
+        for r in records:
+            sm = _strip_spaces(r.get("sm"))
+            mz = _strip_spaces(r.get("mz"))
+            lt = _strip_spaces(r.get("lote"))
+            ed = _strip_spaces(r.get("edif"))
+            vi = _strip_spaces(r.get("viv"))
+            no_oficial = _strip_spaces(r.get("no_oficial"))
+            desc = str(r.get("descripcion", "") or "").strip() or None
+
+            # Validación de integridad mínima: al menos debe tener mz o lt o no_oficial
+            if not any([mz, lt, no_oficial]):
+                omitidas += 1
+                continue
+
+            k = _make_key(sm, mz, lt, ed, vi, no_oficial)
+            if k in map_existentes:
+                # Ya existe exactamente la misma ubicación (sm, mz, lote, edif, viv, no_oficial):
+                # Si viene una nueva descripción y la actual estaba vacía, se actualiza; si no, se omite por duplicado
+                ubi_exist = map_existentes[k]
+                modificado = False
+                if desc and not ubi_exist.descripcion:
+                    ubi_exist.descripcion = desc
+                    modificado = True
+                if modificado:
+                    actualizadas += 1
+                else:
+                    omitidas += 1
+            else:
+                # Nuevo predio a registrar
+                nueva_ubi = Ubicacion(
+                    desarrollo_id=desarrollo_id,
+                    sm=sm,
+                    mz=mz,
+                    lote=lt,
+                    edif=ed,
+                    viv=vi,
+                    no_oficial=no_oficial,
+                    descripcion=desc
+                )
+                self.session.add(nueva_ubi)
+                map_existentes[k] = nueva_ubi
+                insertadas += 1
+
+        self.session.flush()
+
+        # Registro de auditoría
+        try:
+            audit_repo = AuditRepository(self.session)
+            audit_repo.log_evento(
+                evento_codigo="ACTUALIZACION",
+                modulo="PROCESOS_ESPECIALES",
+                usuario_id=usuario_id,
+                sesion_id=sesion_id,
+                valor_nuevo={
+                    "accion": "IMPORTAR_CATALOGO_UBICACIONES",
+                    "desarrollo_id": desarrollo_id,
+                    "desarrollo_nombre": des.nombre,
+                    "total_analizados": len(records),
+                    "insertadas": insertadas,
+                    "actualizadas": actualizadas,
+                    "omitidas": omitidas
+                },
+                detalle={
+                    "desarrollo_nombre": des.nombre,
+                    "insertadas": insertadas,
+                    "actualizadas": actualizadas
+                }
+            )
+            self.session.flush()
+        except Exception:
+            pass
+
+        return {
+            "desarrollo_id": desarrollo_id,
+            "desarrollo_nombre": des.nombre,
+            "total_analizados": len(records),
+            "insertadas": insertadas,
+            "actualizadas": actualizadas,
+            "omitidas": omitidas,
+            "total_vigentes": len(map_existentes)
+        }
+
+
 
 
 class OperacionRepository(BaseRepository):
@@ -547,33 +698,41 @@ class OperacionRepository(BaseRepository):
         if orden_ids is not None and len(orden_ids) == 0:
             return []
         
-        # Get the ID of the 'FACTURADA' state for references precisely
-        fact_join = """
-            LEFT JOIN (
-                SELECT r.solicitud_id, COUNT(r.referencia_id) AS cant_fact
-                FROM sar_produccion.referencia r
-                JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id
-                WHERE esr.entidad = 'referencia' AND esr.codigo = 'FACTURADA'
-                GROUP BY r.solicitud_id
-            ) fact ON v.solicitud_id = fact.solicitud_id
-        """
-
         if orden_ids:
+            fact_join = """
+                LEFT JOIN (
+                    SELECT r.solicitud_id, COUNT(r.referencia_id) AS cant_fact
+                    FROM sar_produccion.referencia r
+                    JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+                    JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id
+                    WHERE esr.entidad = 'referencia' AND esr.codigo = 'FACTURADA'
+                      AND gr.orden_id IN :orden_ids_param
+                    GROUP BY r.solicitud_id
+                ) fact ON v.solicitud_id = fact.solicitud_id
+            """
             stmt = text(f"""
                 SELECT v.*, COALESCE(fact.cant_fact, 0) AS cantidad_facturada
                 FROM sar_produccion.vw_solicitudes_detalle v
                 JOIN sar_produccion.grupo_referencia gr ON v.grupo_id = gr.grupo_id
                 {fact_join}
                 WHERE gr.orden_id IN :orden_ids_param
-                ORDER BY v.grupo_id ASC, v.solicitud_id ASC
+                ORDER BY v.solicitud_id DESC, v.grupo_id DESC
             """)
             result = self.session.execute(stmt, {"orden_ids_param": tuple(orden_ids)})
         else:
-            stmt = text(f"""
-                SELECT v.*, COALESCE(fact.cant_fact, 0) AS cantidad_facturada
+            # Subquery correlacionado acotado por solicitud_id usando índices sin escanear toda la tabla
+            stmt = text("""
+                SELECT v.*,
+                    COALESCE((
+                        SELECT COUNT(r.referencia_id)
+                        FROM sar_produccion.referencia r
+                        JOIN sar_catalogo.estado_sistema esr ON r.estado_id = esr.estado_id
+                        WHERE r.solicitud_id = v.solicitud_id
+                          AND esr.entidad = 'referencia'
+                          AND esr.codigo = 'FACTURADA'
+                    ), 0) AS cantidad_facturada
                 FROM sar_produccion.vw_solicitudes_detalle v
-                {fact_join}
-                ORDER BY v.grupo_id ASC, v.solicitud_id ASC
+                ORDER BY v.solicitud_id DESC, v.grupo_id DESC
             """)
             result = self.session.execute(stmt)
         res = []
@@ -2583,6 +2742,7 @@ class InventarioRepository(BaseRepository):
 
         estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
         estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
+        estado_facturada_id = self._get_estado_id("referencia", "FACTURADA")
         target_estado_id = estado_reservada_id if solo_reservar else estado_asignada_id
 
         # Load concepts map
@@ -2601,7 +2761,19 @@ class InventarioRepository(BaseRepository):
             seen_ref_ids.add(ref_id)
 
             ref = self.session.get(Referencia, ref_id)
-            
+            if not ref:
+                raise ValueError(f"La referencia con ID {ref_id} no existe en la base de datos.")
+
+            # Sanity Check Pre-Commit: Verificar que el folio siga disponible
+            # En modos estándar/directo/reservar: debe estar en FACTURADA (o RESERVADA si es completar lote)
+            if not solo_reservar:
+                # Si no es completar lote (modo estándar/directo), debe ser FACTURADA o RESERVADA del mismo trámite
+                if ref.estado_id == estado_asignada_id:
+                    raise ValueError(f"Conflicto de concurrencia: La referencia '{ref.referencia_portal}' ya fue asignada por otro usuario.")
+            elif solo_reservar:
+                if ref.estado_id != estado_facturada_id:
+                    raise ValueError(f"Conflicto de concurrencia: La referencia '{ref.referencia_portal}' no se encuentra en estado disponible ('FACTURADA') para reservar.")
+
             # Resolve keys
             rfc_id = ref.grupo.rfc_id if (ref and ref.grupo) else 1
             concepto_id = ref.grupo.concepto_id if (ref and ref.grupo) else concepts_map.get(d.get("concepto_solicitado"), 3)
@@ -2660,11 +2832,17 @@ class InventarioRepository(BaseRepository):
             folio_val = None
             pa_val = None
             if not solo_reservar and tipo_destino != "COLABORADOR":
-                sm_val = d.get("sm").strip().upper() if d.get("sm") else None
-                mz_val = d.get("mz").strip().upper() if d.get("mz") else None
-                lote_val = d.get("lote").strip().upper() if d.get("lote") else None
-                edif_val = d.get("edif").strip().upper() if d.get("edif") else None
-                viv_val = d.get("viv").strip().upper() if d.get("viv") else None
+                def _strip_spaces(val):
+                    if not val:
+                        return None
+                    clean = "".join(str(val).split()).upper()
+                    return clean if clean else None
+
+                sm_val = _strip_spaces(d.get("sm"))
+                mz_val = _strip_spaces(d.get("mz"))
+                lote_val = _strip_spaces(d.get("lote"))
+                edif_val = _strip_spaces(d.get("edif"))
+                viv_val = _strip_spaces(d.get("viv"))
                 raw_cli = d.get("cliente")
                 cliente_val = raw_cli.strip().upper() if raw_cli and str(raw_cli).strip() else None
                 raw_folio = d.get("no_oficial") or d.get("folio_electronico")
@@ -2676,15 +2854,15 @@ class InventarioRepository(BaseRepository):
                     from sqlalchemy import func
                     dup_stmt = select(Ubicacion).filter(
                         Ubicacion.desarrollo_id == desarrollo_id,
-                        func.upper(func.trim(Ubicacion.mz)) == mz_val,
-                        func.upper(func.trim(Ubicacion.lote)) == lote_val
+                        func.upper(func.replace(func.coalesce(Ubicacion.mz, ''), ' ', '')) == mz_val,
+                        func.upper(func.replace(func.coalesce(Ubicacion.lote, ''), ' ', '')) == lote_val
                     )
                     if sm_val:
-                        dup_stmt = dup_stmt.filter(func.upper(func.trim(Ubicacion.sm)) == sm_val)
+                        dup_stmt = dup_stmt.filter(func.upper(func.replace(func.coalesce(Ubicacion.sm, ''), ' ', '')) == sm_val)
                     if edif_val:
-                        dup_stmt = dup_stmt.filter(func.upper(func.trim(Ubicacion.edif)) == edif_val)
+                        dup_stmt = dup_stmt.filter(func.upper(func.replace(func.coalesce(Ubicacion.edif, ''), ' ', '')) == edif_val)
                     if viv_val:
-                        dup_stmt = dup_stmt.filter(func.upper(func.trim(Ubicacion.viv)) == viv_val)
+                        dup_stmt = dup_stmt.filter(func.upper(func.replace(func.coalesce(Ubicacion.viv, ''), ' ', '')) == viv_val)
                     
                     ubi = self.session.execute(dup_stmt).scalars().first()
 
@@ -2770,6 +2948,83 @@ class InventarioRepository(BaseRepository):
         self.session.flush()
         return lote.lote_asignacion_id
 
+    def revertir_lote_asignacion(self, lote_asignacion_id: int, usuario_id: int, motivo: str) -> Dict[str, Any]:
+        """Safely rolls back an entire assignment or reservation lote.
+        
+        Validates:
+        1. The lote exists.
+        2. None of the references have been used in downstream R2F/billing workflows.
+        3. Restores references to FACTURADA (or prior state).
+        4. Marks AsignacionReferencia records as CANCELADO.
+        5. Audits the action in the system audit log.
+        """
+        from sar.src.storage.models import LoteAsignacion, LoteDetalle, AsignacionReferencia, Referencia, AuditoriaEvento
+        from sqlalchemy import select, update
+        import datetime
+
+        lote = self.session.get(LoteAsignacion, lote_asignacion_id)
+        if not lote:
+            raise ValueError(f"El lote de asignación #{lote_asignacion_id} no existe.")
+
+        estado_facturada_id = self._get_estado_id("referencia", "FACTURADA")
+        estado_cancelado_asig_id = self._get_estado_id("asignacion_referencia", "CANCELADO") or 92
+
+        # Fetch all AsignacionReferencia for this lote
+        asig_stmt = (
+            select(AsignacionReferencia, Referencia)
+            .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
+            .join(Referencia, AsignacionReferencia.referencia_id == Referencia.referencia_id)
+            .where(LoteDetalle.lote_asignacion_id == lote_asignacion_id)
+        )
+        records = self.session.execute(asig_stmt).all()
+        if not records:
+            raise ValueError(f"El lote #{lote_asignacion_id} no contiene referencias asociadas.")
+
+        # Validate that no reference has been used downstream (e.g. UTILIZADA or FACTURADA_R2F)
+        estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
+        estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
+        allowed_states = {estado_asignada_id, estado_reservada_id}
+
+        conflict_refs = []
+        for asig, ref in records:
+            if ref.estado_id not in allowed_states:
+                conflict_refs.append(ref.referencia_portal)
+
+        if conflict_refs:
+            raise ValueError(
+                f"No se puede revertir el lote #{lote_asignacion_id}. "
+                f"Las siguientes referencias ya fueron utilizadas o cambiaron de estado: {', '.join(conflict_refs[:5])}"
+            )
+
+        # Restore references to FACTURADA and mark assignments as CANCELADO
+        reverted_count = 0
+        for asig, ref in records:
+            ref.estado_id = estado_facturada_id
+            asig.estado_id = estado_cancelado_asig_id
+            asig.observaciones = f"{asig.observaciones or ''} [REVERTIDO: {motivo}]".strip()
+            reverted_count += 1
+
+        # Audit log event
+        audit = AuditoriaEvento(
+            usuario_id=usuario_id,
+            accion="REVERTIR_LOTE_ASIGNACION",
+            modulo="INVENTARIO_ASIGNACION",
+            detalle={
+                "lote_asignacion_id": lote_asignacion_id,
+                "motivo": motivo,
+                "total_referencias_revertidas": reverted_count,
+                "fecha": datetime.datetime.now().isoformat()
+            }
+        )
+        self.session.add(audit)
+        self.session.flush()
+
+        return {
+            "lote_id": lote_asignacion_id,
+            "reverted_count": reverted_count,
+            "message": f"Se revirtió exitosamente el lote #{lote_asignacion_id} con {reverted_count} referencias devueltas a FACTURADA."
+        }
+
     def get_lotes_asignacion(self) -> List[dict]:
         from sqlalchemy import text
         stmt = text("""
@@ -2808,17 +3063,58 @@ class InventarioRepository(BaseRepository):
             for row in results
         ]
 
+    def get_destinatarios_con_asignaciones(self, tipo_destino: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Returns only Notarias or Colaboradores that actually have assignment records in sar_archivo.lote_asignacion."""
+        from sqlalchemy import text
+        results = []
+        if not tipo_destino or tipo_destino == "NOTARIA":
+            stmt_notarias = text("""
+                SELECT DISTINCT n.notaria_id AS id, 'NOTARIA' AS tipo_destino, n.nombre AS nombre, COALESCE(n.alias, '') AS alias
+                FROM sar_archivo.lote_asignacion la
+                JOIN sar_catalogo.notaria n ON la.notaria_id = n.notaria_id
+                WHERE la.tipo_destino = 'NOTARIA'
+                ORDER BY n.nombre ASC
+            """)
+            notarias = self.session.execute(stmt_notarias).all()
+            for r in notarias:
+                results.append({
+                    "id": r.id,
+                    "tipo_destino": r.tipo_destino,
+                    "nombre": r.nombre,
+                    "alias": r.alias
+                })
+
+        if not tipo_destino or tipo_destino == "COLABORADOR":
+            stmt_colab = text("""
+                SELECT DISTINCT c.colaborador_id AS id, 'COLABORADOR' AS tipo_destino, c.nombre AS nombre, '' AS alias
+                FROM sar_archivo.lote_asignacion la
+                JOIN sar_catalogo.colaborador c ON la.colaborador_id = c.colaborador_id
+                WHERE la.tipo_destino = 'COLABORADOR'
+                ORDER BY c.nombre ASC
+            """)
+            colaboradores = self.session.execute(stmt_colab).all()
+            for r in colaboradores:
+                results.append({
+                    "id": r.id,
+                    "tipo_destino": r.tipo_destino,
+                    "nombre": r.nombre,
+                    "alias": r.alias
+                })
+
+        return results
+
     def get_lotes_asignacion_filtered(
         self,
         search: str = None,
         tipo_destino: str = None,
+        destinatario_id: int = None,
         limit: int = 50,
         offset: int = 0,
         start_date: str = None,
         end_date: str = None,
         orden_ids: list = None
     ):
-        """Returns paginated lotes with optional filters including date range. Returns (list_of_dicts, total_count)."""
+        """Returns paginated lotes with optional filters including date range and specific destinatario. Returns (list_of_dicts, total_count)."""
         from sqlalchemy import text
 
         if orden_ids is not None:
@@ -2833,6 +3129,17 @@ class InventarioRepository(BaseRepository):
         if tipo_destino:
             where_clauses.append("la.tipo_destino = :tipo_destino")
             params["tipo_destino"] = tipo_destino
+
+        if destinatario_id:
+            if tipo_destino == "NOTARIA":
+                where_clauses.append("la.notaria_id = :destinatario_id")
+                params["destinatario_id"] = destinatario_id
+            elif tipo_destino == "COLABORADOR":
+                where_clauses.append("la.colaborador_id = :destinatario_id")
+                params["destinatario_id"] = destinatario_id
+            else:
+                where_clauses.append("(la.notaria_id = :destinatario_id OR la.colaborador_id = :destinatario_id)")
+                params["destinatario_id"] = destinatario_id
 
         if start_date:
             where_clauses.append("la.fecha >= :start_date")
@@ -3502,19 +3809,26 @@ class InventarioRepository(BaseRepository):
                 if desarrollo_id and ar.lote_detalle and not ar.lote_detalle.desarrollo_id:
                     ar.lote_detalle.desarrollo_id = desarrollo_id
 
-                mz = d.get("mz") or "-"
-                lote = d.get("lote") or "-"
-                edif = d.get("edif") or "-"
-                viv = d.get("viv") or "-"
+                def _strip_spaces(val):
+                    if not val:
+                        return "-"
+                    clean = "".join(str(val).split()).upper()
+                    return clean if clean else "-"
+
+                mz = _strip_spaces(d.get("mz"))
+                lote = _strip_spaces(d.get("lote"))
+                edif = _strip_spaces(d.get("edif"))
+                viv = _strip_spaces(d.get("viv"))
                 
                 ubi = None
                 if desarrollo_id:
+                    from sqlalchemy import func
                     dup_ubi_stmt = select(Ubicacion).where(
                         Ubicacion.desarrollo_id == desarrollo_id,
-                        Ubicacion.mz == mz,
-                        Ubicacion.lote == lote,
-                        Ubicacion.edif == edif,
-                        Ubicacion.viv == viv
+                        func.upper(func.replace(func.coalesce(Ubicacion.mz, ''), ' ', '')) == mz,
+                        func.upper(func.replace(func.coalesce(Ubicacion.lote, ''), ' ', '')) == lote,
+                        func.upper(func.replace(func.coalesce(Ubicacion.edif, ''), ' ', '')) == edif,
+                        func.upper(func.replace(func.coalesce(Ubicacion.viv, ''), ' ', '')) == viv
                     )
                     ubi = self.session.execute(dup_ubi_stmt).scalars().first()
 
@@ -3805,17 +4119,21 @@ class InventarioRepository(BaseRepository):
         elif conc.alias == "ANALISIS": expected_aliases = ["ANALISIS"]
         else: expected_aliases = [conc.alias]
 
-        from sar.src.storage.models import Rfc
+        from sar.src.storage.models import Referencia, EstadoSistema, GrupoReferencia, AsignacionReferencia, Solicitud, Concepto, OrdenGeneracion, Rfc
         stmt = (
             select(
                 Referencia.referencia_id,
                 Referencia.referencia_portal,
                 Referencia.importe,
                 Concepto.nombre,
-                Rfc.razon_social
+                Rfc.razon_social,
+                OrdenGeneracion.folio,
+                OrdenGeneracion.descripcion,
+                OrdenGeneracion.orden_id
             )
             .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
             .join(GrupoReferencia, Referencia.grupo_id == GrupoReferencia.grupo_id)
+            .join(OrdenGeneracion, GrupoReferencia.orden_id == OrdenGeneracion.orden_id)
             .join(Concepto, GrupoReferencia.concepto_id == Concepto.concepto_id)
             .join(Rfc, GrupoReferencia.rfc_id == Rfc.rfc_id)
             .join(Solicitud, Referencia.solicitud_id == Solicitud.solicitud_id)
@@ -3839,7 +4157,10 @@ class InventarioRepository(BaseRepository):
                 "referencia_portal": r[1],
                 "importe": str(r[2]) if r[2] else "0.00",
                 "concepto_nombre": r[3] or "",
-                "empresa_nombre": r[4] or ""
+                "empresa_nombre": r[4] or "",
+                "orden_folio": r[5] or "",
+                "orden_descripcion": (r[6] or "").strip() or (r[5] or ""),
+                "orden_id": r[7]
             }
             for r in rows
         ]

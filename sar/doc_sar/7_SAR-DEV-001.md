@@ -398,8 +398,8 @@ ________________________________________
 22. Estándar para Conceptos de Cancelación y Órdenes Anuales
 El sistema SAR incorpora el soporte para trámites esporádicos de Cancelación respetando los siguientes patrones:
 •	**Clasificación de Catálogo (`es_cancelacion`)**: En `sar_catalogo.concepto`, los conceptos de cancelación se identifican mediante la bandera `es_cancelacion = TRUE`. El servicio `OrdenesUIService.get_catalogos(es_cancelacion=...)` permite obtener el catálogo segmentado.
-•	**Orden Contenedora Anual (`tipo_orden = 'CANCELACION'`)**: Para evitar la proliferación de órdenes individuales por cada trámite ocasional, los trámites de cancelación se consolidan en una **Orden General Anual** por ejercicio fiscal (`ORD-CANCEL-YYYY`).
-•	**Autocreación y Reutilización**: El backend (`OrdenesService`) reutiliza la orden contenedora del año si ya existe, o solicita/crea automáticamente `ORD-CANCEL-YYYY` si es el primer trámite del año.
+•	**Orden Contenedora Anual (`tipo_orden = 'CANCELACION'`)**: Para evitar la proliferación de órdenes individuales por cada trámite ocasional, los trámites de cancelación se consolidan en una **Orden General Anual** por ejercicio fiscal (`ORD-CLX-AV-YYYY`).
+•	**Autocreación y Reutilización**: El backend (`OrdenesService`) reutiliza la orden contenedora del año si ya existe, o solicita/crea automáticamente `ORD-CLX-AV-YYYY` si es el primer trámite del año.
 ________________________________________
 Estado Documental
 Documento | Nombre Formal | Categoría | Estado

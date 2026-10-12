@@ -84,11 +84,12 @@ class LotesLoadWorker(QThread):
     result_ready = Signal(list, int)  # lotes, total
     error_occurred = Signal(str)
 
-    def __init__(self, inventario_ui_service, search: str, tipo_destino: str, limit: int, offset: int, start_date: str, end_date: str, orden_ids: list):
+    def __init__(self, inventario_ui_service, search: str, tipo_destino: str, destinatario_id: int, limit: int, offset: int, start_date: str, end_date: str, orden_ids: list):
         super().__init__()
         self.inventario_ui_service = inventario_ui_service
         self.search = search
         self.tipo_destino = tipo_destino
+        self.destinatario_id = destinatario_id
         self.limit = limit
         self.offset = offset
         self.start_date = start_date
@@ -106,6 +107,7 @@ class LotesLoadWorker(QThread):
             lotes, total = self.inventario_ui_service.get_lotes_asignacion_filtered(
                 search=self.search,
                 tipo_destino=self.tipo_destino,
+                destinatario_id=self.destinatario_id,
                 limit=self.limit,
                 offset=self.offset,
                 start_date=self.start_date,
@@ -2277,25 +2279,33 @@ class InventoryView(QWidget):
         self.btn_filter_preview_todos.setProperty("chip_state", "active")
         self.btn_filter_preview_todos.clicked.connect(lambda: self._set_preview_filter("TODOS"))
 
-        self.btn_filter_preview_errores = CustomButton("🔴 Solo Errores (0)", parent=self)
+        self.btn_filter_preview_errores = CustomButton("Solo Errores (0)", parent=self)
         self.btn_filter_preview_errores.setObjectName("filterChipBtn")
         self.btn_filter_preview_errores.setProperty("chip_variant", "error")
+        self.btn_filter_preview_errores.setIcon(Icons.get_icon("dot_legacy", size=9, color=Colors.ERROR))
+        self.btn_filter_preview_errores.setIconSize(QSize(9, 9))
         self.btn_filter_preview_errores.clicked.connect(lambda: self._set_preview_filter("ERROR"))
 
-        self.btn_filter_preview_warnings = CustomButton("🟡 Solo Advertencias (0)", parent=self)
+        self.btn_filter_preview_warnings = CustomButton("Solo Advertencias (0)", parent=self)
         self.btn_filter_preview_warnings.setObjectName("filterChipBtn")
         self.btn_filter_preview_warnings.setProperty("chip_variant", "warning")
+        self.btn_filter_preview_warnings.setIcon(Icons.get_icon("dot_legacy", size=9, color=Colors.WARNING))
+        self.btn_filter_preview_warnings.setIconSize(QSize(9, 9))
         self.btn_filter_preview_warnings.clicked.connect(lambda: self._set_preview_filter("WARNING"))
 
-        self.btn_filter_preview_duplicados = CustomButton("🟠 Duplicados (0)", parent=self)
+        self.btn_filter_preview_duplicados = CustomButton("Duplicados (0)", parent=self)
         self.btn_filter_preview_duplicados.setObjectName("filterChipBtn")
         self.btn_filter_preview_duplicados.setProperty("chip_variant", "warning")
+        self.btn_filter_preview_duplicados.setIcon(Icons.get_icon("dot_legacy", size=9, color=Colors.WARNING))
+        self.btn_filter_preview_duplicados.setIconSize(QSize(9, 9))
         self.btn_filter_preview_duplicados.clicked.connect(lambda: self._set_preview_filter("DUPLICADOS"))
         self.btn_filter_preview_duplicados.hide()
 
-        self.btn_filter_preview_validos = CustomButton("🟢 Solo Válidos (0)", parent=self)
+        self.btn_filter_preview_validos = CustomButton("Solo Válidos (0)", parent=self)
         self.btn_filter_preview_validos.setObjectName("filterChipBtn")
         self.btn_filter_preview_validos.setProperty("chip_variant", "success")
+        self.btn_filter_preview_validos.setIcon(Icons.get_icon("dot_legacy", size=9, color=Colors.SUCCESS))
+        self.btn_filter_preview_validos.setIconSize(QSize(9, 9))
         self.btn_filter_preview_validos.clicked.connect(lambda: self._set_preview_filter("VALIDO"))
 
         self.card_preview.add_header_widget(self.btn_filter_preview_todos)
@@ -2409,11 +2419,11 @@ class InventoryView(QWidget):
         self.preview_table.setRowCount(0)
         self.lbl_excel_path.setText("Ningún archivo seleccionado")
         self.btn_filter_preview_todos.setText("Todos (0)")
-        self.btn_filter_preview_errores.setText("🔴 Solo Errores (0)")
-        self.btn_filter_preview_warnings.setText("🟡 Solo Advertencias (0)")
-        self.btn_filter_preview_duplicados.setText("🟠 Duplicados (0)")
+        self.btn_filter_preview_errores.setText("Solo Errores (0)")
+        self.btn_filter_preview_warnings.setText("Solo Advertencias (0)")
+        self.btn_filter_preview_duplicados.setText("Duplicados (0)")
         self.btn_filter_preview_duplicados.hide()
-        self.btn_filter_preview_validos.setText("🟢 Solo Válidos (0)")
+        self.btn_filter_preview_validos.setText("Solo Válidos (0)")
         self._preview_filter_mode = "TODOS"
         self._set_preview_filter("TODOS")
         self.btn_confirmar_masivo.setEnabled(False)
@@ -2759,16 +2769,16 @@ class InventoryView(QWidget):
         valid_count = sum(1 for r in self.validated_records if r.get("status") not in ("ERROR", "WARNING") and not r.get("is_batch_duplicate"))
 
         self.btn_filter_preview_todos.setText(f"Todos ({total_count})")
-        self.btn_filter_preview_errores.setText(f"🔴 Solo Errores ({error_count})")
-        self.btn_filter_preview_warnings.setText(f"🟡 Solo Advertencias ({warning_count})")
+        self.btn_filter_preview_errores.setText(f"Solo Errores ({error_count})")
+        self.btn_filter_preview_warnings.setText(f"Solo Advertencias ({warning_count})")
         
         if dup_count > 0:
-            self.btn_filter_preview_duplicados.setText(f"🟠 Duplicados ({dup_count})")
+            self.btn_filter_preview_duplicados.setText(f"Duplicados ({dup_count})")
             self.btn_filter_preview_duplicados.show()
         else:
             self.btn_filter_preview_duplicados.hide()
 
-        self.btn_filter_preview_validos.setText(f"🟢 Solo Válidos ({valid_count})")
+        self.btn_filter_preview_validos.setText(f"Solo Válidos ({valid_count})")
 
         # Auto-focus the most relevant view: if errors exist, stay on TODOS or highlight count
         self._set_preview_filter("TODOS")
@@ -3060,7 +3070,7 @@ class InventoryView(QWidget):
         self.card_preview_ind = CustomCard(title="Referencias Disponibles a Asignar", parent=self)
         self.card_preview_ind.card_layout.setContentsMargins(16, 10, 16, 10)
         self.card_preview_ind.card_layout.setSpacing(8)
-        self.table_preview_ind = StyledDataTable(["✔", "ID", "Referencia (Portal)", "Concepto", "Empresa", "Importe", "Delegación"], parent=self)
+        self.table_preview_ind = StyledDataTable(["✔", "ID", "Orden", "Referencia (Portal)", "Concepto", "Empresa", "Importe", "Delegación"], parent=self)
         self.table_preview_ind.setMinimumHeight(160)
         self.table_preview_ind.setColumnHidden(1, True) # Hide internal ID
         self.card_preview_ind.add_widget(self.table_preview_ind)
@@ -3093,8 +3103,6 @@ class InventoryView(QWidget):
     def _on_tipo_destino_ind_changed(self, text):
         self.cb_destinatario_ind.clear()
         if not text or text == "-- Seleccione Destino --":
-            self.grid_individual.clear()
-            self.grid_individual.set_cascade_mode(False)
             return
 
         if text == "NOTARIA" and hasattr(self, "_notarias_map"):
@@ -3107,54 +3115,13 @@ class InventoryView(QWidget):
                 self.cb_destinatario_ind.addItems(list(self._colaboradores_map.keys()))
                 self.cb_destinatario_ind.setCurrentIndex(0)
 
-        # Disable cascade mode for both (independent combos: RFC, Delegación, Concepto)
-        # In individual assignment, Desarrollo is captured only in the final assignment form
+        # Ensure grid is configured in independent mode without destroying user selections
         self.grid_individual.set_cascade_mode(False)
         self.grid_individual.set_has_desarrollo(False)
-        # Pre-load only RFCs that actually have 'FACTURADA' stock
-        try:
-            rfcs_con_stock = self.inventario_ui_service.get_rfcs_con_stock_facturadas()
-            rfcs_tuples = []
-            for r in rfcs_con_stock:
-                alias = (r.get("alias") or "").strip()
-                rfc_code = (r.get("rfc") or "").strip()
-                if alias and rfc_code:
-                    lbl = f"{alias} | {rfc_code}"
-                elif rfc_code:
-                    lbl = rfc_code
-                else:
-                    lbl = r.get("razon_social") or ""
-                rfcs_tuples.append((r["rfc_id"], lbl))
-            
-            concepts_all_tuples = sorted(
-                [(c_id, c_name) for c_name, c_id in self._concepts_map.items()],
-                key=lambda x: x[0]
-            )
-            delegations_list_tuples = [
-                (dg_id, dg_name) for dg_name, dg_id in self._delegations_map.items()
-            ]
-            
-            # Fetch desarrollos catalog for the optional combo
-            desarrollos_tuples = sorted(
-                [
-                    (
-                        d["desarrollo_id"],
-                        d["nombre"],
-                        d.get("delegacion_id"),
-                        d.get("es_default", False),
-                    )
-                    for d in self.inventario_ui_service.get_desarrollos()
-                ],
-                key=lambda x: (not x[3], x[1])
-            )
-            
-            self.grid_individual.set_catalogs(rfcs_tuples, concepts_all_tuples, delegations_list_tuples, desarrollos_tuples)
-        except Exception as e:
-            print("Error loading active stock RFCs for individual grid:", e)
-
-        # Clear and add a clean row to match the new mode
-        self.grid_individual.clear()
-        self.grid_individual.add_row()
+        
+        # If grid has no rows, add the initial empty row
+        if not self.grid_individual.rows:
+            self.grid_individual.add_row()
 
 
 
@@ -3171,11 +3138,6 @@ class InventoryView(QWidget):
             )
             return
 
-        tipo_destino = self.cb_tipo_destino_ind.currentText()
-        if not tipo_destino or tipo_destino == "-- Seleccione Destino --":
-            QMessageBox.warning(self, "Destino Requerido", "Debe seleccionar primero un Tipo de Destino válido.")
-            return
-
         grid_data = self.grid_individual.get_all_data()
 
         if not grid_data:
@@ -3183,10 +3145,22 @@ class InventoryView(QWidget):
             return
 
         for i, row in enumerate(grid_data):
-            # If in cascade mode (NOTARIA), rfc, concepto, and delegacion are required.
-            # In non-cascade mode (COLABORADOR), desarrollo is hidden but rfc, concepto and delegacion are still required.
+            # Validar que los campos principales estén seleccionados
             if not row.get("rfc_id") or not row.get("concepto_id") or not row.get("delegacion_id"):
                 QMessageBox.warning(self, "Validación", f"El renglón {i+1} debe tener Empresa, Concepto y Delegación seleccionados.")
+                return
+            
+            # Si el semáforo o conteo de disponibles es 0, no realizar la búsqueda
+            disponibles_count = row.get("disponibles")
+            if disponibles_count is not None and disponibles_count == 0:
+                rfc_lbl = row.get("rfc_text") or "la empresa seleccionada"
+                con_lbl = row.get("concepto_text") or "el concepto"
+                QMessageBox.warning(
+                    self,
+                    "Sin Derechos Disponibles",
+                    f"El renglón {i+1} ({rfc_lbl} - {con_lbl}) no cuenta con derechos disponibles en inventario (Disponibles = 0).\n\n"
+                    "Por favor ajuste los filtros o seleccione una combinación con stock disponible antes de buscar."
+                )
                 return
 
         # Asegurar que las órdenes disponibles estén cargadas
@@ -3268,6 +3242,7 @@ class InventoryView(QWidget):
             table_rows.append([
                 "",  # checked column
                 str(item["referencia_id"]),
+                item.get("orden_descripcion") or item.get("orden_folio", ""),
                 item["referencia_portal"],
                 item.get("concepto_nombre", ""),
                 item.get("empresa_nombre", ""),
@@ -4069,21 +4044,28 @@ class InventoryView(QWidget):
 
         # 1. Tipo Destino (Mismo ancho y alto: 200x36 px)
         self.labeled_destino_lotes = LabeledComboBox("Tipo Destino", ["Todos", "NOTARIA", "COLABORADOR"])
-        self.labeled_destino_lotes.setFixedWidth(200)
+        self.labeled_destino_lotes.setFixedWidth(180)
         self.cb_destino_filter_lotes = self.labeled_destino_lotes.combo
         self.cb_destino_filter_lotes.currentTextChanged.connect(self._on_destino_filter_lotes)
         filter_row.addWidget(self.labeled_destino_lotes)
 
+        # 1.1 Destinatario Dinámico (Filtra solo notarías/colaboradores con asignaciones)
+        self.labeled_destinatario_lotes = LabeledComboBox("Destinatario", ["Todos"])
+        self.labeled_destinatario_lotes.setFixedWidth(220)
+        self.cb_destinatario_filter_lotes = self.labeled_destinatario_lotes.combo
+        self.cb_destinatario_filter_lotes.currentIndexChanged.connect(self._on_destinatario_filter_lotes_changed)
+        filter_row.addWidget(self.labeled_destinatario_lotes)
+
         # 2. Date Filters (Mismo ancho y alto: 200x36 px)
         self.group_start_date = LabeledDateEdit("Desde", parent=self)
-        self.group_start_date.setFixedWidth(200)
+        self.group_start_date.setFixedWidth(170)
         self.start_date_filter = self.group_start_date.date_edit
         self.group_start_date.setDate(QDate.currentDate().addMonths(-3))
         self.start_date_filter.dateChanged.connect(self._on_date_changed_lotes)
         filter_row.addWidget(self.group_start_date)
 
         self.group_end_date = LabeledDateEdit("Hasta", parent=self)
-        self.group_end_date.setFixedWidth(200)
+        self.group_end_date.setFixedWidth(170)
         self.end_date_filter = self.group_end_date.date_edit
         self.group_end_date.setDate(QDate.currentDate())
         self.end_date_filter.dateChanged.connect(self._on_date_changed_lotes)
@@ -4194,9 +4176,13 @@ class InventoryView(QWidget):
         self.total_lotes = 0
         self._current_search_text_lotes = ""
         self._current_tipo_destino_lotes = "Todos"
+        self._current_destinatario_id_lotes = None
         self._current_rfc_id_lotes = None
         self.active_lotes_worker = None
         self._last_lotes_worker_args = None
+
+        # Inicializar opciones del combo destinatario
+        self._populate_destinatarios_filter_lotes()
 
         # Debounce timer para búsqueda en Lotes (700 ms)
         self._search_lotes_timer = QTimer(self)
@@ -4311,12 +4297,37 @@ class InventoryView(QWidget):
         """Alias de compatibilidad para actualizar los banners de filtro."""
         self._update_order_filter_banners()
 
+    def _populate_destinatarios_filter_lotes(self):
+        """Populates the Destinatario combobox dynamically based on active tipo_destino.
+        Filters only Notarías or Colaboradores that actually have assignment records.
+        """
+        if not hasattr(self, "cb_destinatario_filter_lotes"):
+            return
+
+        tipo_destino = self._current_tipo_destino_lotes if self._current_tipo_destino_lotes != "Todos" else None
+        
+        self.cb_destinatario_filter_lotes.blockSignals(True)
+        self.cb_destinatario_filter_lotes.clear()
+        self.cb_destinatario_filter_lotes.addItem("Todos", userData=None)
+
+        try:
+            destinatarios = self.inventario_ui_service.get_destinatarios_con_asignaciones(tipo_destino=tipo_destino)
+            for d in destinatarios:
+                nombre = (d.get("nombre") or "").strip()
+                if nombre:
+                    self.cb_destinatario_filter_lotes.addItem(nombre, userData=d.get("id"))
+        except Exception as e:
+            print("Error populating destinatarios filter:", e)
+
+        self.cb_destinatario_filter_lotes.blockSignals(False)
+
     def refresh_lotes_data(self):
         """Loads assignments from service asynchronously with active filters and populates the table."""
         if not hasattr(self, 'table_lotes'):
             return
 
         tipo_destino = self._current_tipo_destino_lotes if self._current_tipo_destino_lotes != "Todos" else None
+        destinatario_id = self._current_destinatario_id_lotes
         search = self._current_search_text_lotes or None
         
         start_date = self.start_date_filter.date().toString("yyyy-MM-dd")
@@ -4327,6 +4338,7 @@ class InventoryView(QWidget):
         worker_args = (
             search,
             tipo_destino,
+            destinatario_id,
             self.page_size_lotes,
             offset,
             start_date,
@@ -4359,6 +4371,7 @@ class InventoryView(QWidget):
             inventario_ui_service=self.inventario_ui_service,
             search=search,
             tipo_destino=tipo_destino,
+            destinatario_id=destinatario_id,
             limit=self.page_size_lotes,
             offset=offset,
             start_date=start_date,
@@ -4454,8 +4467,16 @@ class InventoryView(QWidget):
 
     def _on_destino_filter_lotes(self, text):
         self._current_tipo_destino_lotes = text
+        self._current_destinatario_id_lotes = None
+        self._populate_destinatarios_filter_lotes()
         self.current_page_lotes = 1
         self.refresh_lotes_data()
+
+    def _on_destinatario_filter_lotes_changed(self, index):
+        if hasattr(self, "cb_destinatario_filter_lotes"):
+            self._current_destinatario_id_lotes = self.cb_destinatario_filter_lotes.currentData()
+            self.current_page_lotes = 1
+            self.refresh_lotes_data()
 
     def _on_date_changed_lotes(self, qdate):
         self.current_page_lotes = 1
@@ -5094,11 +5115,11 @@ class ManualAssignmentDialog(QDialog):
             else:
                 d["desarrollo_id"] = None
                 d["desarrollo_name"] = ""
-            d["sm"] = self.txt_sm.text().strip()
-            d["mz"] = self.txt_mz.text().strip()
-            d["lote"] = self.txt_lote.text().strip()
-            d["edif"] = self.txt_edif.text().strip()
-            d["viv"] = self.txt_viv.text().strip()
+            d["sm"] = "".join(self.txt_sm.text().split()).upper()
+            d["mz"] = "".join(self.txt_mz.text().split()).upper()
+            d["lote"] = "".join(self.txt_lote.text().split()).upper()
+            d["edif"] = "".join(self.txt_edif.text().split()).upper()
+            d["viv"] = "".join(self.txt_viv.text().split()).upper()
             d["folio_electronico"] = self.txt_folio.text().strip()
             d["credito_titular"] = self.txt_credito.text().strip()
             d["pa"] = self.txt_pa.text().strip()
@@ -5431,11 +5452,11 @@ class ManualAssignmentDialog(QDialog):
 
                 update_payload = {
                     "cliente": self.txt_cliente.text().strip(),
-                    "sm": self.txt_sm.text().strip(),
-                    "mz": self.txt_mz.text().strip(),
-                    "lote": self.txt_lote.text().strip(),
-                    "edif": self.txt_edif.text().strip(),
-                    "viv": self.txt_viv.text().strip(),
+                    "sm": "".join(self.txt_sm.text().split()).upper(),
+                    "mz": "".join(self.txt_mz.text().split()).upper(),
+                    "lote": "".join(self.txt_lote.text().split()).upper(),
+                    "edif": "".join(self.txt_edif.text().split()).upper(),
+                    "viv": "".join(self.txt_viv.text().split()).upper(),
                     "folio_electronico": self.txt_folio.text().strip(),
                     "no_oficial": self.txt_folio.text().strip(),
                     "credito_titular": self.txt_credito.text().strip(),

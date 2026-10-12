@@ -419,3 +419,42 @@ def reservar_lote_manual(payload: ReservarLoteManualRequest, db: Session = Depen
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al procesar reserva de lote: {str(e)}")
+
+# ===========================================================================
+# ENDPOINTS: Catálogo de Ubicaciones (Procesos Especiales)
+# ===========================================================================
+
+class ImportarUbicacionesRequest(BaseModel):
+    desarrollo_id: int
+    usuario_id: int
+    sesion_id: Optional[int] = None
+    records: List[Dict[str, Any]]
+
+@router.get("/ubicaciones/{desarrollo_id}")
+def get_ubicaciones_by_desarrollo(desarrollo_id: int, db: Session = Depends(get_db)):
+    """Retorna el listado de ubicaciones registradas para un desarrollo."""
+    try:
+        from sar.src.storage.repositories import CatalogoRepository
+        repo = CatalogoRepository(db)
+        return repo.get_ubicaciones_by_desarrollo(desarrollo_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar ubicaciones del desarrollo: {str(e)}")
+
+@router.post("/ubicaciones/bulk-import")
+def bulk_import_ubicaciones(payload: ImportarUbicacionesRequest, db: Session = Depends(get_db)):
+    """Importa masivamente un lote de ubicaciones para un desarrollo con deduplicación y auditoría."""
+    try:
+        from sar.src.storage.repositories import CatalogoRepository
+        repo = CatalogoRepository(db)
+        res = repo.importar_catalogo_ubicaciones(
+            desarrollo_id=payload.desarrollo_id,
+            records=payload.records,
+            usuario_id=payload.usuario_id,
+            sesion_id=payload.sesion_id
+        )
+        db.commit()
+        return res
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al importar catálogo de ubicaciones: {str(e)}")
+

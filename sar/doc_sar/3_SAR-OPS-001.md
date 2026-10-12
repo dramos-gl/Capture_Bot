@@ -116,8 +116,8 @@ ________________________________________
 6.1 Tipos de Órdenes y Modos Operativos
 Las órdenes se clasifican en cuatro tipos, definiendo el comportamiento del sistema y la automatización:
 
-•	ESTANDAR: Órdenes normales de cobro. Cada referencia equivale a 1 acto.
-•	CANCELACION: Orden anual para cancelaciones hipotecarias (Ej. ORD-CANCEL-2026). Las referencias se agrupan sobre el mismo folio padre.
+•	ESTANDAR: Órdenes normales de cobro y subsidios (Ej. ORD-SUB-YYYYMMDD, con sufijo incremental -2, -3 si hay múltiples el mismo día). Cada referencia equivale a 1 acto.
+•	CANCELACION: Orden anual para cancelaciones hipotecarias y de avisos (Ej. ORD-CLX-AV-2026). Las referencias se agrupan sobre el mismo folio padre anual.
 •	FOJAS: Orden anual para Derechos de Fojas (Ej. ORD-FOJAS-2026). Requiere que el usuario defina la `cantidad_actos` durante la captura, lo cual modifica el multiplicador en el portal.
 •	TESTIMONIO: Orden anual para Expedición de Testimonios (Ej. ORD-TESTIMONIO-2026). Genera las referencias en un grupo y portal distinto (Grupo=71).
 ________________________________________

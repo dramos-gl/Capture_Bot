@@ -564,6 +564,28 @@ class InventarioUIService:
                 )
                 session.commit()
 
+    def revertir_lote_asignacion(self, lote_asignacion_id: int, usuario_id: int, motivo: str) -> Dict[str, Any]:
+        """Safely rolls back an entire assignment or reservation lote."""
+        if self.api_client.connect_via_api:
+            payload = {
+                "lote_asignacion_id": lote_asignacion_id,
+                "usuario_id": usuario_id,
+                "motivo": motivo
+            }
+            return self.api_client.request("POST", f"/api/docs/inventario/lotes/{lote_asignacion_id}/revertir", data=payload)
+        else:
+            if not self.db_connector:
+                raise ValueError("db_connector is required when connect_via_api is False")
+            with self.db_connector.get_session() as session:
+                repo = InventarioRepository(session)
+                res = repo.revertir_lote_asignacion(
+                    lote_asignacion_id=lote_asignacion_id,
+                    usuario_id=usuario_id,
+                    motivo=motivo
+                )
+                session.commit()
+                return res
+
     def get_lotes_asignacion(self) -> List[Dict[str, Any]]:
         """Fetches assignment lotes."""
         if self.api_client.connect_via_api:
@@ -575,10 +597,27 @@ class InventarioUIService:
                 repo = InventarioRepository(session)
                 return repo.get_lotes_asignacion()
 
+    def get_destinatarios_con_asignaciones(self, tipo_destino: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Returns only Notarias or Colaboradores that actually have assignment records."""
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_destinatarios_con_asignaciones", transport=transport):
+            if self.api_client.connect_via_api:
+                params = {}
+                if tipo_destino:
+                    params["tipo_destino"] = tipo_destino
+                return self.api_client.request("GET", "/api/docs/inventario/lotes/destinatarios", data=params)
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_destinatarios_con_asignaciones(tipo_destino=tipo_destino)
+
     def get_lotes_asignacion_filtered(
         self,
         search: str = None,
         tipo_destino: str = None,
+        destinatario_id: int = None,
         limit: int = 50,
         offset: int = 0,
         start_date: str = None,
@@ -595,6 +634,8 @@ class InventarioUIService:
                     params["search"] = search
                 if tipo_destino:
                     params["tipo_destino"] = tipo_destino
+                if destinatario_id:
+                    params["destinatario_id"] = destinatario_id
                 if start_date:
                     params["start_date"] = start_date
                 if end_date:
@@ -611,6 +652,7 @@ class InventarioUIService:
                     return repo.get_lotes_asignacion_filtered(
                         search=search,
                         tipo_destino=tipo_destino,
+                        destinatario_id=destinatario_id,
                         limit=limit,
                         offset=offset,
                         start_date=start_date,

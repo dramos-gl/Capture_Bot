@@ -44,7 +44,7 @@ class MainView(QWidget):
         self.footer_bar_layout.setContentsMargins(16, 2, 20, 6)
         self.footer_bar_layout.setSpacing(0)
         
-        self.lbl_global_footer = QLabel("Sistema de Administración de Derechos | DRR | v1.0.0", self.footer_bar)
+        self.lbl_global_footer = QLabel("Sistema de Administración de Derechos | DR | v1.0", self.footer_bar)
         self.lbl_global_footer.setObjectName("globalAppFooter")
         self.lbl_global_footer.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.lbl_global_footer.setStyleSheet("color: #94A3B8; font-size: 10px; background: transparent;")

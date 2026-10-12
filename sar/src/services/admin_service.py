@@ -657,3 +657,18 @@ class AdminService:
         new_val = {"delegacion_id": d.delegacion_id, "nombre": d.nombre, "alias": d.alias, "municipio_id": d.municipio_id, "activo": d.activo}
         self._log_audit(usuario_id, sesion_id, modulo, action, old_val, new_val, {"nombre": d.nombre})
         return d
+
+    def get_ubicaciones_by_desarrollo(self, desarrollo_id: int) -> List[Dict[str, Any]]:
+        return self.cat_repo.get_ubicaciones_by_desarrollo(desarrollo_id)
+
+    @require_active_session
+    def importar_catalogo_ubicaciones(
+        self, usuario_id: Optional[int], sesion_id: Optional[int], desarrollo_id: int, records: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        return self.cat_repo.importar_catalogo_ubicaciones(
+            desarrollo_id=desarrollo_id,
+            records=records,
+            usuario_id=usuario_id or 1,
+            sesion_id=sesion_id
+        )
+

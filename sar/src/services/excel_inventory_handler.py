@@ -104,6 +104,14 @@ class ExcelInventoryHandler:
                     return prefix
             return val_str
 
+        def _clean_coord_val(val) -> str:
+            """Normaliza coordenadas (mz, lote, ext, int) eliminando espacios intermedios y en extremos."""
+            base_str = _normalize_cell_str(val)
+            if not base_str:
+                return ""
+            # Remover todos los espacios en blanco (incluyendo intermedios, tabs, etc.)
+            return "".join(base_str.split()).upper()
+
         # Process data rows
         for row_num, row in enumerate(rows[1:], start=2):
             # Skip empty rows
@@ -130,11 +138,11 @@ class ExcelInventoryHandler:
             f_escritura = _normalize_date_str(row[idx_fecha_escritura]) if idx_fecha_escritura != -1 else None
             f_titulacion = _normalize_date_str(row[idx_fecha_titulacion]) if idx_fecha_titulacion != -1 else None
 
-            # Location fields
-            mz = _normalize_cell_str(row[idx_mz]) if idx_mz != -1 else ""
-            lote = _normalize_cell_str(row[idx_lote]) if idx_lote != -1 else ""
-            edif = _normalize_cell_str(row[idx_edif]) if idx_edif != -1 else ""
-            viv = _normalize_cell_str(row[idx_viv]) if idx_viv != -1 else ""
+            # Location fields (limpieza estricta de espacios intermedios y extremos)
+            mz = _clean_coord_val(row[idx_mz]) if idx_mz != -1 else ""
+            lote = _clean_coord_val(row[idx_lote]) if idx_lote != -1 else ""
+            edif = _clean_coord_val(row[idx_edif]) if idx_edif != -1 else ""
+            viv = _clean_coord_val(row[idx_viv]) if idx_viv != -1 else ""
             
             raw_ubicacion = _normalize_cell_str(row[idx_ubicacion]) if idx_ubicacion != -1 else ""
 
@@ -147,10 +155,10 @@ class ExcelInventoryHandler:
                 m_lt = re.search(r"L?T\s*(\d+)", txt)
                 m_ed = re.search(r"EDIF\s*([A-Z0-9\-]+)", txt)
                 m_vv = re.search(r"VIV\s*([A-Z0-9\-]+)", txt)
-                if m_mz: mz = m_mz.group(1)
-                if m_lt: lote = m_lt.group(1)
-                if m_ed: edif = m_ed.group(1)
-                if m_vv: viv = m_vv.group(1)
+                if m_mz: mz = "".join(m_mz.group(1).split()).upper()
+                if m_lt: lote = "".join(m_lt.group(1).split()).upper()
+                if m_ed: edif = "".join(m_ed.group(1).split()).upper()
+                if m_vv: viv = "".join(m_vv.group(1).split()).upper()
 
             folio = _normalize_cell_str(row[idx_folio]) if idx_folio != -1 else ""
             estatus_aviso = _normalize_cell_str(row[idx_estatus_aviso]) if idx_estatus_aviso != -1 else ""
@@ -199,6 +207,29 @@ class ExcelInventoryHandler:
                     })
 
         return parsed_records
+
+    @staticmethod
+    def compute_batch_checksum(records: List[Dict[str, Any]]) -> str:
+        """Computes a deterministic SHA-256 hash over normalized batch records.
+        Protects dataset integrity between preview validation and database commit.
+        """
+        import hashlib
+        import json
+        
+        normalized = []
+        for r in records:
+            normalized.append({
+                "empresa": str(r.get("empresa") or "").strip().upper(),
+                "desarrollo": str(r.get("desarrollo") or "").strip().upper(),
+                "concepto": str(r.get("concepto_solicitado") or "").strip().upper(),
+                "referencia": str(r.get("referencia_asignada") or "").strip().upper(),
+                "cliente": str(r.get("cliente") or "").strip().upper(),
+                "mz": str(r.get("mz") or "").strip().upper(),
+                "lote": str(r.get("lote") or "").strip().upper(),
+            })
+        normalized.sort(key=lambda x: (x["desarrollo"], x["mz"], x["lote"], x["concepto"], x["referencia"]))
+        raw_bytes = json.dumps(normalized, sort_keys=True).encode("utf-8")
+        return hashlib.sha256(raw_bytes).hexdigest()
 
     @staticmethod
     def validate_parsed_rows(
@@ -322,12 +353,16 @@ class ExcelInventoryHandler:
             row_empresa = row.get("empresa", "").strip().upper()
             req_autolink = row.get("requiere_autovincular", False)
             cliente = row.get("cliente", "")
-            mz = row.get("mz", "")
-            lote = row.get("lote", "")
-            edif = row.get("edif", "")
-            viv = row.get("viv", "")
+            mz = "".join(str(row.get("mz", "") or "").split()).upper()
+            lote = "".join(str(row.get("lote", "") or "").split()).upper()
+            edif = "".join(str(row.get("edif", "") or "").split()).upper()
+            viv = "".join(str(row.get("viv", "") or "").split()).upper()
             
             row_result = dict(row)
+            row_result["mz"] = mz
+            row_result["lote"] = lote
+            row_result["edif"] = edif
+            row_result["viv"] = viv
             row_result["status"] = "PENDIENTE" # default
             row_result["error_message"] = ""
             row_result["referencia_id"] = None
@@ -424,7 +459,7 @@ class ExcelInventoryHandler:
             if not omitir_validacion and concept_id_req:
                 loc_key = (desarrollo_name.upper(), mz.strip().upper(), lote.strip().upper(), edif.strip().upper(), viv.strip().upper(), concept_id_req)
                 
-                # Check DB historical attempts first
+                from sqlalchemy import func
                 dup_stmt = (
                     select(AsignacionReferencia)
                     .join(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
@@ -432,10 +467,10 @@ class ExcelInventoryHandler:
                     .join(Concepto, LoteDetalle.concepto_id == Concepto.concepto_id)
                     .where(
                         Ubicacion.desarrollo_id == (desarrollo.desarrollo_id if desarrollo else None),
-                        Ubicacion.mz == mz,
-                        Ubicacion.lote == lote,
-                        Ubicacion.edif == edif,
-                        Ubicacion.viv == viv,
+                        func.upper(func.replace(func.coalesce(Ubicacion.mz, ''), ' ', '')) == mz,
+                        func.upper(func.replace(func.coalesce(Ubicacion.lote, ''), ' ', '')) == lote,
+                        func.upper(func.replace(func.coalesce(Ubicacion.edif, ''), ' ', '')) == edif,
+                        func.upper(func.replace(func.coalesce(Ubicacion.viv, ''), ' ', '')) == viv,
                         Concepto.concepto_id == concept_id_req
                     )
                     .order_by(AsignacionReferencia.intento.desc())
@@ -594,6 +629,11 @@ class ExcelInventoryHandler:
 
                 if allocated_ref_ids:
                     available_stmt = available_stmt.where(Referencia.referencia_id.not_in(list(allocated_ref_ids)))
+
+                # Lock with FOR UPDATE SKIP LOCKED when supported by dialect (PostgreSQL)
+                bind = session.get_bind() if hasattr(session, "get_bind") else None
+                if bind and hasattr(bind, "dialect") and bind.dialect.name == "postgresql":
+                    available_stmt = available_stmt.with_for_update(skip_locked=True)
 
                 ref_obj = session.execute(available_stmt).scalars().first()
                 if not ref_obj:

@@ -1381,20 +1381,29 @@ class ThemeManager:
             padding: 4px;
         }}
         
-        /* Dropdown menus for Bots (forces light style) */
-        QMenu#botMenu {{
-            background-color: #ffffff;
-            color: #1f2937;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
-            padding: 4px;
+        /* Login Screen Card & Typography */
+        QWidget#loginFormContainer {{
+            background-color: {surf};
+            border: 1px solid {border};
+            border-radius: 12px;
         }}
-        QMenu#botMenu::item {{
-            padding: 6px 12px;
-            border-radius: 2px;
+        QLabel#loginTitleLabel {{
+            font-size: 24px;
+            font-weight: {Typography.WEIGHT_BOLD};
+            color: {txt_primary};
+            background-color: transparent;
         }}
-        QMenu#botMenu::item:selected {{
-            background-color: #f3f4f6;
+        QLabel#loginSubtitleLabel {{
+            font-size: 14px;
+            font-weight: {Typography.WEIGHT_MEDIUM};
+            color: {txt_secondary};
+            background-color: transparent;
+        }}
+        QComboBox#loginModuloCombo {{
+            min-height: 40px;
+            max-height: 40px;
+            padding: 2px 12px;
+            font-size: 13px;
         }}
         """
         return qss

@@ -33,13 +33,13 @@ class LoginView(QWidget):
         
         # Header title
         self.title_lbl = CustomLabel("SAR Login", variant="header")
-        self.title_lbl.setStyleSheet("font-size: 24px; font-weight: bold; color: #1e3a5f;")
+        self.title_lbl.setObjectName("loginTitleLabel")
         self.title_lbl.setAlignment(Qt.AlignCenter)
         self.center_layout.addWidget(self.title_lbl)
         
         # Subtitle
         mod_lbl = CustomLabel("Módulo de Acceso", variant="body")
-        mod_lbl.setStyleSheet("font-size: 14px; color: #4a5568;")
+        mod_lbl.setObjectName("loginSubtitleLabel")
         mod_lbl.setAlignment(Qt.AlignCenter)
         self.center_layout.addWidget(mod_lbl)
         
@@ -47,7 +47,8 @@ class LoginView(QWidget):
         
         # Module Selection
         self.cb_modulo = CustomComboBox(self)
-        self.cb_modulo.setFixedHeight(36)
+        self.cb_modulo.setObjectName("loginModuloCombo")
+        self.cb_modulo.setFixedHeight(42)
         self.cb_modulo.setPlaceholderText("Seleccionar un módulo")
         self.cb_modulo_original_stylesheet = self.cb_modulo.styleSheet()
         self._load_modules()

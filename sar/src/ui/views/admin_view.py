@@ -25,6 +25,7 @@ from sar.src.ui.views.admin.migration_view import MigrationView
 from sar.src.ui.views.admin.bulk_load_view import BulkLoadView
 from sar.src.ui.views.admin.update_facturas_view import UpdateFacturasView
 from sar.src.ui.views.admin.reservas_proceso_view import ReservasProcesoView
+from sar.src.ui.views.admin.ubicaciones_view import UbicacionesView
 from sar.src.ui.views.admin.help_dialogs import (
     AboutDialog, ShortcutsDialog, SystemDiagnosticsDialog, SupportDialog, UserManualDialog
 )
@@ -214,6 +215,7 @@ class AdminWindow(QMainWindow):
             "parametros": lambda: ParametersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION", "ADM:PARAMETROS")),
             "localizadores": lambda: LocalizersView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CONFIGURACION", "ADM:LOCALIZADORES")),
             "carga_masiva": lambda: BulkLoadView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:CARGA_MASIVA")),
+            "ubicaciones": lambda: UbicacionesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:UBICACIONES") or self._can_edit("CATALOGOS", "ADM:GEOGRAFIA")),
             "migracion": lambda: MigrationView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:MIGRACION")),
             "reserva_masiva": lambda: ReservasProcesoView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA")),
             "update_facturas": lambda: UpdateFacturasView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:UPDATE_FACTURAS"))
@@ -243,6 +245,7 @@ class AdminWindow(QMainWindow):
             "parametros": ("CONFIGURACION", "ADM:PARAMETROS"),
             "localizadores": ("CONFIGURACION", "ADM:LOCALIZADORES"),
             "carga_masiva": ("PROCESOS_ESPECIALES", "ADM:CARGA_MASIVA"),
+            "ubicaciones": ("PROCESOS_ESPECIALES", "ADM:UBICACIONES"),
             "migracion": ("PROCESOS_ESPECIALES", "ADM:MIGRACION"),
             "reserva_masiva": ("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA"),
             "update_facturas": ("PROCESOS_ESPECIALES", "ADM:UPDATE_FACTURAS"),

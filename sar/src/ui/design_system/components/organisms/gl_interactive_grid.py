@@ -366,6 +366,7 @@ class InteractiveGridRow(QFrame):
 
     def set_disponibles(self, count):
         """Update the read-only availability label with semaphoric color."""
+        self._disponibles_count = count
         if count is None:
             self._update_disponibles_style("neutral", "—")
             return
@@ -437,7 +438,8 @@ class InteractiveGridRow(QFrame):
             "desarrollo_text": self.combo_desarrollo.currentText() if self._has_desarrollo else None,
             "cantidad": self.spin_cantidad.value(),
             "cantidad_actos": self.spin_cantidad_actos.value() if self.combo_concepto.currentData() == 5 else 1,
-            "cantidad_generada": getattr(self, "_cantidad_generada", 0)
+            "cantidad_generada": getattr(self, "_cantidad_generada", 0),
+            "disponibles": getattr(self, "_disponibles_count", None)
         }
 
 

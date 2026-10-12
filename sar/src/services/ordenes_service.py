@@ -66,7 +66,7 @@ class OrdenesService:
         if tipo_ord_upper in ("CANCELACION", "FOJAS", "TESTIMONIO", "PAGADA"):
             current_year = datetime.utcnow().year
             prefix_map = {
-                "CANCELACION": f"ORD-CANCEL-{current_year}",
+                "CANCELACION": f"ORD-CLX-AV-{current_year}",
                 "FOJAS": f"ORD-FOJAS-{current_year}",
                 "TESTIMONIO": f"ORD-TESTIMONIO-{current_year}",
                 "PAGADA": f"ORD-PAGADA-{current_year}"
@@ -80,7 +80,6 @@ class OrdenesService:
             folio_str = prefix_map[tipo_ord_upper]
             
             # Check if annual order already exists
-            from sqlalchemy import select
             stmt = select(OrdenGeneracion).where(
                 OrdenGeneracion.folio == folio_str,
                 OrdenGeneracion.tipo_orden == tipo_ord_upper
@@ -98,8 +97,24 @@ class OrdenesService:
                 self.session.add(nueva_orden)
                 self.session.flush()
         else:
-            # Generate unique Folio (e.g. ORD-YYYYMMDD-HHMMSS)
-            folio_str = f"ORD-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+            # Generar Folio Estándar Diario (ORD-SUB-YYYYMMDD con consecutivo automático si hay múltiples el mismo día)
+            date_str = datetime.utcnow().strftime('%Y%m%d')
+            base_folio = f"ORD-SUB-{date_str}"
+            
+            # Consultar folios existentes con el mismo prefijo base para determinar el consecutivo
+            stmt_folios = select(OrdenGeneracion.folio).where(
+                OrdenGeneracion.folio.like(f"{base_folio}%")
+            )
+            existing_folios = set(self.session.execute(stmt_folios).scalars().all())
+            
+            if base_folio not in existing_folios:
+                folio_str = base_folio
+            else:
+                counter = 2
+                while f"{base_folio}-{counter}" in existing_folios:
+                    counter += 1
+                folio_str = f"{base_folio}-{counter}"
+
             nueva_orden = OrdenGeneracion(
                 folio=folio_str,
                 descripcion=descripcion,
@@ -126,7 +141,6 @@ class OrdenesService:
             total_referencias_solicitadas += int(row['cantidad'])
 
         # 3. Create or update Groups and divide into Solicitudes
-        from sqlalchemy import select
         for (rfc_id, concepto_id), data in grupos_dict.items():
             cantidad_total = data['cantidad_total']
             

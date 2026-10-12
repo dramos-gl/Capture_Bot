@@ -52,7 +52,7 @@ def test_cancelaciones_y_orden_anual():
         )
         session.commit()
         
-        expected_folio = f"ORD-CANCEL-{current_year}"
+        expected_folio = f"ORD-CLX-AV-{current_year}"
         print(f"Folio de Orden Anual generado: {orden_cancel.folio}")
         assert orden_cancel.folio == expected_folio, f"El folio debe ser {expected_folio}"
         assert orden_cancel.tipo_orden == "CANCELACION", "El tipo_orden debe ser CANCELACION"

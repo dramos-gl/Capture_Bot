@@ -257,12 +257,14 @@ Métodos de Captura
 Habilita la captura rápida en vivo agregando renglones en una grilla interactiva.
 
 Componentes del Formulario:
-*   **Descripción de la Orden**: Input de texto general.
-*   **Modos de Operación (Excluyentes)**:
-    *   `[ ] Modo Cancelaciones` (Fuerza tipo CANCELACION, simplifica la tabla al ocultar concepto/delegación).
-    *   `[ ] Modo Fojas` (Fuerza tipo FOJAS, habilita la columna "No. Actos").
-    *   `[ ] Modo Testimonios` (Fuerza tipo TESTIMONIO, mantiene el grid estándar).
-    *   *Nota: Al confirmar una operación de éxito en cualquier modo especial, el formulario se limpia y se desmarcan los checks para prevenir errores humanos.*
+*   **Descripción de la Orden**: Input de texto general (editable para órdenes Estándar, bloqueado y autocompletado para bolsas anuales).
+*   **Selector de Tipo de Orden (`CustomComboBox`)**:
+    *   `Estándar (Subsidios)` (Genera folios diarios `ORD-SUB-YYYYMMDD`, con consecutivo incremental automático si se crean varias en la misma fecha).
+    *   `Cancelación de Avisos (Anual)` (Consolida en la orden anual `ORD-CLX-AV-YYYY`).
+    *   `Derechos Pagados (Anual)` (Consolida en la orden anual `ORD-PAGADA-YYYY`).
+    *   `Derechos de Fojas (Anual)` (Consolida en la orden anual `ORD-FOJAS-YYYY`, habilita la columna "No. Actos").
+    *   `Expedición de Testimonios (Anual)` (Consolida en la orden anual `ORD-TESTIMONIO-YYYY`).
+    *   *Nota: Al confirmar una operación de éxito, el formulario se limpia y reinicia la selección a Estándar para prevenir errores humanos.*
 *   **Tabla de Captura Dinámica (Grilla)**:
     *   Columnas:
         1.  `RFC` (Dropdown filtrable conectado a CAT_RFC)

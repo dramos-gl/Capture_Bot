@@ -132,7 +132,7 @@ class RequestsView(QWidget):
         
         self.filter_bar = FilterBar(
             search_placeholder="Buscar solicitud",
-            state_options=["Todas", "ASIGNADA", "AUTORIZADA", "CANCELADA", "COMPLETADA", "ERROR", "FACTURADA", "FACTURADA_PARCIAL", "PENDIENTE", "PROCESANDO"],
+            state_options=["PENDIENTE Y COMPLETADA", "Todas", "PENDIENTE", "COMPLETADA", "ASIGNADA", "AUTORIZADA", "CANCELADA", "ERROR", "FACTURADA", "FACTURADA_PARCIAL", "PROCESANDO"],
             on_search=self._filter_table_by_text,
             on_state_change=self._filter_table_by_state,
             on_action=self._on_manual_refresh,
@@ -220,7 +220,7 @@ class RequestsView(QWidget):
         self._all_solicitudes_data = []
         self._filtered_solicitudes_data = []
         self._current_search_text = ""
-        self._current_estado_filter = "Todas"
+        self._current_estado_filter = "PENDIENTE Y COMPLETADA"
 
         self.selected_orden_ids = []
         self.todas_las_ordenes = []
@@ -236,7 +236,6 @@ class RequestsView(QWidget):
         
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.btn_filter_orden, alignment=Qt.AlignmentFlag.AlignBottom)
         
-        self._load_available_orders()
         self._update_order_filter_title()
         
     def _get_selected_solicitud_id(self) -> int:
@@ -627,7 +626,9 @@ class RequestsView(QWidget):
 
     def refresh_data(self, force_reload_orders: bool = False):
         """Fetches the latest Solicitudes."""
-        self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
+        # Only load orders if forced or if user has set a custom filter
+        if force_reload_orders or self.is_custom_filter:
+            self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
         
         # Cancel active thread if running safely
         if self.active_worker and self.active_worker.isRunning():
@@ -639,7 +640,8 @@ class RequestsView(QWidget):
                 pass
             self.active_worker.wait()
 
-        orden_ids = getattr(self, 'selected_orden_ids', [])
+        # If user has not set a custom order filter, pass None to load all solicitudes
+        orden_ids = getattr(self, 'selected_orden_ids', None) if self.is_custom_filter else None
         
         self.active_worker = RequestsLoadWorker(self.solicitudes_ui_service, orden_ids)
         self.active_worker.result_ready.connect(self._on_data_loaded)
@@ -690,7 +692,9 @@ class RequestsView(QWidget):
             # State Filter Logic
             state_match = True
             if estado_filter != "Todas":
-                if estado_filter == "ASIGNADA":
+                if estado_filter == "PENDIENTE Y COMPLETADA":
+                    state_match = estado in ["PENDIENTE", "COMPLETADA", "COMPLETADO"]
+                elif estado_filter == "ASIGNADA":
                     state_match = estado in ["ASIGNADA", "ASIGNADO"]
                 elif estado_filter == "CANCELADA":
                     state_match = estado in ["CANCELADA", "CANCELADO"]
@@ -804,7 +808,7 @@ class RequestsView(QWidget):
                 if preserve_selection and self.is_custom_filter:
                     self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
                 elif not self.is_custom_filter:
-                    self.selected_orden_ids = [self.todas_las_ordenes[0]["orden_id"]]
+                    self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
             else:
                 self.selected_orden_ids = []
         except Exception as e:
@@ -820,6 +824,10 @@ class RequestsView(QWidget):
         if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
             self._load_available_orders()
             
+        # If user opens menu while not in custom filter mode, default all orders as selected in the UI
+        if not self.is_custom_filter and self.todas_las_ordenes:
+            self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
+
         menu = KeepOpenMenu(self)
         order_actions = {}
         
@@ -885,6 +893,11 @@ class RequestsView(QWidget):
 
     def _get_active_orders_formatted_text(self) -> str:
         """Genera el texto HTML ultra-compacto de las órdenes activas en el filtro para pantallas 1366x768 y reducidas."""
+        if not getattr(self, "is_custom_filter", False):
+            total_orders = len(getattr(self, "todas_las_ordenes", []))
+            count_str = f" ({total_orders})" if total_orders > 0 else ""
+            return f'<span style="color: #10B981; font-weight: bold;">Todas{count_str}</span>'
+
         total_orders = len(getattr(self, "todas_las_ordenes", []))
         selected_ids = getattr(self, "selected_orden_ids", [])
         num_selected = len(selected_ids)
@@ -916,6 +929,11 @@ class RequestsView(QWidget):
 
     def _get_active_orders_tooltip_text(self) -> str:
         """Genera el texto de tooltip multilínea detallando cada una de las órdenes seleccionadas."""
+        if not getattr(self, "is_custom_filter", False):
+            total_orders = len(getattr(self, "todas_las_ordenes", []))
+            count_str = f" ({total_orders} órdenes activas)" if total_orders > 0 else ""
+            return f"Filtro de Órdenes:\nTodas las órdenes seleccionadas{count_str}\nPuede cambiar la selección con el botón de embudo [Filtro]."
+
         total_orders = len(getattr(self, "todas_las_ordenes", []))
         selected_ids = getattr(self, "selected_orden_ids", [])
         num_selected = len(selected_ids)

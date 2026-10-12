@@ -95,11 +95,13 @@ class AdminMenuBar(QMenuBar):
         menu_procesos.setWindowFlag(Qt.FramelessWindowHint, True)
         
         act_carga = self._add_action(menu_procesos, "Carga Masiva de Referencias", "documento_cargar", color=Colors.ACCENT_CYAN)
+        act_ubicaciones = self._add_action(menu_procesos, "Cargar Catálogo de Ubicaciones", "tabla", color=Colors.ACCENT_TEAL)
         act_migracion = self._add_action(menu_procesos, "Migración y Sincronización", "sincronizar", color=Colors.ACCENT_INDIGO)
         act_reserva_masiva = self._add_action(menu_procesos, "Reserva Masiva de Referencias", "bloquear", color=Colors.ACCENT_ROSE)
         act_update = self._add_action(menu_procesos, "Escanear Delegaciones en Facturas (PDF)", "documento_historial", color=Colors.ACCENT_EMERALD)
         
         act_carga.triggered.connect(lambda: self.view_requested.emit("carga_masiva"))
+        act_ubicaciones.triggered.connect(lambda: self.view_requested.emit("ubicaciones"))
         act_migracion.triggered.connect(lambda: self.view_requested.emit("migracion"))
         act_reserva_masiva.triggered.connect(lambda: self.view_requested.emit("reserva_masiva"))
         act_update.triggered.connect(lambda: self.view_requested.emit("update_facturas"))

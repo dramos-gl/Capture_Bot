@@ -298,13 +298,13 @@ class OrdersView(QWidget):
                     f"¿Estás seguro de que deseas guardar la orden Anual de derechos pagados ({folio_pagada}) con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
                 )
             elif tipo_ord == "CANCELACION":
-                folio_cancel = f"ORD-CANCEL-{current_year}"
+                folio_cancel = f"ORD-CLX-AV-{current_year}"
                 orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_cancel), None)
                 action_title = "Confirmar Orden de Cancelación"
                 action_msg = (
-                    f"¿Estás seguro de que deseas actualizar la orden de cancelación de aviso con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                    f"¿Estás seguro de que deseas actualizar la orden de cancelación de aviso ({folio_cancel}) con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
                     if orden_existente else
-                    f"¿Estás seguro de que deseas guardar la orden Anual de cancelación de aviso con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
+                    f"¿Estás seguro de que deseas guardar la orden Anual de cancelación de aviso ({folio_cancel}) con las siguientes partidas?\n\n{details_str}\n\nDescripción: {desc}"
                 )
             elif tipo_ord == "FOJAS":
                 folio_fojas = f"ORD-FOJAS-{current_year}"
@@ -631,7 +631,7 @@ class OrdersView(QWidget):
         all_ordenes = getattr(self, "_all_ordenes_data", [])
         prefix_map = {
             "PAGADA": f"ORD-PAGADA-{current_year}",
-            "CANCELACION": f"ORD-CANCEL-{current_year}",
+            "CANCELACION": f"ORD-CLX-AV-{current_year}",
             "FOJAS": f"ORD-FOJAS-{current_year}",
             "TESTIMONIO": f"ORD-TESTIMONIO-{current_year}"
         }
