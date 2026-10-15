@@ -25,7 +25,10 @@ from sar.src.ui.views.admin.migration_view import MigrationView
 from sar.src.ui.views.admin.bulk_load_view import BulkLoadView
 from sar.src.ui.views.admin.update_facturas_view import UpdateFacturasView
 from sar.src.ui.views.admin.reservas_proceso_view import ReservasProcesoView
+from sar.src.ui.views.admin.regularizar_colaborador_view import RegularizarColaboradorView
+from sar.src.ui.views.admin.fusion_lotes_view import FusionLotesView
 from sar.src.ui.views.admin.ubicaciones_view import UbicacionesView
+from satc.src.ui.views.satc_catalogs_view import SatcCatalogsView
 from sar.src.ui.views.admin.help_dialogs import (
     AboutDialog, ShortcutsDialog, SystemDiagnosticsDialog, SupportDialog, UserManualDialog
 )
@@ -218,7 +221,15 @@ class AdminWindow(QMainWindow):
             "ubicaciones": lambda: UbicacionesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:UBICACIONES") or self._can_edit("CATALOGOS", "ADM:GEOGRAFIA")),
             "migracion": lambda: MigrationView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:MIGRACION")),
             "reserva_masiva": lambda: ReservasProcesoView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA")),
-            "update_facturas": lambda: UpdateFacturasView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:UPDATE_FACTURAS"))
+            "regularizar_colaborador": lambda: RegularizarColaboradorView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA")),
+            "fusion_lotes": lambda: FusionLotesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:FUSION_LOTES") or self._can_edit("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA")),
+            "update_facturas": lambda: UpdateFacturasView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:UPDATE_FACTURAS")),
+            "satc_catalogos": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
+            "satc_tipos_tramite": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
+            "satc_estados_tramite": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
+            "satc_estados_vivienda": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
+            "satc_regimenes": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
+            "satc_viviendas": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC"))
         }
         
         # Add a lightweight default placeholder view
@@ -248,12 +259,20 @@ class AdminWindow(QMainWindow):
             "ubicaciones": ("PROCESOS_ESPECIALES", "ADM:UBICACIONES"),
             "migracion": ("PROCESOS_ESPECIALES", "ADM:MIGRACION"),
             "reserva_masiva": ("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA"),
+            "regularizar_colaborador": ("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA"),
             "update_facturas": ("PROCESOS_ESPECIALES", "ADM:UPDATE_FACTURAS"),
+            "satc_catalogos": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
+            "satc_tipos_tramite": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
+            "satc_estados_tramite": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
+            "satc_estados_vivienda": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
+            "satc_regimenes": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
+            "satc_viviendas": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
         }
         
         if view_name in view_module_map:
             mod, submod = view_module_map[view_name]
-            if not self._has_view_access(mod, submod):
+            # Si el usuario es admin o tiene permisos de trámites / catálogos
+            if not self._has_view_access(mod, submod) and not self._has_view_access("CATALOGOS") and not self._has_view_access("SEGURIDAD"):
                 QMessageBox.warning(
                     self,
                     "Acceso Denegado",
@@ -261,15 +280,32 @@ class AdminWindow(QMainWindow):
                 )
                 return
 
-        if view_name not in self.instantiated_views and view_name in self.view_factories:
+        # Para los submódulos de satc que comparten la misma vista por pestañas:
+        target_tab_idx = None
+        target_view_key = view_name
+        if view_name in ["satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas"]:
+            target_view_key = "satc_catalogos"
+            tab_map = {
+                "satc_tipos_tramite": 0,
+                "satc_estados_tramite": 1,
+                "satc_estados_vivienda": 2,
+                "satc_regimenes": 3,
+                "satc_viviendas": 4
+            }
+            target_tab_idx = tab_map.get(view_name)
+
+        if target_view_key not in self.instantiated_views and target_view_key in self.view_factories:
             # Instantiate view on-demand for the first time
-            view_instance = self.view_factories[view_name]()
+            view_instance = self.view_factories[target_view_key]()
             self.stacked_widget.addWidget(view_instance)
-            self.instantiated_views[view_name] = view_instance
+            self.instantiated_views[target_view_key] = view_instance
             
-        if view_name in self.instantiated_views:
-            view = self.instantiated_views[view_name]
-            view.refresh_data()
+        if target_view_key in self.instantiated_views:
+            view = self.instantiated_views[target_view_key]
+            if target_tab_idx is not None and hasattr(view, "tabs"):
+                view.tabs.setCurrentIndex(target_tab_idx)
+            if hasattr(view, "refresh_data"):
+                view.refresh_data()
             self.stacked_widget.setCurrentWidget(view)
 
     def _handle_logout_action(self):

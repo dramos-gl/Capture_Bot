@@ -280,6 +280,7 @@ class TramiteVivienda(Base):
     __table_args__ = {"schema": "satc_produccion"}
 
     tramite_vivienda_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    solicitud_tramite_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_produccion.solicitud_tramite.solicitud_tramite_id", ondelete="SET NULL"))
     vivienda_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.vivienda.vivienda_id", ondelete="CASCADE"))
     regimen_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.regimen_condominio.regimen_id", ondelete="CASCADE"))
     tipo_tramite_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.tipo_tramite.tipo_tramite_id"), nullable=False)
@@ -299,6 +300,7 @@ class TramiteVivienda(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     # Relaciones
+    solicitud_tramite: Mapped[Optional["SolicitudTramite"]] = relationship(back_populates="tramites")
     vivienda: Mapped[Optional[Vivienda]] = relationship(back_populates="tramites")
     regimen: Mapped[Optional[RegimenCondominio]] = relationship()
     tipo_tramite: Mapped[TipoTramite] = relationship()
@@ -307,6 +309,62 @@ class TramiteVivienda(Base):
     factura: Mapped[Optional[FacturaCancun]] = relationship()
     usuario_responsable = relationship("Usuario", foreign_keys=[usuario_responsable_id])
     requisitos: Mapped[List["RequisitoDocumento"]] = relationship(back_populates="tramite", cascade="all, delete-orphan")
+
+
+class OrdenTramite(Base):
+    """Mapea la macro-orden ejecutiva de trámites (Vía B paralela a orden_cancun)."""
+    __tablename__ = "orden_tramite"
+    __table_args__ = {"schema": "satc_produccion"}
+
+    orden_tramite_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    folio_orden: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    desarrollo_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id"), nullable=False)
+    regimen_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.regimen_condominio.regimen_id", ondelete="SET NULL"))
+    descripcion: Mapped[Optional[str]] = mapped_column(Text)
+    total_solicitudes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_viviendas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_concluidos: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_comprobados_erp: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    estado_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.estado_tramite.estado_tramite_id"), nullable=False)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Relaciones
+    desarrollo = relationship("Desarrollo", foreign_keys=[desarrollo_id])
+    regimen = relationship("RegimenCondominio", foreign_keys=[regimen_id])
+    estado: Mapped[EstadoTramite] = relationship()
+    usuario = relationship("Usuario", foreign_keys=[usuario_id])
+    solicitudes: Mapped[List["SolicitudTramite"]] = relationship(back_populates="orden", cascade="all, delete-orphan")
+
+
+class SolicitudTramite(Base):
+    """Mapea el paquete de radicación de trámites ante el municipio (Vía B paralela a lote_folio)."""
+    __tablename__ = "solicitud_tramite"
+    __table_args__ = {"schema": "satc_produccion"}
+
+    solicitud_tramite_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    orden_tramite_id: Mapped[int] = mapped_column(ForeignKey("satc_produccion.orden_tramite.orden_tramite_id", ondelete="CASCADE"), nullable=False)
+    folio_solicitud: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    tipo_tramite_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.tipo_tramite.tipo_tramite_id"), nullable=False)
+    expediente_municipal: Mapped[Optional[str]] = mapped_column(String(100))
+    fecha_ingreso_municipio: Mapped[Optional[date]] = mapped_column(Date)
+    total_viviendas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    viviendas_procesadas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    viviendas_facturadas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    viviendas_concluidas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    archivo_origen: Mapped[Optional[str]] = mapped_column(String(500))
+    estado_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.estado_tramite.estado_tramite_id"), nullable=False)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Relaciones
+    orden: Mapped[OrdenTramite] = relationship(back_populates="solicitudes")
+    tipo_tramite: Mapped[TipoTramite] = relationship()
+    estado: Mapped[EstadoTramite] = relationship()
+    usuario = relationship("Usuario", foreign_keys=[usuario_id])
+    tramites: Mapped[List["TramiteVivienda"]] = relationship(back_populates="solicitud_tramite")
 
 
 class RequisitoDocumento(Base):

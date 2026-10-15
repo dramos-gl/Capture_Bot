@@ -193,16 +193,32 @@ class NavigationSidebar(QFrame):
         self.btn_derechos.setCheckable(True)
         self.btn_derechos.setIcon(Icons.hollow_dot("#94A3B8"))
         self.btn_derechos.setVisible(False)
+
+        self.btn_tramites_vivienda = QPushButton("Trámites por Vivienda")
+        self.btn_tramites_vivienda.setObjectName("subNavBtn")
+        self.btn_tramites_vivienda.setCheckable(True)
+        self.btn_tramites_vivienda.setIcon(Icons.hollow_dot("#94A3B8"))
+        self.btn_tramites_vivienda.setVisible(False)
+
+        self.btn_historial_tramites = QPushButton("Consultar Historial")
+        self.btn_historial_tramites.setObjectName("subNavBtn")
+        self.btn_historial_tramites.setCheckable(True)
+        self.btn_historial_tramites.setIcon(Icons.hollow_dot("#94A3B8"))
+        self.btn_historial_tramites.setVisible(False)
         
         self.submenu_layout.addWidget(self.btn_capturar_nueva)
         self.submenu_layout.addWidget(self.btn_ordenes_capturadas)
         self.submenu_layout.addWidget(self.btn_solicitudes)
         self.submenu_layout.addWidget(self.btn_derechos)
+        self.submenu_layout.addWidget(self.btn_tramites_vivienda)
+        self.submenu_layout.addWidget(self.btn_historial_tramites)
         
         self.buttons["capturar_orden"] = self.btn_capturar_nueva
         self.buttons["ordenes_capturadas"] = self.btn_ordenes_capturadas
         self.buttons["solicitudes"] = self.btn_solicitudes
         self.buttons["referencias"] = self.btn_derechos
+        self.buttons["tramites_vivienda"] = self.btn_tramites_vivienda
+        self.buttons["historial_tramites"] = self.btn_historial_tramites
  
         # --- SUBMENU 2: INVENTARIO ---
         self.inv_submenu_container = QWidget()
@@ -313,6 +329,8 @@ class NavigationSidebar(QFrame):
         self.btn_ordenes_capturadas.clicked.connect(lambda: self._on_sub_nav_clicked("ordenes_capturadas"))
         self.btn_solicitudes.clicked.connect(lambda: self._on_sub_nav_clicked("solicitudes"))
         self.btn_derechos.clicked.connect(lambda: self._on_sub_nav_clicked("referencias"))
+        self.btn_tramites_vivienda.clicked.connect(lambda: self._on_sub_nav_clicked("tramites_vivienda"))
+        self.btn_historial_tramites.clicked.connect(lambda: self._on_sub_nav_clicked("historial_tramites"))
 
         self.btn_inv_facturas.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_facturas"))
         self.btn_inv_masivo.clicked.connect(lambda: self._on_sub_nav_clicked("inventario_masivo"))
@@ -374,7 +392,7 @@ class NavigationSidebar(QFrame):
 
     def _get_first_visible_orden_sub(self) -> str:
         """Retorna la primera opción autorizada y visible del submenú Órdenes."""
-        for key in ["capturar_orden", "ordenes_capturadas", "solicitudes", "referencias"]:
+        for key in ["capturar_orden", "ordenes_capturadas", "solicitudes", "referencias", "tramites_vivienda", "historial_tramites"]:
             if key in self._authorized_items:
                 return key
         return "capturar_orden"
@@ -425,7 +443,7 @@ class NavigationSidebar(QFrame):
             
         # Regular main navigation click - Keep the submenus fixed
         for key, btn in self.buttons.items():
-            if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+            if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "tramites_vivienda", "historial_tramites", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                 btn.setChecked(False)
                 btn.setIcon(Icons.hollow_dot("#94A3B8"))
             else:
@@ -438,7 +456,7 @@ class NavigationSidebar(QFrame):
         
     def _on_sub_nav_clicked(self, clicked_key: str):
         # 1. Handle Órdenes Submenu
-        if clicked_key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias"]:
+        if clicked_key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "tramites_vivienda", "historial_tramites"]:
             self.buttons["ordenes"].setChecked(True)
             self.chevron_label.setPixmap(Icons.chevron_up("#2563EB").pixmap(12, 12))
             self.submenu_visible = True
@@ -446,13 +464,13 @@ class NavigationSidebar(QFrame):
             
             # Uncheck all other parent items except ordenes
             for key, btn in self.buttons.items():
-                if key not in ["ordenes", "ordenes_capturadas", "capturar_orden", "solicitudes", "referencias"]:
+                if key not in ["ordenes", "ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "tramites_vivienda", "historial_tramites"]:
                     btn.setChecked(False)
                     if key in ["inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                         btn.setIcon(Icons.hollow_dot("#94A3B8"))
             
             # Handle Órdenes submenus check states
-            for key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias"]:
+            for key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "tramites_vivienda", "historial_tramites"]:
                 btn = self.buttons[key]
                 if key == clicked_key:
                     btn.setChecked(True)
@@ -472,7 +490,7 @@ class NavigationSidebar(QFrame):
             for key, btn in self.buttons.items():
                 if key not in ["inventario", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                     btn.setChecked(False)
-                    if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias"]:
+                    if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "tramites_vivienda"]:
                         btn.setIcon(Icons.hollow_dot("#94A3B8"))
             
             # Handle Inventario submenus check states
@@ -489,7 +507,7 @@ class NavigationSidebar(QFrame):
 
     def select_item(self, key: str):
         """Allows programmatically checking a navigation item button."""
-        if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+        if key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "tramites_vivienda", "historial_tramites", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
             self._on_sub_nav_clicked(key)
         elif key in self.buttons:
             self._on_main_nav_clicked(key)
@@ -505,7 +523,7 @@ class NavigationSidebar(QFrame):
         """Shows a specific navigation item by its key (Fail-Closed)."""
         self._authorized_items.add(key)
         if key in self.buttons:
-            if self.is_collapsed and key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
+            if self.is_collapsed and key in ["ordenes_capturadas", "capturar_orden", "solicitudes", "referencias", "tramites_vivienda", "historial_tramites", "inventario_facturas", "inventario_masivo", "inventario_apartar", "inventario_catalogos", "inventario_lotes"]:
                 self.buttons[key].setVisible(False)
             else:
                 self.buttons[key].setVisible(True)
@@ -577,7 +595,7 @@ class NavigationSidebar(QFrame):
             # Restore submenu items ONLY if authorized and parent was active
             if self.submenu_visible:
                 self.submenu_container.show()
-                for k in ["capturar_orden", "ordenes_capturadas", "solicitudes", "referencias"]:
+                for k in ["capturar_orden", "ordenes_capturadas", "solicitudes", "referencias", "tramites_vivienda", "historial_tramites"]:
                     if k in self._authorized_items and k in self.buttons:
                         self.buttons[k].setVisible(True)
             if self.inv_submenu_visible:

@@ -7,31 +7,25 @@ from typing import Optional
 
 def format_orden_filter_label(folio: str, descripcion: Optional[str] = None, max_desc_len: int = 50) -> str:
     """
-    Formats order folio and description for UI filters and dropdown menus.
+    Formats order description for UI filters and dropdown menus.
     
-    Transforms technical folios such as:
-        'ORD-20260709-234440' with description 'Subsidios Julio 2026'
-    Into human-readable operational labels:
-        'ORD-20260709 - Subsidios Julio 2026'
+    Prioritizes the human-readable description (e.g. 'Subsidios Agosto 2026')
+    to provide a clean, non-repetitive operational UX.
     
-    Handles:
-        - Prefixes: Takes 'ORD-YYYYMMDD' from 'ORD-YYYYMMDD-HHMMSS[-SUFFIX]'
-        - Empty or missing descriptions
-        - Truncation of excessively long descriptions
+    Fallback:
+        If description is missing or empty, returns the clean folio prefix.
     """
+    desc = (descripcion or "").strip()
+    if desc:
+        if len(desc) > max_desc_len:
+            return desc[:max_desc_len].rstrip() + "..."
+        return desc
+
+    # Fallback si no tiene descripción capturada
     if not folio:
         return ""
 
     parts = str(folio).strip().split("-")
     if len(parts) >= 2:
-        prefix = f"{parts[0]}-{parts[1]}"
-    else:
-        prefix = str(folio).strip()
-
-    desc = (descripcion or "").strip()
-    if desc:
-        if len(desc) > max_desc_len:
-            desc = desc[:max_desc_len].rstrip() + "..."
-        return f"{prefix} - {desc}"
-
-    return prefix
+        return f"{parts[0]}-{parts[1]}"
+    return str(folio).strip()

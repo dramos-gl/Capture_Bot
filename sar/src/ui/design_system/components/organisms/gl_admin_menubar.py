@@ -80,7 +80,26 @@ class AdminMenuBar(QMenuBar):
         act_rfcs.triggered.connect(lambda: self.view_requested.emit("rfcs"))
         act_estados.triggered.connect(lambda: self.view_requested.emit("estados"))
         
-        # 4. ⚙️ Configuración Core
+        # 4. 🏢 Catálogos SATC (Ciclo de Vida y Trámites)
+        menu_satc = self.addMenu("&Catálogos SATC")
+        menu_satc.setWindowFlag(Qt.FramelessWindowHint, True)
+
+        act_satc_catalogos = self._add_action(menu_satc, "Administración de Catálogos SATC", "tabla", color=Colors.ACCENT_CYAN)
+        act_satc_tipos = self._add_action(menu_satc, "Tipos de Trámite Municipal", "documento_plantilla", color=Colors.ACCENT_BLUE)
+        act_satc_estados_tr = self._add_action(menu_satc, "Estados de Trámite", "validar", color=Colors.SUCCESS)
+        act_satc_estados_viv = self._add_action(menu_satc, "Estados de Vivienda / UPE", "actividad", color=Colors.ACCENT_AMBER)
+        act_satc_regimenes = self._add_action(menu_satc, "Regímenes en Condominio (Macro-Lotes)", "empresa", color=Colors.ACCENT_VIOLET)
+        menu_satc.addSeparator()
+        act_satc_viviendas = self._add_action(menu_satc, "Importación Masiva de Viviendas (Excel)", "documento_cargar", color=Colors.ACCENT_EMERALD)
+
+        act_satc_catalogos.triggered.connect(lambda: self.view_requested.emit("satc_catalogos"))
+        act_satc_tipos.triggered.connect(lambda: self.view_requested.emit("satc_tipos_tramite"))
+        act_satc_estados_tr.triggered.connect(lambda: self.view_requested.emit("satc_estados_tramite"))
+        act_satc_estados_viv.triggered.connect(lambda: self.view_requested.emit("satc_estados_vivienda"))
+        act_satc_regimenes.triggered.connect(lambda: self.view_requested.emit("satc_regimenes"))
+        act_satc_viviendas.triggered.connect(lambda: self.view_requested.emit("satc_viviendas"))
+
+        # 5. ⚙️ Configuración Core
         menu_config = self.addMenu("&Configuración Core")
         menu_config.setWindowFlag(Qt.FramelessWindowHint, True)
         
@@ -98,12 +117,16 @@ class AdminMenuBar(QMenuBar):
         act_ubicaciones = self._add_action(menu_procesos, "Cargar Catálogo de Ubicaciones", "tabla", color=Colors.ACCENT_TEAL)
         act_migracion = self._add_action(menu_procesos, "Migración y Sincronización", "sincronizar", color=Colors.ACCENT_INDIGO)
         act_reserva_masiva = self._add_action(menu_procesos, "Reserva Masiva de Referencias", "bloquear", color=Colors.ACCENT_ROSE)
+        act_regularizar = self._add_action(menu_procesos, "Regularizar Asignaciones (Colaboradores)", "editar", color=Colors.ACCENT_AMBER)
+        act_fusion = self._add_action(menu_procesos, "Unificación / Fusión de Lotes", "enlace", color=Colors.ACCENT)
         act_update = self._add_action(menu_procesos, "Escanear Delegaciones en Facturas (PDF)", "documento_historial", color=Colors.ACCENT_EMERALD)
         
         act_carga.triggered.connect(lambda: self.view_requested.emit("carga_masiva"))
         act_ubicaciones.triggered.connect(lambda: self.view_requested.emit("ubicaciones"))
         act_migracion.triggered.connect(lambda: self.view_requested.emit("migracion"))
         act_reserva_masiva.triggered.connect(lambda: self.view_requested.emit("reserva_masiva"))
+        act_regularizar.triggered.connect(lambda: self.view_requested.emit("regularizar_colaborador"))
+        act_fusion.triggered.connect(lambda: self.view_requested.emit("fusion_lotes"))
         act_update.triggered.connect(lambda: self.view_requested.emit("update_facturas"))
 
         # 6. ❓ Ayuda

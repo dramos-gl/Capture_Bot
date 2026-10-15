@@ -169,6 +169,77 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: 
                 OrdenGeneracion.fecha_creacion
             ).order_by(OrdenGeneracion.orden_id.desc())).mappings().all()
             return [dict(r) for r in res]
+        elif entity == "satc_tipos_tramite":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            items = satc_svc.get_all_tipos_tramite()
+            return [
+                {
+                    "tipo_tramite_id": t.tipo_tramite_id,
+                    "codigo": t.codigo,
+                    "nombre": t.nombre,
+                    "aplica_a": t.aplica_a,
+                    "etapa_disparador": t.etapa_disparador,
+                    "dias_vigencia": t.dias_vigencia,
+                    "es_obligatorio": t.es_obligatorio,
+                    "activo": t.activo
+                }
+                for t in items
+            ]
+        elif entity == "satc_estados_tramite":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            items = satc_svc.get_all_estados_tramite()
+            return [
+                {
+                    "estado_tramite_id": e.estado_tramite_id,
+                    "codigo": e.codigo,
+                    "nombre": e.nombre,
+                    "fase": e.fase,
+                    "es_bloqueante": e.es_bloqueante,
+                    "es_terminal": e.es_terminal,
+                    "activo": e.activo
+                }
+                for e in items
+            ]
+        elif entity == "satc_estados_vivienda":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            items = satc_svc.get_all_estados_vivienda()
+            return [
+                {
+                    "estado_vivienda_id": e.estado_vivienda_id,
+                    "codigo": e.codigo,
+                    "nombre": e.nombre,
+                    "descripcion": e.descripcion,
+                    "orden_flujo": e.orden_flujo,
+                    "permite_venta": e.permite_venta,
+                    "permite_escrituracion": e.permite_escrituracion,
+                    "activo": e.activo
+                }
+                for e in items
+            ]
+        elif entity == "satc_regimenes":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            items = satc_svc.get_all_regimenes()
+            return [
+                {
+                    "regimen_id": r.regimen_id,
+                    "desarrollo_id": r.desarrollo_id,
+                    "desarrollo_nombre": r.desarrollo.nombre if r.desarrollo else "N/A",
+                    "nombre_regimen": r.nombre_regimen,
+                    "sm": r.sm or "",
+                    "mz": r.mz,
+                    "lt": r.lt,
+                    "total_upes": r.total_upes,
+                    "upes_generadas": r.upes_generadas,
+                    "licencia_construccion_matriz": r.licencia_construccion_matriz or "",
+                    "clave_catastral_matriz": r.clave_catastral_matriz or "",
+                    "activo": r.activo
+                }
+                for r in items
+            ]
         else:
             raise HTTPException(status_code=400, detail=f"Entidad desconocida: {entity}")
     except Exception as e:
@@ -270,6 +341,30 @@ def save_admin_entity(entity: str, request: AdminSaveRequest, db: Session = Depe
             res = service.save_accion(request.usuario_id, request.sesion_id, request.data)
             db.commit()
             return {"detail": "Acción guardada con éxito", "id": res.accion_id}
+        elif entity == "satc_tipos_tramite":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            res = satc_svc.save_tipo_tramite(request.data)
+            db.commit()
+            return {"detail": "Tipo de trámite guardado con éxito", "id": res.tipo_tramite_id}
+        elif entity == "satc_estados_tramite":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            res = satc_svc.save_estado_tramite(request.data)
+            db.commit()
+            return {"detail": "Estado de trámite guardado con éxito", "id": res.estado_tramite_id}
+        elif entity == "satc_estados_vivienda":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            res = satc_svc.save_estado_vivienda(request.data)
+            db.commit()
+            return {"detail": "Estado de vivienda guardado con éxito", "id": res.estado_vivienda_id}
+        elif entity == "satc_regimenes":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            res = satc_svc.save_regimen_condominio(request.data)
+            db.commit()
+            return {"detail": "Régimen en condominio guardado con éxito", "id": res.regimen_id}
         else:
             raise HTTPException(status_code=400, detail=f"Entidad desconocida para guardar: {entity}")
     except Exception as e:
@@ -420,6 +515,32 @@ def reservar_lote_manual(payload: ReservarLoteManualRequest, db: Session = Depen
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al procesar reserva de lote: {str(e)}")
 
+class RegularizarColaboradorRequest(BaseModel):
+    colaborador_id: int
+    usuario_id: int
+    sesion_id: Optional[int] = None
+    observaciones: Optional[str] = None
+    registros: List[Dict[str, Any]]
+
+@router.post("/referencias/regularizar-colaborador")
+def regularizar_referencias_colaborador(payload: RegularizarColaboradorRequest, db: Session = Depends(get_db)):
+    """Regulariza y consolida referencias previamente apartadas a colaboradores con datos de expediente y ubicación."""
+    try:
+        from sar.src.storage.repositories import InventarioRepository
+        repo = InventarioRepository(db)
+        result = repo.regularizar_referencias_colaborador(
+            colaborador_id=payload.colaborador_id,
+            usuario_id=payload.usuario_id,
+            registros=payload.registros,
+            observaciones_lote=payload.observaciones,
+            sesion_id=payload.sesion_id
+        )
+        db.commit()
+        return result
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al regularizar asignaciones de colaborador: {str(e)}")
+
 # ===========================================================================
 # ENDPOINTS: Catálogo de Ubicaciones (Procesos Especiales)
 # ===========================================================================
@@ -457,4 +578,49 @@ def bulk_import_ubicaciones(payload: ImportarUbicacionesRequest, db: Session = D
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al importar catálogo de ubicaciones: {str(e)}")
+
+# ===========================================================================
+# ENDPOINTS: Importación y Consulta de Viviendas SATC (Ciclo de Vida)
+# ===========================================================================
+
+class ImportarViviendasSATCRequest(BaseModel):
+    desarrollo_id: int
+    regimen_id: Optional[int] = None
+    usuario_id: int
+    sesion_id: Optional[int] = None
+    records: List[Dict[str, Any]]
+
+@router.get("/satc/viviendas/{desarrollo_id}")
+def get_satc_viviendas_by_desarrollo(desarrollo_id: int, regimen_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Retorna las viviendas registradas por desarrollo o por régimen."""
+    try:
+        from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+        svc = HousingLifeCycleService(db)
+        if regimen_id:
+            return svc.get_viviendas_by_regimen(regimen_id)
+        return svc.get_viviendas_by_desarrollo(desarrollo_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al consultar viviendas SATC: {str(e)}")
+
+@router.post("/satc/viviendas/bulk-import")
+def bulk_import_satc_viviendas(payload: ImportarViviendasSATCRequest, db: Session = Depends(get_db)):
+    """Ejecuta la importación masiva de viviendas con validación de UPEs autorizadas vs total en archivo."""
+    try:
+        from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+        svc = HousingLifeCycleService(db)
+        res = svc.importar_viviendas_excel(
+            desarrollo_id=payload.desarrollo_id,
+            records=payload.records,
+            regimen_id=payload.regimen_id,
+            usuario_id=payload.usuario_id,
+            sesion_id=payload.sesion_id
+        )
+        return res
+    except ValueError as ve:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al importar viviendas SATC: {str(e)}")
+
 

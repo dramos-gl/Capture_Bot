@@ -167,6 +167,7 @@ Catálogo dedicado para los estados operativos, documentales y financieros de ca
 8. `FACTURADO` (Fase: AUTOMATIZADA, bloqueante: FALSE, terminal: FALSE) — *Bot C*
 9. `COMPROBADO_ERP` (Fase: FINANCIERA, bloqueante: FALSE, terminal: FALSE) — *ERP Póliza*
 10. `CONCLUIDO` (Fase: CIERRE, bloqueante: FALSE, terminal: TRUE)
+11. `EXPIRADO` (Fase: CIERRE, bloqueante: TRUE, terminal: FALSE) — *Requiere nueva solicitud por caducidad*
 
 ---
 
@@ -253,6 +254,58 @@ Unidad individual de control de trámites (Lote individual en fraccionamiento o 
 
 ## 6. Producción
 
+### Arquitectura de Doble Vía (Coexistencia y No-Regresión)
+El esquema de producción implementa dos vías paralelas de operación:
+* **Vía A (Operativa R2F Actual):** `orden_cancun` ──> `lote_folio` ──> `folio_cancun` (mantiene intacto el procesamiento tradicional por lotes Excel).
+* **Vía B (Gobernanza Ciclo de Vida):** `orden_tramite` ──> `solicitud_tramite` ──> `tramite_vivienda` (gobierna el expediente por vivienda, UPEs, radicación municipal y ERP).
+* **Convergencia:** Ambas vías comparten la capa de extracción y comprobantes fiscales: `recibo_cancun` (Bot A) y `factura_cancun` (Bot C).
+
+---
+
+### Tabla: `satc_produccion.orden_tramite` *(Equivalente evolucionado de orden_cancun)*
+Agrupador ejecutivo de trámites por Desarrollo o Régimen en Condominio.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `orden_tramite_id` | BIGSERIAL PK | Identificador único de la orden |
+| `folio_orden` | VARCHAR(50) UNIQUE NOT NULL | Folio consecutivo (ej: `TRM-ORD-2026-001`) |
+| `desarrollo_id` | BIGINT FK NOT NULL | Desarrollo matriz (`sar_catalogo.desarrollo`) |
+| `regimen_id` | BIGINT FK NULL | Régimen en condominio (`satc_catalogo.regimen_condominio`) |
+| `descripcion` | TEXT NULL | Notas ejecutivas del paquete de trámites |
+| `total_solicitudes` | INTEGER NOT NULL DEFAULT 0 | Contador de paquetes de solicitud radicados |
+| `total_viviendas` | INTEGER NOT NULL DEFAULT 0 | Número de viviendas / UPEs amparadas |
+| `total_concluidos` | INTEGER NOT NULL DEFAULT 0 | Trámites totalmente finalizados |
+| `total_comprobados_erp` | INTEGER NOT NULL DEFAULT 0 | Facturas con póliza comprobada en ERP |
+| `estado_id` | BIGINT FK NOT NULL | Estado global de la orden |
+| `usuario_id` | BIGINT FK NOT NULL | Operador o coordinador que abrió la orden |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | |
+| `updated_at` | TIMESTAMPTZ | |
+
+---
+
+### Tabla: `satc_produccion.solicitud_tramite` *(Equivalente evolucionado de lote_folio)*
+Paquete de radicación municipal o expediente colectivo ingresado ante la autoridad.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `solicitud_tramite_id` | BIGSERIAL PK | Identificador único del paquete de solicitud |
+| `orden_tramite_id` | BIGINT FK NOT NULL | Orden matriz (`satc_produccion.orden_tramite`) |
+| `folio_solicitud` | VARCHAR(50) UNIQUE NOT NULL | Folio interno (ej: `SOL-TRM-2026-001`) |
+| `tipo_tramite_id` | BIGINT FK NOT NULL | Tipo de trámite del paquete (`satc_catalogo.tipo_tramite`) |
+| `expediente_municipal` | VARCHAR(100) NULL | No. de expediente o radicación en Catastro/Tesorería |
+| `fecha_ingreso_municipio`| DATE NULL | Fecha oficial de ingreso en ventanilla municipal |
+| `total_viviendas` | INTEGER NOT NULL DEFAULT 0 | Total de UPEs o lotes en el paquete |
+| `viviendas_procesadas` | INTEGER NOT NULL DEFAULT 0 | Con recibo municipal descargado |
+| `viviendas_facturadas` | INTEGER NOT NULL DEFAULT 0 | Con factura timbrada |
+| `viviendas_concluidas` | INTEGER NOT NULL DEFAULT 0 | Trámites 100% cerrados |
+| `archivo_origen` | VARCHAR(500) NULL | Archivo de origen (Excel/Memoria técnica) |
+| `estado_id` | BIGINT FK NOT NULL | Estado de la solicitud |
+| `usuario_id` | BIGINT FK NOT NULL | Gestor que radicó la solicitud |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | |
+| `updated_at` | TIMESTAMPTZ | |
+
+---
+
 ### Tabla: `satc_produccion.tramite_vivienda`
 Instancia del ciclo de vida de un trámite asociado a una vivienda individual o macro-régimen.
 Gobierna el estado operativo, documental y financiero.
@@ -260,6 +313,7 @@ Gobierna el estado operativo, documental y financiero.
 | Campo | Tipo | Descripción |
 | :--- | :--- | :--- |
 | `tramite_vivienda_id` | BIGSERIAL PK | |
+| `solicitud_tramite_id` | BIGINT FK NULL | Solicitud o paquete padre (`satc_produccion.solicitud_tramite`) |
 | `vivienda_id` | BIGINT FK NULL | Vivienda o UPE asociada (NULL si es trámite matriz) |
 | `regimen_id` | BIGINT FK NULL | Régimen asociado (si aplica) |
 | `tipo_tramite_id` | BIGINT FK NOT NULL | Tipo de trámite (`satc_catalogo.tipo_tramite`) |

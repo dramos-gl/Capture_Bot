@@ -1,6 +1,7 @@
 """Repository classes for encapsulated database CRUD and queries."""
 
 from typing import List, Optional, Any
+import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import select, and_
 from sar.src.storage.models import (
@@ -2721,24 +2722,103 @@ class InventarioRepository(BaseRepository):
         
         return {"disponibles": disponibles, "asignadas": asignadas, "reservadas": reservadas}
 
+    def get_lotes_activos_por_destinatario(
+        self, tipo_destino: str, destinatario_id: int, limit: int = 50
+    ) -> List[dict]:
+        """Returns active assignment lotes eligible for appending references for a specific Notaria or Colaborador.
+        
+        Ordered descending by date and ID.
+        """
+        from sqlalchemy import text
+        where_clause = "la.notaria_id = :dest_id" if tipo_destino == "NOTARIA" else "la.colaborador_id = :dest_id"
+        stmt = text(f"""
+            SELECT 
+                la.lote_asignacion_id,
+                la.tipo_destino,
+                la.solicitante_externo,
+                la.fecha,
+                la.observaciones,
+                u.nombre AS creador,
+                (
+                    SELECT COUNT(*)
+                    FROM sar_archivo.asignacion_referencia ar
+                    JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
+                    WHERE ld.lote_asignacion_id = la.lote_asignacion_id
+                ) AS total_referencias
+            FROM sar_archivo.lote_asignacion la
+            JOIN sar_seguridad.usuario u ON la.usuario_creacion = u.usuario_id
+            WHERE la.tipo_destino = :tipo_destino AND {where_clause}
+            ORDER BY la.fecha DESC, la.lote_asignacion_id DESC
+            LIMIT :limit
+        """)
+        rows = self.session.execute(stmt, {"tipo_destino": tipo_destino, "dest_id": destinatario_id, "limit": limit}).all()
+        return [
+            {
+                "lote_asignacion_id": r.lote_asignacion_id,
+                "tipo_destino": r.tipo_destino,
+                "solicitante_externo": r.solicitante_externo or "",
+                "fecha": r.fecha.strftime("%Y-%m-%d %H:%M") if r.fecha else "",
+                "observaciones": r.observaciones or "",
+                "creador": r.creador or "",
+                "total_referencias": r.total_referencias or 0
+            }
+            for r in rows
+        ]
+
     def crear_lote_asignacion(
         self, tipo_destino: str, notaria_id: Optional[int], colaborador_id: Optional[int],
         solicitante_externo: Optional[str], observaciones: Optional[str], usuario_creacion: int,
-        detalles_list: List[dict], solo_reservar: bool = False, asignar_directo: bool = False
+        detalles_list: List[dict], solo_reservar: bool = False, asignar_directo: bool = False,
+        lote_asignacion_id: Optional[int] = None
     ) -> int:
-        from sar.src.storage.models import LoteAsignacion, LoteDetalle, Ubicacion, AsignacionReferencia, Referencia, Concepto
+        from sar.src.storage.models import LoteAsignacion, LoteDetalle, Ubicacion, AsignacionReferencia, Referencia, Concepto, AuditoriaEvento, EventoSistema
         from sqlalchemy import select
-        
-        lote = LoteAsignacion(
-            tipo_destino=tipo_destino,
-            notaria_id=notaria_id,
-            colaborador_id=colaborador_id,
-            solicitante_externo=solicitante_externo.strip() if solicitante_externo else None,
-            observaciones=observaciones,
-            usuario_creacion=usuario_creacion
-        )
-        self.session.add(lote)
-        self.session.flush()
+        import datetime
+
+        es_anexion = lote_asignacion_id is not None and int(lote_asignacion_id) > 0
+        total_previo = 0
+
+        if es_anexion:
+            # 1. Bloqueo pesimista del lote existente para evitar condiciones de carrera (FOR UPDATE)
+            lote = self.session.execute(
+                select(LoteAsignacion)
+                .where(LoteAsignacion.lote_asignacion_id == lote_asignacion_id)
+                .with_for_update()
+            ).scalars().first()
+
+            if not lote:
+                raise ValueError(f"El lote de asignación #{lote_asignacion_id} no existe en el sistema.")
+
+            # Validar congruencia estricta de destino
+            if lote.tipo_destino != tipo_destino:
+                raise ValueError(f"Incongruencia de destino: El lote #{lote_asignacion_id} es de tipo '{lote.tipo_destino}' y se intentó anexar como '{tipo_destino}'.")
+
+            if tipo_destino == "NOTARIA" and lote.notaria_id != notaria_id:
+                raise ValueError(f"Incongruencia de notaría: El lote #{lote_asignacion_id} pertenece a otra notaría (ID: {lote.notaria_id}).")
+            elif tipo_destino == "COLABORADOR" and lote.colaborador_id != colaborador_id:
+                raise ValueError(f"Incongruencia de colaborador: El lote #{lote_asignacion_id} pertenece a otro colaborador (ID: {lote.colaborador_id}).")
+
+            # Contar referencias previas para auditoría
+            total_previo = sum(ld.cantidad_confirmada for ld in lote.detalles)
+
+            # Concatenar traza histórica en observaciones sin destruir la cabecera original
+            if observaciones and observaciones.strip():
+                now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+                nota_anexion = f"\n[{now_str} - Anexión]: {observaciones.strip()}"
+                lote.observaciones = f"{(lote.observaciones or '').strip()}{nota_anexion}".strip()
+
+        else:
+            # Crear nuevo lote estándar
+            lote = LoteAsignacion(
+                tipo_destino=tipo_destino,
+                notaria_id=notaria_id,
+                colaborador_id=colaborador_id,
+                solicitante_externo=solicitante_externo.strip() if solicitante_externo else None,
+                observaciones=observaciones,
+                usuario_creacion=usuario_creacion
+            )
+            self.session.add(lote)
+            self.session.flush()
 
         estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
         estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
@@ -2750,8 +2830,14 @@ class InventarioRepository(BaseRepository):
         concepts = self.session.execute(concepto_stmt).scalars().all()
         concepts_map = {c.alias: c.concepto_id for c in concepts if c.alias}
 
-        # We will group references by (rfc_id, concepto_id, desarrollo_id) to create the LoteDetalle entries
+        # We will group references by (rfc_id, concepto_id, desarrollo_id) to create/reuse the LoteDetalle entries
         grouped_details = {}
+        if es_anexion:
+            # Precargar partidas ya existentes en el lote
+            for ld_existente in lote.detalles:
+                k = (ld_existente.rfc_id, ld_existente.concepto_id, ld_existente.desarrollo_id)
+                grouped_details[k] = ld_existente
+
         seen_ref_ids = set()
 
         for d in detalles_list:
@@ -2944,6 +3030,32 @@ class InventarioRepository(BaseRepository):
             
             if ref:
                 ref.estado_id = target_estado_id
+
+        # Si fue una anexión a lote existente, registrar evento de auditoría formal
+        if es_anexion and seen_ref_ids:
+            evt_id = self.session.execute(
+                select(EventoSistema.evento_id).where(EventoSistema.codigo == "ACTUALIZACION")
+            ).scalar_one_or_none()
+
+            if evt_id:
+                audit = AuditoriaEvento(
+                    evento_id=evt_id,
+                    usuario_id=usuario_creacion,
+                    modulo="CONTROL_DERECHOS",
+                    detalle={
+                        "accion": "ANEXAR_DERECHOS_LOTE",
+                        "lote_asignacion_id": lote.lote_asignacion_id,
+                        "tipo_destino": tipo_destino,
+                        "notaria_id": notaria_id,
+                        "colaborador_id": colaborador_id,
+                        "total_previo": total_previo,
+                        "total_anexados": len(seen_ref_ids),
+                        "total_nuevo": total_previo + len(seen_ref_ids),
+                        "referencias_anexadas": list(seen_ref_ids),
+                        "fecha": datetime.datetime.now().isoformat()
+                    }
+                )
+                self.session.add(audit)
 
         self.session.flush()
         return lote.lote_asignacion_id
@@ -4451,6 +4563,466 @@ class InventarioRepository(BaseRepository):
 
         self.session.flush()
         return {"success": True, "asignacion_referencia_id": ar.asignacion_referencia_id}
+
+    def regularizar_referencias_colaborador(
+        self,
+        colaborador_id: int,
+        usuario_id: int,
+        registros: List[dict],
+        observaciones_lote: Optional[str] = None,
+        sesion_id: Optional[int] = None
+    ) -> dict:
+        """Completes and regularizes previously reserved references for a collaborator with full file/location details.
+
+        Each item in `registros` is expected to have:
+        - referencia: str
+        - cliente: Optional[str]
+        - desarrollo_id: int
+        - sm: Optional[str] (sanitized without spaces)
+        - mz: Optional[str] (sanitized without spaces)
+        - lote: Optional[str] (sanitized without spaces)
+        - edif: Optional[str] (sanitized without spaces)
+        - viv: Optional[str] (sanitized without spaces)
+        - no_oficial: Optional[str]
+        - credito_titular: Optional[str]
+        - pa: Optional[str]
+        - fecha_solicitud: Optional[date/str]
+        - fecha_escritura: Optional[date/str]
+        - observaciones: Optional[str]
+        """
+        import datetime
+        from sqlalchemy import func
+        from sar.src.storage.models import (
+            Referencia, AsignacionReferencia, LoteDetalle, LoteAsignacion, Ubicacion, AuditoriaEvento, EventoSistema
+        )
+
+        def _clean_str(val: Any) -> Optional[str]:
+            if val is None:
+                return None
+            s = str(val).strip().upper()
+            return s if s else None
+
+        def _clean_coord(val: Any) -> Optional[str]:
+            if val is None:
+                return None
+            s = str(val).replace(" ", "").strip().upper()
+            return s if s else None
+
+        def _parse_date(val: Any) -> Optional[datetime.date]:
+            if not val:
+                return None
+            if isinstance(val, (datetime.date, datetime.datetime)):
+                return val.date() if hasattr(val, "date") else val
+            if isinstance(val, str):
+                s = val.strip().split()[0]
+                if not s:
+                    return None
+                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"):
+                    try:
+                        return datetime.datetime.strptime(s, fmt).date()
+                    except Exception:
+                        continue
+            return None
+
+        # Resolve state IDs
+        estado_asignada_id = self._get_estado_id("referencia", "ASIGNADA")
+        estado_reservada_id = self._get_estado_id("referencia", "RESERVADA")
+
+        # Create or reuse a LoteAsignacion for this regularization process
+        lote = LoteAsignacion(
+            tipo_destino="COLABORADOR",
+            colaborador_id=colaborador_id,
+            observaciones=(observaciones_lote or "Regularización Masiva de Referencias a Colaborador").strip(),
+            usuario_creacion=usuario_id,
+            fecha=datetime.datetime.now()
+        )
+        self.session.add(lote)
+        self.session.flush()
+
+        exitos = 0
+        errores = 0
+        detalles = []
+        regularizados_ids = []
+
+        for reg in registros:
+            ref_portal = _clean_str(reg.get("referencia"))
+            if not ref_portal:
+                errores += 1
+                detalles.append({"referencia": "", "status": "ERROR", "message": "Referencia vacía o inválida."})
+                continue
+
+            # Find Referencia by portal text
+            ref = self.session.execute(
+                select(Referencia).where(Referencia.referencia_portal == ref_portal)
+            ).scalars().first()
+
+            if not ref:
+                errores += 1
+                detalles.append({"referencia": ref_portal, "status": "ERROR", "message": "La referencia no existe en el sistema."})
+                continue
+
+            # Verify current reservation/assignment record
+            asig = self.session.execute(
+                select(AsignacionReferencia).where(AsignacionReferencia.referencia_id == ref.referencia_id)
+            ).scalars().first()
+
+            if not asig:
+                errores += 1
+                detalles.append({"referencia": ref_portal, "status": "ERROR", "message": "La referencia no cuenta con registro de apartado/reserva previo."})
+                continue
+
+            # Check collaborator ownership via lote_detalle -> lote_asignacion
+            ld_actual = self.session.get(LoteDetalle, asig.lote_detalle_id)
+            if not ld_actual or not ld_actual.lote_asignacion:
+                errores += 1
+                detalles.append({"referencia": ref_portal, "status": "ERROR", "message": "No se localizó el lote de asignación de la referencia."})
+                continue
+
+            if ld_actual.lote_asignacion.colaborador_id != colaborador_id:
+                errores += 1
+                detalles.append({
+                    "referencia": ref_portal,
+                    "status": "ERROR",
+                    "message": f"La referencia pertenece a otro colaborador (ID: {ld_actual.lote_asignacion.colaborador_id})."
+                })
+                continue
+
+            # Verify state is RESERVADA
+            if ref.estado_id != estado_reservada_id:
+                errores += 1
+                detalles.append({
+                    "referencia": ref_portal,
+                    "status": "ERROR",
+                    "message": f"La referencia no está en estado RESERVADA (estado actual ID: {ref.estado_id})."
+                })
+                continue
+
+            desarrollo_id = reg.get("desarrollo_id")
+            if not desarrollo_id:
+                errores += 1
+                detalles.append({"referencia": ref_portal, "status": "ERROR", "message": "El desarrollo es obligatorio para regularizar."})
+                continue
+
+            # Coordinates sanitization (internal spaces removed)
+            sm = _clean_coord(reg.get("sm"))
+            mz = _clean_coord(reg.get("mz"))
+            lote_coord = _clean_coord(reg.get("lote"))
+            edif = _clean_coord(reg.get("edif"))
+            viv = _clean_coord(reg.get("viv"))
+            no_oficial = _clean_str(reg.get("no_oficial"))
+            cliente = _clean_str(reg.get("cliente"))
+            credito = _clean_str(reg.get("credito_titular"))
+            pa = _clean_str(reg.get("pa"))
+            f_sol = _parse_date(reg.get("fecha_solicitud"))
+            f_esc = _parse_date(reg.get("fecha_escritura"))
+            obs_reg = _clean_str(reg.get("observaciones"))
+
+            # Locate or create Ubicacion with normalized coordinates
+            ubi_id = None
+            if any([sm, mz, lote_coord, edif, viv]):
+                # Build query matching existing Ubicacion
+                conds = [Ubicacion.desarrollo_id == desarrollo_id]
+                if sm:
+                    conds.append(func.replace(Ubicacion.sm, ' ', '') == sm)
+                if mz:
+                    conds.append(func.replace(Ubicacion.mz, ' ', '') == mz)
+                if lote_coord:
+                    conds.append(func.replace(Ubicacion.lote, ' ', '') == lote_coord)
+                if edif:
+                    conds.append(func.replace(Ubicacion.edif, ' ', '') == edif)
+                if viv:
+                    conds.append(func.replace(Ubicacion.viv, ' ', '') == viv)
+
+                ubi_existente = self.session.execute(
+                    select(Ubicacion).where(and_(*conds))
+                ).scalars().first()
+
+                if ubi_existente:
+                    ubi_id = ubi_existente.ubicacion_id
+                    if no_oficial and not ubi_existente.no_oficial:
+                        ubi_existente.no_oficial = no_oficial
+                else:
+                    nueva_ubi = Ubicacion(
+                        desarrollo_id=desarrollo_id,
+                        sm=sm,
+                        mz=mz,
+                        lote=lote_coord,
+                        edif=edif,
+                        viv=viv,
+                        no_oficial=no_oficial
+                    )
+                    self.session.add(nueva_ubi)
+                    self.session.flush()
+                    ubi_id = nueva_ubi.ubicacion_id
+
+            # Create LoteDetalle under new lote for regularized status
+            ld_regularizado = LoteDetalle(
+                lote_asignacion_id=lote.lote_asignacion_id,
+                rfc_id=ref.grupo.rfc_id,
+                concepto_id=ref.grupo.concepto_id,
+                desarrollo_id=desarrollo_id,
+                cantidad_solicitada=1,
+                cantidad_confirmada=1
+            )
+            self.session.add(ld_regularizado)
+            self.session.flush()
+
+            # Update AsignacionReferencia
+            asig.lote_detalle_id = ld_regularizado.lote_detalle_id
+            asig.ubicacion_id = ubi_id
+            asig.cliente = cliente
+            asig.credito_titular = credito
+            asig.pa = pa
+            asig.no_oficial = no_oficial
+            asig.fecha_solicitud = f_sol
+            asig.fecha_escritura = f_esc
+            asig.observaciones = obs_reg or asig.observaciones
+            asig.estado_id = estado_asignada_id
+            asig.fecha_confirmacion = datetime.datetime.now()
+            asig.usuario_confirmacion = usuario_id
+
+            # Update Referencia status to ASIGNADA
+            ref.estado_id = estado_asignada_id
+
+            regularizados_ids.append(ref.referencia_id)
+            exitos += 1
+            detalles.append({
+                "referencia": ref_portal,
+                "status": "CORRECTO",
+                "message": "Referencia regularizada y consolidada a ASIGNADA exitosamente."
+            })
+
+        # Register audit event if any records succeeded
+        if exitos > 0:
+            evt_id = self.session.execute(
+                select(EventoSistema.evento_id).where(EventoSistema.codigo == "ACTUALIZACION")
+            ).scalar_one_or_none()
+
+            if evt_id:
+                audit = AuditoriaEvento(
+                    evento_id=evt_id,
+                    usuario_id=usuario_id,
+                    sesion_id=sesion_id,
+                    modulo="PROCESOS_ESPECIALES",
+                    detalle={
+                        "accion": "REGULARIZAR_COLABORADOR",
+                        "colaborador_id": colaborador_id,
+                        "lote_asignacion_id": lote.lote_asignacion_id,
+                        "total_exitos": exitos,
+                        "total_errores": errores,
+                        "referencias_regularizadas": regularizados_ids[:100]
+                    }
+                )
+                self.session.add(audit)
+
+        return {
+            "lote_asignacion_id": lote.lote_asignacion_id,
+            "exitos": exitos,
+            "errores": errores,
+            "detalles": detalles
+        }
+
+    def get_lotes_activos_por_destinatario(self, tipo_destino: str, destinatario_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        """Returns active assignment lotes for a given recipient ordered chronologically descending."""
+        from sqlalchemy import text
+        where_cond = "la.notaria_id = :dest_id" if tipo_destino == "NOTARIA" else "la.colaborador_id = :dest_id"
+        stmt = text(f"""
+            SELECT
+                la.lote_asignacion_id,
+                la.tipo_destino,
+                la.notaria_id,
+                la.colaborador_id,
+                la.solicitante_externo,
+                la.fecha,
+                la.observaciones,
+                u.nombre AS creador,
+                (
+                    SELECT COUNT(*)
+                    FROM sar_archivo.asignacion_referencia ar
+                    JOIN sar_archivo.lote_detalle ld ON ar.lote_detalle_id = ld.lote_detalle_id
+                    WHERE ld.lote_asignacion_id = la.lote_asignacion_id
+                ) AS total_referencias
+            FROM sar_archivo.lote_asignacion la
+            JOIN sar_seguridad.usuario u ON la.usuario_creacion = u.usuario_id
+            WHERE la.tipo_destino = :tipo_destino AND {where_cond}
+            ORDER BY la.fecha DESC, la.lote_asignacion_id DESC
+            LIMIT :limit
+        """)
+        results = self.session.execute(stmt, {
+            "tipo_destino": tipo_destino,
+            "dest_id": destinatario_id,
+            "limit": limit
+        }).all()
+
+        return [
+            {
+                "lote_asignacion_id": row.lote_asignacion_id,
+                "tipo_destino": row.tipo_destino,
+                "solicitante_externo": row.solicitante_externo or "",
+                "fecha": row.fecha.strftime("%Y-%m-%d %H:%M") if row.fecha else "",
+                "observaciones": row.observaciones or "",
+                "creador": row.creador,
+                "total_referencias": int(row.total_referencias or 0)
+            }
+            for row in results
+        ]
+
+    def fusionar_lotes_asignacion(
+        self,
+        lote_maestro_id: int,
+        lotes_absorber_ids: List[int],
+        usuario_id: int,
+        sesion_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Safely merges multiple lotes into a single master lote using pessimistic row-level locking.
+
+        Enforces:
+        1. Both master and absorbed lotes exist and share identical recipient (tipo_destino and notaria/colaborador).
+        2. Absorbed lotes must differ from the master lote.
+        3. Moves all AsignacionReferencia records to LoteDetalle entries under the master lote.
+        4. Consolidates LoteDetalle quantities for matching (rfc_id, concepto_id, desarrollo_id).
+        5. Updates master lote observations with historic merge audit trail.
+        6. Deletes empty absorbed lote headers.
+        7. Records an audit event in sar_auditoria.
+        """
+        from sar.src.storage.models import LoteAsignacion, LoteDetalle, AsignacionReferencia, AuditoriaEvento, EventoSistema
+        from sqlalchemy import select, update
+
+        if not lotes_absorber_ids:
+            raise ValueError("Debe seleccionar al menos un lote para absorber.")
+
+        lotes_absorber_ids = [lid for lid in lotes_absorber_ids if lid != lote_maestro_id]
+        if not lotes_absorber_ids:
+            raise ValueError("Los lotes a absorber no pueden ser idénticos al Lote Maestro.")
+
+        # 1. Pessimistic lock on master lote
+        lote_maestro = self.session.execute(
+            select(LoteAsignacion)
+            .where(LoteAsignacion.lote_asignacion_id == lote_maestro_id)
+            .with_for_update()
+        ).scalars().first()
+
+        if not lote_maestro:
+            raise ValueError(f"El Lote Maestro #{lote_maestro_id} no existe.")
+
+        # Map existing master details by (rfc_id, concepto_id, desarrollo_id)
+        master_details = {}
+        for ld in lote_maestro.detalles:
+            k = (ld.rfc_id, ld.concepto_id, ld.desarrollo_id)
+            master_details[k] = ld
+
+        total_referencias_transferidas = 0
+        lotes_procesados = []
+
+        now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+        trazas_fusion = []
+
+        for l_abs_id in lotes_absorber_ids:
+            lote_abs = self.session.execute(
+                select(LoteAsignacion)
+                .where(LoteAsignacion.lote_asignacion_id == l_abs_id)
+                .with_for_update()
+            ).scalars().first()
+
+            if not lote_abs:
+                continue
+
+            # Strict destination congruency validation
+            if lote_abs.tipo_destino != lote_maestro.tipo_destino:
+                raise ValueError(
+                    f"Incongruencia de destino: El lote #{l_abs_id} es de tipo '{lote_abs.tipo_destino}' "
+                    f"mientras que el Lote Maestro #{lote_maestro_id} es '{lote_maestro.tipo_destino}'."
+                )
+
+            if lote_maestro.tipo_destino == "NOTARIA" and lote_abs.notaria_id != lote_maestro.notaria_id:
+                raise ValueError(
+                    f"Incongruencia de Notaría: El lote #{l_abs_id} (Notaría {lote_abs.notaria_id}) "
+                    f"no pertenece a la misma notaría que el Lote Maestro (Notaría {lote_maestro.notaria_id})."
+                )
+            elif lote_maestro.tipo_destino == "COLABORADOR" and lote_abs.colaborador_id != lote_maestro.colaborador_id:
+                raise ValueError(
+                    f"Incongruencia de Colaborador: El lote #{l_abs_id} (Colaborador {lote_abs.colaborador_id}) "
+                    f"no pertenece al mismo colaborador que el Lote Maestro (Colaborador {lote_maestro.colaborador_id})."
+                )
+
+            refs_en_este_lote = 0
+
+            # Transfer each LoteDetalle of the absorbed lote
+            for ld_abs in list(lote_abs.detalles):
+                k = (ld_abs.rfc_id, ld_abs.concepto_id, ld_abs.desarrollo_id)
+                asigs_abs = list(ld_abs.asignaciones)
+                count_asigs = len(asigs_abs)
+
+                if k in master_details:
+                    # Target LoteDetalle already exists in master lote: reapoint asignaciones
+                    ld_target = master_details[k]
+                    for ar in asigs_abs:
+                        ar.lote_detalle_id = ld_target.lote_detalle_id
+                    ld_target.cantidad_solicitada += ld_abs.cantidad_solicitada
+                    ld_target.cantidad_confirmada += count_asigs
+                    self.session.flush()
+                    # Disassociate and delete now-empty absorbed detail
+                    if ld_abs in lote_abs.detalles:
+                        lote_abs.detalles.remove(ld_abs)
+                    self.session.delete(ld_abs)
+                else:
+                    # Key does not exist in master: disassociate from absorbed lote and adopt into master
+                    if ld_abs in lote_abs.detalles:
+                        lote_abs.detalles.remove(ld_abs)
+                    ld_abs.lote_asignacion_id = lote_maestro_id
+                    lote_maestro.detalles.append(ld_abs)
+                    master_details[k] = ld_abs
+
+                refs_en_este_lote += count_asigs
+
+            self.session.flush()
+            total_referencias_transferidas += refs_en_este_lote
+            lotes_procesados.append(l_abs_id)
+            trazas_fusion.append(f"Lote #{l_abs_id} ({refs_en_este_lote} refs)")
+
+            # Clear collection and delete the empty absorbed header
+            lote_abs.detalles.clear()
+            self.session.delete(lote_abs)
+
+        if not lotes_procesados:
+            raise ValueError("No se pudo procesar ninguno de los lotes seleccionados.")
+
+        # Append audit note to master lote observations
+        traza_txt = f"\n[{now_str} - Fusión Administrativa]: Se absorbieron los lotes: {', '.join(trazas_fusion)}."
+        lote_maestro.observaciones = f"{(lote_maestro.observaciones or '').strip()}{traza_txt}".strip()
+
+        # Formal Audit Log Entry
+        evt_id = self.session.execute(
+            select(EventoSistema.evento_id).where(EventoSistema.codigo == "ACTUALIZACION")
+        ).scalar_one_or_none()
+
+        if evt_id:
+            audit = AuditoriaEvento(
+                evento_id=evt_id,
+                usuario_id=usuario_id,
+                sesion_id=sesion_id,
+                modulo="PROCESOS_ESPECIALES",
+                detalle={
+                    "accion": "FUSION_LOTES_ASIGNACION",
+                    "lote_maestro_id": lote_maestro_id,
+                    "lotes_absorbidos": lotes_procesados,
+                    "total_referencias_transferidas": total_referencias_transferidas,
+                    "tipo_destino": lote_maestro.tipo_destino,
+                    "notaria_id": lote_maestro.notaria_id,
+                    "colaborador_id": lote_maestro.colaborador_id,
+                    "fecha": datetime.datetime.now().isoformat()
+                }
+            )
+            self.session.add(audit)
+
+        self.session.flush()
+
+        return {
+            "lote_maestro_id": lote_maestro_id,
+            "lotes_absorbidos": lotes_procesados,
+            "total_transferidas": total_referencias_transferidas
+        }
+
 
 
 

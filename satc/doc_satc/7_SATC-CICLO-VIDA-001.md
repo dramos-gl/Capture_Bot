@@ -183,9 +183,45 @@ Gobierna el estado operativo, documental, automatizado (Bots) y financiero (ERP)
 
 ---
 
-## 5. Cadena de Control Financiero y Documental
+## 5. Arquitectura de Coexistencia y Cadena de Control Financiero
 
-Cada trámite debe mantener una conciliación trilateral obligatoria:
+### 5.1 Jerarquía Operativa de Doble Vía (Strangler Fig Pattern)
+Para garantizar **cero interrupción** del sistema en producción mientras se evoluciona al control por vivienda, el sistema implementa dos vías paralelas:
+
+```
+┌────────────────────────────────────────────────────────┐     ┌────────────────────────────────────────────────────────┐
+│            VÍA A: OPERACIÓN ACTUAL (R2F)               │     │        VÍA B: GOBERNANZA INTEGRAL (NUEVO FLUJO)        │
+│            (Operación reactiva por folios)             │     │      (Control de ciclo de vida por vivienda / UPE)     │
+└───────────────────────────┬────────────────────────────┘     └───────────────────────────┬────────────────────────────┘
+                            │                                                              │
+                            ▼                                                              ▼
+                   satc_produccion.                                               satc_produccion.
+                     orden_cancun                                                   orden_tramite
+                            │                                                              │
+                            ▼                                                              ▼
+                   satc_produccion.                                               satc_produccion.
+                      lote_folio                                                 solicitud_tramite
+                            │                                                              │
+                            ▼                                                              ▼
+                   satc_produccion.                                               satc_produccion.
+                     folio_cancun                                                 tramite_vivienda
+                            │                                                              │
+                            └───────────────────────────────┬──────────────────────────────┘
+                                                            │
+                                                            ▼
+                                                   satc_produccion.recibo_cancun (Bot A)
+                                                            │
+                                                            ▼
+                                                   satc_produccion.factura_cancun (Bot C)
+```
+
+* **Vía A (Operativa R2F):** `orden_cancun` ──> `lote_folio` ──> `folio_cancun`. Permite a los operadores procesar lotes rápidos en Excel sin vincular previamente la vivienda.
+* **Vía B (Gobernanza Ciclo de Vida):** `orden_tramite` ──> `solicitud_tramite` ──> `tramite_vivienda`. Permite gobernar los macro-proyectos, radicar paquetes ante Catastro/Tesorería y controlar el semáforo de escrituración por vivienda/UPE.
+* **Convergencia:** Ambos flujos reutilizan el mismo motor de automatización: **Bot A** (descarga y lectura de recibos) y **Bot C** (timbrado CFDI).
+
+### 5.2 Cadena de Conciliación Trilateral ERP
+
+Cada trámite de vivienda mantiene una conciliación trilateral obligatoria:
 
 ```
 ┌────────────────────────────────────────────────────────┐

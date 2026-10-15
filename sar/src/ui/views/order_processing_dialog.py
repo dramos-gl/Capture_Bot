@@ -202,6 +202,17 @@ class OrderProcessingDialog(QDialog):
         self.btn_fase_b_pdf.setToolTip("Generar lotes archivos pdf")
         self.btn_fase_b_pdf.clicked.connect(self._on_generar_pdf_unificado)
 
+        self.btn_exportar_facturas = CustomButton(
+            text="Facturas",
+            is_secondary=True,
+            icon_name="documento_descargar",
+            control_size="sm",
+            parent=self
+        )
+        self.btn_exportar_facturas.setObjectName("secondaryBtn")
+        self.btn_exportar_facturas.setToolTip("Exportar facturas individuales (PDF y XML de derechos que cuenten con ambos)")
+        self.btn_exportar_facturas.clicked.connect(self._on_exportar_facturas_individuales)
+
         self.btn_authorize = CustomButton.action_autorizar(control_size="sm", parent=self)
         self.btn_authorize.setObjectName("orderProcessingAuthBtn")
         self.btn_authorize.setToolTip("Autorizar solicitudes seleccionadas")
@@ -218,6 +229,7 @@ class OrderProcessingDialog(QDialog):
         
         self.bottom_layout.addWidget(self.btn_fase_b_excel)
         self.bottom_layout.addWidget(self.btn_fase_b_pdf)
+        self.bottom_layout.addWidget(self.btn_exportar_facturas)
         self.bottom_layout.addWidget(self.btn_authorize)
         self.bottom_layout.addWidget(self.btn_reject)
         self.bottom_layout.addWidget(self.btn_cancel)
@@ -497,20 +509,30 @@ class OrderProcessingDialog(QDialog):
 
     def _check_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
         """Helper to verify if current session/user holds permission for modulo + accion."""
-        parent_window = self.window()
+        parent_window = self.parent().window() if self.parent() else self.window()
         usuario_id = getattr(parent_window, 'current_usuario_id', None)
+        if not usuario_id and hasattr(self, 'parent') and self.parent():
+            usuario_id = getattr(self.parent(), 'current_usuario_id', None)
+            
         if not usuario_id:
-            return True # Fallback if standalone/testing without active user session context
+            # Fail-Closed Policy: If active user cannot be verified, access must be strictly denied
+            return False
         
         try:
-            if getattr(self.api_client, 'connect_via_api', False):
-                perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
-                return perms.get(modulo_codigo, {}).get(accion_codigo, False)
-            else:
-                with self.db_connector.get_session() as session:
-                    from sar.src.services.security_service import SecurityService
-                    sec_service = SecurityService(session)
-                    return sec_service.has_permission(usuario_id, modulo_codigo, accion_codigo)
+            # Utilize cached permissions if available on parent_window
+            perms = getattr(parent_window, '_permissions_cache', None)
+            if perms is None or getattr(parent_window, '_permissions_cache_user_id', None) != usuario_id:
+                if getattr(self.api_client, 'connect_via_api', False):
+                    perms = self.api_client.request("GET", f"/api/auth/permissions/{usuario_id}")
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.services.security_service import SecurityService
+                        sec_service = SecurityService(session)
+                        perms = sec_service.get_user_permissions(usuario_id)
+                setattr(parent_window, '_permissions_cache', perms)
+                setattr(parent_window, '_permissions_cache_user_id', usuario_id)
+
+            return perms.get(modulo_codigo, {}).get(accion_codigo, False)
         except Exception as e:
             print(f"Error checking permission {modulo_codigo}:{accion_codigo}: {e}")
             return False
@@ -757,6 +779,96 @@ class OrderProcessingDialog(QDialog):
             
         except Exception as e:
             QMessageBox.critical(self, "Error - Generar PDF Unificado", f"Ocurrió un error al iniciar la generación de PDFs:\n{str(e)}")
+
+    def _on_exportar_facturas_individuales(self):
+        """Exporta los archivos PDF y XML individuales de los derechos seleccionados que cuenten con ambos archivos."""
+        if not self._check_permission("ORDENES", "EJECUTAR"):
+            QMessageBox.warning(
+                self,
+                "Acceso Denegado",
+                "No tiene permisos para exportar facturas individuales (ORDENES:EJECUTAR)."
+            )
+            return
+
+        sol_ids = self._get_selected_solicitud_ids()
+        if not sol_ids:
+            QMessageBox.warning(self, "Selección Requerida", "Selecciona al menos una solicitud de la tabla primero.")
+            return
+
+        from sar.src.services.fase_b_service import FaseBService, FaseBWorker
+        from sar.src.ui.design_system.components import GLLoadingDialog
+        from PySide6.QtWidgets import QFileDialog
+
+        service = FaseBService(self.db_connector)
+        facturas_disponibles = service.get_facturas_exportables(sol_ids)
+
+        if not facturas_disponibles:
+            QMessageBox.information(
+                self,
+                "Sin Facturas Completas",
+                "Las solicitudes seleccionadas no contienen derechos con ambos archivos (PDF y XML) disponibles para exportación."
+            )
+            return
+
+        total_facturas = len(facturas_disponibles)
+        confirm = QMessageBox.question(
+            self,
+            "Confirmar Exportación de Facturas",
+            f"Se encontraron {total_facturas} derecho(s) con factura completa (PDF y XML) en las solicitudes seleccionadas.\n\n"
+            f"¿Desea seleccionar la carpeta de destino para exportar los archivos individuales?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        default_dir = self._get_default_directory()
+        dest_dir = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta para Guardar Facturas (PDF y XML)", default_dir)
+        if not dest_dir:
+            return
+
+        # Verificar posibles archivos existentes
+        conflicts = service.check_conflicting_files(sol_ids, dest_dir, action_type="facturas")
+        if conflicts:
+            conflicts_sample = "\n".join([f"- {name}" for name in conflicts[:10]])
+            if len(conflicts) > 10:
+                conflicts_sample += f"\n... y {len(conflicts) - 10} archivo(s) más."
+            replace_confirm = QMessageBox.warning(
+                self,
+                "Archivos Existentes - Reemplazar",
+                f"Los siguientes {len(conflicts)} archivo(s) ya existen en la carpeta de destino:\n\n{conflicts_sample}\n\n¿Desea reemplazarlos?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if replace_confirm != QMessageBox.Yes:
+                return
+
+        self.loading_dialog = GLLoadingDialog("Exportando facturas individuales (PDF y XML)...", self)
+        self.loading_dialog.show()
+
+        self.facturas_worker = FaseBWorker(service, sol_ids, dest_dir, action_type="facturas")
+
+        def on_finished(result):
+            self.loading_dialog.close()
+            if result.get("success"):
+                msg = (
+                    f"¡Exportación de facturas completada con éxito!\n\n"
+                    f"• Derechos procesados: {result.get('total_referencias', 0)}\n"
+                    f"• Total de archivos generados: {result.get('total_archivos', 0)} (PDFs y XMLs)\n"
+                )
+                if result.get("faltantes", 0) > 0:
+                    msg += f"• Derechos omitidos por archivos inaccesibles: {result.get('faltantes')}\n"
+                msg += f"\nGuardados en:\n{dest_dir}"
+                QMessageBox.information(self, "Éxito - Exportación de Facturas", msg)
+            else:
+                QMessageBox.warning(self, "Advertencia - Exportación de Facturas", result.get("message", "No se pudieron exportar facturas."))
+
+        def on_error(err):
+            self.loading_dialog.close()
+            QMessageBox.critical(self, "Error - Exportación de Facturas", f"Ocurrió un error al exportar las facturas:\n{str(err)}")
+
+        self.facturas_worker.finished.connect(on_finished)
+        self.facturas_worker.error.connect(on_error)
+        self.facturas_worker.start()
 
     def _apply_readonly_if_cancelled(self):
         """Disables controls and displays a warning banner if the order is cancelled."""

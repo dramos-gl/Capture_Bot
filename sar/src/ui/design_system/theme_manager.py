@@ -31,6 +31,8 @@ class ThemeManager:
         chevron_down_path = os.path.join(icons_dir, "chevron_down_dark.svg" if is_dark else "chevron_down.svg").replace("\\", "/")
         chevron_up_path = os.path.join(icons_dir, "chevron_up_dark.svg" if is_dark else "chevron_up.svg").replace("\\", "/")
         calendar_path = os.path.join(icons_dir, "calendar.svg").replace("\\", "/")
+        radio_unchecked_path = os.path.join(icons_dir, "radio_unchecked_dark.svg" if is_dark else "radio_unchecked.svg").replace("\\", "/")
+        radio_checked_path = os.path.join(icons_dir, "radio_checked_dark.svg" if is_dark else "radio_checked.svg").replace("\\", "/")
 
         qss = f"""
         /* Global Defaults */
@@ -1104,6 +1106,35 @@ class ThemeManager:
         QCheckBox::indicator:disabled {{
             border-color: {border};
             background-color: {bg};
+        }}
+
+        /* RadioButtons */
+        QRadioButton {{
+            background-color: transparent;
+            color: {txt_primary};
+            spacing: 8px;
+            font-size: 13px;
+            outline: none;
+        }}
+        QRadioButton:focus {{
+            outline: none;
+            border: none;
+        }}
+        QRadioButton::indicator {{
+            width: 18px;
+            height: 18px;
+            border: none;
+            background: transparent;
+            image: url({radio_unchecked_path});
+        }}
+        QRadioButton::indicator:hover {{
+            image: url({radio_checked_path});
+        }}
+        QRadioButton::indicator:checked {{
+            image: url({radio_checked_path});
+        }}
+        QRadioButton::indicator:disabled {{
+            opacity: 0.5;
         }}
         
         /* Menu Bar and Menus Dropdowns */

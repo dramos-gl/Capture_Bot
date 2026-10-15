@@ -7,8 +7,9 @@ import sys
 import logging
 from pathlib import Path
 
-# Configurar path raíz
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
+# Configurar path raíz: __file__ está en satc/src/storage/migrations/run_010_migration.py
+# parent: migrations, parent: storage, parent: src, parent: satc, parent: Proyecto_CapturaBot
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
@@ -42,8 +43,22 @@ def run_migration():
         with engine.connect() as conn:
             # Ejecutar el script completo
             conn.execute(text(sql_content))
+            
+            # Otorgar permisos al usuario de aplicación del sistema (sar_app_user)
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'sar_app_user') THEN
+                        GRANT USAGE ON SCHEMA satc_catalogo, satc_produccion TO sar_app_user;
+                        GRANT ALL ON ALL TABLES IN SCHEMA satc_catalogo, satc_produccion TO sar_app_user;
+                        GRANT ALL ON ALL SEQUENCES IN SCHEMA satc_catalogo, satc_produccion TO sar_app_user;
+                        ALTER DEFAULT PRIVILEGES IN SCHEMA satc_catalogo, satc_produccion GRANT ALL ON TABLES TO sar_app_user;
+                        ALTER DEFAULT PRIVILEGES IN SCHEMA satc_catalogo, satc_produccion GRANT ALL ON SEQUENCES TO sar_app_user;
+                    END IF;
+                END $$;
+            """))
             conn.commit()
-            logger.info("✅ Migración 010 ejecutada exitosamente en PostgreSQL.")
+            logger.info("✅ Migración 010 ejecutada exitosamente y permisos otorgados a sar_app_user.")
             
             # Verificación de tablas creadas
             res = conn.execute(text("""

@@ -750,13 +750,13 @@ class DashboardView(QWidget):
 
             if num_selected == 1:
                 o = selected_objs[0]
-                p = format_orden_filter_label(o.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                p = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=30)
                 return f"<b>{p}</b>"
 
             elif num_selected == 2:
                 o1, o2 = selected_objs[0], selected_objs[1]
-                p1 = format_orden_filter_label(o1.get("folio", ""), max_desc_len=0).split(" - ")[0]
-                p2 = format_orden_filter_label(o2.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                p1 = format_orden_filter_label(o1.get("folio", ""), o1.get("descripcion", ""), max_desc_len=20)
+                p2 = format_orden_filter_label(o2.get("folio", ""), o2.get("descripcion", ""), max_desc_len=20)
                 return f"<b>{p1}, {p2}</b>"
 
             else:

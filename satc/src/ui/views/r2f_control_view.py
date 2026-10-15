@@ -90,12 +90,18 @@ class R2FControlView(QWidget):
         self.sidebar.set_username(self._get_username_string())
         self.sidebar.logout_requested.connect(self.logout_requested.emit)
         
-        # Habilitar ítems del submenú Órdenes y Control R2F
+        # Habilitar ítems del submenú Órdenes y Control R2F con verificación RBAC (Fail-Closed)
         self.sidebar.show_item("dashboard")
         self.sidebar.show_item("ordenes")
         self.sidebar.show_item("capturar_orden")
         self.sidebar.show_item("ordenes_capturadas")
         self.sidebar.show_item("r2f_control")
+
+        # Gobernanza RBAC para Trámites por Vivienda
+        if self._check_rbac_permission("TRAMITES_VIVIENDA", "LEER"):
+            self.sidebar.show_item("tramites_vivienda")
+            self.sidebar.show_item("historial_tramites")
+
         self.sidebar.select_item("r2f_control")
         self.sidebar.nav_selected.connect(self._on_sidebar_item_selected)
         
@@ -114,9 +120,14 @@ class R2FControlView(QWidget):
         self.page_ordenes_capturadas = self._build_ordenes_capturadas_page()
         self.page_bandeja_control = self._build_bandeja_control_page()
         
+        # Sub-vista Ciclo de Vida: Trámites por Vivienda (Vía B)
+        from satc.src.ui.views.tramites_control_view import TramitesControlView
+        self.page_tramites_vivienda = TramitesControlView(self.db_connector, self.usuario_id, self)
+        
         self.main_stack.addWidget(self.page_capturar_orden)       # Index 0: Capturar Orden
         self.main_stack.addWidget(self.page_ordenes_capturadas)   # Index 1: Órdenes Capturadas
         self.main_stack.addWidget(self.page_bandeja_control)      # Index 2: Bandeja de Control
+        self.main_stack.addWidget(self.page_tramites_vivienda)    # Index 3: Trámites por Vivienda (Vía B)
         
         self.content_layout.addWidget(self.main_stack, stretch=1)
         
@@ -578,6 +589,32 @@ class R2FControlView(QWidget):
     # -------------------------------------------------------------------------
     # NAVEGACIÓN Y HANDLERS DEL SIDEBAR
     # -------------------------------------------------------------------------
+    def _check_rbac_permission(self, modulo_codigo: str, accion_codigo: str) -> bool:
+        """Helper para verificar permisos RBAC en SATC (Directo y API REST)."""
+        parent_window = self.window()
+        usuario_id = getattr(parent_window, 'current_usuario_id', self.usuario_id)
+        if not usuario_id:
+            return True
+
+        try:
+            perms = getattr(parent_window, '_permissions_cache', None)
+            if perms is None or getattr(parent_window, '_permissions_cache_user_id', None) != usuario_id:
+                from sar.src.storage.api_client import APIClient
+                api = self.api_client or getattr(parent_window, 'api_client', APIClient())
+                if getattr(api, 'connect_via_api', False):
+                    perms = api.request("GET", f"/api/auth/permissions/{usuario_id}")
+                else:
+                    with self.db_connector.get_session() as session:
+                        from sar.src.services.security_service import SecurityService
+                        sec_service = SecurityService(session)
+                        perms = sec_service.get_user_permissions(usuario_id)
+                setattr(parent_window, '_permissions_cache', perms)
+                setattr(parent_window, '_permissions_cache_user_id', usuario_id)
+            return perms.get(modulo_codigo, {}).get(accion_codigo, False)
+        except Exception as e:
+            logger.warning(f"Error comprobando permiso RBAC en R2F {modulo_codigo}:{accion_codigo}: {e}")
+            return True
+
     def _on_sidebar_item_selected(self, key: str):
         """Maneja la conmutación entre sub-páginas internas mediante el Sidebar."""
         if key == "capturar_orden":
@@ -588,6 +625,16 @@ class R2FControlView(QWidget):
             self.main_stack.setCurrentIndex(1)
         elif key in ("r2f_control", "dashboard"):
             self.main_stack.setCurrentIndex(2)
+        elif key == "tramites_vivienda":
+            if hasattr(self, "page_tramites_vivienda"):
+                self.page_tramites_vivienda.cargar_datos()
+                self.page_tramites_vivienda._cambiar_modo(0)
+            self.main_stack.setCurrentIndex(3)
+        elif key == "historial_tramites":
+            if hasattr(self, "page_tramites_vivienda"):
+                self.page_tramites_vivienda.cargar_datos()
+                self.page_tramites_vivienda._cambiar_modo(1)
+            self.main_stack.setCurrentIndex(3)
 
     def _on_modo_orden_changed(self, text: str):
         """Alterna los campos según la acción seleccionada (Crear nueva vs Anexar existente)."""

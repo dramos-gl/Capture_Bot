@@ -525,6 +525,59 @@ def get_references_metadata(solicitud_ids: str, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener metadatos de referencias: {str(e)}")
 
+@router.get("/solicitudes/facturas-exportables")
+def get_facturas_exportables(solicitud_ids: str, db: Session = Depends(get_db)):
+    """Retorna los metadatos de facturas que cuentan con pdf_path y xml_path para las solicitudes indicadas."""
+    from sqlalchemy import text
+    try:
+        parsed_ids = [int(x) for x in solicitud_ids.split(",")] if solicitud_ids else []
+        if not parsed_ids:
+            return []
+            
+        query = text("""
+            SELECT 
+                r.referencia_id,
+                r.referencia_portal,
+                r.solicitud_id,
+                r.consecutivo_grupo,
+                f.factura_id,
+                f.nombre_archivo,
+                f.pdf_path,
+                f.pdf2_path,
+                f.xml_path,
+                rfc.rfc,
+                c.alias AS concepto_alias
+            FROM sar_produccion.referencia r
+            JOIN sar_archivo.factura f ON r.referencia_id = f.referencia_id
+            JOIN sar_produccion.grupo_referencia gr ON r.grupo_id = gr.grupo_id
+            JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
+            JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+            WHERE r.solicitud_id IN :sol_ids
+              AND f.pdf_path IS NOT NULL 
+              AND f.xml_path IS NOT NULL
+            ORDER BY r.consecutivo_grupo ASC
+        """)
+        
+        rows = db.execute(query, {"sol_ids": tuple(parsed_ids)}).all()
+        return [
+            {
+                "referencia_id": r.referencia_id,
+                "referencia_portal": r.referencia_portal,
+                "solicitud_id": r.solicitud_id,
+                "consecutivo_grupo": r.consecutivo_grupo,
+                "factura_id": r.factura_id,
+                "nombre_archivo": r.nombre_archivo,
+                "pdf_path": r.pdf_path,
+                "pdf2_path": r.pdf2_path,
+                "xml_path": r.xml_path,
+                "rfc": r.rfc,
+                "concepto_alias": r.concepto_alias
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener facturas exportables: {str(e)}")
+
 @router.get("/config/ruta-derechos")
 def get_ruta_derechos(db: Session = Depends(get_db)):
     """Retorna el parámetro del sistema RUTA_DERECHOS."""
@@ -1099,11 +1152,18 @@ class LoteAsignacionCreateRequest(BaseModel):
     detalles: List[LoteDetalleItem]
     solo_reservar: bool = False
     asignar_directo: bool = False
+    lote_asignacion_id: Optional[int] = None
 
 class LoteRevertirRequest(BaseModel):
     lote_asignacion_id: int
     usuario_id: int
     motivo: str
+
+class LoteFusionarRequest(BaseModel):
+    lote_maestro_id: int
+    lotes_absorber_ids: List[int]
+    usuario_id: int
+    sesion_id: Optional[int] = None
 
 class LoteValidarRequest(BaseModel):
     parsed_rows: List[dict]
@@ -1390,10 +1450,26 @@ def create_lote_asignacion(request: LoteAsignacionCreateRequest, db: Session = D
             usuario_creacion=request.usuario_creacion,
             detalles_list=detalles_converted,
             solo_reservar=request.solo_reservar,
-            asignar_directo=request.asignar_directo
+            asignar_directo=request.asignar_directo,
+            lote_asignacion_id=request.lote_asignacion_id
         )
         db.commit()
-        return {"lote_id": lote_id, "detail": "Lote de asignación creado con éxito"}
+        return {"lote_id": lote_id, "detail": "Lote de asignación procesado con éxito"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/inventario/lotes/activos-destinatario")
+def get_lotes_activos_destinatario(
+    tipo_destino: str,
+    destinatario_id: int,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        return repo.get_lotes_activos_por_destinatario(tipo_destino, destinatario_id, limit=limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1406,6 +1482,23 @@ def revert_lote_asignacion(lote_id: int, request: LoteRevertirRequest, db: Sessi
             lote_asignacion_id=lote_id,
             usuario_id=request.usuario_id,
             motivo=request.motivo
+        )
+        db.commit()
+        return res
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/inventario/lotes/fusionar")
+def fusionar_lotes_asignacion(request: LoteFusionarRequest, db: Session = Depends(get_db)):
+    from sar.src.storage.repositories import InventarioRepository
+    try:
+        repo = InventarioRepository(db)
+        res = repo.fusionar_lotes_asignacion(
+            lote_maestro_id=request.lote_maestro_id,
+            lotes_absorber_ids=request.lotes_absorber_ids,
+            usuario_id=request.usuario_id,
+            sesion_id=request.sesion_id
         )
         db.commit()
         return res

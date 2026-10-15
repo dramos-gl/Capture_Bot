@@ -431,3 +431,370 @@ class FacturaCancunRepository(BaseCancunRepository):
         factura.updated_at = datetime.utcnow()
         self.session.flush()
         return factura
+
+
+# =============================================================================
+# REPOSITORIOS DEL CICLO DE VIDA DE VIVIENDAS Y TRÁMITES (SATC)
+# =============================================================================
+
+from satc.src.storage.satc_models import (
+    TipoTramite, EstadoVivienda, EstadoTramite, 
+    RegimenCondominio, Vivienda, TramiteVivienda, RequisitoDocumento
+)
+
+
+class TipoTramiteRepository(BaseCancunRepository):
+    """Encapsula operaciones para el catálogo de tipos de trámite."""
+
+    def get_by_id(self, tipo_tramite_id: int) -> Optional[TipoTramite]:
+        return self.session.get(TipoTramite, tipo_tramite_id)
+
+    def list_all(self) -> List[TipoTramite]:
+        stmt = select(TipoTramite).order_by(TipoTramite.tipo_tramite_id.asc())
+        return list(self.session.execute(stmt).scalars().all())
+
+    def save(self, tipo: TipoTramite) -> TipoTramite:
+        self.session.add(tipo)
+        self.session.flush()
+        return tipo
+
+
+class EstadoViviendaRepository(BaseCancunRepository):
+    """Encapsula operaciones para el catálogo de estados del ciclo de vida de la vivienda."""
+
+    def get_by_id(self, estado_vivienda_id: int) -> Optional[EstadoVivienda]:
+        return self.session.get(EstadoVivienda, estado_vivienda_id)
+
+    def list_all(self) -> List[EstadoVivienda]:
+        stmt = select(EstadoVivienda).order_by(EstadoVivienda.orden_flujo.asc(), EstadoVivienda.estado_vivienda_id.asc())
+        return list(self.session.execute(stmt).scalars().all())
+
+    def save(self, estado: EstadoVivienda) -> EstadoVivienda:
+        self.session.add(estado)
+        self.session.flush()
+        return estado
+
+
+class EstadoTramiteRepository(BaseCancunRepository):
+    """Encapsula operaciones para el catálogo de estados operativos de trámites."""
+
+    def get_by_id(self, estado_tramite_id: int) -> Optional[EstadoTramite]:
+        return self.session.get(EstadoTramite, estado_tramite_id)
+
+    def list_all(self) -> List[EstadoTramite]:
+        stmt = select(EstadoTramite).order_by(EstadoTramite.estado_tramite_id.asc())
+        return list(self.session.execute(stmt).scalars().all())
+
+    def save(self, estado: EstadoTramite) -> EstadoTramite:
+        self.session.add(estado)
+        self.session.flush()
+        return estado
+
+
+class RegimenCondominioRepository(BaseCancunRepository):
+    """Encapsula el acceso y manipulación de Regímenes de Condominio (Macro-Lotes)."""
+
+    def get_by_id(self, regimen_id: int) -> Optional[RegimenCondominio]:
+        return self.session.get(RegimenCondominio, regimen_id)
+
+    def get_by_desarrollo(self, desarrollo_id: int) -> List[RegimenCondominio]:
+        stmt = (
+            select(RegimenCondominio)
+            .where(RegimenCondominio.desarrollo_id == desarrollo_id)
+            .order_by(RegimenCondominio.nombre_regimen.asc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
+    def create(
+        self,
+        desarrollo_id: int,
+        nombre_regimen: str,
+        mz: str,
+        lt: str,
+        total_upes: int,
+        sm: Optional[str] = None,
+        licencia_matriz: Optional[str] = None,
+        clave_catastral_matriz: Optional[str] = None,
+    ) -> RegimenCondominio:
+        regimen = RegimenCondominio(
+            desarrollo_id=desarrollo_id,
+            nombre_regimen=nombre_regimen,
+            sm=sm,
+            mz=mz,
+            lt=lt,
+            total_upes=total_upes,
+            upes_generadas=0,
+            licencia_construccion_matriz=licencia_matriz,
+            clave_catastral_matriz=clave_catastral_matriz,
+            activo=True,
+            created_at=datetime.utcnow()
+        )
+        self.session.add(regimen)
+        self.session.flush()
+        return regimen
+
+    def list_all(self) -> List[RegimenCondominio]:
+        stmt = (
+            select(RegimenCondominio)
+            .options(selectinload(RegimenCondominio.desarrollo))
+            .order_by(RegimenCondominio.regimen_id.desc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
+    def save(self, regimen: RegimenCondominio) -> RegimenCondominio:
+        self.session.add(regimen)
+        self.session.flush()
+        return regimen
+
+    def increment_upes_generadas(self, regimen_id: int, count: int) -> None:
+        regimen = self.get_by_id(regimen_id)
+        if regimen:
+            regimen.upes_generadas += count
+            regimen.updated_at = datetime.utcnow()
+            self.session.flush()
+
+
+class ViviendaRepository(BaseCancunRepository):
+    """Encapsula operaciones para Viviendas individuales y UPEs."""
+
+    def get_by_id(self, vivienda_id: int) -> Optional[Vivienda]:
+        return self.session.get(Vivienda, vivienda_id)
+
+    def _get_estado_vivienda_id(self, codigo: str) -> int:
+        stmt = select(EstadoVivienda.estado_vivienda_id).where(EstadoVivienda.codigo == codigo)
+        result = self.session.execute(stmt).scalar_one_or_none()
+        if not result:
+            raise ValueError(f"Estado de vivienda '{codigo}' no existe en el catálogo.")
+        return result
+
+    def create_upe(
+        self,
+        desarrollo_id: int,
+        regimen_id: int,
+        numero_upe: str,
+        vivienda: str,
+        mz: str,
+        lt: str,
+        sm: Optional[str] = None,
+        edificio: Optional[str] = None,
+        calle: Optional[str] = None,
+        clave_catastral: Optional[str] = None,
+        descripcion: Optional[str] = None,
+        estado_codigo: str = "PROYECTADA"
+    ) -> Vivienda:
+        estado_id = self._get_estado_vivienda_id(estado_codigo)
+        viv = Vivienda(
+            desarrollo_id=desarrollo_id,
+            regimen_id=regimen_id,
+            tipo_proyecto="REGIMEN_CONDOMINIO",
+            sm=sm,
+            mz=mz,
+            lt=lt,
+            edificio=edificio,
+            vivienda=vivienda,
+            numero_upe=numero_upe,
+            calle=calle,
+            clave_catastral=clave_catastral,
+            descripcion=descripcion,
+            estado_vivienda_id=estado_id,
+            estatus_obra="EN_CONSTRUCCION",
+            activo=True,
+            created_at=datetime.utcnow()
+        )
+        self.session.add(viv)
+        self.session.flush()
+        return viv
+
+    def list_by_regimen(self, regimen_id: int) -> List[Vivienda]:
+        stmt = (
+            select(Vivienda)
+            .options(selectinload(Vivienda.estado), selectinload(Vivienda.regimen), selectinload(Vivienda.desarrollo))
+            .where(Vivienda.regimen_id == regimen_id)
+            .order_by(Vivienda.vivienda_id.asc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
+    def list_by_desarrollo(self, desarrollo_id: int, solo_sin_regimen: bool = False) -> List[Vivienda]:
+        stmt = (
+            select(Vivienda)
+            .options(selectinload(Vivienda.estado), selectinload(Vivienda.regimen), selectinload(Vivienda.desarrollo))
+            .where(Vivienda.desarrollo_id == desarrollo_id)
+        )
+        if solo_sin_regimen:
+            stmt = stmt.where(Vivienda.regimen_id.is_(None))
+        stmt = stmt.order_by(Vivienda.vivienda_id.asc())
+        return list(self.session.execute(stmt).scalars().all())
+
+    def count_by_regimen(self, regimen_id: int) -> int:
+        stmt = select(func.count(Vivienda.vivienda_id)).where(Vivienda.regimen_id == regimen_id)
+        return self.session.execute(stmt).scalar_one() or 0
+
+    def update_estado(self, vivienda_id: int, nuevo_estado_codigo: str) -> None:
+        viv = self.get_by_id(vivienda_id)
+        if viv:
+            viv.estado_vivienda_id = self._get_estado_vivienda_id(nuevo_estado_codigo)
+            viv.updated_at = datetime.utcnow()
+            self.session.flush()
+
+
+class TramiteViviendaRepository(BaseCancunRepository):
+    """Encapsula el ciclo de vida y trazabilidad de los trámites de vivienda."""
+
+    def get_by_id(self, tramite_vivienda_id: int) -> Optional[TramiteVivienda]:
+        return self.session.get(TramiteVivienda, tramite_vivienda_id)
+
+    def _get_estado_tramite_id(self, codigo: str) -> int:
+        stmt = select(EstadoTramite.estado_tramite_id).where(EstadoTramite.codigo == codigo)
+        result = self.session.execute(stmt).scalar_one_or_none()
+        if not result:
+            raise ValueError(f"Estado de trámite '{codigo}' no existe en el catálogo.")
+        return result
+
+    def create(
+        self,
+        tipo_tramite_id: int,
+        vivienda_id: Optional[int] = None,
+        regimen_id: Optional[int] = None,
+        solicitud_tramite_id: Optional[int] = None,
+        estado_codigo: str = "NO_INICIADO",
+        folio_pase_caja: Optional[str] = None,
+        orden_compra_erp: Optional[str] = None,
+        usuario_responsable_id: Optional[int] = None,
+        observaciones: Optional[str] = None
+    ) -> TramiteVivienda:
+        estado_id = self._get_estado_tramite_id(estado_codigo)
+        tramite = TramiteVivienda(
+            vivienda_id=vivienda_id,
+            regimen_id=regimen_id,
+            solicitud_tramite_id=solicitud_tramite_id,
+            tipo_tramite_id=tipo_tramite_id,
+            estado_tramite_id=estado_id,
+            folio_pase_caja=folio_pase_caja,
+            orden_compra_erp=orden_compra_erp,
+            comprobado_erp=False,
+            usuario_responsable_id=usuario_responsable_id,
+            observaciones=observaciones,
+            created_at=datetime.utcnow()
+        )
+        self.session.add(tramite)
+        self.session.flush()
+        return tramite
+
+    def list_by_vivienda(self, vivienda_id: int) -> List[TramiteVivienda]:
+        stmt = (
+            select(TramiteVivienda)
+            .options(
+                selectinload(TramiteVivienda.tipo_tramite),
+                selectinload(TramiteVivienda.estado),
+                selectinload(TramiteVivienda.recibo),
+                selectinload(TramiteVivienda.factura),
+            )
+            .where(TramiteVivienda.vivienda_id == vivienda_id)
+            .order_by(TramiteVivienda.tramite_vivienda_id.asc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
+    def update_estado(self, tramite_vivienda_id: int, estado_codigo: str) -> None:
+        tramite = self.get_by_id(tramite_vivienda_id)
+        if tramite:
+            tramite.estado_tramite_id = self._get_estado_tramite_id(estado_codigo)
+            tramite.updated_at = datetime.utcnow()
+            self.session.flush()
+
+    def conciliar_erp(self, tramite_vivienda_id: int, poliza_comprobacion: str) -> None:
+        tramite = self.get_by_id(tramite_vivienda_id)
+        if tramite:
+            tramite.poliza_comprobacion_erp = poliza_comprobacion
+            tramite.comprobado_erp = True
+            tramite.estado_tramite_id = self._get_estado_tramite_id("COMPROBADO_ERP")
+            tramite.updated_at = datetime.utcnow()
+            self.session.flush()
+
+
+from satc.src.storage.satc_models import OrdenTramite, SolicitudTramite
+
+
+class OrdenTramiteRepository(BaseCancunRepository):
+    """Encapsula operaciones para OrdenTramite (Macro-Orden ejecutiva)."""
+
+    def get_by_id(self, orden_tramite_id: int) -> Optional[OrdenTramite]:
+        return self.session.get(OrdenTramite, orden_tramite_id)
+
+    def generate_next_folio(self) -> str:
+        year = datetime.now().year
+        prefix = f"TRM-ORD-{year}-"
+        stmt = select(OrdenTramite.folio_orden).where(OrdenTramite.folio_orden.like(f"{prefix}%"))
+        folios = self.session.execute(stmt).scalars().all()
+        max_seq = 0
+        for f in folios:
+            try:
+                seq = int(f.split("-")[-1])
+                if seq > max_seq:
+                    max_seq = seq
+            except ValueError:
+                continue
+        return f"{prefix}{str(max_seq + 1).zfill(3)}"
+
+    def create(
+        self,
+        desarrollo_id: int,
+        usuario_id: int,
+        regimen_id: Optional[int] = None,
+        descripcion: Optional[str] = None
+    ) -> OrdenTramite:
+        folio = self.generate_next_folio()
+        # Estado inicial: NO_INICIADO
+        stmt_est = select(EstadoTramite.estado_tramite_id).where(EstadoTramite.codigo == "NO_INICIADO")
+        estado_id = self.session.execute(stmt_est).scalar_one()
+
+        orden = OrdenTramite(
+            folio_orden=folio,
+            desarrollo_id=desarrollo_id,
+            regimen_id=regimen_id,
+            descripcion=descripcion,
+            total_solicitudes=0,
+            total_viviendas=0,
+            total_concluidos=0,
+            total_comprobados_erp=0,
+            estado_id=estado_id,
+            usuario_id=usuario_id,
+            created_at=datetime.utcnow()
+        )
+        self.session.add(orden)
+        self.session.flush()
+        return orden
+
+    def list_all(self) -> List[OrdenTramite]:
+        stmt = (
+            select(OrdenTramite)
+            .options(
+                selectinload(OrdenTramite.desarrollo),
+                selectinload(OrdenTramite.regimen),
+                selectinload(OrdenTramite.estado),
+                selectinload(OrdenTramite.solicitudes),
+            )
+            .order_by(OrdenTramite.orden_tramite_id.desc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
+
+class SolicitudTramiteRepository(BaseCancunRepository):
+    """Encapsula operaciones para SolicitudTramite (Renglón por Tipo de Trámite)."""
+
+    def get_by_id(self, solicitud_tramite_id: int) -> Optional[SolicitudTramite]:
+        return self.session.get(SolicitudTramite, solicitud_tramite_id)
+
+    def list_by_orden(self, orden_tramite_id: int) -> List[SolicitudTramite]:
+        stmt = (
+            select(SolicitudTramite)
+            .options(
+                selectinload(SolicitudTramite.tipo_tramite),
+                selectinload(SolicitudTramite.estado),
+                selectinload(SolicitudTramite.tramites),
+            )
+            .where(SolicitudTramite.orden_tramite_id == orden_tramite_id)
+            .order_by(SolicitudTramite.solicitud_tramite_id.asc())
+        )
+        return list(self.session.execute(stmt).scalars().all())
+
+

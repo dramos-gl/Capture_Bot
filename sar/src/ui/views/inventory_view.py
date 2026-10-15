@@ -3,15 +3,16 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget,
     QFileDialog, QDialog, QFormLayout, QLineEdit, QTextEdit, QLabel, QComboBox,
-    QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox, QCheckBox, QSizePolicy,
-    QHeaderView, QTableWidgetItem
+    QDateEdit, QFrame, QMenu, QScrollArea, QGroupBox, QCheckBox, QRadioButton, QButtonGroup,
+    QSizePolicy, QHeaderView, QTableWidgetItem
 )
 
 from PySide6.QtCore import Qt, QThread, Signal, QDate, QSize, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QAction, QGuiApplication
 from sar.src.ui.design_system.components import (
     CustomCard, CustomButton, StyledDataTable, FilterBar, CustomComboBox, CustomSpinBox,
-    LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox, InteractiveGrid, GLLoadingDialog,
+    LabeledComboBox, LabeledDateEdit, KeepOpenMenu, CustomLabel, CustomInput, CustomCheckBox,
+    CustomRadioButton, InteractiveGrid, GLLoadingDialog,
     CircularSpinner, GLMessageBox as QMessageBox, GLMessageDialog, GLInfoBanner, GLFileDialog
 )
 from sar.src.ui.design_system.components.molecules.gl_stat_card import StatCard
@@ -4211,13 +4212,13 @@ class InventoryView(QWidget):
 
             if num_selected == 1:
                 o = selected_objs[0]
-                p = format_orden_filter_label(o.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                p = format_orden_filter_label(o.get("folio", ""), o.get("descripcion", ""), max_desc_len=30)
                 return f"<b>{p}</b>"
 
             elif num_selected == 2:
                 o1, o2 = selected_objs[0], selected_objs[1]
-                p1 = format_orden_filter_label(o1.get("folio", ""), max_desc_len=0).split(" - ")[0]
-                p2 = format_orden_filter_label(o2.get("folio", ""), max_desc_len=0).split(" - ")[0]
+                p1 = format_orden_filter_label(o1.get("folio", ""), o1.get("descripcion", ""), max_desc_len=20)
+                p2 = format_orden_filter_label(o2.get("folio", ""), o2.get("descripcion", ""), max_desc_len=20)
                 return f"<b>{p1}, {p2}</b>"
 
             else:
@@ -4710,7 +4711,7 @@ class ManualAssignmentDialog(QDialog):
             self.nav_container.hide()
             self.chk_replicar.hide()
 
-        # Selector de Tipo de Destino (en cabecera fija)
+        # Selector de Tipo de Destino y Modo de Lote (en cabecera fija)
         dest_form = QFormLayout()
         dest_form.setContentsMargins(0, 0, 0, 2)
         dest_form.setSpacing(8)
@@ -4721,6 +4722,43 @@ class ManualAssignmentDialog(QDialog):
         self.cb_destino.setCurrentIndex(0)
         self.cb_destino.currentTextChanged.connect(self._on_destino_changed)
         dest_form.addRow("Tipo Destino:", self.cb_destino)
+
+        # Selector de Modo de Lote (Nuevo vs Anexar a existente)
+        self.modo_lote_container = QWidget(self)
+        modo_layout = QVBoxLayout(self.modo_lote_container)
+        modo_layout.setContentsMargins(0, 0, 0, 0)
+        modo_layout.setSpacing(6)
+
+        rb_layout = QHBoxLayout()
+        rb_layout.setSpacing(16)
+        self.bg_modo_lote = QButtonGroup(self)
+        self.rb_lote_nuevo = CustomRadioButton("Crear nuevo lote de asignación", self.modo_lote_container)
+        self.rb_lote_nuevo.setChecked(True)
+        self.rb_lote_anexar = CustomRadioButton("Anexar a lote preexistente", self.modo_lote_container)
+        self.bg_modo_lote.addButton(self.rb_lote_nuevo)
+        self.bg_modo_lote.addButton(self.rb_lote_anexar)
+        rb_layout.addWidget(self.rb_lote_nuevo)
+        rb_layout.addWidget(self.rb_lote_anexar)
+        rb_layout.addStretch()
+        modo_layout.addLayout(rb_layout)
+
+        # Fila de selección de lote preexistente (oculta por defecto)
+        self.anexar_container = QWidget(self.modo_lote_container)
+        anexar_lay = QHBoxLayout(self.anexar_container)
+        anexar_lay.setContentsMargins(0, 2, 0, 0)
+        anexar_lay.setSpacing(8)
+        self.cb_lote_existente = CustomComboBox(self.anexar_container, control_size="md")
+        self.cb_lote_existente.addItem("-- Seleccione un Lote Preexistente --", None)
+        anexar_lay.addWidget(self.cb_lote_existente, stretch=1)
+        self.anexar_container.hide()
+        modo_layout.addWidget(self.anexar_container)
+
+        self.rb_lote_nuevo.toggled.connect(self._on_modo_lote_changed)
+        self.rb_lote_anexar.toggled.connect(self._on_modo_lote_changed)
+
+        if not self._is_editing_existing:
+            dest_form.addRow("Asignación:", self.modo_lote_container)
+
         main_vlayout.addLayout(dest_form)
 
         # -------------------------------------------------------------
@@ -4935,6 +4973,10 @@ class ManualAssignmentDialog(QDialog):
         self.txt_credito.textChanged.connect(lambda: self._ubi_timer.start())
         self.txt_pa.textChanged.connect(lambda: self._ubi_timer.start())
         self.txt_folio.textChanged.connect(lambda: self._ubi_timer.start())
+
+        # Conectar cambios de destinatario para refrescar lotes preexistentes si está en modo anexar
+        self.cb_notarias.currentIndexChanged.connect(self._on_destinatario_selection_changed)
+        self.cb_colaboradores.currentIndexChanged.connect(self._on_destinatario_selection_changed)
 
         # -------------------------------------------------------------
         # 3. PIE FIJO (Botones de Acción siempre visibles)
@@ -5344,6 +5386,72 @@ class ManualAssignmentDialog(QDialog):
         if hasattr(self, "scroll_area"):
             self.scroll_area.verticalScrollBar().setValue(0)
 
+        # Refrescar lotes si está activo el modo anexar
+        if hasattr(self, "rb_lote_anexar") and self.rb_lote_anexar.isChecked():
+            self._cargar_lotes_existentes()
+
+    def _on_modo_lote_changed(self):
+        is_anexar = self.rb_lote_anexar.isChecked()
+        self.anexar_container.setVisible(is_anexar)
+        if is_anexar:
+            self._cargar_lotes_existentes()
+
+    def _on_destinatario_selection_changed(self):
+        if hasattr(self, "rb_lote_anexar") and self.rb_lote_anexar.isChecked():
+            self._cargar_lotes_existentes()
+
+    def _cargar_lotes_existentes(self):
+        """Carga y filtra dinámicamente los lotes activos según el destinatario seleccionado."""
+        if not hasattr(self, "cb_lote_existente"):
+            return
+
+        self.cb_lote_existente.clear()
+        tipo_dest = self.cb_destino.currentText()
+        destinatario_id = None
+
+        if tipo_dest == "NOTARIA":
+            destinatario_id = self.cb_notarias.currentData()
+            placeholder = "-- Seleccione Lote de la Notaría --"
+        elif tipo_dest == "COLABORADOR":
+            destinatario_id = self.cb_colaboradores.currentData()
+            placeholder = "-- Seleccione Lote del Colaborador --"
+        else:
+            placeholder = "-- Seleccione Tipo Destino Primero --"
+
+        self.cb_lote_existente.addItem(placeholder, None)
+
+        if not destinatario_id or tipo_dest not in ("NOTARIA", "COLABORADOR"):
+            return
+
+        try:
+            lotes = self.inventario_ui_service.get_lotes_activos_por_destinatario(
+                tipo_destino=tipo_dest,
+                destinatario_id=destinatario_id,
+                limit=50
+            )
+
+            if not lotes:
+                self.cb_lote_existente.clear()
+                self.cb_lote_existente.addItem(f"-- Sin lotes previos para este destinatario --", None)
+                return
+
+            for lote in lotes:
+                lote_id = lote.get("lote_asignacion_id")
+                fecha_str = str(lote.get("fecha") or "")[:10]
+                total_refs = lote.get("total_referencias", 0)
+                solic = lote.get("solicitante_externo")
+                solic_txt = f" | Sol: {solic}" if solic else ""
+                obs = lote.get("observaciones") or ""
+                obs_snippet = f" | {obs[:30]}..." if obs else ""
+
+                label = f"Lote #{lote_id} ({fecha_str}) - {total_refs} refs{solic_txt}{obs_snippet}"
+                self.cb_lote_existente.addItem(label, lote_id)
+
+        except Exception as e:
+            print("[ManualAssignmentDialog] Error al cargar lotes preexistentes:", e)
+            self.cb_lote_existente.clear()
+            self.cb_lote_existente.addItem("-- Error al consultar lotes --", None)
+
     def _load_catalogs(self):
         try:
             p = self.parent()
@@ -5659,11 +5767,30 @@ class ManualAssignmentDialog(QDialog):
                     "referencia_asignada": portal_code
                 })
 
+        # Validar selección de lote preexistente si está en modo anexar
+        lote_asignacion_id = None
+        if hasattr(self, "rb_lote_anexar") and self.rb_lote_anexar.isChecked():
+            lote_asignacion_id = self.cb_lote_existente.currentData()
+            if not lote_asignacion_id:
+                QMessageBox.warning(
+                    self,
+                    "Lote Requerido",
+                    "Ha seleccionado la opción 'Anexar a lote preexistente'.\n\n"
+                    "Por favor, seleccione un lote válido de la lista desplegable antes de continuar, o cambie la opción a 'Crear nuevo lote de asignación'."
+                )
+                return
+
         # Confirm action with the user
-        if self.total_refs == 1:
-            confirm_msg = "¿Está seguro de guardar la asignación del derecho seleccionado?"
+        if lote_asignacion_id:
+            if self.total_refs == 1:
+                confirm_msg = f"¿Está seguro de anexar el derecho seleccionado al Lote #{lote_asignacion_id}?"
+            else:
+                confirm_msg = f"¿Está seguro de anexar los {self.total_refs} derechos seleccionados al Lote #{lote_asignacion_id}?"
         else:
-            confirm_msg = f"¿Está seguro de guardar la asignación de los {self.total_refs} derechos seleccionados?"
+            if self.total_refs == 1:
+                confirm_msg = "¿Está seguro de guardar la asignación del derecho seleccionado creando un nuevo lote?"
+            else:
+                confirm_msg = f"¿Está seguro de guardar la asignación de los {self.total_refs} derechos seleccionados creando un nuevo lote?"
             
         reply = QMessageBox.question(
             self,
@@ -5684,17 +5811,24 @@ class ManualAssignmentDialog(QDialog):
             solicitante_externo = first_d.get("solicitante_externo") or None
             observaciones_global = first_d.get("observaciones") or ""
 
-            self.inventario_ui_service.crear_lote_asignacion(
+            res_lote = self.inventario_ui_service.crear_lote_asignacion(
                 tipo_destino=common_tipo_destino,
                 notaria_id=notaria_id,
                 colaborador_id=colaborador_id,
                 solicitante_externo=solicitante_externo,
                 observaciones=observaciones_global,
                 usuario_creacion=usuario_id,
-                detalles_list=detalles_list
+                detalles_list=detalles_list,
+                lote_asignacion_id=lote_asignacion_id
             )
 
-            QMessageBox.information(self, "Éxito", f"Se asignaron exitosamente {len(self.ref_ids)} derechos.")
+            res_id = getattr(res_lote, "lote_asignacion_id", None) or (res_lote.get("lote_asignacion_id") if isinstance(res_lote, dict) else lote_asignacion_id)
+            if lote_asignacion_id:
+                msg_exito = f"Se anexaron exitosamente {len(self.ref_ids)} derechos al Lote #{res_id or lote_asignacion_id}."
+            else:
+                msg_exito = f"Se asignaron exitosamente {len(self.ref_ids)} derechos en el nuevo Lote #{res_id}." if res_id else f"Se asignaron exitosamente {len(self.ref_ids)} derechos."
+
+            QMessageBox.information(self, "Éxito", msg_exito)
             self.accept()
         except Exception as e:
             QMessageBox.critical(self, "Error al Guardar", f"No se pudo registrar la asignación en la base de datos:\n{str(e)}")

@@ -518,8 +518,59 @@ class InventarioUIService:
                 repo.save_desarrollo(name, delegacion_id)
                 session.commit()
 
-    def crear_lote_asignacion(self, tipo_destino: str, notaria_id: int, colaborador_id: int, solicitante_externo: str, observaciones: str, usuario_creacion: int, detalles_list: List[Dict[str, Any]], solo_reservar: bool = False) -> None:
-        """Registers a new assignment lote."""
+    def get_lotes_activos_por_destinatario(self, tipo_destino: str, destinatario_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        """Fetches active assignment lotes eligible for appending references for a specific recipient."""
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.get_lotes_activos_por_destinatario", transport=transport):
+            if self.api_client.connect_via_api:
+                params = {"tipo_destino": tipo_destino, "destinatario_id": destinatario_id, "limit": limit}
+                return self.api_client.request("GET", "/api/docs/inventario/lotes/activos-destinatario", data=params)
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    return repo.get_lotes_activos_por_destinatario(tipo_destino, destinatario_id, limit=limit)
+
+    def fusionar_lotes(
+        self,
+        lote_maestro_id: int,
+        lotes_absorber_ids: List[int],
+        usuario_id: int,
+        sesion_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Merges multiple lotes into a master lote. Symmetric support for API and local DB."""
+        transport = "API" if self.api_client.connect_via_api else "LOCAL"
+        with track_perf("InventarioUIService.fusionar_lotes", transport=transport):
+            if self.api_client.connect_via_api:
+                payload = {
+                    "lote_maestro_id": lote_maestro_id,
+                    "lotes_absorber_ids": lotes_absorber_ids,
+                    "usuario_id": usuario_id,
+                    "sesion_id": sesion_id
+                }
+                return self.api_client.request("POST", "/api/docs/inventario/lotes/fusionar", data=payload)
+            else:
+                if not self.db_connector:
+                    raise ValueError("db_connector is required when connect_via_api is False")
+                with self.db_connector.get_session() as session:
+                    repo = InventarioRepository(session)
+                    res = repo.fusionar_lotes_asignacion(
+                        lote_maestro_id=lote_maestro_id,
+                        lotes_absorber_ids=lotes_absorber_ids,
+                        usuario_id=usuario_id,
+                        sesion_id=sesion_id
+                    )
+                    session.commit()
+                    return res
+
+    def crear_lote_asignacion(
+        self, tipo_destino: str, notaria_id: Optional[int], colaborador_id: Optional[int],
+        solicitante_externo: Optional[str], observaciones: Optional[str], usuario_creacion: int,
+        detalles_list: List[Dict[str, Any]], solo_reservar: bool = False,
+        lote_asignacion_id: Optional[int] = None
+    ) -> int:
+        """Registers a new assignment lote or appends references to an existing one."""
         if self.api_client.connect_via_api:
             detalles_payload = []
             date_fields = ("fecha_solicitud", "fecha_reporte_notaria", "fecha_ingreso_rpp", "fecha_escritura", "fecha_titulacion")
@@ -544,15 +595,17 @@ class InventarioUIService:
                 "observaciones": observaciones,
                 "usuario_creacion": usuario_creacion,
                 "detalles": detalles_payload,
-                "solo_reservar": solo_reservar
+                "solo_reservar": solo_reservar,
+                "lote_asignacion_id": lote_asignacion_id
             }
-            self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
+            res = self.api_client.request("POST", "/api/docs/inventario/lotes", data=payload)
+            return res.get("lote_id", 0) if isinstance(res, dict) else 0
         else:
             if not self.db_connector:
                 raise ValueError("db_connector is required when connect_via_api is False")
             with self.db_connector.get_session() as session:
                 repo = InventarioRepository(session)
-                repo.crear_lote_asignacion(
+                lote_id = repo.crear_lote_asignacion(
                     tipo_destino=tipo_destino,
                     notaria_id=notaria_id,
                     colaborador_id=colaborador_id,
@@ -560,9 +613,11 @@ class InventarioUIService:
                     observaciones=observaciones,
                     usuario_creacion=usuario_creacion,
                     detalles_list=detalles_list,
-                    solo_reservar=solo_reservar
+                    solo_reservar=solo_reservar,
+                    lote_asignacion_id=lote_asignacion_id
                 )
                 session.commit()
+                return lote_id
 
     def revertir_lote_asignacion(self, lote_asignacion_id: int, usuario_id: int, motivo: str) -> Dict[str, Any]:
         """Safely rolls back an entire assignment or reservation lote."""
