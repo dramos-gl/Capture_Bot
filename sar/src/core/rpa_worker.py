@@ -545,9 +545,12 @@ class RpaWorker(QThread):
                                 tot_req, tot_gen = session.execute(total_req_stm, {"orden_id": orden.orden_id}).fetchone()
                                 
                                 if pending_grupos == 0 or (tot_gen and tot_req and tot_gen >= tot_req):
-                                    orden_status_id = get_or_create_status("orden_generacion", "PENDIENTE_AUTORIZACION")
-                                    orden.estado_id = orden_status_id
-                                    session.flush()
+                                    # Para órdenes ESTANDAR, al terminar la generación de referencias la cabecera queda COMPLETADA.
+                                    # Las órdenes anuales (PAGADA, CANCELACION, FOJAS, TESTIMONIO) permanecen siempre en ABIERTA.
+                                    if getattr(orden, "tipo_orden", "ESTANDAR") == "ESTANDAR":
+                                        orden_status_id = get_or_create_status("orden_generacion", "COMPLETADA")
+                                        orden.estado_id = orden_status_id
+                                        session.flush()
                     
                     session.commit()
         except Exception as e:

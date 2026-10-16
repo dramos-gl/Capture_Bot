@@ -421,7 +421,8 @@ class ReferenciasView(QWidget):
 
     def refresh_data(self, force_reload_orders: bool = False):
         """Starts background thread to fetch data matching filters and current offset."""
-        self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
+        if force_reload_orders or not getattr(self, 'todas_las_ordenes', None):
+            self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
         # Cancel active thread if running safely
         if self.active_worker and self.active_worker.isRunning():
             self.active_worker.cancel()
@@ -492,9 +493,13 @@ class ReferenciasView(QWidget):
                 r["fecha_vigencia"]
             ])
             
-        self.table.blockSignals(True)
-        self.table.populate_rows(data_rows, checkable_first_col=True)
-        self.table.blockSignals(False)
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.blockSignals(True)
+            self.table.populate_rows(data_rows, checkable_first_col=True)
+            self.table.blockSignals(False)
+        finally:
+            self.table.setUpdatesEnabled(True)
         
         # 2. Calculate indices for info display
         total_items = self.total_items

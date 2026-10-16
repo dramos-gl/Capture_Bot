@@ -49,9 +49,11 @@ Se implementa un Control de Acceso Basado en Roles (RBAC) granular atómico de 2
 *   **Acceso a Nivel 2 (Submódulos Atómicos)**:
     *   **Sección Seguridad (`SEGURIDAD`)**: `ADM:USUARIOS`, `ADM:ROLES`, `ADM:PERMISOS`, `ADM:MODULOS`, `ADM:ACCIONES`.
     *   **Sección Catálogos (`CATALOGOS`)**: `ADM:CAT_NEGOCIO`, `ADM:GEOGRAFIA`, `ADM:RFCS`, `ADM:ESTADOS`.
+    *   **Sección Catálogos SATC (`TRAMITES_VIVIENDA`)**: `CATALOGOS_SATC` (Tipos de Trámite, Estados de Trámite, Estados de Vivienda, Regímenes en Condominio, Importación de Viviendas). Desacoplado con tolerancia a fallos.
     *   **Sección Configuración (`CONFIGURACION`)**: `ADM:PARAMETROS`, `ADM:LOCALIZADORES`.
-    *   **Sección Procesos Especiales (`PROCESOS_ESPECIALES`)**: `ADM:CARGA_MASIVA`, `ADM:MIGRACION`, `ADM:RESERVA_MASIVA`, `ADM:UPDATE_FACTURAS`.
+    *   **Sección Procesos Especiales (`PROCESOS_ESPECIALES`)**: `ADM:CARGA_MASIVA`, `ADM:UBICACIONES`, `ADM:MIGRACION`, `ADM:RESERVA_MASIVA`, `ADM:FUSION_LOTES`, `ADM:UPDATE_FACTURAS`.
 *   **Compatibilidad y Fail-Closed**: Todo acceso a cada submódulo en la barra `AdminMenuBar` evalúa primero el permiso atómico específico (`ADM:*`) y en fallback el permiso del módulo padre (`SEGURIDAD`, `CATALOGOS`, `CONFIGURACION`, `PROCESOS_ESPECIALES`), garantizando política de fallo seguro y desacoplamiento por perfil.
+*   **Blindaje de Salida (`closeEvent`)**: La ventana inspecciona dinámicamente si alguna sub-vista instanciada contiene un worker en ejecución activa (`worker.isRunning()`), desplegando una alerta obligatoria antes de permitir el cierre para evitar transacciones truncadas.
 
 ---
 
@@ -61,6 +63,7 @@ Se implementa un Control de Acceso Basado en Roles (RBAC) granular atómico de 2
 1.  **CU-ADM-01**: Gestionar Usuarios y Roles.
 2.  **CU-ADM-02**: Administrar Catálogos (RFCs, Conceptos, Geografía).
 3.  **CU-ADM-03**: Modificar Parámetros de Operación y Localizadores.
+4.  **CU-ADM-04**: Ejecutar Procesos Masivos (Ubicaciones, Reserva Manual, Fusión de Lotes y Regularización de Colaboradores).
 
 ### Historias de Usuario Destacadas
 *   **HU01 - Gestión de Usuarios**: *Como Administrador del Sistema, quiero poder dar de alta un nuevo usuario, asignarle roles y desactivarlo si deja la empresa, para controlar quién ingresa al SAR.*
@@ -72,7 +75,7 @@ Se implementa un Control de Acceso Basado en Roles (RBAC) granular atómico de 2
 ## 4. Experiencia de Usuario (UI/UX) y Diseño de Navegación
 
 Siguiendo el principio de **Atomic Design**, la interfaz será reutilizable y consistente. El flujo maestro constará de:
-1.  Un **Sidebar de Administración** o Menú Superior en Barra.
+1.  Un **Sidebar de Administración** o Menú Superior en Barra (`AdminMenuBar`).
 2.  Una **Vista de Grid (Master)** con paginación, filtros de columna y botón `+ Nuevo`. Se soporta doble-clic para edición de registros, y clic simple para selección maestro-detalle. Los elementos seleccionados destacan usando color de Acento para contraste óptimo.
 3.  Un **Panel Lateral / Formulario Modal (Detail)** para Creación y Edición, para no perder el contexto de la lista. Formularios extensos (como RFC) utilizan grillas de 2 columnas para optimizar espacio vertical.
 
@@ -85,9 +88,10 @@ graph TD
     M[AdminMenuBar] --> S[1. Sistema]
     M --> SEC[2. Seguridad y Accesos]
     M --> CAT[3. Catálogos Base]
-    M --> CFG[4. Configuración Core]
-    M --> PRC[5. Procesos Especiales]
-    M --> HLP[6. Ayuda]
+    M --> SATC[4. Catálogos SATC]
+    M --> CFG[5. Configuración Core]
+    M --> PRC[6. Procesos Especiales]
+    M --> HLP[7. Ayuda]
     
     S --> S1[Cerrar Sesión Ctrl+L]
     S --> S2[Salir del Sistema Ctrl+Q]
@@ -102,14 +106,23 @@ graph TD
     CAT --> CAT2[Geografía Operativa]
     CAT --> CAT3[Contribuyentes RFC]
     CAT --> CAT4[Estados y Transiciones]
+
+    SATC --> SATC1[Catálogos SATC]
+    SATC --> SATC2[Tipos de Trámite Municipal]
+    SATC --> SATC3[Estados de Trámite y Vivienda]
+    SATC --> SATC4[Regímenes en Condominio]
+    SATC --> SATC5[Importación de Viviendas]
     
     CFG --> CFG1[Parámetros Globales]
     CFG --> CFG2[Localizadores Motor Bot]
     
     PRC --> PRC1[Carga Masiva de Referencias]
-    PRC --> PRC2[Migración y Sincronización]
-    PRC --> PRC3[Reserva Masiva de Referencias]
-    PRC --> PRC4[Escanear Delegaciones Facturas PDF]
+    PRC --> PRC2[Cargar Catálogo Ubicaciones]
+    PRC --> PRC3[Migración y Sincronización]
+    PRC --> PRC4[Reserva Masiva de Referencias]
+    PRC --> PRC5[Regularizar Colaboradores]
+    PRC --> PRC6[Unificación / Fusión de Lotes]
+    PRC --> PRC7[Escanear Delegaciones Facturas PDF]
     
     HLP --> HLP1[Manual de Administración F1]
     HLP --> HLP2[Atajos de Teclado Ctrl+H]

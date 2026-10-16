@@ -391,7 +391,7 @@ class OrdersView(QWidget):
         # Filter Bar
         self.filter_bar_historial = FilterBar(
             search_placeholder="Buscar por folio, descripción, estado...",
-            state_options=["Todas", "BORRADOR", "PENDIENTE", "EN_PROCESO", "PENDIENTE_AUTORIZACION", "COMPLETADA", "AUTORIZADA", "RECHAZADA", "CANCELADA"],
+            state_options=["Todas", "ABIERTA", "PENDIENTE", "EN_PROCESO", "PENDIENTE_AUTORIZACION", "COMPLETADA", "AUTORIZADA", "RECHAZADA", "CANCELADA", "CERRADA", "BORRADOR"],
             on_search=self._on_historial_search,
             on_state_change=self._on_historial_state_change,
             on_action=self.refresh_historial,
@@ -796,9 +796,13 @@ class OrdersView(QWidget):
                 str(o["total_generadas"])
             ])
 
-        self.table_historial.blockSignals(True)
-        self.table_historial.populate_rows(data_rows, checkable_first_col=False)
-        self.table_historial.blockSignals(False)
+        self.table_historial.setUpdatesEnabled(False)
+        try:
+            self.table_historial.blockSignals(True)
+            self.table_historial.populate_rows(data_rows, checkable_first_col=False)
+            self.table_historial.blockSignals(False)
+        finally:
+            self.table_historial.setUpdatesEnabled(True)
 
         # 3. Update footer info
         if total_items == 0:
@@ -993,6 +997,16 @@ class OrdersView(QWidget):
             oid = int(id_item.text())
             folio = folio_item.text().strip() if folio_item else f"ID {oid}"
             estado = estado_item.text().strip().upper() if estado_item else ""
+
+            # Bloqueo inmediato para órdenes anuales
+            if any(folio.startswith(prefix) for prefix in ("ORD-PAGADA-", "ORD-CLX-AV-", "ORD-FOJAS-", "ORD-TESTIMONIO-")):
+                QMessageBox.information(
+                    self,
+                    "Cancelación No Permitida",
+                    f"La orden '{folio}' es una Orden Anual de ejercicio fiscal y no puede ser cancelada.\n\n"
+                    f"Para descartar un trámite específico, cancele la solicitud individual en la bandeja de trabajo."
+                )
+                return
             
             generadas_str = generadas_item.text().strip() if generadas_item else "0"
             generadas = int(generadas_str) if generadas_str.isdigit() else 0

@@ -395,11 +395,24 @@ El sistema SAR implementa una arquitectura híbrida desacoplada gobernada por la
 •	**Simetría Funcional (Zero Divergence)**: Todo servicio en la capa de presentación debe implementar de forma idéntica la consulta/persistencia local directa (`db_connector` / SQLAlchemy) y la alternativa distribuida REST API (`api_client` / FastAPI).
 •	**Serialización Homogénea**: Los endpoints del servidor central (`ops_router`, `docs_router`, `admin_router`, `auth_router`) deben estructurar y exponer exactamente los mismos diccionarios y modelos de datos (Pydantic / JSON) que los repositorios de acceso local.
 ________________________________________
-22. Estándar para Conceptos de Cancelación y Órdenes Anuales
-El sistema SAR incorpora el soporte para trámites esporádicos de Cancelación respetando los siguientes patrones:
-•	**Clasificación de Catálogo (`es_cancelacion`)**: En `sar_catalogo.concepto`, los conceptos de cancelación se identifican mediante la bandera `es_cancelacion = TRUE`. El servicio `OrdenesUIService.get_catalogos(es_cancelacion=...)` permite obtener el catálogo segmentado.
-•	**Orden Contenedora Anual (`tipo_orden = 'CANCELACION'`)**: Para evitar la proliferación de órdenes individuales por cada trámite ocasional, los trámites de cancelación se consolidan en una **Orden General Anual** por ejercicio fiscal (`ORD-CLX-AV-YYYY`).
-•	**Autocreación y Reutilización**: El backend (`OrdenesService`) reutiliza la orden contenedora del año si ya existe, o solicita/crea automáticamente `ORD-CLX-AV-YYYY` si es el primer trámite del año.
+22. Estándar para Conceptos Especiales y Órdenes Anuales
+El sistema SAR incorpora el soporte para trámites continuos o esporádicos anuales respetando los siguientes patrones:
+•	**Tipos de Órdenes Anuales**:
+    - `PAGADA`: Derechos Pagados (`ORD-PAGADA-YYYY`), acumulando partidas anuales sobre el catálogo estándar.
+    - `CANCELACION`: Cancelación de avisos y gravámenes (`ORD-CLX-AV-YYYY`).
+    - `FOJAS`: Derechos de Fojas (`ORD-FOJAS-YYYY`).
+    - `TESTIMONIO`: Expedición de Testimonios (`ORD-TESTIMONIO-YYYY`).
+•	**Persistencia y Autocreación**: El backend (`OrdenesService`) reutiliza la orden contenedora del ejercicio fiscal si ya existe, o crea automáticamente `ORD-<TIPO>-YYYY` en estado `ABIERTA` si es el primer trámite del año.
+•	**Regla de Estados para Órdenes Anuales**:
+    - La cabecera permanece en estado `ABIERTA` durante todo el año para permitir la incorporación sucesiva de partidas.
+    - Las órdenes anuales de años anteriores se transicionan a `CERRADA` al iniciar el nuevo ejercicio fiscal.
+    - Las solicitudes y referencias hijas procesadas dentro de la orden anual siguen el flujo normal de autorización de forma individual sin mutar la cabecera anual a estados terminales (`AUTORIZADA` / `RECHAZADA`).
+•	**Regla de Estados para Órdenes ESTANDAR**:
+    - La cabecera transiciona de `ABIERTA` → `COMPLETADA` al terminar el Bot SAR la generación de todas las referencias del lote.
+    - Al autorizar/rechazar la dirección el lote, la cabecera muta a `AUTORIZADA` o `RECHAZADA`.
+•	**Reglas Técnicas para Solicitudes (`sar_produccion.solicitud`)**:
+    - `fn_editar_cantidad_solicitud`: Solo ejecutable bajo bloqueo transaccional pesimista (`FOR UPDATE`) en estado `PENDIENTE`.
+    - `fn_cancelar_solicitud`: Solo ejecutable en estado `PENDIENTE`. Asigna formalmente el estado de la entidad `solicitud` (`codigo = 'CANCELADA'`, ID 36) y ajusta de forma atómica la cantidad del `grupo_referencia` padre.
 ________________________________________
 Estado Documental
 Documento | Nombre Formal | Categoría | Estado

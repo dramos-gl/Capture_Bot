@@ -712,9 +712,10 @@ class OperacionRepository(BaseRepository):
                 ) fact ON v.solicitud_id = fact.solicitud_id
             """
             stmt = text(f"""
-                SELECT v.*, COALESCE(fact.cant_fact, 0) AS cantidad_facturada
+                SELECT v.*, rfc.alias AS empresa_alias, COALESCE(fact.cant_fact, 0) AS cantidad_facturada
                 FROM sar_produccion.vw_solicitudes_detalle v
                 JOIN sar_produccion.grupo_referencia gr ON v.grupo_id = gr.grupo_id
+                JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
                 {fact_join}
                 WHERE gr.orden_id IN :orden_ids_param
                 ORDER BY v.solicitud_id DESC, v.grupo_id DESC
@@ -723,7 +724,7 @@ class OperacionRepository(BaseRepository):
         else:
             # Subquery correlacionado acotado por solicitud_id usando índices sin escanear toda la tabla
             stmt = text("""
-                SELECT v.*,
+                SELECT v.*, rfc.alias AS empresa_alias,
                     COALESCE((
                         SELECT COUNT(r.referencia_id)
                         FROM sar_produccion.referencia r
@@ -733,6 +734,8 @@ class OperacionRepository(BaseRepository):
                           AND esr.codigo = 'FACTURADA'
                     ), 0) AS cantidad_facturada
                 FROM sar_produccion.vw_solicitudes_detalle v
+                JOIN sar_produccion.grupo_referencia gr ON v.grupo_id = gr.grupo_id
+                JOIN sar_catalogo.rfc rfc ON gr.rfc_id = rfc.rfc_id
                 ORDER BY v.solicitud_id DESC, v.grupo_id DESC
             """)
             result = self.session.execute(stmt)
@@ -743,6 +746,7 @@ class OperacionRepository(BaseRepository):
                 "grupo_id": row.grupo_id,
                 "folio": row.folio,
                 "rfc": row.rfc_razon_social,
+                "empresa_alias": getattr(row, "empresa_alias", None) or row.rfc_razon_social,
                 "concepto": row.concepto_nombre,
                 "delegacion": row.delegacion_nombre or "Sin Delegación",
                 "cantidad_solicitada": row.cantidad_solicitada,
@@ -802,6 +806,18 @@ class OperacionRepository(BaseRepository):
         from sqlalchemy import text
         stmt = text("SELECT sar_produccion.fn_cancelar_solicitud(:solicitud_id)")
         result = self.session.execute(stmt, {"solicitud_id": solicitud_id}).scalar()
+        
+        # Blindaje de integridad: Asegurar que el estado_id asignado sea el de la entidad 'solicitud' (CANCELADA - ID 36)
+        stmt_fix = text("""
+            UPDATE sar_produccion.solicitud
+            SET estado_id = (
+                SELECT estado_id FROM sar_catalogo.estado_sistema 
+                WHERE entidad = 'solicitud' AND codigo = 'CANCELADA' 
+                LIMIT 1
+            )
+            WHERE solicitud_id = :solicitud_id
+        """)
+        self.session.execute(stmt_fix, {"solicitud_id": solicitud_id})
         self.session.flush()
         return result
 
@@ -1206,6 +1222,7 @@ class ProduccionRepository(BaseRepository):
                 JOIN sar_produccion.grupo_referencia gr ON ref.grupo_id = gr.grupo_id
                 LEFT JOIN sar_archivo.asignacion_referencia ar ON ref.referencia_id = ar.referencia_id
                 WHERE es_ref.entidad = 'referencia'
+                  AND es_ref.codigo IN ('FACTURADA', 'PENDIENTE_AUTORIZACION')
                 GROUP BY gr.orden_id
             ) kpi ON o.orden_id = kpi.orden_id
             {where_filter}
@@ -1406,7 +1423,9 @@ class ProduccionRepository(BaseRepository):
                 
                 if counts and counts.total > 0:
                     orden = self.session.get(OrdenGeneracion, ord_id)
-                    if orden:
+                    # Solo la orden ESTANDAR muta su cabecera a estados terminales (AUTORIZADA / RECHAZADA).
+                    # Las órdenes anuales (PAGADA, CANCELACION, FOJAS, TESTIMONIO) permanecen ABIERTA.
+                    if orden and getattr(orden, "tipo_orden", "ESTANDAR") == "ESTANDAR":
                         if counts.pdte == 0:
                             if counts.aut == counts.total:
                                 orden.estado_id = self._get_or_create_estado_id("orden_generacion", "AUTORIZADA")
@@ -1426,6 +1445,13 @@ class ProduccionRepository(BaseRepository):
         orden = self.session.get(OrdenGeneracion, orden_id)
         if not orden:
             raise ValueError(f"Orden con ID {orden_id} no encontrada.")
+
+        tipo_ord = getattr(orden, "tipo_orden", "ESTANDAR")
+        if tipo_ord in ("PAGADA", "CANCELACION", "FOJAS", "TESTIMONIO"):
+            raise ValueError(
+                f"La orden '{orden.folio}' es de tipo Anual ({tipo_ord}) y no puede ser cancelada en bloque.\n"
+                f"Las órdenes anuales son contenedores de ejercicio fiscal. Para descartar un trámite específico, cancele la solicitud individual en la bandeja de trabajo."
+            )
 
         estado_codigo = self.session.execute(
             text("SELECT codigo FROM sar_catalogo.estado_sistema WHERE estado_id = :eid"),
@@ -1504,7 +1530,7 @@ class ProduccionRepository(BaseRepository):
         
         # 1. Obtener la orden, folio y estado
         stmt_est = text("""
-            SELECT o.folio, es.codigo 
+            SELECT o.folio, es.codigo, o.tipo_orden
             FROM sar_produccion.orden_generacion o
             JOIN sar_catalogo.estado_sistema es ON o.estado_id = es.estado_id
             WHERE o.orden_id = :orden_id
@@ -1513,7 +1539,21 @@ class ProduccionRepository(BaseRepository):
         if not row:
             return {"ready": False, "folio": f"ID {orden_id}", "reason": "La orden no existe en el sistema."}
             
-        folio, est_cod = row[0], row[1]
+        folio, est_cod, tipo_ord = row[0], row[1], (row[2] or "ESTANDAR")
+
+        # Bloqueo estricto: Las órdenes anuales no se pueden autorizar ni rechazar en bloque desde la cabecera
+        if accion in ("AUTORIZADA", "RECHAZADA") and tipo_ord in ("PAGADA", "CANCELACION", "FOJAS", "TESTIMONIO"):
+            verbo = "autorizar" if accion == "AUTORIZADA" else "rechazar"
+            return {
+                "ready": False,
+                "folio": folio,
+                "reason": (
+                    f"La orden '{folio}' es de tipo Anual ({tipo_ord}) y no se puede {verbo} en bloque.\n\n"
+                    f"Las órdenes anuales contienen trámites acumulativos de todo el año. Para {verbo} un derecho o trámite específico, "
+                    f"dé doble clic sobre la orden y procese la referencia individual en la ventana de detalle."
+                ),
+                "suggestion": "Dé doble clic sobre la fila para abrir el diálogo de procesamiento individual."
+            }
         
         # Inteligencia de estados terminales según la acción solicitada
         if accion == "AUTORIZADA":
@@ -1847,7 +1887,9 @@ class ProduccionRepository(BaseRepository):
                 counts = self.session.execute(check_ord_ref_stmt, {"orden_id": ord_id}).fetchone()
                 if counts and counts.total > 0:
                     orden = self.session.get(OrdenGeneracion, ord_id)
-                    if orden:
+                    # Solo la orden ESTANDAR muta su cabecera a estados terminales (AUTORIZADA / RECHAZADA).
+                    # Las órdenes anuales (PAGADA, CANCELACION, FOJAS, TESTIMONIO) permanecen ABIERTA.
+                    if orden and getattr(orden, "tipo_orden", "ESTANDAR") == "ESTANDAR":
                         if counts.pdte == 0:
                             if counts.aut == counts.total:
                                 orden.estado_id = self._get_or_create_estado_id("orden_generacion", "AUTORIZADA")

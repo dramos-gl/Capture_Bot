@@ -224,6 +224,27 @@ class FaseBService:
                     
         return conflicts
 
+    @staticmethod
+    def is_file_locked(filepath: str) -> bool:
+        """Verifica si un archivo existente se encuentra bloqueado/abierto por otra aplicación en Windows."""
+        if not os.path.exists(filepath):
+            return False
+        try:
+            with open(filepath, "r+b"):
+                pass
+            return False
+        except (IOError, PermissionError):
+            return True
+
+    def check_locked_files(self, filenames: List[str], dest_dir: str) -> List[str]:
+        """Retorna la lista de archivos que están actualmente abiertos/bloqueados en Windows."""
+        locked = []
+        for name in filenames:
+            path = os.path.join(dest_dir, name)
+            if self.is_file_locked(path):
+                locked.append(name)
+        return locked
+
     def generate_excel_only(self, solicitud_ids: List[int], dest_dir: str) -> Dict[str, Any]:
         """Generates Excel files grouped by RFC+Concepto and their global lote number."""
         if not os.path.exists(dest_dir):

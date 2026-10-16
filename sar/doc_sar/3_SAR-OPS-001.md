@@ -114,12 +114,33 @@ Flujo:
 BORRADOR → ABIERTA → PROCESANDO → FINALIZADA
 ________________________________________
 6.1 Tipos de Órdenes y Modos Operativos
-Las órdenes se clasifican en cuatro tipos, definiendo el comportamiento del sistema y la automatización:
+Las órdenes se clasifican en cinco tipos, definiendo el comportamiento del sistema y la automatización:
 
-•	ESTANDAR: Órdenes normales de cobro y subsidios (Ej. ORD-SUB-YYYYMMDD, con sufijo incremental -2, -3 si hay múltiples el mismo día). Cada referencia equivale a 1 acto.
-•	CANCELACION: Orden anual para cancelaciones hipotecarias y de avisos (Ej. ORD-CLX-AV-2026). Las referencias se agrupan sobre el mismo folio padre anual.
-•	FOJAS: Orden anual para Derechos de Fojas (Ej. ORD-FOJAS-2026). Requiere que el usuario defina la `cantidad_actos` durante la captura, lo cual modifica el multiplicador en el portal.
-•	TESTIMONIO: Orden anual para Expedición de Testimonios (Ej. ORD-TESTIMONIO-2026). Genera las referencias en un grupo y portal distinto (Grupo=71).
+•	ESTANDAR: Órdenes de cobro y subsidios procesadas por lotes discretos (Ej. ORD-SUB-YYYYMMDD, con sufijo incremental -2, -3 si hay múltiples el mismo día). Cada referencia equivale a 1 acto.
+•	PAGADA: Orden anual para Derechos Pagados (Ej. ORD-PAGADA-YYYY). Reutiliza el folio padre anual para acumular partidas a lo largo de todo el ejercicio fiscal.
+•	CANCELACION: Orden anual para cancelaciones hipotecarias y de avisos (Ej. ORD-CLX-AV-YYYY). Las referencias se agrupan sobre el mismo folio padre anual.
+•	FOJAS: Orden anual para Derechos de Fojas (Ej. ORD-FOJAS-YYYY). Requiere que el usuario defina la `cantidad_actos` durante la captura, lo cual modifica el multiplicador en el portal.
+•	TESTIMONIO: Orden anual para Expedición de Testimonios (Ej. ORD-TESTIMONIO-YYYY). Genera las referencias en un grupo y portal distinto (Grupo=71).
+________________________________________
+6.2 Ciclo de Vida y Reglas Operativas de una Orden (orden_generacion)
+
+A. Órdenes ESTANDAR (Lotes Discretos):
+•	ABIERTA: Orden creada por el operador en fase de captura y edición de partidas.
+•	COMPLETADA: El Bot SAR concluyó la generación de todas las líneas de captura y referencias bancarias del lote (listas para validación directiva).
+•	AUTORIZADA: La dirección aprobó las referencias del lote.
+•	RECHAZADA: La dirección rechazó las referencias del lote.
+•	CANCELADA: La orden fue anulada administrativamente antes de generar derechos.
+Flujo: ABIERTA → COMPLETADA → AUTORIZADA / RECHAZADA (o CANCELADA).
+
+B. Órdenes Anuales (PAGADA, CANCELACION, FOJAS, TESTIMONIO):
+•	ABIERTA: La cabecera permanece abierta de manera continua durante los 365 días del año calendario para permitir la inyección acumulativa de trámites esporádicos.
+•	CERRADA: Transición ejecutada automáticamente al inicio del siguiente ejercicio fiscal al crearse la nueva orden anual.
+*(Nota: Las solicitudes y referencias hijas de una orden anual fluyen normalmente en su ciclo de vida individual: PENDIENTE → COMPLETADA → PENDIENTE_AUTORIZACION → AUTORIZADA / RECHAZADA).*
+
+C. Matriz de Acciones de Cabecera (Módulo Órdenes Capturadas):
+•	Editar Orden: Permitido para órdenes en estado ABIERTA. En partidas con derechos ya generados (`cantidad_generada > 0`), no se permite reducir la cantidad ni eliminar la partida.
+•	Autorizar / Rechazar en Bloque: Permitido exclusivamente para órdenes ESTANDAR completas (`total_pendientes == total_solicitadas`). Para órdenes Anuales, está bloqueado en bloque; el usuario debe ingresar con doble clic para autorizar o rechazar partidas individuales.
+•	Cancelar Orden: Permitido únicamente si la orden no cuenta con referencias generadas (`generadas == 0`). Las órdenes Anuales no pueden cancelarse en bloque por ser contenedores del ejercicio fiscal.
 ________________________________________
 7. Ciclo de Vida de un Grupo
 Estados:
@@ -128,7 +149,7 @@ Estados:
 •	COMPLETADO
 •	CERRADO
 ________________________________________
-8. Ciclo de Vida de una Solicitud
+8. Ciclo de Vida y Reglas de Solicitudes (sar_produccion.solicitud)
 Estados:
 •	PENDIENTE
 •	ASIGNADA
@@ -136,8 +157,11 @@ Estados:
 •	COMPLETADA
 •	ERROR
 •	CANCELADA
-Flujo:
-PENDIENTE → ASIGNADA → PROCESANDO → COMPLETADA
+Flujo: PENDIENTE → ASIGNADA → PROCESANDO → COMPLETADA
+
+Reglas de Negocio para Solicitudes:
+•	Edición de Cantidad: Únicamente permitida en estado PENDIENTE con cero referencias generadas. Protege los rangos de consecutivos precalculados y evita condiciones de carrera con el Bot SAR.
+•	Cancelación de Solicitud: Únicamente permitida en estado PENDIENTE con cero referencias generadas. Descuenta automáticamente la cantidad del grupo padre y asigna formalmente el estado `CANCELADA` (`estado_id = 36`). Es la vía oficial para anular trámites específicos dentro de órdenes anuales sin afectar el folio contenedor.
 ________________________________________
 9. Asignación de Solicitudes
 Estrategia Oficial
@@ -152,15 +176,19 @@ EMPRESA1 | ANALISIS | PLAYA | 1000
 Asignado a:
 Pedro Gómez
 ________________________________________
-10. Bandeja de Trabajo
-Cada usuario visualizará únicamente:
-•	Solicitudes asignadas.
-•	Cantidad solicitada.
-•	Cantidad generada.
-•	Estado.
-•	Progreso.
-Ejemplo:
-EMPRESA1 ANALISIS CANCUN 1000
+10. Bandeja de Trabajo (Módulo Solicitudes)
+Cada usuario visualizará en la tabla de solicitudes:
+•	ID Solicitud, Grupo, Folio Orden.
+•	Empresa (con formato Alias Comercial + RFC entre paréntesis).
+•	Concepto, Delegación, Solicitadas, Generadas, Facturadas, Estado y Asignado a.
+
+Reglas Operativas de Filtrado y UX:
+•	**Regla de Selección de Orden por Defecto**: Al acceder a la bandeja, el sistema preselecciona automáticamente la **orden más reciente** que contenga solicitudes en estado `PENDIENTE` o `COMPLETADA`. Si ninguna orden activa tiene solicitudes en dicho estado, selecciona la orden más reciente activa del catálogo.
+•	**Filtro de Estado**: Por defecto se aplica `'Todas'`, omitiendo estados combinados y filtrando en memoria con ultra-baja latencia sobre la(s) orden(es) activa(s).
+•	**Botón de Filtro de Órdenes**: Permite selección granular múltiple o conmutación hacia "Todas las órdenes".
+
+Ejemplo de Registro:
+EMPRESA1 (RFC123456) | ANALISIS | CANCUN | 1000 Solicitadas
 [INICIAR]
 ________________________________________
 11. Inicio de Procesamiento

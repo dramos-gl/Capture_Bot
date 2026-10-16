@@ -669,16 +669,20 @@ class MetricsDashboardDialog(QWidget):
     # =========================================================================
     def _on_report_ready(self, data: List[Dict[str, Any]]):
         # Table
-        self.table.populate_rows([
-            [
-                row["rfc_name"],
-                row["concepto_name"],
-                row["delegacion_name"],
-                f"{row['total_referencias']:,}",
-                f"$ {row['importe_total']:,.2f}",
-            ]
-            for row in data
-        ])
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.populate_rows([
+                [
+                    row["rfc_name"],
+                    row["concepto_name"],
+                    row["delegacion_name"],
+                    f"{row['total_referencias']:,}",
+                    f"$ {row['importe_total']:,.2f}",
+                ]
+                for row in data
+            ])
+        finally:
+            self.table.setUpdatesEnabled(True)
 
         # Actualizar títulos de las tarjetas de gráficos dinámicamente
         rfc_txt = self.cb_rfc.currentText()

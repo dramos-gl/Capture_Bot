@@ -132,7 +132,7 @@ class RequestsView(QWidget):
         
         self.filter_bar = FilterBar(
             search_placeholder="Buscar solicitud",
-            state_options=["PENDIENTE Y COMPLETADA", "Todas", "PENDIENTE", "COMPLETADA", "ASIGNADA", "AUTORIZADA", "CANCELADA", "ERROR", "FACTURADA", "FACTURADA_PARCIAL", "PROCESANDO"],
+            state_options=["Todas", "PENDIENTE", "COMPLETADA", "ASIGNADA", "AUTORIZADA", "CANCELADA", "ERROR", "FACTURADA", "FACTURADA_PARCIAL", "PROCESANDO"],
             on_search=self._filter_table_by_text,
             on_state_change=self._filter_table_by_state,
             on_action=self._on_manual_refresh,
@@ -220,7 +220,7 @@ class RequestsView(QWidget):
         self._all_solicitudes_data = []
         self._filtered_solicitudes_data = []
         self._current_search_text = ""
-        self._current_estado_filter = "PENDIENTE Y COMPLETADA"
+        self._current_estado_filter = "Todas"
 
         self.selected_orden_ids = []
         self.todas_las_ordenes = []
@@ -236,6 +236,8 @@ class RequestsView(QWidget):
         
         self.filter_bar.layout().insertWidget(self.filter_bar.layout().count() - 1, self.btn_filter_orden, alignment=Qt.AlignmentFlag.AlignBottom)
         
+        # Cargar orden inicial por defecto (la más reciente con PENDIENTE o COMPLETADA)
+        self._load_available_orders()
         self._update_order_filter_title()
         
     def _get_selected_solicitud_id(self) -> int:
@@ -366,6 +368,18 @@ class RequestsView(QWidget):
             # Check for existing file conflicts
             conflicts = service.check_conflicting_files(sol_ids, dest_dir, action_type="excel")
             if conflicts:
+                # Blindaje Windows: Validar si alguno de los archivos en conflicto está abierto/bloqueado
+                locked_files = service.check_locked_files(conflicts, dest_dir)
+                if locked_files:
+                    locked_str = "\n".join([f"- {name}" for name in locked_files])
+                    QMessageBox.warning(
+                        self,
+                        "Archivos Abiertos en Otra Aplicación",
+                        f"Los siguientes archivos están abiertos en Excel u otro programa:\n\n{locked_str}\n\n"
+                        "Por favor cierre los archivos antes de continuar para evitar errores de permisos."
+                    )
+                    return
+
                 conflicts_str = "\n".join([f"- {name}" for name in conflicts])
                 replace_confirm = QMessageBox.warning(
                     self,
@@ -444,6 +458,18 @@ class RequestsView(QWidget):
             # Check for existing file conflicts
             conflicts = service.check_conflicting_files(sol_ids, dest_dir, action_type="pdf")
             if conflicts:
+                # Blindaje Windows: Validar si alguno de los archivos en conflicto está abierto/bloqueado
+                locked_files = service.check_locked_files(conflicts, dest_dir)
+                if locked_files:
+                    locked_str = "\n".join([f"- {name}" for name in locked_files])
+                    QMessageBox.warning(
+                        self,
+                        "Archivos Abiertos en Otra Aplicación",
+                        f"Los siguientes archivos están abiertos en el visor de PDF u otro programa:\n\n{locked_str}\n\n"
+                        "Por favor cierre los archivos antes de continuar para evitar errores de permisos."
+                    )
+                    return
+
                 conflicts_str = "\n".join([f"- {name}" for name in conflicts])
                 replace_confirm = QMessageBox.warning(
                     self,
@@ -692,9 +718,7 @@ class RequestsView(QWidget):
             # State Filter Logic
             state_match = True
             if estado_filter != "Todas":
-                if estado_filter == "PENDIENTE Y COMPLETADA":
-                    state_match = estado in ["PENDIENTE", "COMPLETADA", "COMPLETADO"]
-                elif estado_filter == "ASIGNADA":
+                if estado_filter == "ASIGNADA":
                     state_match = estado in ["ASIGNADA", "ASIGNADO"]
                 elif estado_filter == "CANCELADA":
                     state_match = estado in ["CANCELADA", "CANCELADO"]
@@ -734,11 +758,12 @@ class RequestsView(QWidget):
         # 2. Populate table with page slice
         data_rows = []
         for s in page_slice:
+            empresa_display = s.get("empresa_alias") or s.get("rfc") or ""
             data_rows.append([
                 str(s["solicitud_id"]),
                 str(s["grupo_id"]),
                 s["folio"],
-                s["rfc"],
+                empresa_display,
                 s["concepto"],
                 s["delegacion"],
                 str(s["cantidad_solicitada"]),
@@ -748,9 +773,21 @@ class RequestsView(QWidget):
                 s["usuario_asignado"]
             ])
 
-        self.table.blockSignals(True)
-        self.table.populate_rows(data_rows)
-        self.table.blockSignals(False)
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.blockSignals(True)
+            self.table.populate_rows(data_rows)
+            
+            # Tooltip con la razón social completa en la columna Empresa (columna 3)
+            for row_idx, s in enumerate(page_slice):
+                razon_social = s.get("rfc") or ""
+                item_empresa = self.table.item(row_idx, 3)
+                if item_empresa and razon_social:
+                    item_empresa.setToolTip(f"Razón Social: {razon_social}")
+
+            self.table.blockSignals(False)
+        finally:
+            self.table.setUpdatesEnabled(True)
 
         # 3. Update footer info
         if total_items == 0:
@@ -808,7 +845,31 @@ class RequestsView(QWidget):
                 if preserve_selection and self.is_custom_filter:
                     self.selected_orden_ids = [oid for oid in self.selected_orden_ids if oid in valid_ids]
                 elif not self.is_custom_filter:
-                    self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
+                    # Regla de negocio: Por defecto seleccionar la orden más reciente
+                    # que contenga solicitudes en estado PENDIENTE o COMPLETADA.
+                    target_order_id = None
+                    try:
+                        all_sols = self.solicitudes_ui_service.get_solicitudes()
+                        folios_activas = {
+                            s.get("folio") for s in all_sols
+                            if str(s.get("estado", "")).upper() in ("PENDIENTE", "COMPLETADA", "COMPLETADO")
+                        }
+                        for o in self.todas_las_ordenes:
+                            if o.get("folio") in folios_activas:
+                                target_order_id = o["orden_id"]
+                                break
+                    except Exception as err_sols:
+                        print("Advertencia determinando orden con solicitudes activas:", err_sols)
+
+                    # Si ninguna orden tiene solicitudes pendientes/completadas, tomar la más reciente del catálogo
+                    if not target_order_id and self.todas_las_ordenes:
+                        target_order_id = self.todas_las_ordenes[0]["orden_id"]
+
+                    if target_order_id:
+                        self.selected_orden_ids = [target_order_id]
+                        self.is_custom_filter = True
+                    else:
+                        self.selected_orden_ids = []
             else:
                 self.selected_orden_ids = []
         except Exception as e:
@@ -823,10 +884,6 @@ class RequestsView(QWidget):
         # Load orders if not loaded yet
         if not hasattr(self, 'todas_las_ordenes') or not self.todas_las_ordenes:
             self._load_available_orders()
-            
-        # If user opens menu while not in custom filter mode, default all orders as selected in the UI
-        if not self.is_custom_filter and self.todas_las_ordenes:
-            self.selected_orden_ids = [ord["orden_id"] for ord in self.todas_las_ordenes]
 
         menu = KeepOpenMenu(self)
         order_actions = {}

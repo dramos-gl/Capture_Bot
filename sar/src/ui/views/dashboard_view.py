@@ -432,7 +432,8 @@ class DashboardView(QWidget):
         # Update timestamp label
         self.lbl_datetime.setText(QDateTime.currentDateTime().toString("dd/MM/yyyy  hh:mm AP"))
         
-        self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
+        if force_reload_orders or not getattr(self, 'todas_las_ordenes', None):
+            self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
 
         current_kpis_args = tuple(self.selected_orden_ids or [])
         kpis_already_running = (
@@ -590,7 +591,11 @@ class DashboardView(QWidget):
                 ref["fecha_generacion"],
                 ref["estado"]
             ])
-        self.table.populate_rows(data_rows)
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.populate_rows(data_rows)
+        finally:
+            self.table.setUpdatesEnabled(True)
         
         total_items = self.total_items
         start_idx = (self.current_page - 1) * self.page_size

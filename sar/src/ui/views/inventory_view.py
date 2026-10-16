@@ -1389,7 +1389,8 @@ class InventoryView(QWidget):
                 pass
             self.active_worker.wait()
 
-        self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
+        if force_reload_orders or not getattr(self, 'todas_las_ordenes', None):
+            self._load_available_orders(preserve_selection=True, force_reload=force_reload_orders)
         
         self.lbl_pagination_info.setText("Cargando inventario...")
         self.pagination_widget.setEnabled(False)
@@ -1474,43 +1475,47 @@ class InventoryView(QWidget):
                 r.get("fecha_asignacion", "")
             ])
 
-        self.table.blockSignals(True)
-        self.table.populate_rows(rows_data, checkable_first_col=True)
-        
-        # Configure checkboxes, highlight pinned rows, and disable assigned references
-        pinned_bg_color = QColor("#EFF6FF") # Soft blue/primary tint for selected pinned rows
-        
-        for row_idx, r in enumerate(self.visible_table_data):
-            # Tooltip con razón social completa en la columna Empresa (columna 4)
-            empresa_full = r.get("empresa") or ""
-            empresa_item = self.table.item(row_idx, 4)
-            if empresa_item and empresa_full:
-                empresa_item.setToolTip(f"Empresa: {empresa_full}")
-
-            check_item = self.table.item(row_idx, 0)
-            if not check_item:
-                continue
-                
-            r_id = r.get("referencia_id")
-            is_asignada = r.get("asignada", False) or r.get("estado_codigo") in ("ASIGNADA", "SUSTITUIDO")
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.blockSignals(True)
+            self.table.populate_rows(rows_data, checkable_first_col=True)
             
-            if is_asignada:
-                check_item.setFlags(check_item.flags() & ~Qt.ItemFlag.ItemIsEnabled & ~Qt.ItemFlag.ItemIsUserCheckable)
-                check_item.setCheckState(Qt.CheckState.Unchecked)
-                check_item.setToolTip("Los derechos en estado asignado o sustituido no se pueden volver a asignar.")
-            else:
-                if r_id in self.selected_ref_map:
-                    check_item.setCheckState(Qt.CheckState.Checked)
-                    check_item.setToolTip("✓ Derecho seleccionado y fijado en la parte superior.")
-                    for c_idx in range(self.table.columnCount()):
-                        cell_item = self.table.item(row_idx, c_idx)
-                        if cell_item:
-                            cell_item.setBackground(pinned_bg_color)
-                else:
-                    check_item.setCheckState(Qt.CheckState.Unchecked)
+            # Configure checkboxes, highlight pinned rows, and disable assigned references
+            pinned_bg_color = QColor("#EFF6FF") # Soft blue/primary tint for selected pinned rows
+            
+            for row_idx, r in enumerate(self.visible_table_data):
+                # Tooltip con razón social completa en la columna Empresa (columna 4)
+                empresa_full = r.get("empresa") or ""
+                empresa_item = self.table.item(row_idx, 4)
+                if empresa_item and empresa_full:
+                    empresa_item.setToolTip(f"Empresa: {empresa_full}")
+
+                check_item = self.table.item(row_idx, 0)
+                if not check_item:
+                    continue
                     
-        self.table.blockSignals(False)
-        self._update_selection_controls()
+                r_id = r.get("referencia_id")
+                is_asignada = r.get("asignada", False) or r.get("estado_codigo") in ("ASIGNADA", "SUSTITUIDO")
+                
+                if is_asignada:
+                    check_item.setFlags(check_item.flags() & ~Qt.ItemFlag.ItemIsEnabled & ~Qt.ItemFlag.ItemIsUserCheckable)
+                    check_item.setCheckState(Qt.CheckState.Unchecked)
+                    check_item.setToolTip("Los derechos en estado asignado o sustituido no se pueden volver a asignar.")
+                else:
+                    if r_id in self.selected_ref_map:
+                        check_item.setCheckState(Qt.CheckState.Checked)
+                        check_item.setToolTip("✓ Derecho seleccionado y fijado en la parte superior.")
+                        for c_idx in range(self.table.columnCount()):
+                            cell_item = self.table.item(row_idx, c_idx)
+                            if cell_item:
+                                cell_item.setBackground(pinned_bg_color)
+                    else:
+                        check_item.setCheckState(Qt.CheckState.Unchecked)
+                        
+            self.table.blockSignals(False)
+            self._update_selection_controls()
+        finally:
+            self.table.setUpdatesEnabled(True)
 
         # Update labels & paging buttons
         total_pages = max(1, (self.total_items + self.page_size - 1) // self.page_size)
@@ -2612,14 +2617,18 @@ class InventoryView(QWidget):
             ])
 
         self._visible_preview_records = filtered_records
-        self.preview_table.populate_rows(preview_rows)
+        self.preview_table.setUpdatesEnabled(False)
+        try:
+            self.preview_table.populate_rows(preview_rows)
 
-        # Set tooltip with full client name if truncated
-        for row_idx, r in enumerate(filtered_records):
-            client_full = str(r.get("cliente", "") or "").strip()
-            client_item = self.preview_table.item(row_idx, 1)
-            if client_item and client_full:
-                client_item.setToolTip(client_full)
+            # Set tooltip with full client name if truncated
+            for row_idx, r in enumerate(filtered_records):
+                client_full = str(r.get("cliente", "") or "").strip()
+                client_item = self.preview_table.item(row_idx, 1)
+                if client_item and client_full:
+                    client_item.setToolTip(client_full)
+        finally:
+            self.preview_table.setUpdatesEnabled(True)
 
         # Configure optimized column widths and modes specifically for this preview table:
         # Col 0: Fila Excel (75px)
@@ -4395,20 +4404,24 @@ class InventoryView(QWidget):
 
     def _populate_lotes_table(self):
         """Populates the lotes table from self.all_lotes_data without the Empresa column."""
-        self.table_lotes.setRowCount(0)
-        rows = []
-        for l in self.all_lotes_data:
-            rows.append([
-                str(l["lote_asignacion_id"]),
-                l["tipo_destino"],
-                l["asignado_a"],
-                l.get("solicitante_externo", ""),
-                l["fecha"],
-                str(l["total_referencias"]),
-                l.get("creador", ""),
-                l.get("observaciones", "")
-            ])
-        self.table_lotes.populate_rows(rows)
+        self.table_lotes.setUpdatesEnabled(False)
+        try:
+            self.table_lotes.setRowCount(0)
+            rows = []
+            for l in self.all_lotes_data:
+                rows.append([
+                    str(l["lote_asignacion_id"]),
+                    l["tipo_destino"],
+                    l["asignado_a"],
+                    l.get("solicitante_externo", ""),
+                    l["fecha"],
+                    str(l["total_referencias"]),
+                    l.get("creador", ""),
+                    l.get("observaciones", "")
+                ])
+            self.table_lotes.populate_rows(rows)
+        finally:
+            self.table_lotes.setUpdatesEnabled(True)
 
         total_pages = max(1, -(-self.total_lotes // self.page_size_lotes))
         start = (self.current_page_lotes - 1) * self.page_size_lotes + 1 if self.total_lotes > 0 else 0

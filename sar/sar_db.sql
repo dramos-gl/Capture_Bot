@@ -852,9 +852,17 @@ DECLARE
     v_grupo_id BIGINT;
     v_cantidad_solicitada INT;
 BEGIN
-    SELECT estado_id INTO v_estado_cancelado_id FROM sar_catalogo.estado_sistema WHERE codigo = 'CANCELADO' LIMIT 1;
+    SELECT estado_id INTO v_estado_cancelado_id 
+    FROM sar_catalogo.estado_sistema 
+    WHERE entidad = 'solicitud' AND codigo = 'CANCELADA' 
+    LIMIT 1;
+
     IF v_estado_cancelado_id IS NULL THEN
-        INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion) VALUES ('GENERAL', 'CANCELADO', 'CANCELADO') RETURNING estado_id INTO v_estado_cancelado_id;
+        SELECT estado_id INTO v_estado_cancelado_id 
+        FROM sar_catalogo.estado_sistema 
+        WHERE codigo IN ('CANCELADA', 'CANCELADO') 
+        ORDER BY (entidad = 'solicitud') DESC 
+        LIMIT 1;
     END IF;
 
     SELECT estado_id, grupo_id, cantidad_solicitada
@@ -1116,6 +1124,7 @@ INSERT INTO sar_catalogo.evento_sistema (codigo, descripcion) VALUES
 -- Estados del Sistema Estandarizados
 INSERT INTO sar_catalogo.estado_sistema (entidad, codigo, descripcion) VALUES
 ('orden_generacion', 'ABIERTA',               'Orden abierta para edición'),
+('orden_generacion', 'CERRADA',               'Orden anual cerrada por fin de ejercicio fiscal'),
 ('orden_generacion', 'PENDIENTE_AUTORIZACION', 'Orden con todas las referencias generadas en espera de validación/autorización'),
 ('orden_generacion', 'COMPLETADA',             'Orden con todas las referencias generadas'),
 ('orden_generacion', 'AUTORIZADA',             'Orden con todas las referencias autorizadas'),

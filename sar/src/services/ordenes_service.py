@@ -28,14 +28,16 @@ class OrdenesService:
         self.audit_repo = AuditRepository(session)
         self.config_repo = ConfigRepository(session)
 
-    def _get_estado_id(self, codigo: str) -> int:
-        """Helper to get state ID from catalog."""
-        stmt = select(EstadoSistema.estado_id).where(EstadoSistema.codigo == codigo)
+    def _get_estado_id(self, entidad: str, codigo: str) -> int:
+        """Helper to get state ID from catalog filtering by entity and code."""
+        stmt = select(EstadoSistema.estado_id).where(
+            EstadoSistema.entidad == entidad,
+            EstadoSistema.codigo == codigo
+        )
         estado_id = self.session.execute(stmt).scalars().first()
         if not estado_id:
-            # Fallback or create dummy if not exists during dev
-            # In a real system, the catalog is pre-populated
-            estado = EstadoSistema(entidad="GENERAL", codigo=codigo, descripcion=codigo)
+            # Fallback or create if not exists
+            estado = EstadoSistema(entidad=entidad, codigo=codigo, descripcion=f"Estado {codigo} de {entidad}")
             self.session.add(estado)
             self.session.flush()
             return estado.estado_id
@@ -54,10 +56,11 @@ class OrdenesService:
         Registers a new manual order or appends to an annual cancellation order.
         `renglones` format: [{'rfc_id': int, 'concepto_id': int, 'delegacion_id': int, 'cantidad': int}]
         """
-        # Determine initial states
-        estado_orden_id = self._get_estado_id("PENDIENTE")
-        estado_grupo_id = self._get_estado_id("PENDIENTE")
-        estado_sol_id = self._get_estado_id("PENDIENTE")
+        # Determine initial states con integridad relacional por entidad:
+        # La cabecera de la orden nace en ABIERTA; sus grupos y solicitudes nacen en PENDIENTE.
+        estado_orden_id = self._get_estado_id("orden_generacion", "ABIERTA")
+        estado_grupo_id = self._get_estado_id("grupo_referencia", "PENDIENTE")
+        estado_sol_id = self._get_estado_id("solicitud", "PENDIENTE")
 
         # Config parameter for max batch size of solicitudes
         lote_size = self.config_repo.get_lote_solicitud_size()
@@ -65,6 +68,9 @@ class OrdenesService:
         tipo_ord_upper = tipo_orden.upper() if tipo_orden else "ESTANDAR"
         if tipo_ord_upper in ("CANCELACION", "FOJAS", "TESTIMONIO", "PAGADA"):
             current_year = datetime.utcnow().year
+            estado_abierta_id = self._get_estado_id("orden_generacion", "ABIERTA")
+            estado_cerrada_id = self._get_estado_id("orden_generacion", "CERRADA")
+
             prefix_map = {
                 "CANCELACION": f"ORD-CLX-AV-{current_year}",
                 "FOJAS": f"ORD-FOJAS-{current_year}",
@@ -79,7 +85,22 @@ class OrdenesService:
             }
             folio_str = prefix_map[tipo_ord_upper]
             
-            # Check if annual order already exists
+            # 1. Cierre automático idempotente de órdenes anuales de ejercicios fiscales anteriores
+            from sqlalchemy import text
+            cierre_stmt = text("""
+                UPDATE sar_produccion.orden_generacion
+                SET estado_id = :cerrada_id
+                WHERE tipo_orden = :tipo_ord
+                  AND estado_id != :cerrada_id
+                  AND folio NOT LIKE :folio_current_year
+            """)
+            self.session.execute(cierre_stmt, {
+                "cerrada_id": estado_cerrada_id,
+                "tipo_ord": tipo_ord_upper,
+                "folio_current_year": f"%{current_year}%"
+            })
+
+            # 2. Buscar o crear la orden anual del año en curso en estado ABIERTA
             stmt = select(OrdenGeneracion).where(
                 OrdenGeneracion.folio == folio_str,
                 OrdenGeneracion.tipo_orden == tipo_ord_upper
@@ -90,12 +111,17 @@ class OrdenesService:
                     folio=folio_str,
                     descripcion=descripcion or desc_map[tipo_ord_upper],
                     municipio_id=municipio_id,
-                    estado_id=estado_orden_id,
+                    estado_id=estado_abierta_id,
                     usuario_id=usuario_id,
                     tipo_orden=tipo_ord_upper
                 )
                 self.session.add(nueva_orden)
                 self.session.flush()
+            else:
+                # Asegurar que la orden anual del año en curso permanezca ABIERTA
+                if nueva_orden.estado_id != estado_abierta_id:
+                    nueva_orden.estado_id = estado_abierta_id
+                    self.session.flush()
         else:
             # Generar Folio Estándar Diario (ORD-SUB-YYYYMMDD con consecutivo automático si hay múltiples el mismo día)
             date_str = datetime.utcnow().strftime('%Y%m%d')
@@ -270,8 +296,8 @@ class OrdenesService:
         orden.municipio_id = municipio_id
 
         # Determine states catalog IDs
-        estado_grupo_id = self._get_estado_id("PENDIENTE")
-        estado_sol_id = self._get_estado_id("PENDIENTE")
+        estado_grupo_id = self._get_estado_id("grupo_referencia", "PENDIENTE")
+        estado_sol_id = self._get_estado_id("solicitud", "PENDIENTE")
         lote_size = self.config_repo.get_lote_solicitud_size()
 
         # 4. Map existing db structure

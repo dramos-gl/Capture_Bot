@@ -28,7 +28,10 @@ from sar.src.ui.views.admin.reservas_proceso_view import ReservasProcesoView
 from sar.src.ui.views.admin.regularizar_colaborador_view import RegularizarColaboradorView
 from sar.src.ui.views.admin.fusion_lotes_view import FusionLotesView
 from sar.src.ui.views.admin.ubicaciones_view import UbicacionesView
-from satc.src.ui.views.satc_catalogs_view import SatcCatalogsView
+try:
+    from satc.src.ui.views.satc_catalogs_view import SatcCatalogsView
+except ImportError:
+    SatcCatalogsView = None
 from sar.src.ui.views.admin.help_dialogs import (
     AboutDialog, ShortcutsDialog, SystemDiagnosticsDialog, SupportDialog, UserManualDialog
 )
@@ -224,13 +227,13 @@ class AdminWindow(QMainWindow):
             "regularizar_colaborador": lambda: RegularizarColaboradorView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA")),
             "fusion_lotes": lambda: FusionLotesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:FUSION_LOTES") or self._can_edit("PROCESOS_ESPECIALES", "ADM:RESERVA_MASIVA")),
             "update_facturas": lambda: UpdateFacturasView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:UPDATE_FACTURAS")),
-            "satc_catalogos": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
-            "satc_tipos_tramite": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
-            "satc_estados_tramite": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
-            "satc_estados_vivienda": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
-            "satc_regimenes": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC")),
-            "satc_viviendas": lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC"))
         }
+        
+        # Registrar factorías para SATC solo si el subsistema está disponible
+        if SatcCatalogsView is not None:
+            satc_factory = lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC"))
+            for key in ["satc_catalogos", "satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas"]:
+                self.view_factories[key] = satc_factory
         
         # Add a lightweight default placeholder view
         self.default_view = QWidget()
@@ -349,6 +352,26 @@ class AdminWindow(QMainWindow):
             event.accept()
             return
             
+        # Verificar si hay procesos en segundo plano activos en las sub-vistas instanciadas
+        active_processes = []
+        for view_key, view_inst in getattr(self, "instantiated_views", {}).items():
+            worker = getattr(view_inst, "worker", None)
+            if worker and hasattr(worker, "isRunning") and worker.isRunning():
+                active_processes.append(view_key)
+
+        if active_processes:
+            warning_reply = QMessageBox.question(
+                self,
+                "Proceso en Ejecución",
+                f"Hay procesos en segundo plano activos en: {', '.join(active_processes)}.\n\n"
+                "¿Está seguro de que desea salir? Los procesos incompletos podrían interrumpirse.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if warning_reply != QMessageBox.Yes:
+                event.ignore()
+                return
+
         reply = QMessageBox.question(
             self,
             "Confirmar Salida",
