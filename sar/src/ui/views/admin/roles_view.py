@@ -47,12 +47,22 @@ class RolesView(QWidget):
         self.tbl_roles.btn_add.setVisible(self.can_edit)
         
     def _create_dialog(self, title: str) -> CustomDialog:
-        from PySide6.QtWidgets import QScrollArea, QPushButton
+        from PySide6.QtWidgets import QScrollArea, QPushButton, QApplication
         from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
         
         dialog = CustomDialog(title, self)
-        dialog.setMinimumSize(880, 720)
-        dialog.resize(920, 750)
+        
+        # Dimensionado responsivo adaptativo (apto para pantallas desde 1366x768)
+        screen = QApplication.primaryScreen()
+        if screen:
+            avail = screen.availableGeometry()
+            dw = min(920, int(avail.width() * 0.85))
+            dh = min(680, int(avail.height() * 0.85))
+            dialog.setMinimumSize(740, 520)
+            dialog.resize(dw, dh)
+        else:
+            dialog.setMinimumSize(740, 520)
+            dialog.resize(860, 600)
         
         # Main Scroll Area for clean UX
         scroll = QScrollArea(dialog)

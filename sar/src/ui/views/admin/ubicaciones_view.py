@@ -168,9 +168,10 @@ class UbicacionesView(QWidget):
             "Estatus", "SM", "Manzana", "Lote", "Edificio", "Vivienda", "No. Oficial", "Descripción / Notas"
         ])
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(26)
         self.layout.addWidget(self.table)
 
     def refresh_data(self):

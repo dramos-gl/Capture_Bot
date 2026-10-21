@@ -1147,38 +1147,43 @@ class ThemeManager:
             border-bottom: 1px solid {border};
             font-size: 13px;
             font-weight: 500;
-            padding: 2px 6px;
+            padding: 0px 4px;
         }}
         QMenuBar::item {{
             background-color: transparent;
             color: {txt_primary};
             padding: 6px 12px;
-            margin: 2px;
-            border-radius: 6px;
+            margin: 0px 1px;
+            border: none;
+            border-bottom: 2px solid transparent;
+            border-radius: 0px;
         }}
         QMenuBar::item:selected {{
-            background-color: {border};
-            color: {Colors.ACCENT};
+            background-color: transparent;
+            color: {"#2563EB" if not is_dark else "#60A5FA"};
+            border-bottom: 2px solid {"#2563EB" if not is_dark else "#60A5FA"};
         }}
         QMenuBar::item:pressed {{
-            background-color: {"#CBD5E1" if not is_dark else "#475569"};
+            background-color: {"rgba(37, 99, 235, 0.08)" if not is_dark else "rgba(96, 165, 250, 0.12)"};
+            color: {"#1D4ED8" if not is_dark else "#93C5FD"};
+            border-bottom: 2px solid {"#1D4ED8" if not is_dark else "#93C5FD"};
         }}
         QMenu {{
             background-color: {surf};
             border: 1px solid {border};
-            border-radius: 8px;
-            padding: 6px 4px;
+            border-radius: 2px;
+            padding: 4px 2px;
         }}
         QMenu::item {{
             padding: 6px 24px 6px 12px;
             background-color: transparent;
             color: {txt_primary};
-            border-radius: 4px;
+            border-radius: 0px;
             font-size: 12px;
         }}
         QMenu::item:selected {{
-            background-color: {"#EFF6FF" if not is_dark else Colors.PRIMARY_HOVER};
-            color: {"#2563EB" if not is_dark else "#FFFFFF"};
+            background-color: {"#EFF6FF" if not is_dark else "#1E293B"};
+            color: {"#2563EB" if not is_dark else "#60A5FA"};
         }}
         QMenu::separator {{
             height: 1px;

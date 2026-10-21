@@ -137,8 +137,10 @@ class FusionLotesView(QWidget):
         self.table_lotes.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
         self.table_lotes.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table_lotes.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_lotes.verticalHeader().setVisible(False)
         self.table_lotes.setAlternatingRowColors(True)
+        self.table_lotes.setShowGrid(False)
+        self.table_lotes.verticalHeader().setVisible(False)
+        self.table_lotes.verticalHeader().setDefaultSectionSize(26)
         main_layout.addWidget(self.table_lotes, stretch=1)
 
         # 4. Pie de Acciones

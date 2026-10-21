@@ -175,6 +175,10 @@ class ReservasProcesoView(QWidget):
         self.table_res.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table_res.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table_res.horizontalHeader().setStretchLastSection(True)
+        self.table_res.setAlternatingRowColors(True)
+        self.table_res.setShowGrid(False)
+        self.table_res.verticalHeader().setVisible(False)
+        self.table_res.verticalHeader().setDefaultSectionSize(26)
         self.table_res.setVisible(False)
         self.preview_stack.addWidget(self.table_res)
 

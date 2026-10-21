@@ -232,9 +232,39 @@ class AdminWindow(QMainWindow):
             for key in ["satc_catalogos", "satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas"]:
                 self.view_factories[key] = satc_factory
         
-        # Al abrir el módulo de administración, cargar directamente la vista principal (Usuarios)
-        # para que la ventana se presente limpia, productiva y sin pantallas estáticas intermedias.
-        self._change_view("usuarios")
+        # Vista de bienvenida no invasiva inicial
+        self.welcome_widget = self._create_welcome_view()
+        self.stacked_widget.addWidget(self.welcome_widget)
+        self.stacked_widget.setCurrentWidget(self.welcome_widget)
+
+    def _create_welcome_view(self) -> QWidget:
+        """Creates an elegant, non-invasive corporate placeholder encouraging the user to select an option."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(12)
+        layout.setContentsMargins(40, 40, 40, 40)
+
+        # Icono corporativo sobrio
+        icon_lbl = QLabel()
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setPixmap(Icons.get_pixmap("seguridad", size=64, color=Colors.TEXT_LIGHT_MUTED))
+        layout.addWidget(icon_lbl)
+
+        # Título principal de bienvenida
+        title_lbl = CustomLabel("Bienvenido al Módulo de Administración", variant="header")
+        title_lbl.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_lbl)
+
+        # Subtítulo explicativo no invasivo
+        subtitle_lbl = CustomLabel(
+            "Seleccione una opción del menú superior para comenzar a gestionar el sistema.",
+            variant="muted"
+        )
+        subtitle_lbl.setAlignment(Qt.AlignCenter)
+        layout.addWidget(subtitle_lbl)
+
+        return widget
         
     def _change_view(self, view_name: str):
         """Loads and switches to the requested view lazily on-demand."""
