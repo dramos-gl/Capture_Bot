@@ -11,6 +11,7 @@ from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.storage.repositories import UsuarioRepository
 from sar.src.ui.design_system.components.organisms.gl_admin_menubar import AdminMenuBar
+from sar.src.ui.design_system.components.organisms.gl_action_toolbar import GLActionToolbar
 from sar.src.ui.design_system.utils.icons import Icons
 
 from sar.src.ui.views.admin.users_view import UsersView
@@ -107,6 +108,20 @@ class AdminWindow(QMainWindow):
         
         self.menu_bar.setCornerWidget(self.user_info_widget, Qt.TopRightCorner)
         self.setMenuBar(self.menu_bar)
+        
+        # Action Toolbar Organism (Barra de herramientas fija superior)
+        self.action_toolbar = GLActionToolbar(self)
+        self.addToolBar(Qt.TopToolBarArea, self.action_toolbar)
+        
+        # Conexión de acciones globales de la Toolbar Dinámica
+        self.action_toolbar.home_requested.connect(self._on_toolbar_home)
+        self.action_toolbar.view_requested.connect(self._change_view)
+        
+        self.action_toolbar.new_requested.connect(self._on_toolbar_new)
+        self.action_toolbar.edit_requested.connect(self._on_toolbar_edit)
+        self.action_toolbar.refresh_requested.connect(self._on_toolbar_refresh)
+        self.action_toolbar.export_requested.connect(self._on_toolbar_export)
+        self.action_toolbar.help_requested.connect(self._show_help_manual)
         
         # Central Content Setup (Maximizando área de trabajo útil)
         self.central_widget = QWidget()
@@ -332,6 +347,168 @@ class AdminWindow(QMainWindow):
             if hasattr(view, "refresh_data"):
                 view.refresh_data()
             self.stacked_widget.setCurrentWidget(view)
+            # Mapeo de submódulos a categoría de herramientas en la toolbar
+            category_map = {
+                "usuarios": "SEGURIDAD",
+                "roles": "SEGURIDAD",
+                "permisos": "SEGURIDAD",
+                "app_modulos": "SEGURIDAD",
+                "acciones": "SEGURIDAD",
+                "conceptos": "CATALOGOS",
+                "geografia": "CATALOGOS",
+                "rfcs": "CATALOGOS",
+                "estados": "CATALOGOS",
+                "carga_masiva": "PROCESOS",
+                "ubicaciones": "PROCESOS",
+                "migracion": "PROCESOS",
+                "reserva_masiva": "PROCESOS",
+                "regularizar_colaborador": "PROCESOS",
+                "fusion_lotes": "PROCESOS",
+                "update_facturas": "PROCESOS",
+                "parametros": "CONFIGURACION",
+                "localizadores": "CONFIGURACION",
+                "satc_catalogos": "SATC",
+                "satc_tipos_tramite": "SATC",
+                "satc_estados_tramite": "SATC",
+                "satc_estados_vivienda": "SATC",
+                "satc_regimenes": "SATC",
+                "satc_viviendas": "SATC",
+            }
+            category = category_map.get(view_name, "SATC" if "satc" in view_name else "CATALOGOS")
+            self.action_toolbar.set_module_context(category, view_name)
+            self._update_toolbar_state(view)
+
+    def _get_active_crud_panel(self, view):
+        """Helper to find the active CrudTablePanel in single or tabbed views."""
+        from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
+        
+        # 1. Búsqueda directa por atributos conocidos
+        candidate_attrs = [
+            "tbl_usuarios", "tbl_users", "tbl_roles", "tbl_modulos", "tbl_mod", "tbl_app",
+            "tbl_acciones", "tbl_status", "tbl_rfcs", "tbl_parametros", "tbl_params",
+            "tbl_localizadores", "tbl_muns", "tbl_dels"
+        ]
+        for attr in candidate_attrs:
+            val = getattr(view, attr, None)
+            if isinstance(val, CrudTablePanel):
+                return val
+
+        # 2. Vistas con Pestañas (CatalogsView, SatcCatalogsView, etc.)
+        if hasattr(view, "tabs"):
+            idx = view.tabs.currentIndex()
+            # Mapeo según la vista
+            if hasattr(view, "tbl_conceptos"):
+                panels = [
+                    getattr(view, "tbl_conceptos", None),
+                    getattr(view, "tbl_notarias", None),
+                    getattr(view, "tbl_colaboradores", None),
+                    getattr(view, "tbl_desarrollos", None)
+                ]
+                if 0 <= idx < len(panels) and isinstance(panels[idx], CrudTablePanel):
+                    return panels[idx]
+            elif hasattr(view, "tbl_tipos"):
+                panels = [
+                    getattr(view, "tbl_tipos", None),
+                    getattr(view, "tbl_est_tramite", None),
+                    getattr(view, "tbl_est_vivienda", None),
+                    getattr(view, "tbl_regimenes", None),
+                    getattr(view, "tbl_viviendas", None)
+                ]
+                if 0 <= idx < len(panels) and isinstance(panels[idx], CrudTablePanel):
+                    return panels[idx]
+
+        # 3. Búsqueda dinámica en hijos del widget actual
+        if hasattr(view, "findChildren"):
+            crud_children = [c for c in view.findChildren(CrudTablePanel) if c.isVisible()]
+            if crud_children:
+                return crud_children[0]
+
+        return None
+
+    def _update_toolbar_state(self, view=None):
+        """Enables or disables toolbar CRUD buttons based on view capabilities and selection."""
+        view = view or self.stacked_widget.currentWidget()
+        if not view or view == self.welcome_widget:
+            self.action_toolbar.set_crud_enabled(False, False)
+            self.action_toolbar.act_refresh.setEnabled(False)
+            self.action_toolbar.act_export.setEnabled(False)
+            return
+
+        self.action_toolbar.act_refresh.setEnabled(True)
+        self.action_toolbar.act_export.setEnabled(True)
+        
+        crud = self._get_active_crud_panel(view)
+        if crud and hasattr(crud, "btn_add") and hasattr(crud, "btn_edit"):
+            can_add = getattr(crud.btn_add, "isVisible", lambda: True)() and crud.btn_add.isEnabled()
+            can_edit = crud.btn_edit.isEnabled()
+            self.action_toolbar.set_crud_enabled(can_add, can_edit)
+            
+            # Sincronizar dinámicamente cuando cambie la selección en la grilla
+            if hasattr(crud, "table") and hasattr(crud.table, "itemSelectionChanged"):
+                try:
+                    crud.table.itemSelectionChanged.disconnect()
+                except Exception:
+                    pass
+                crud.table.itemSelectionChanged.connect(
+                    lambda: self.action_toolbar.act_edit.setEnabled(crud.btn_edit.isEnabled())
+                )
+        else:
+            can_edit_view = getattr(view, "can_edit", False)
+            self.action_toolbar.set_crud_enabled(can_edit_view, False)
+
+    def _on_toolbar_home(self):
+        """Navigates back to the welcome screen."""
+        self.stacked_widget.setCurrentWidget(self.welcome_widget)
+        self.action_toolbar.set_module_context("home")
+        self._update_toolbar_state(self.welcome_widget)
+
+    def _on_toolbar_new(self):
+        """Triggers create action on the currently visible view/panel."""
+        view = self.stacked_widget.currentWidget()
+        crud = self._get_active_crud_panel(view)
+        if crud and crud.btn_add.isEnabled():
+            crud.add_requested.emit()
+
+    def _on_toolbar_edit(self):
+        """Triggers edit action on the selected item in the active view/panel."""
+        view = self.stacked_widget.currentWidget()
+        crud = self._get_active_crud_panel(view)
+        if crud and crud.btn_edit.isEnabled():
+            crud._on_edit_button_clicked()
+
+    def _on_toolbar_refresh(self):
+        """Refreshes the active view data."""
+        view = self.stacked_widget.currentWidget()
+        if hasattr(view, "refresh_data"):
+            view.refresh_data()
+            self._update_toolbar_state(view)
+
+    def _on_toolbar_export(self):
+        """Exports visible table data to CSV."""
+        view = self.stacked_widget.currentWidget()
+        crud = self._get_active_crud_panel(view)
+        table = getattr(crud, "table", None) or getattr(view, "table", None) or getattr(view, "table_res", None)
+        if not table or table.rowCount() == 0:
+            QMessageBox.information(self, "Exportar", "No hay registros disponibles para exportar.")
+            return
+
+        from PySide6.QtWidgets import QFileDialog
+        import csv
+        path, _ = QFileDialog.getSaveFileName(self, "Exportar Datos", "exportacion_administracion.csv", "CSV (*.csv)")
+        if not path:
+            return
+
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                headers = [table.horizontalHeaderItem(c).text() if table.horizontalHeaderItem(c) else f"Col {c}" for c in range(table.columnCount())]
+                writer.writerow(headers)
+                for r in range(table.rowCount()):
+                    row = [table.item(r, c).text() if table.item(r, c) else "" for c in range(table.columnCount())]
+                    writer.writerow(row)
+            QMessageBox.information(self, "Éxito", f"Datos exportados correctamente:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error al Exportar", f"No se pudo guardar el archivo: {e}")
 
     def _handle_logout_action(self):
         reply = QMessageBox.question(

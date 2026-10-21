@@ -1061,27 +1061,27 @@ class ThemeManager:
         QTabWidget::pane {{
             border: 1px solid {border};
             background-color: {surf};
-            border-radius: {Spacing.RADIUS_MD};
-            padding: 16px;
+            border-radius: 0px;
+            padding: 8px;
         }}
         QTabBar::tab {{
-            background-color: {bg};
+            background-color: transparent;
             color: {txt_secondary};
-            padding: 8px 16px;
-            border: 1px solid {border};
-            border-bottom: none;
-            border-top-left-radius: 6px;
-            border-top-right-radius: 6px;
-            margin-right: 2px;
-            font-weight: bold;
+            padding: 8px 18px;
+            border: none;
+            border-bottom: 2px solid transparent;
+            border-radius: 0px;
+            margin-right: 4px;
+            font-weight: 600;
+            font-size: 13px;
         }}
         QTabBar::tab:selected {{
-            background-color: {surf};
+            background-color: transparent;
             color: {"#2563EB" if not is_dark else "#60A5FA"};
             border-bottom: 2px solid {"#2563EB" if not is_dark else "#60A5FA"};
         }}
         QTabBar::tab:hover:!selected {{
-            background-color: {border};
+            background-color: {"rgba(37, 99, 235, 0.05)" if not is_dark else "rgba(96, 165, 250, 0.08)"};
             color: {txt_primary};
         }}
         
@@ -1189,6 +1189,48 @@ class ThemeManager:
             height: 1px;
             background-color: {border};
             margin: 4px 6px;
+        }}
+
+        /* Action Toolbar Organism (ERP Style Toolbar) */
+        QToolBar#adminActionToolbar {{
+            background-color: {surf};
+            border-bottom: 1px solid {border};
+            padding: 4px 12px;
+            spacing: 6px;
+        }}
+        QToolBar#adminActionToolbar QToolButton {{
+            background-color: transparent;
+            color: {txt_primary};
+            border: 1px solid transparent;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: 500;
+            min-width: 68px;
+        }}
+        QToolBar#adminActionToolbar QToolButton:hover {{
+            background-color: {"rgba(37, 99, 235, 0.08)" if not is_dark else "rgba(96, 165, 250, 0.12)"};
+            border-color: {"rgba(37, 99, 235, 0.20)" if not is_dark else "rgba(96, 165, 250, 0.30)"};
+            color: {"#2563EB" if not is_dark else "#60A5FA"};
+        }}
+        QToolBar#adminActionToolbar QToolButton:pressed {{
+            background-color: {"rgba(37, 99, 235, 0.18)" if not is_dark else "rgba(96, 165, 250, 0.24)"};
+            border-color: {"#2563EB" if not is_dark else "#60A5FA"};
+        }}
+        QToolBar#adminActionToolbar QToolButton:checked {{
+            background-color: {"#EBF3FF" if not is_dark else "rgba(37, 99, 235, 0.25)"};
+            border-color: {"#BFDBFE" if not is_dark else "rgba(96, 165, 250, 0.40)"};
+            color: {"#2563EB" if not is_dark else "#60A5FA"};
+            font-weight: 600;
+        }}
+        QToolBar#adminActionToolbar QToolButton:disabled {{
+            opacity: 0.35;
+            color: {txt_muted};
+        }}
+        QToolBar#adminActionToolbar QToolBarSeparator {{
+            width: 1px;
+            background-color: {border};
+            margin: 6px 8px;
         }}
         
         /* ScrollBars */
