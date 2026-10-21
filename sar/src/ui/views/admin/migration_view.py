@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from PySide6.QtCore import Qt, QThread, Signal
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
@@ -65,7 +66,8 @@ class MigrationView(QWidget):
         self._build_ui()
         
     def _build_ui(self):
-        # Label de descripción completa de la funcionalidad
+        # Card de descripción del proceso
+        self.banner_card = CustomCard()
         self.lbl_desc = CustomLabel(
             "<b>Descripción del Proceso:</b><br/>"
             "Este proceso permite reubicar y transferir masivamente referencias mal clasificadas "
@@ -77,8 +79,8 @@ class MigrationView(QWidget):
             variant="body"
         )
         self.lbl_desc.setWordWrap(True)
-        self.lbl_desc.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; color: #475569;")
-        self.layout.addWidget(self.lbl_desc)
+        self.banner_card.layout.addWidget(self.lbl_desc)
+        self.layout.addWidget(self.banner_card)
 
         # Top Controls Layout
         self.controls_layout = QHBoxLayout()

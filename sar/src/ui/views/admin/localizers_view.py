@@ -2,6 +2,7 @@ import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
@@ -42,26 +43,10 @@ class LocalizersView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(580)
         
-        card_l = QFrame(dialog)
-        card_l.setObjectName("card_l")
-        card_l.setStyleSheet(f"""
-            QFrame#card_l {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_l = QVBoxLayout(card_l)
-        lay_l.setContentsMargins(0, 0, 0, 0)
-        lay_l.setSpacing(8)
-        
-        lbl_l = CustomLabel("🤖 LOCALIZADOR WEB DE CAPTURA (BOT)", variant="subheader")
-        lbl_l.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_l.addWidget(lbl_l)
+        card_l = CustomCard(title="🤖 Localizador Web de Captura (Bot)", parent=dialog)
         
         form_l = QFormLayout()
-        form_l.setSpacing(8)
+        form_l.setSpacing(10)
         form_l.setContentsMargins(0, 0, 0, 0)
         
         self.inp_l_clave = CustomInput("Ej. BTN_GUARDAR_SOLICITUD", parent=card_l)
@@ -88,12 +73,11 @@ class LocalizersView(QWidget):
         form_l.addRow("Label Visible:", self.inp_l_label)
         form_l.addRow("Estrategia *:", self.cmb_l_estrategia)
         form_l.addRow("Valor Selector *:", self.inp_l_selector)
-        lay_l.addLayout(form_l)
+        card_l.layout.addLayout(form_l)
         dialog.add_widget(card_l)
         
         self.chk_l_activo = CustomCheckBox("Localizador activo para automatización", dialog)
         self.chk_l_activo.setChecked(True)
-        self.chk_l_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_l_activo)
         
         def _validate_l():

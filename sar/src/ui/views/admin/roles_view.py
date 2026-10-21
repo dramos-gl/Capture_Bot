@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
+from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
@@ -54,43 +56,24 @@ class RolesView(QWidget):
         
         # Main Scroll Area for clean UX
         scroll = QScrollArea(dialog)
+        scroll.setObjectName("cleanScrollArea")
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setStyleSheet("""
-            QScrollArea { border: none; background: transparent; }
-            QWidget#scrollContent { background: transparent; }
-        """)
         
         scroll_content = QWidget()
-        scroll_content.setObjectName("scrollContent")
+        scroll_content.setObjectName("scrollableContent")
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(4, 4, 4, 4)
         scroll_layout.setSpacing(16)
         
         # -------------------------------------------------------------
-        # 1. TARJETA: IDENTIFICACIÓN Y CONFIGURACIÓN DEL ROL
+        # 1. TARJETA ATÓMICA: IDENTIFICACIÓN Y CONFIGURACIÓN DEL ROL
         # -------------------------------------------------------------
-        card_rol = QFrame(scroll_content)
-        card_rol.setObjectName("card_rol")
-        card_rol.setStyleSheet(f"""
-            QFrame#card_rol {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 12px 16px;
-            }}
-        """)
-        lay_rol = QVBoxLayout(card_rol)
-        lay_rol.setContentsMargins(0, 0, 0, 0)
-        lay_rol.setSpacing(8)
-        
-        lbl_rol = CustomLabel("🛡️ IDENTIFICACIÓN Y CONFIGURACIÓN DEL ROL", variant="subheader")
-        lbl_rol.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_rol.addWidget(lbl_rol)
+        card_rol = CustomCard(title="🛡️ Identificación y Configuración del Rol", parent=scroll_content)
         
         form_rol = QFormLayout()
-        form_rol.setSpacing(8)
+        form_rol.setSpacing(10)
         form_rol.setContentsMargins(0, 0, 0, 0)
         
         rol_lay = QHBoxLayout()
@@ -105,8 +88,7 @@ class RolesView(QWidget):
         self.inp_r_codigo.set_text = self.inp_r_codigo.setText
         self.inp_r_codigo.set_focus = self.inp_r_codigo.setFocus
         
-        lbl_nom = QLabel("Nombre *:")
-        lbl_nom.setStyleSheet(f"color: {Colors.TEXT_LIGHT_SECONDARY}; font-size: 12px; font-weight: 500;")
+        lbl_nom = CustomLabel("Nombre *:", variant="body", parent=card_rol)
         
         self.inp_r_nombre = CustomInput("Nombre descriptivo del rol", parent=card_rol)
         self.inp_r_nombre.setMaxLength(100)
@@ -118,61 +100,34 @@ class RolesView(QWidget):
         rol_lay.addWidget(self.inp_r_nombre, 2)
         
         form_rol.addRow("Código del Rol *:", rol_lay)
-        lay_rol.addLayout(form_rol)
+        card_rol.layout.addLayout(form_rol)
         scroll_layout.addWidget(card_rol)
         
         # -------------------------------------------------------------
-        # 2. MATRIZ DE PERMISOS CRUZADOS (Módulos vs Acciones)
+        # 2. MATRIZ ATÓMICA DE PERMISOS CRUZADOS (Módulos vs Acciones)
         # -------------------------------------------------------------
-        card_matrix = QFrame(scroll_content)
-        card_matrix.setObjectName("card_matrix")
-        card_matrix.setStyleSheet(f"""
-            QFrame#card_matrix {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 12px 16px;
-            }}
-        """)
-        lay_matrix = QVBoxLayout(card_matrix)
-        lay_matrix.setContentsMargins(0, 0, 0, 0)
-        lay_matrix.setSpacing(10)
-        
-        header_matrix_lay = QVBoxLayout()
-        header_matrix_lay.setSpacing(6)
-        
-        lbl_matrix = CustomLabel("⚙️ MATRIZ DE PERMISOS CRUZADOS (MÓDULOS VS ACCIONES)", variant="subheader")
-        lbl_matrix.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY};")
-        header_matrix_lay.addWidget(lbl_matrix)
+        card_matrix = CustomCard(title="⚙️ Matriz de Permisos Cruzados (Módulos vs Acciones)", parent=scroll_content)
         
         # Quick actions buttons row for admin convenience
         if self.can_edit:
             btn_row = QHBoxLayout()
             btn_row.setSpacing(8)
+            btn_row.setContentsMargins(0, 0, 0, 6)
             
-            btn_check_all = CustomButton("Marcar Todo", is_secondary=True)
-            btn_check_all.setFixedHeight(28)
-            btn_check_all.setStyleSheet("font-size: 11px; padding: 2px 10px;")
+            btn_check_all = CustomButton("Marcar Todo", is_secondary=True, control_size="sm")
             btn_check_all.clicked.connect(lambda: self._set_all_matrix(True))
             
-            btn_uncheck_all = CustomButton("Desmarcar Todo", is_secondary=True)
-            btn_uncheck_all.setFixedHeight(28)
-            btn_uncheck_all.setStyleSheet("font-size: 11px; padding: 2px 10px;")
+            btn_uncheck_all = CustomButton("Desmarcar Todo", is_secondary=True, control_size="sm")
             btn_uncheck_all.clicked.connect(lambda: self._set_all_matrix(False))
             
-            btn_read_only = CustomButton("Solo Lectura (LEER)", is_secondary=True)
-            btn_read_only.setFixedHeight(28)
-            btn_read_only.setStyleSheet("font-size: 11px; padding: 2px 10px;")
+            btn_read_only = CustomButton("Solo Lectura (LEER)", is_secondary=True, control_size="sm")
             btn_read_only.clicked.connect(self._set_read_only_matrix)
             
             btn_row.addWidget(btn_check_all)
             btn_row.addWidget(btn_uncheck_all)
             btn_row.addWidget(btn_read_only)
             btn_row.addStretch()
-            
-            header_matrix_lay.addLayout(btn_row)
-            
-        lay_matrix.addLayout(header_matrix_lay)
+            card_matrix.layout.addLayout(btn_row)
         
         self.matrix_table = QTableWidget(card_matrix)
         self.matrix_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -198,22 +153,6 @@ class RolesView(QWidget):
         row_height = 36
         calc_height = (len(self.modulos) * row_height) + 38
         self.matrix_table.setFixedHeight(min(max(calc_height, 220), 420))
-        self.matrix_table.setStyleSheet("""
-            QTableWidget {
-                border: 1px solid #CBD5E1;
-                border-radius: 6px;
-                background-color: #FFFFFF;
-                gridline-color: #E2E8F0;
-            }
-            QHeaderView::section {
-                background-color: #F1F5F9;
-                color: #334155;
-                font-weight: bold;
-                font-size: 11px;
-                padding: 6px;
-                border: 1px solid #CBD5E1;
-            }
-        """)
         
         self.checkboxes_matrix = {}
         for r_idx, mod in enumerate(self.modulos):
@@ -222,7 +161,6 @@ class RolesView(QWidget):
                 if not self.can_edit:
                     chk.setEnabled(False)
                 widget = QWidget()
-                widget.setStyleSheet("background-color: transparent;")
                 l = QHBoxLayout(widget)
                 l.addWidget(chk)
                 l.setAlignment(Qt.AlignCenter)
@@ -230,29 +168,13 @@ class RolesView(QWidget):
                 self.matrix_table.setCellWidget(r_idx, c_idx, widget)
                 self.checkboxes_matrix[(mod["id"], acc["id"])] = chk
                 
-        lay_matrix.addWidget(self.matrix_table)
+        card_matrix.layout.addWidget(self.matrix_table)
         scroll_layout.addWidget(card_matrix)
         
         # -------------------------------------------------------------
         # 3. MÓDULOS DE APLICACIÓN AUTORIZADOS (Acceso Nivel 1)
         # -------------------------------------------------------------
-        card_apps = QFrame(scroll_content)
-        card_apps.setObjectName("card_apps")
-        card_apps.setStyleSheet(f"""
-            QFrame#card_apps {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 12px 16px;
-            }}
-        """)
-        lay_apps = QVBoxLayout(card_apps)
-        lay_apps.setContentsMargins(0, 0, 0, 0)
-        lay_apps.setSpacing(8)
-        
-        lbl_apps = CustomLabel("📱 MÓDULOS DE APLICACIÓN AUTORIZADOS (ACCESO NIVEL 1)", variant="subheader")
-        lbl_apps.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_apps.addWidget(lbl_apps)
+        card_apps = CustomCard(title="📱 Módulos de Aplicación Autorizados (Acceso Nivel 1)", parent=scroll_content)
         
         grid_apps = QGridLayout()
         grid_apps.setContentsMargins(0, 4, 0, 0)
@@ -269,7 +191,7 @@ class RolesView(QWidget):
             grid_apps.addWidget(chk, row, col)
             self.checkboxes_apps[app["id"]] = chk
             
-        lay_apps.addLayout(grid_apps)
+        card_apps.layout.addLayout(grid_apps)
         scroll_layout.addWidget(card_apps)
         
         # -------------------------------------------------------------
@@ -277,7 +199,6 @@ class RolesView(QWidget):
         # -------------------------------------------------------------
         self.chk_r_activo = CustomCheckBox("Rol de sistema activo para asignación de usuarios", scroll_content)
         self.chk_r_activo.setChecked(True)
-        self.chk_r_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         scroll_layout.addWidget(self.chk_r_activo)
         
         scroll.setWidget(scroll_content)

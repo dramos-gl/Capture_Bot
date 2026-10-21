@@ -70,9 +70,7 @@ class ReservasProcesoView(QWidget):
         left_col.setSpacing(4)
         left_col.setAlignment(Qt.AlignmentFlag.AlignTop)
         
-        colab_title_lbl = QLabel()
-        colab_title_lbl.setText("Colaborador Destino <font color='#EF4444'>*</font>")
-        colab_title_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        colab_title_lbl = CustomLabel("Colaborador Destino *", variant="subheader")
         left_col.addWidget(colab_title_lbl)
 
         self.cb_colaborador = CustomComboBox()
@@ -91,8 +89,7 @@ class ReservasProcesoView(QWidget):
         
         obs_header_layout = QHBoxLayout()
         obs_header_layout.setSpacing(6)
-        obs_title_lbl = CustomLabel("Observaciones del Lote", variant="body")
-        obs_title_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        obs_title_lbl = CustomLabel("Observaciones del Lote", variant="subheader")
         obs_header_layout.addWidget(obs_title_lbl)
         obs_header_layout.addStretch()
         self.lbl_char_counter = CustomLabel("0 / 500", variant="muted")
@@ -155,7 +152,6 @@ class ReservasProcesoView(QWidget):
             res_title_layout.addWidget(table_icon_lbl)
         
         res_title_lbl = CustomLabel("Referencias Pre-cargadas / Estado de Validación", variant="subheader")
-        res_title_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #1E293B;")
         res_title_layout.addWidget(res_title_lbl)
         results_header.addLayout(res_title_layout)
         results_header.addStretch()
@@ -168,7 +164,6 @@ class ReservasProcesoView(QWidget):
 
         # Main Stacked Layout for Table or Placeholder
         self.preview_container = QFrame()
-        self.preview_container.setStyleSheet("background-color: transparent; border: none;")
         self.preview_stack = QVBoxLayout(self.preview_container)
         self.preview_stack.setContentsMargins(0, 0, 0, 0)
 
@@ -180,28 +175,11 @@ class ReservasProcesoView(QWidget):
         self.table_res.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table_res.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table_res.horizontalHeader().setStretchLastSection(True)
-        self.table_res.setStyleSheet("""
-            QTableWidget {
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
-                gridline-color: #F1F5F9;
-                background-color: #FFFFFF;
-            }
-            QHeaderView::section {
-                background-color: #F8FAFC;
-                padding: 10px;
-                font-weight: bold;
-                border: none;
-                border-bottom: 1px solid #E2E8F0;
-                color: #475569;
-            }
-        """)
         self.table_res.setVisible(False)
         self.preview_stack.addWidget(self.table_res)
 
         # Placeholder Component (No results to show)
         self.placeholder_widget = QWidget()
-        self.placeholder_widget.setStyleSheet("background-color: transparent;")
         placeholder_layout = QVBoxLayout(self.placeholder_widget)
         placeholder_layout.setContentsMargins(40, 40, 40, 40)
         placeholder_layout.setSpacing(12)
@@ -216,7 +194,6 @@ class ReservasProcesoView(QWidget):
 
         placeholder_title = CustomLabel("No hay referencias cargadas", variant="subheader")
         placeholder_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder_title.setStyleSheet("font-weight: bold; color: #475569;")
         placeholder_layout.addWidget(placeholder_title)
 
         placeholder_sub = CustomLabel("Seleccione un archivo Excel para validar las referencias.", variant="muted")
@@ -236,7 +213,6 @@ class ReservasProcesoView(QWidget):
         self.cb_page_limit = CustomComboBox()
         self.cb_page_limit.addItems(["25", "50", "100"])
         self.cb_page_limit.setFixedWidth(70)
-        self.cb_page_limit.setStyleSheet("padding: 3px; border: 1px solid #CBD5E1; border-radius: 4px;")
         self.footer_layout.addWidget(self.cb_page_limit)
 
         self.btn_prev_page = CustomButton("<", is_secondary=True)

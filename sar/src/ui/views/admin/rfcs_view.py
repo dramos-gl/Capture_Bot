@@ -2,6 +2,7 @@ import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
@@ -44,28 +45,12 @@ class RfcsView(QWidget):
         dialog.setMinimumWidth(660)
         
         # -------------------------------------------------------------
-        # 1. TARJETA: IDENTIFICACIÓN FISCAL (QFormLayout estático como Asignar Derecho)
+        # 1. TARJETA ATÓMICA: IDENTIFICACIÓN FISCAL
         # -------------------------------------------------------------
-        card_fiscal = QFrame(dialog)
-        card_fiscal.setObjectName("card_fiscal")
-        card_fiscal.setStyleSheet(f"""
-            QFrame#card_fiscal {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_fiscal = QVBoxLayout(card_fiscal)
-        lay_fiscal.setContentsMargins(0, 0, 0, 0)
-        lay_fiscal.setSpacing(8)
-        
-        lbl_fiscal = CustomLabel("🏢 DATOS DE IDENTIFICACIÓN FISCAL", variant="subheader")
-        lbl_fiscal.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_fiscal.addWidget(lbl_fiscal)
+        card_fiscal = CustomCard(title="🏢 Datos de Identificación Fiscal", parent=dialog)
         
         form_fiscal = QFormLayout()
-        form_fiscal.setSpacing(8)
+        form_fiscal.setSpacing(10)
         form_fiscal.setContentsMargins(0, 0, 0, 0)
         
         # Fila 1: RFC y Alias en horizontal
@@ -76,8 +61,7 @@ class RfcsView(QWidget):
         self.txt_rfc.setMaxLength(13)
         self.txt_rfc.textEdited.connect(lambda t: self.txt_rfc.setText(t.upper()))
         
-        lbl_alias = QLabel("Alias / Comercial:")
-        lbl_alias.setStyleSheet(f"color: {Colors.TEXT_LIGHT_SECONDARY}; font-size: 12px; font-weight: 500;")
+        lbl_alias = CustomLabel("Alias / Comercial:", variant="body", parent=card_fiscal)
         self.txt_alias = CustomInput("Nombre comercial o sucursal (Opcional)", parent=card_fiscal)
         self.txt_alias.setMaxLength(100)
         
@@ -87,8 +71,7 @@ class RfcsView(QWidget):
         form_fiscal.addRow("RFC *:", rfc_lay)
         
         # Error label sutil para RFC
-        self.lbl_rfc_err = QLabel("", card_fiscal)
-        self.lbl_rfc_err.setStyleSheet(f"color: {Colors.ERROR}; font-size: 11px; font-weight: bold;")
+        self.lbl_rfc_err = CustomLabel("", variant="caption", parent=card_fiscal)
         self.lbl_rfc_err.setVisible(False)
         form_fiscal.addRow("", self.lbl_rfc_err)
         
@@ -97,32 +80,16 @@ class RfcsView(QWidget):
         self.txt_rs.setMaxLength(500)
         form_fiscal.addRow("Razón Social *:", self.txt_rs)
         
-        lay_fiscal.addLayout(form_fiscal)
+        card_fiscal.layout.addLayout(form_fiscal)
         dialog.add_widget(card_fiscal)
         
         # -------------------------------------------------------------
-        # 2. TARJETA: DOMICILIO FISCAL Y LOCALIZACIÓN
+        # 2. TARJETA ATÓMICA: DOMICILIO FISCAL Y LOCALIZACIÓN
         # -------------------------------------------------------------
-        card_domicilio = QFrame(dialog)
-        card_domicilio.setObjectName("card_domicilio")
-        card_domicilio.setStyleSheet(f"""
-            QFrame#card_domicilio {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_domicilio = QVBoxLayout(card_domicilio)
-        lay_domicilio.setContentsMargins(0, 0, 0, 0)
-        lay_domicilio.setSpacing(8)
-        
-        lbl_domicilio = CustomLabel("📍 DOMICILIO FISCAL Y LOCALIZACIÓN", variant="subheader")
-        lbl_domicilio.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_domicilio.addWidget(lbl_domicilio)
+        card_domicilio = CustomCard(title="📍 Domicilio Fiscal y Localización", parent=dialog)
         
         form_dom = QFormLayout()
-        form_dom.setSpacing(8)
+        form_dom.setSpacing(10)
         form_dom.setContentsMargins(0, 0, 0, 0)
         
         # Fila 1: Calle
@@ -133,8 +100,7 @@ class RfcsView(QWidget):
         num_lay = QHBoxLayout()
         num_lay.setSpacing(10)
         self.txt_ext = CustomInput("No. Ext / SM / Mz", parent=card_domicilio)
-        lbl_int = QLabel("No. Int:")
-        lbl_int.setStyleSheet(f"color: {Colors.TEXT_LIGHT_SECONDARY}; font-size: 12px; font-weight: 500;")
+        lbl_int = CustomLabel("No. Int:", variant="body", parent=card_domicilio)
         self.txt_int = CustomInput("Piso / Depto (Opcional)", parent=card_domicilio)
         num_lay.addWidget(self.txt_ext, 1)
         num_lay.addWidget(lbl_int)
@@ -145,8 +111,7 @@ class RfcsView(QWidget):
         col_lay = QHBoxLayout()
         col_lay.setSpacing(10)
         self.txt_col = CustomInput("Colonia o fraccionamiento", parent=card_domicilio)
-        lbl_cp = QLabel("C.P.:")
-        lbl_cp.setStyleSheet(f"color: {Colors.TEXT_LIGHT_SECONDARY}; font-size: 12px; font-weight: 500;")
+        lbl_cp = CustomLabel("C.P.:", variant="body", parent=card_domicilio)
         self.txt_cp = CustomInput("77500", parent=card_domicilio)
         self.txt_cp.setMaxLength(10)
         col_lay.addWidget(self.txt_col, 3)
@@ -165,7 +130,7 @@ class RfcsView(QWidget):
         geo_lay.addWidget(self.txt_est, 1)
         form_dom.addRow("Ubicación Geo:", geo_lay)
         
-        lay_domicilio.addLayout(form_dom)
+        card_domicilio.layout.addLayout(form_dom)
         dialog.add_widget(card_domicilio)
         
         # -------------------------------------------------------------
@@ -173,7 +138,6 @@ class RfcsView(QWidget):
         # -------------------------------------------------------------
         self.chk_activo = CustomCheckBox("Contribuyente activo para facturación y generación de referencias", dialog)
         self.chk_activo.setChecked(True)
-        self.chk_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_activo)
         
         # Validación en tiempo real
@@ -186,14 +150,20 @@ class RfcsView(QWidget):
                 if not re.match(r"^[A-ZÑ&]{3,4}\d{6}[A-Z\d]{3}$", rfc_val):
                     self.lbl_rfc_err.setText("Formato de RFC inválido (12 caracteres P. Moral o 13 P. Física).")
                     self.lbl_rfc_err.setVisible(True)
-                    self.txt_rfc.setStyleSheet(f"border: 1px solid {Colors.ERROR};")
+                    self.txt_rfc.setProperty("hasError", "true")
+                    self.txt_rfc.style().unpolish(self.txt_rfc)
+                    self.txt_rfc.style().polish(self.txt_rfc)
                     is_rfc_valid = False
                 else:
                     self.lbl_rfc_err.setVisible(False)
-                    self.txt_rfc.setStyleSheet("")
+                    self.txt_rfc.setProperty("hasError", "false")
+                    self.txt_rfc.style().unpolish(self.txt_rfc)
+                    self.txt_rfc.style().polish(self.txt_rfc)
             else:
                 self.lbl_rfc_err.setVisible(False)
-                self.txt_rfc.setStyleSheet("")
+                self.txt_rfc.setProperty("hasError", "false")
+                self.txt_rfc.style().unpolish(self.txt_rfc)
+                self.txt_rfc.style().polish(self.txt_rfc)
                 
             can_save = bool(rfc_val and rs_val and is_rfc_valid)
             dialog.btn_save.setEnabled(can_save)

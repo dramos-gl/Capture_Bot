@@ -4,6 +4,7 @@ import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
@@ -53,26 +54,10 @@ class GeographyView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(540)
         
-        card_m = QFrame(dialog)
-        card_m.setObjectName("card_m")
-        card_m.setStyleSheet(f"""
-            QFrame#card_m {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_m = QVBoxLayout(card_m)
-        lay_m.setContentsMargins(0, 0, 0, 0)
-        lay_m.setSpacing(8)
-        
-        lbl_m = CustomLabel("🗺️ DATOS DEL MUNICIPIO", variant="subheader")
-        lbl_m.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_m.addWidget(lbl_m)
+        card_m = CustomCard(title="🗺️ Datos del Municipio", parent=dialog)
         
         form_m = QFormLayout()
-        form_m.setSpacing(8)
+        form_m.setSpacing(10)
         form_m.setContentsMargins(0, 0, 0, 0)
         
         self.inp_m_codigo_portal = CustomInput("Ej. MUN_001 (Opcional)", parent=card_m)
@@ -89,12 +74,11 @@ class GeographyView(QWidget):
         
         form_m.addRow("Código Portal:", self.inp_m_codigo_portal)
         form_m.addRow("Nombre Municipio *:", self.inp_m_nombre)
-        lay_m.addLayout(form_m)
+        card_m.layout.addLayout(form_m)
         dialog.add_widget(card_m)
         
         self.chk_m_activo = CustomCheckBox("Municipio activo en catálogo", dialog)
         self.chk_m_activo.setChecked(True)
-        self.chk_m_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_m_activo)
         
         def _validate_m():
@@ -163,26 +147,10 @@ class GeographyView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(540)
         
-        card_d = QFrame(dialog)
-        card_d.setObjectName("card_d")
-        card_d.setStyleSheet(f"""
-            QFrame#card_d {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_d = QVBoxLayout(card_d)
-        lay_d.setContentsMargins(0, 0, 0, 0)
-        lay_d.setSpacing(8)
-        
-        lbl_d = CustomLabel("📍 DATOS DE LA DELEGACIÓN", variant="subheader")
-        lbl_d.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_d.addWidget(lbl_d)
+        card_d = CustomCard(title="📍 Datos de la Delegación", parent=dialog)
         
         form_d = QFormLayout()
-        form_d.setSpacing(8)
+        form_d.setSpacing(10)
         form_d.setContentsMargins(0, 0, 0, 0)
         
         self.inp_d_codigo_portal = CustomInput("Ej. DEL_001 (Opcional)", parent=card_d)
@@ -206,12 +174,11 @@ class GeographyView(QWidget):
         form_d.addRow("Código Portal:", self.inp_d_codigo_portal)
         form_d.addRow("Nombre Delegación *:", self.inp_d_nombre)
         form_d.addRow("Alias Corto:", self.inp_d_alias)
-        lay_d.addLayout(form_d)
+        card_d.layout.addLayout(form_d)
         dialog.add_widget(card_d)
         
         self.chk_d_activo = CustomCheckBox("Delegación activa en catálogo", dialog)
         self.chk_d_activo.setChecked(True)
-        self.chk_d_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_d_activo)
         
         def _validate_d():

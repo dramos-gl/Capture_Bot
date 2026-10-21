@@ -2,6 +2,7 @@ import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
@@ -40,26 +41,10 @@ class StatusView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(540)
         
-        card_st = QFrame(dialog)
-        card_st.setObjectName("card_st")
-        card_st.setStyleSheet(f"""
-            QFrame#card_st {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_st = QVBoxLayout(card_st)
-        lay_st.setContentsMargins(0, 0, 0, 0)
-        lay_st.setSpacing(8)
-        
-        lbl_st = CustomLabel("🚦 REGISTRO DE ESTADO DE FLUJO", variant="subheader")
-        lbl_st.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_st.addWidget(lbl_st)
+        card_st = CustomCard(title="🚦 Registro de Estado de Flujo", parent=dialog)
         
         form_st = QFormLayout()
-        form_st.setSpacing(8)
+        form_st.setSpacing(10)
         form_st.setContentsMargins(0, 0, 0, 0)
         
         self.inp_entidad = CustomInput("Tabla o módulo (ej. ORDENES)", parent=card_st)
@@ -83,7 +68,7 @@ class StatusView(QWidget):
         form_st.addRow("Entidad *:", self.inp_entidad)
         form_st.addRow("Código *:", self.inp_codigo)
         form_st.addRow("Descripción:", self.inp_desc)
-        lay_st.addLayout(form_st)
+        card_st.layout.addLayout(form_st)
         dialog.add_widget(card_st)
         
         def _validate_st():

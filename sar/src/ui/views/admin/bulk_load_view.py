@@ -12,6 +12,7 @@ from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMe
 from PySide6.QtCore import Qt, QThread, Signal
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.molecules.gl_info_banner import GLInfoBanner
 from sqlalchemy import text
 
 class BulkImportWorker(QThread):
@@ -70,19 +71,18 @@ class BulkLoadView(QWidget):
         self._build_ui()
         
     def _build_ui(self):
-        # Label de descripción completa de la funcionalidad
-        self.lbl_desc = CustomLabel(
+        # Banner de descripción completa del proceso masivo
+        self.banner_desc = GLInfoBanner(
             "<b>Descripción del Proceso:</b><br/>"
             "Esta herramienta permite insertar masivamente un gran volumen de referencias autorizadas externamente de forma manual a una Orden de Generación.<br/>"
             "1. <b>Selecciona</b> la orden destino sobre la cual deseas importar las referencias.<br/>"
             "2. Presiona <b>Generar Plantilla CSV</b> para descargar el formato adecuado con los RFCs y conceptos vigentes de la orden.<br/>"
             "3. Abre el archivo en Excel e introduce la información solicitada sin duplicar números de referencia.<br/>"
             "4. Presiona <b>Ejecutar Carga Masiva</b> para validar e insertar transaccionalmente todas las referencias y actualizar los acumuladores del sistema.",
-            variant="body"
+            variant="info",
+            parent=self
         )
-        self.lbl_desc.setWordWrap(True)
-        self.lbl_desc.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; color: #475569;")
-        self.layout.addWidget(self.lbl_desc)
+        self.layout.addWidget(self.banner_desc)
 
         # Top Controls Layout
         self.controls_layout = QHBoxLayout()

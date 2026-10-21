@@ -4,6 +4,7 @@ import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel, QTabWidget
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
@@ -113,26 +114,10 @@ class CatalogsView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(560)
         
-        card_c = QFrame(dialog)
-        card_c.setObjectName("card_c")
-        card_c.setStyleSheet(f"""
-            QFrame#card_c {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_c = QVBoxLayout(card_c)
-        lay_c.setContentsMargins(0, 0, 0, 0)
-        lay_c.setSpacing(8)
-        
-        lbl_c = CustomLabel("📋 CONFIGURACIÓN DE CONCEPTO", variant="subheader")
-        lbl_c.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_c.addWidget(lbl_c)
+        card_c = CustomCard(title="📋 Configuración de Concepto", parent=dialog)
         
         form_c = QFormLayout()
-        form_c.setSpacing(8)
+        form_c.setSpacing(10)
         form_c.setContentsMargins(0, 0, 0, 0)
         
         self.inp_c_codigo_portal = CustomInput("Ej. CONC_001 (Opcional)", parent=card_c)
@@ -154,12 +139,11 @@ class CatalogsView(QWidget):
         form_c.addRow("Código Portal:", self.inp_c_codigo_portal)
         form_c.addRow("Nombre Concepto *:", self.inp_c_nombre)
         form_c.addRow("Alias / Corto:", self.inp_c_alias)
-        lay_c.addLayout(form_c)
+        card_c.layout.addLayout(form_c)
         dialog.add_widget(card_c)
         
         self.chk_c_activo = CustomCheckBox("Concepto activo para solicitudes", dialog)
         self.chk_c_activo.setChecked(True)
-        self.chk_c_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_c_activo)
         
         def _validate_c():
@@ -225,26 +209,10 @@ class CatalogsView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(560)
         
-        card_n = QFrame(dialog)
-        card_n.setObjectName("card_n")
-        card_n.setStyleSheet(f"""
-            QFrame#card_n {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_n = QVBoxLayout(card_n)
-        lay_n.setContentsMargins(0, 0, 0, 0)
-        lay_n.setSpacing(8)
-        
-        lbl_n = CustomLabel("🏛️ DATOS DE LA NOTARÍA", variant="subheader")
-        lbl_n.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_n.addWidget(lbl_n)
+        card_n = CustomCard(title="🏛️ Datos de la Notaría", parent=dialog)
         
         form_n = QFormLayout()
-        form_n.setSpacing(8)
+        form_n.setSpacing(10)
         form_n.setContentsMargins(0, 0, 0, 0)
         
         self.inp_n_nombre = CustomInput("Nombre de la notaría (ej. NOTARÍA 12 CANCÚN)", parent=card_n)
@@ -261,12 +229,11 @@ class CatalogsView(QWidget):
         
         form_n.addRow("Nombre Notaría *:", self.inp_n_nombre)
         form_n.addRow("Alias / Notario:", self.inp_n_alias)
-        lay_n.addLayout(form_n)
+        card_n.layout.addLayout(form_n)
         dialog.add_widget(card_n)
         
         self.chk_n_activo = CustomCheckBox("Notaría activa para asignación de referencias", dialog)
         self.chk_n_activo.setChecked(True)
-        self.chk_n_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_n_activo)
         
         def _validate_n():
@@ -331,26 +298,10 @@ class CatalogsView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(540)
         
-        card_col = QFrame(dialog)
-        card_col.setObjectName("card_col")
-        card_col.setStyleSheet(f"""
-            QFrame#card_col {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_col = QVBoxLayout(card_col)
-        lay_col.setContentsMargins(0, 0, 0, 0)
-        lay_col.setSpacing(8)
-        
-        lbl_col = CustomLabel("👥 DATOS DE COLABORADOR / SOLICITANTE", variant="subheader")
-        lbl_col.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_col.addWidget(lbl_col)
+        card_col = CustomCard(title="👥 Datos de Colaborador / Solicitante", parent=dialog)
         
         form_col = QFormLayout()
-        form_col.setSpacing(8)
+        form_col.setSpacing(10)
         form_col.setContentsMargins(0, 0, 0, 0)
         
         self.inp_col_nombre = CustomInput("Nombre completo del colaborador", parent=card_col)
@@ -361,12 +312,11 @@ class CatalogsView(QWidget):
         self.inp_col_nombre.set_focus = self.inp_col_nombre.setFocus
         
         form_col.addRow("Nombre Completo *:", self.inp_col_nombre)
-        lay_col.addLayout(form_col)
+        card_col.layout.addLayout(form_col)
         dialog.add_widget(card_col)
         
         self.chk_col_activo = CustomCheckBox("Colaborador activo para asignaciones", dialog)
         self.chk_col_activo.setChecked(True)
-        self.chk_col_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_col_activo)
         
         def _validate_col():
@@ -426,26 +376,10 @@ class CatalogsView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(540)
         
-        card_d = QFrame(dialog)
-        card_d.setObjectName("card_d")
-        card_d.setStyleSheet(f"""
-            QFrame#card_d {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_d = QVBoxLayout(card_d)
-        lay_d.setContentsMargins(0, 0, 0, 0)
-        lay_d.setSpacing(8)
-        
-        lbl_d = CustomLabel("🏗️ DATOS DEL DESARROLLO / PROYECTO", variant="subheader")
-        lbl_d.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_d.addWidget(lbl_d)
+        card_d = CustomCard(title="🏗️ Datos del Desarrollo / Proyecto", parent=dialog)
         
         form_d = QFormLayout()
-        form_d.setSpacing(8)
+        form_d.setSpacing(10)
         form_d.setContentsMargins(0, 0, 0, 0)
         
         self.inp_d_nombre = CustomInput("Nombre del desarrollo o proyecto inmobiliario", parent=card_d)
@@ -463,12 +397,11 @@ class CatalogsView(QWidget):
 
         form_d.addRow("Nombre Desarrollo *:", self.inp_d_nombre)
         form_d.addRow("Alias Corto:", self.inp_d_alias)
-        lay_d.addLayout(form_d)
+        card_d.layout.addLayout(form_d)
         dialog.add_widget(card_d)
         
         self.chk_d_activo = CustomCheckBox("Desarrollo activo en inventario", dialog)
         self.chk_d_activo.setChecked(True)
-        self.chk_d_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_d_activo)
         
         def _validate_d():
@@ -538,26 +471,10 @@ class CatalogsView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(580)
         
-        card_de = QFrame(dialog)
-        card_de.setObjectName("card_de")
-        card_de.setStyleSheet(f"""
-            QFrame#card_de {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_de = QVBoxLayout(card_de)
-        lay_de.setContentsMargins(0, 0, 0, 0)
-        lay_de.setSpacing(8)
-        
-        lbl_de = CustomLabel("🏢 ASOCIACIÓN EMPRESA (RFC) Y DELEGACIÓN", variant="subheader")
-        lbl_de.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_de.addWidget(lbl_de)
+        card_de = CustomCard(title="🏢 Asociación Empresa (RFC) y Delegación", parent=dialog)
         
         form_de = QFormLayout()
-        form_de.setSpacing(8)
+        form_de.setSpacing(10)
         form_de.setContentsMargins(0, 0, 0, 0)
         
         rfc_names = [f"{r['rfc']} - {r['razon_social']}" for r in self.rfcs_list]
@@ -574,7 +491,7 @@ class CatalogsView(QWidget):
         
         form_de.addRow("Empresa (RFC) *:", self.cmb_de_rfc)
         form_de.addRow("Delegación *:", self.cmb_de_delegacion)
-        lay_de.addLayout(form_de)
+        card_de.layout.addLayout(form_de)
         dialog.add_widget(card_de)
         
         self.chk_de_default = CustomCheckBox("Empresa predeterminada para este desarrollo (es_default)", dialog)

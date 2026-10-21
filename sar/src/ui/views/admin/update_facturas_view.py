@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QCheckBox
 )
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from PySide6.QtCore import Qt, QThread, Signal
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
@@ -203,7 +204,8 @@ class UpdateFacturasView(QWidget):
         self._build_ui()
 
     def _build_ui(self):
-        # Label de descripción completa de la funcionalidad
+        # Card explicativo del proceso
+        self.banner_card = CustomCard()
         self.lbl_desc = CustomLabel(
             "<b>Descripción del Proceso:</b><br/>"
             "Este proceso automatizado escanea los archivos PDF de facturas físicas almacenados en el storage para recuperar información faltante de forma retrospectiva.<br/>"
@@ -213,8 +215,8 @@ class UpdateFacturasView(QWidget):
             variant="body"
         )
         self.lbl_desc.setWordWrap(True)
-        self.lbl_desc.setStyleSheet("background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 6px; color: #475569;")
-        self.layout.addWidget(self.lbl_desc)
+        self.banner_card.layout.addWidget(self.lbl_desc)
+        self.layout.addWidget(self.banner_card)
 
         # Selector de orden
         self.order_layout = QHBoxLayout()
@@ -252,7 +254,6 @@ class UpdateFacturasView(QWidget):
         # Console output
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setStyleSheet("font-family: Consolas, monospace; background-color: #f7fafc; color: #2d3748;")
         self.layout.addWidget(self.console)
 
     def refresh_data(self):

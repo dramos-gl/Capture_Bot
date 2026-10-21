@@ -2,6 +2,7 @@ import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
@@ -45,28 +46,12 @@ class UsersView(QWidget):
         dialog.setMinimumWidth(640)
         
         # -------------------------------------------------------------
-        # 1. TARJETA: DATOS DE USUARIO Y CREDENCIALES
+        # 1. TARJETA ATÓMICA: DATOS DE USUARIO Y CREDENCIALES
         # -------------------------------------------------------------
-        card_user = QFrame(dialog)
-        card_user.setObjectName("card_user")
-        card_user.setStyleSheet(f"""
-            QFrame#card_user {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_user = QVBoxLayout(card_user)
-        lay_user.setContentsMargins(0, 0, 0, 0)
-        lay_user.setSpacing(8)
-        
-        lbl_user = CustomLabel("👤 DATOS DE USUARIO Y CREDENCIALES", variant="subheader")
-        lbl_user.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_user.addWidget(lbl_user)
+        card_user = CustomCard(title="👤 Datos de Usuario y Credenciales", parent=dialog)
         
         form_user = QFormLayout()
-        form_user.setSpacing(8)
+        form_user.setSpacing(10)
         form_user.setContentsMargins(0, 0, 0, 0)
         
         self.inp_u_username = CustomInput("Nombre de usuario único (ej. jgomez)", parent=card_user)
@@ -81,8 +66,7 @@ class UsersView(QWidget):
         
         form_user.addRow("Username *:", self.inp_u_username)
         
-        self.lbl_user_err = QLabel("", card_user)
-        self.lbl_user_err.setStyleSheet(f"color: {Colors.ERROR}; font-size: 11px; font-weight: bold;")
+        self.lbl_user_err = CustomLabel("", variant="caption", parent=card_user)
         self.lbl_user_err.setVisible(False)
         form_user.addRow("", self.lbl_user_err)
         
@@ -101,32 +85,16 @@ class UsersView(QWidget):
         self.inp_u_correo.set_text = self.inp_u_correo.setText
         form_user.addRow("Correo Electrónico:", self.inp_u_correo)
         
-        lay_user.addLayout(form_user)
+        card_user.layout.addLayout(form_user)
         dialog.add_widget(card_user)
         
         # -------------------------------------------------------------
-        # 2. TARJETA: ROL Y PERMISOS DE ACCESO
+        # 2. TARJETA ATÓMICA: ROL Y PERMISOS DE ACCESO
         # -------------------------------------------------------------
-        card_roles = QFrame(dialog)
-        card_roles.setObjectName("card_roles")
-        card_roles.setStyleSheet(f"""
-            QFrame#card_roles {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_roles = QVBoxLayout(card_roles)
-        lay_roles.setContentsMargins(0, 0, 0, 0)
-        lay_roles.setSpacing(8)
-        
-        lbl_roles = CustomLabel("🔐 ROL Y PERMISOS DE ACCESO", variant="subheader")
-        lbl_roles.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_roles.addWidget(lbl_roles)
+        card_roles = CustomCard(title="🔐 Rol y Permisos de Acceso", parent=dialog)
         
         form_roles = QFormLayout()
-        form_roles.setSpacing(8)
+        form_roles.setSpacing(10)
         form_roles.setContentsMargins(0, 0, 0, 0)
         
         self.cmb_roles = CustomComboBox(card_roles)
@@ -135,7 +103,7 @@ class UsersView(QWidget):
             self.cmb_roles.addItem(role["nombre"], role["id"])
             
         form_roles.addRow("Rol Asignado *:", self.cmb_roles)
-        lay_roles.addLayout(form_roles)
+        card_roles.layout.addLayout(form_roles)
         dialog.add_widget(card_roles)
         
         # -------------------------------------------------------------
@@ -143,7 +111,6 @@ class UsersView(QWidget):
         # -------------------------------------------------------------
         self.chk_u_activo = CustomCheckBox("Usuario activo para iniciar sesión en el sistema", dialog)
         self.chk_u_activo.setChecked(True)
-        self.chk_u_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_u_activo)
         
         # Validación en tiempo real

@@ -2,6 +2,7 @@ import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
@@ -41,26 +42,10 @@ class ActionsView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(560)
         
-        card_ac = QFrame(dialog)
-        card_ac.setObjectName("card_ac")
-        card_ac.setStyleSheet(f"""
-            QFrame#card_ac {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_ac = QVBoxLayout(card_ac)
-        lay_ac.setContentsMargins(0, 0, 0, 0)
-        lay_ac.setSpacing(8)
-        
-        lbl_ac = CustomLabel("🔐 DEFINICIÓN DE ACCIÓN / PERMISO RBAC", variant="subheader")
-        lbl_ac.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_ac.addWidget(lbl_ac)
+        card_ac = CustomCard(title="🔐 Definición de Acción / Permiso RBAC", parent=dialog)
         
         form_ac = QFormLayout()
-        form_ac.setSpacing(8)
+        form_ac.setSpacing(10)
         form_ac.setContentsMargins(0, 0, 0, 0)
         
         self.inp_codigo = CustomInput("Ej. EDITAR_RFC", parent=card_ac)
@@ -83,12 +68,11 @@ class ActionsView(QWidget):
         form_ac.addRow("Código *:", self.inp_codigo)
         form_ac.addRow("Nombre *:", self.inp_nombre)
         form_ac.addRow("Descripción:", self.inp_desc)
-        lay_ac.addLayout(form_ac)
+        card_ac.layout.addLayout(form_ac)
         dialog.add_widget(card_ac)
         
         self.chk_activo = CustomCheckBox("Acción activa para evaluación de permisos", dialog)
         self.chk_activo.setChecked(True)
-        self.chk_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_activo)
         
         def _validate_ac():

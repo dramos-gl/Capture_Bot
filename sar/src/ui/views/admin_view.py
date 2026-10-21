@@ -4,7 +4,10 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLabel, QMainWindow, QApplication
 )
 from PySide6.QtCore import Qt, Signal
+from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.storage.repositories import UsuarioRepository
 from sar.src.ui.design_system.components.organisms.gl_admin_menubar import AdminMenuBar
@@ -96,10 +99,8 @@ class AdminWindow(QMainWindow):
         
         self.lbl_user_icon = QLabel()
         self.lbl_user_icon.setPixmap(Icons.user().pixmap(14, 14))
-        self.lbl_user_icon.setStyleSheet("background: transparent;")
         
-        self.lbl_username = CustomLabel(self._get_username_string(), variant="body")
-        self.lbl_username.setStyleSheet("font-weight: bold; color: #4a5568; font-size: 12px; background: transparent;")
+        self.lbl_username = CustomLabel(self._get_username_string(), variant="caption")
         
         self.user_info_layout.addWidget(self.lbl_user_icon)
         self.user_info_layout.addWidget(self.lbl_username)
@@ -107,15 +108,11 @@ class AdminWindow(QMainWindow):
         self.menu_bar.setCornerWidget(self.user_info_widget, Qt.TopRightCorner)
         self.setMenuBar(self.menu_bar)
         
-        # Central Content Setup
+        # Central Content Setup (Maximizando área de trabajo útil)
         self.central_widget = QWidget()
         self.layout = QVBoxLayout(self.central_widget)
-        self.layout.setContentsMargins(24, 24, 24, 24)
-        self.layout.setSpacing(24)
-        
-        # Title
-        self.lbl_title = CustomLabel("Administración del Sistema", variant="header")
-        self.layout.addWidget(self.lbl_title)
+        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setSpacing(0)
         
         # Stacked Widget for sub-views
         self.stacked_widget = QStackedWidget()
@@ -235,14 +232,9 @@ class AdminWindow(QMainWindow):
             for key in ["satc_catalogos", "satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas"]:
                 self.view_factories[key] = satc_factory
         
-        # Add a lightweight default placeholder view
-        self.default_view = QWidget()
-        l = QVBoxLayout(self.default_view)
-        lbl = CustomLabel("Seleccione una opción del menú superior para comenzar.", variant="body")
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        l.addWidget(lbl)
-        self.stacked_widget.addWidget(self.default_view)
-        self.stacked_widget.setCurrentWidget(self.default_view)
+        # Al abrir el módulo de administración, cargar directamente la vista principal (Usuarios)
+        # para que la ventana se presente limpia, productiva y sin pantallas estáticas intermedias.
+        self._change_view("usuarios")
         
     def _change_view(self, view_name: str):
         """Loads and switches to the requested view lazily on-demand."""

@@ -4,6 +4,7 @@ import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
@@ -56,26 +57,10 @@ class ModulesView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(540)
         
-        card_app = QFrame(dialog)
-        card_app.setObjectName("card_app")
-        card_app.setStyleSheet(f"""
-            QFrame#card_app {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_app = QVBoxLayout(card_app)
-        lay_app.setContentsMargins(0, 0, 0, 0)
-        lay_app.setSpacing(8)
-        
-        lbl_app = CustomLabel("📱 IDENTIFICACIÓN DE APP MÓDULO (NIVEL 1)", variant="subheader")
-        lbl_app.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_app.addWidget(lbl_app)
+        card_app = CustomCard(title="📱 Identificación de App Módulo (Nivel 1)", parent=dialog)
         
         form_app = QFormLayout()
-        form_app.setSpacing(8)
+        form_app.setSpacing(10)
         form_app.setContentsMargins(0, 0, 0, 0)
         
         self.inp_a_cod = CustomInput("Ej. R2F_CONTROL", parent=card_app)
@@ -93,12 +78,11 @@ class ModulesView(QWidget):
         self.inp_a_nom.set_text = self.inp_a_nom.setText
         
         form_app.addRow("Nombre *:", self.inp_a_nom)
-        lay_app.addLayout(form_app)
+        card_app.layout.addLayout(form_app)
         dialog.add_widget(card_app)
         
         self.chk_a_act = CustomCheckBox("App módulo activo en menú de navegación", dialog)
         self.chk_a_act.setChecked(True)
-        self.chk_a_act.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_a_act)
         
         def _validate_app():
@@ -124,26 +108,10 @@ class ModulesView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(580)
         
-        card_mod = QFrame(dialog)
-        card_mod.setObjectName("card_mod")
-        card_mod.setStyleSheet(f"""
-            QFrame#card_mod {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_mod = QVBoxLayout(card_mod)
-        lay_mod.setContentsMargins(0, 0, 0, 0)
-        lay_mod.setSpacing(8)
-        
-        lbl_mod = CustomLabel("🧩 CONFIGURACIÓN DE MÓDULO INTERNO (NIVEL 2)", variant="subheader")
-        lbl_mod.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_mod.addWidget(lbl_mod)
+        card_mod = CustomCard(title="🧩 Configuración de Módulo Interno (Nivel 2)", parent=dialog)
         
         form_mod = QFormLayout()
-        form_mod.setSpacing(8)
+        form_mod.setSpacing(10)
         form_mod.setContentsMargins(0, 0, 0, 0)
         
         self.cmb_m_app = CustomComboBox(parent=card_mod)
@@ -178,12 +146,11 @@ class ModulesView(QWidget):
         self.inp_m_desc.set_text = self.inp_m_desc.setText
         form_mod.addRow("Descripción:", self.inp_m_desc)
         
-        lay_mod.addLayout(form_mod)
+        card_mod.layout.addLayout(form_mod)
         dialog.add_widget(card_mod)
         
         self.chk_m_act = CustomCheckBox("Módulo activo para evaluación RBAC", dialog)
         self.chk_m_act.setChecked(True)
-        self.chk_m_act.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_m_act)
         
         def _validate_mod():

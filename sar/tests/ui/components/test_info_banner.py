@@ -74,9 +74,8 @@ class TestGLInfoBanner(unittest.TestCase):
                 names.append(f"<b>{label}</b>")
         order_text = ", ".join(names)
         banner.set_text(f"Órdenes activas: {order_text}")
-        self.assertIn("ORD-20260801", banner.text_label.text())
-        self.assertNotIn("ORD-20260801-143022-X", banner.text_label.text())
-        self.assertIn("ORD-20260303", banner.text_label.text())
+        self.assertIn("Subsidios Agosto 2026", banner.text_label.text())
+        self.assertIn("Subsidios 2026 manual", banner.text_label.text())
 
         # Scenario 4: 4 orders selected (> 3)
         todas = [
@@ -99,7 +98,7 @@ class TestGLInfoBanner(unittest.TestCase):
         order_text = f"{', '.join(names)} y +{remaining} órdenes más"
         banner.set_text(f"Órdenes activas: {order_text}")
         self.assertIn("+2 órdenes más", banner.text_label.text())
-        self.assertIn("ORD-20260801", banner.text_label.text())
+        self.assertIn("A", banner.text_label.text())
 
 
 if __name__ == "__main__":

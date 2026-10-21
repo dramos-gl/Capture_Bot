@@ -38,7 +38,7 @@ class AdminMenuBar(QMenuBar):
         return action
         
     def _build_menus(self):
-        # 1. 📁 Sistema
+        # 1. 📁 Sistema (SAR)
         menu_sistema = self.addMenu("&Sistema")
         menu_sistema.setWindowFlag(Qt.FramelessWindowHint, True)
         
@@ -49,7 +49,7 @@ class AdminMenuBar(QMenuBar):
         act_logout.triggered.connect(self.logout_clicked.emit)
         act_exit.triggered.connect(self.exit_clicked.emit)
         
-        # 2. 🛡️ Seguridad y Accesos
+        # 2. 🛡️ Seguridad y Accesos (SAR)
         menu_seguridad = self.addMenu("&Seguridad y Accesos")
         menu_seguridad.setWindowFlag(Qt.FramelessWindowHint, True)
         
@@ -66,8 +66,8 @@ class AdminMenuBar(QMenuBar):
         act_modulos.triggered.connect(lambda: self.view_requested.emit("app_modulos"))
         act_acciones.triggered.connect(lambda: self.view_requested.emit("acciones"))
         
-        # 3. 📚 Catálogos Base
-        menu_catalogos = self.addMenu("&Catálogos Base")
+        # 3. 📚 Catálogos SAR
+        menu_catalogos = self.addMenu("&Catálogos SAR")
         menu_catalogos.setWindowFlag(Qt.FramelessWindowHint, True)
         
         act_conceptos = self._add_action(menu_catalogos, "Catálogos de Negocio (Conceptos, Notarías, Desarrollos)", "tabla", color=Colors.ACCENT_EMERALD)
@@ -80,42 +80,14 @@ class AdminMenuBar(QMenuBar):
         act_rfcs.triggered.connect(lambda: self.view_requested.emit("rfcs"))
         act_estados.triggered.connect(lambda: self.view_requested.emit("estados"))
         
-        # 4. 🏢 Catálogos SATC (Ciclo de Vida y Trámites)
-        menu_satc = self.addMenu("&Catálogos SATC")
-        menu_satc.setWindowFlag(Qt.FramelessWindowHint, True)
-
-        act_satc_catalogos = self._add_action(menu_satc, "Administración de Catálogos SATC", "tabla", color=Colors.ACCENT_CYAN)
-        act_satc_tipos = self._add_action(menu_satc, "Tipos de Trámite Municipal", "documento_plantilla", color=Colors.ACCENT_BLUE)
-        act_satc_estados_tr = self._add_action(menu_satc, "Estados de Trámite", "validar", color=Colors.SUCCESS)
-        act_satc_estados_viv = self._add_action(menu_satc, "Estados de Vivienda / UPE", "actividad", color=Colors.ACCENT_AMBER)
-        act_satc_regimenes = self._add_action(menu_satc, "Regímenes mz", "empresa", color=Colors.ACCENT_VIOLET)
-        menu_satc.addSeparator()
-        act_satc_viviendas = self._add_action(menu_satc, "Importación Masiva de Viviendas (Excel)", "documento_cargar", color=Colors.ACCENT_EMERALD)
-
-        act_satc_catalogos.triggered.connect(lambda: self.view_requested.emit("satc_catalogos"))
-        act_satc_tipos.triggered.connect(lambda: self.view_requested.emit("satc_tipos_tramite"))
-        act_satc_estados_tr.triggered.connect(lambda: self.view_requested.emit("satc_estados_tramite"))
-        act_satc_estados_viv.triggered.connect(lambda: self.view_requested.emit("satc_estados_vivienda"))
-        act_satc_regimenes.triggered.connect(lambda: self.view_requested.emit("satc_regimenes"))
-        act_satc_viviendas.triggered.connect(lambda: self.view_requested.emit("satc_viviendas"))
-
-        # 5. ⚙️ Configuración Core
-        menu_config = self.addMenu("&Configuración Core")
-        menu_config.setWindowFlag(Qt.FramelessWindowHint, True)
-        
-        act_parametros = self._add_action(menu_config, "Parámetros Globales del Sistema", "parametros", color=Colors.ACCENT_BLUE)
-        act_locs = self._add_action(menu_config, "Localizadores y Selectores (Motor Bot)", "integraciones", color=Colors.ACCENT_VIOLET)
-        
-        act_parametros.triggered.connect(lambda: self.view_requested.emit("parametros"))
-        act_locs.triggered.connect(lambda: self.view_requested.emit("localizadores"))
-        
-        # 5. 🛠️ Procesos Especiales
-        menu_procesos = self.addMenu("&Procesos Especiales")
+        # 4. 🛠️ Procesos SAR (Operaciones e Inventario)
+        menu_procesos = self.addMenu("&Procesos SAR")
         menu_procesos.setWindowFlag(Qt.FramelessWindowHint, True)
         
         act_carga = self._add_action(menu_procesos, "Carga Masiva de Referencias", "documento_cargar", color=Colors.ACCENT_CYAN)
         act_ubicaciones = self._add_action(menu_procesos, "Cargar Catálogo de Ubicaciones", "tabla", color=Colors.ACCENT_TEAL)
         act_migracion = self._add_action(menu_procesos, "Migración y Sincronización", "sincronizar", color=Colors.ACCENT_INDIGO)
+        menu_procesos.addSeparator()
         act_reserva_masiva = self._add_action(menu_procesos, "Reserva Masiva de Referencias", "bloquear", color=Colors.ACCENT_ROSE)
         act_regularizar = self._add_action(menu_procesos, "Regularizar Asignaciones (Colaboradores)", "editar", color=Colors.ACCENT_AMBER)
         act_fusion = self._add_action(menu_procesos, "Unificación / Fusión de Lotes", "enlace", color=Colors.ACCENT)
@@ -129,7 +101,36 @@ class AdminMenuBar(QMenuBar):
         act_fusion.triggered.connect(lambda: self.view_requested.emit("fusion_lotes"))
         act_update.triggered.connect(lambda: self.view_requested.emit("update_facturas"))
 
-        # 6. ❓ Ayuda
+        # 5. ⚙️ Configuración SAR
+        menu_config = self.addMenu("&Configuración SAR")
+        menu_config.setWindowFlag(Qt.FramelessWindowHint, True)
+        
+        act_parametros = self._add_action(menu_config, "Parámetros Globales del Sistema", "parametros", color=Colors.ACCENT_BLUE)
+        act_locs = self._add_action(menu_config, "Localizadores y Selectores (Motor Bot)", "integraciones", color=Colors.ACCENT_VIOLET)
+        
+        act_parametros.triggered.connect(lambda: self.view_requested.emit("parametros"))
+        act_locs.triggered.connect(lambda: self.view_requested.emit("localizadores"))
+
+        # 6. 🏢 Administración SATC (Sistema de Automatización y Control de Trámites Cancún)
+        menu_satc = self.addMenu("&Administración SATC")
+        menu_satc.setWindowFlag(Qt.FramelessWindowHint, True)
+
+        act_satc_catalogos = self._add_action(menu_satc, "Catálogos Ciclo de Vida SATC (Pestañas)", "tabla", color=Colors.ACCENT_CYAN)
+        act_satc_tipos = self._add_action(menu_satc, "Tipos de Trámite Municipal", "documento_plantilla", color=Colors.ACCENT_BLUE)
+        act_satc_estados_tr = self._add_action(menu_satc, "Estados de Trámite", "validar", color=Colors.SUCCESS)
+        act_satc_estados_viv = self._add_action(menu_satc, "Estados de Vivienda / UPE", "actividad", color=Colors.ACCENT_AMBER)
+        act_satc_regimenes = self._add_action(menu_satc, "Regímenes en Condominio (SM, MZ, LT)", "empresa", color=Colors.ACCENT_VIOLET)
+        menu_satc.addSeparator()
+        act_satc_viviendas = self._add_action(menu_satc, "Importación Masiva de Viviendas (Excel SATC)", "documento_cargar", color=Colors.ACCENT_EMERALD)
+
+        act_satc_catalogos.triggered.connect(lambda: self.view_requested.emit("satc_catalogos"))
+        act_satc_tipos.triggered.connect(lambda: self.view_requested.emit("satc_tipos_tramite"))
+        act_satc_estados_tr.triggered.connect(lambda: self.view_requested.emit("satc_estados_tramite"))
+        act_satc_estados_viv.triggered.connect(lambda: self.view_requested.emit("satc_estados_vivienda"))
+        act_satc_regimenes.triggered.connect(lambda: self.view_requested.emit("satc_regimenes"))
+        act_satc_viviendas.triggered.connect(lambda: self.view_requested.emit("satc_viviendas"))
+
+        # 7. ❓ Ayuda y Diagnóstico
         menu_ayuda = self.addMenu("&Ayuda")
         menu_ayuda.setWindowFlag(Qt.FramelessWindowHint, True)
         
@@ -138,7 +139,7 @@ class AdminMenuBar(QMenuBar):
         act_diagnostics = self._add_action(menu_ayuda, "Diagnóstico y Estado del Servidor", "actividad", color=Colors.SUCCESS)
         menu_ayuda.addSeparator()
         act_support = self._add_action(menu_ayuda, "Mesa de Ayuda y Soporte Técnico", "soporte", color=Colors.ACCENT_AMBER)
-        act_about = self._add_action(menu_ayuda, "Acerca de SAR...", "informacion", color=Colors.ACCENT_CYAN)
+        act_about = self._add_action(menu_ayuda, "Acerca de SAR & SATC...", "informacion", color=Colors.ACCENT_CYAN)
         
         act_manual.triggered.connect(self.help_manual_requested.emit)
         act_shortcuts.triggered.connect(self.help_shortcuts_requested.emit)

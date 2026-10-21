@@ -2,6 +2,7 @@ import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
@@ -41,26 +42,10 @@ class ParametersView(QWidget):
         dialog = CustomDialog(title, self)
         dialog.setMinimumWidth(540)
         
-        card_p = QFrame(dialog)
-        card_p.setObjectName("card_p")
-        card_p.setStyleSheet(f"""
-            QFrame#card_p {{
-                background-color: {Colors.SLATE_50};
-                border: 1px solid {Colors.SLATE_200};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-        """)
-        lay_p = QVBoxLayout(card_p)
-        lay_p.setContentsMargins(0, 0, 0, 0)
-        lay_p.setSpacing(8)
-        
-        lbl_p = CustomLabel("⚙️ CONFIGURACIÓN DE PARÁMETRO CORE", variant="subheader")
-        lbl_p.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay_p.addWidget(lbl_p)
+        card_p = CustomCard(title="⚙️ Configuración de Parámetro Core", parent=dialog)
         
         form_p = QFormLayout()
-        form_p.setSpacing(8)
+        form_p.setSpacing(10)
         form_p.setContentsMargins(0, 0, 0, 0)
         
         self.inp_p_codigo = CustomInput("Ej. TAMANO_LOTE_WS", parent=card_p)
@@ -77,12 +62,11 @@ class ParametersView(QWidget):
         
         form_p.addRow("Código *:", self.inp_p_codigo)
         form_p.addRow("Valor *:", self.inp_p_valor)
-        lay_p.addLayout(form_p)
+        card_p.layout.addLayout(form_p)
         dialog.add_widget(card_p)
         
         self.chk_p_activo = CustomCheckBox("Parámetro activo en motor de configuración", dialog)
         self.chk_p_activo.setChecked(True)
-        self.chk_p_activo.setStyleSheet(f"font-size: 12px; font-weight: 600; color: {Colors.TEXT_LIGHT_PRIMARY}; margin: 4px 2px;")
         dialog.add_widget(self.chk_p_activo)
         
         def _validate_p():

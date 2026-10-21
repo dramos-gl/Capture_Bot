@@ -14,6 +14,7 @@ from PySide6.QtGui import QFont, QIcon, QColor
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.molecules.gl_info_banner import GLInfoBanner
 from sar.src.ui.design_system.utils.icons import Icons
 
 
@@ -34,13 +35,7 @@ class AboutDialog(QDialog):
 
         # Header Card
         header_card = QFrame()
-        header_card.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1E293B, stop:1 #0F172A);
-                border-radius: 12px;
-                padding: 16px;
-            }
-        """)
+        header_card.setObjectName("aboutHeaderCard")
         h_layout = QHBoxLayout(header_card)
         h_layout.setContentsMargins(12, 12, 12, 12)
         h_layout.setSpacing(16)
@@ -56,13 +51,13 @@ class AboutDialog(QDialog):
         title_box.setSpacing(2)
         
         lbl_app = QLabel("SAR — Sistema de Administración de Referencias")
-        lbl_app.setStyleSheet("color: #FFFFFF; font-size: 15px; font-weight: bold;")
+        lbl_app.setObjectName("aboutTitle")
         
         lbl_ver = QLabel("Versión 2.5 (Edición Empresarial)")
-        lbl_ver.setStyleSheet("color: #38BDF8; font-size: 12px; font-weight: 600;")
+        lbl_ver.setObjectName("aboutVersion")
 
         lbl_desc = QLabel("Plataforma Integral de Captura, Control de Derechos y Automatización")
-        lbl_desc.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        lbl_desc.setObjectName("aboutDesc")
         lbl_desc.setWordWrap(True)
 
         title_box.addWidget(lbl_app)
@@ -74,14 +69,7 @@ class AboutDialog(QDialog):
 
         # System Information Table
         info_frame = QFrame()
-        info_frame.setStyleSheet("""
-            QFrame {
-                background-color: #F8FAFC;
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-                padding: 8px;
-            }
-        """)
+        info_frame.setObjectName("helpInfoCard")
         info_layout = QVBoxLayout(info_frame)
         info_layout.setSpacing(6)
         info_layout.setContentsMargins(8, 8, 8, 8)
@@ -99,9 +87,10 @@ class AboutDialog(QDialog):
             row = QHBoxLayout()
             row.setSpacing(8)
             lbl_k = QLabel(label)
-            lbl_k.setStyleSheet("color: #64748B; font-weight: 600; font-size: 11px; min-width: 140px;")
+            lbl_k.setObjectName("helpInfoKey")
+            lbl_k.setMinimumWidth(140)
             lbl_v = QLabel(val)
-            lbl_v.setStyleSheet("color: #1E293B; font-size: 11px;")
+            lbl_v.setObjectName("helpInfoVal")
             row.addWidget(lbl_k)
             row.addWidget(lbl_v, stretch=1)
             info_layout.addLayout(row)
@@ -153,26 +142,6 @@ class ShortcutsDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 6px;
-                gridline-color: #F1F5F9;
-            }
-            QHeaderView::section {
-                background-color: #F8FAFC;
-                font-weight: bold;
-                color: #475569;
-                border: none;
-                border-bottom: 1px solid #CBD5E1;
-                padding: 6px;
-            }
-            QTableWidget::item {
-                padding: 4px 8px;
-                color: #1E293B;
-            }
-        """)
 
         shortcuts_data = [
             ("Abrir Manual de Ayuda", "F1", "Global"),
@@ -240,22 +209,14 @@ class SystemDiagnosticsDialog(QDialog):
         header_layout.addStretch()
         layout.addLayout(header_layout)
 
-        # Status Summary Card
-        self.summary_card = QFrame()
-        self.summary_card.setStyleSheet("""
-            QFrame {
-                background-color: #F8FAFC;
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-                padding: 12px;
-            }
-        """)
-        self.summary_layout = QVBoxLayout(self.summary_card)
-        self.summary_layout.setSpacing(8)
-        self.lbl_overall = QLabel("Ejecutando pruebas de conectividad...")
-        self.lbl_overall.setStyleSheet("font-weight: bold; font-size: 13px; color: #475569;")
-        self.summary_layout.addWidget(self.lbl_overall)
-        layout.addWidget(self.summary_card)
+        # Status Summary Banner
+        self.banner_overall = GLInfoBanner(
+            "Ejecutando pruebas de conectividad y estado del sistema...",
+            variant="info",
+            icon_name="actividad",
+            parent=self
+        )
+        layout.addWidget(self.banner_overall)
 
         # Results Table
         self.results_table = QTableWidget(self)
@@ -266,21 +227,6 @@ class SystemDiagnosticsDialog(QDialog):
         self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.results_table.verticalHeader().setVisible(False)
         self.results_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.results_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 6px;
-            }
-            QHeaderView::section {
-                background-color: #F8FAFC;
-                font-weight: bold;
-                color: #475569;
-                border: none;
-                border-bottom: 1px solid #CBD5E1;
-                padding: 6px;
-            }
-        """)
         layout.addWidget(self.results_table)
 
         # Bottom controls
@@ -300,8 +246,7 @@ class SystemDiagnosticsDialog(QDialog):
 
     def run_diagnostics(self):
         """Executes actual diagnostics queries."""
-        self.lbl_overall.setText("Evaluando componentes del sistema...")
-        self.lbl_overall.setStyleSheet("font-weight: bold; font-size: 13px; color: #2563EB;")
+        self.banner_overall.set_text("Evaluando componentes del sistema...")
         self.results_table.setRowCount(0)
 
         checks = []
@@ -379,11 +324,9 @@ class SystemDiagnosticsDialog(QDialog):
             self.results_table.setItem(row, 2, it_det)
 
         if has_error:
-            self.lbl_overall.setText("⚠️ Se detectaron problemas en las pruebas de diagnóstico.")
-            self.lbl_overall.setStyleSheet("font-weight: bold; font-size: 13px; color: #DC2626;")
+            self.banner_overall.set_text("<b>⚠️ Atención:</b> Se detectaron problemas en las pruebas de diagnóstico.")
         else:
-            self.lbl_overall.setText("✅ Todos los servicios y conexiones operan correctamente.")
-            self.lbl_overall.setStyleSheet("font-weight: bold; font-size: 13px; color: #059669;")
+            self.banner_overall.set_text("<b>✅ Todo en orden:</b> Todos los servicios y conexiones operan correctamente.")
 
 
 class SupportDialog(QDialog):
@@ -411,14 +354,7 @@ class SupportDialog(QDialog):
         layout.addLayout(header_layout)
 
         card = QFrame()
-        card.setStyleSheet("""
-            QFrame {
-                background-color: #F8FAFC;
-                border: 1px solid #E2E8F0;
-                border-radius: 8px;
-                padding: 14px;
-            }
-        """)
+        card.setObjectName("helpInfoCard")
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(10)
 
@@ -434,9 +370,9 @@ class SupportDialog(QDialog):
             row = QVBoxLayout()
             row.setSpacing(2)
             lbl_t = QLabel(title)
-            lbl_t.setStyleSheet("font-weight: bold; color: #1E293B; font-size: 11px;")
+            lbl_t.setObjectName("helpInfoKey")
             lbl_v = QLabel(val)
-            lbl_v.setStyleSheet("color: #475569; font-size: 11px;")
+            lbl_v.setObjectName("helpInfoVal")
             lbl_v.setWordWrap(True)
             row.addWidget(lbl_t)
             row.addWidget(lbl_v)
@@ -477,30 +413,8 @@ class UserManualDialog(QDialog):
         header_layout.addStretch()
         layout.addLayout(header_layout)
 
-        # Tab widget for manual sections
+        # Tab widget for manual sections (estilizado automáticamente por ThemeManager)
         self.tabs = QTabWidget(self)
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #CBD5E1;
-                border-radius: 6px;
-                background-color: #FFFFFF;
-                padding: 12px;
-            }
-            QTabBar::tab {
-                background: #F1F5F9;
-                color: #475569;
-                padding: 8px 16px;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-weight: 600;
-                margin-right: 4px;
-            }
-            QTabBar::tab:selected {
-                background: #FFFFFF;
-                color: #2563EB;
-                border-bottom: 2px solid #2563EB;
-            }
-        """)
 
         manual_topics = [
             ("📘 Guía Operativa (Usuario)", """
@@ -553,12 +467,12 @@ class UserManualDialog(QDialog):
 
         for tab_name, html_content in manual_topics:
             browser = QTextBrowser()
+            browser.setObjectName("helpManualBrowser")
             browser.setHtml(f"""
                 <div style='font-family: Segoe UI, sans-serif; font-size: 13px; line-height: 1.6; color: #334155;'>
                     {html_content}
                 </div>
             """)
-            browser.setStyleSheet("border: none; background: transparent;")
             self.tabs.addTab(browser, tab_name)
 
         layout.addWidget(self.tabs)

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QColor
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
@@ -83,6 +84,7 @@ class UbicacionesView(QWidget):
 
     def _build_ui(self):
         # 1. Informative description banner
+        self.banner_card = CustomCard()
         self.lbl_desc = CustomLabel(
             "<b>Carga de Catálogo de Ubicaciones por Desarrollo:</b><br/>"
             "Esta herramienta administrativa permite precargar masivamente el padrón físico de lotes, manzanas y viviendas de un Desarrollo.<br/>"
@@ -94,8 +96,8 @@ class UbicacionesView(QWidget):
             variant="body"
         )
         self.lbl_desc.setWordWrap(True)
-        self.lbl_desc.setStyleSheet(f"background-color: {Colors.SURFACE_LIGHT}; border: 1px solid {Colors.BORDER_LIGHT}; padding: 12px; border-radius: 6px; color: {Colors.TEXT_LIGHT_SECONDARY};")
-        self.layout.addWidget(self.lbl_desc)
+        self.banner_card.layout.addWidget(self.lbl_desc)
+        self.layout.addWidget(self.banner_card)
 
         # 2. Controls Toolbar
         controls_layout = QHBoxLayout()
@@ -133,22 +135,16 @@ class UbicacionesView(QWidget):
         self.layout.addLayout(controls_layout)
 
         # 3. KPI / Status summary bar
-        self.kpi_frame = QFrame()
-        self.kpi_frame.setStyleSheet(f"background-color: {Colors.SURFACE_LIGHT}; border: 1px solid {Colors.BORDER_LIGHT}; border-radius: 6px; padding: 6px;")
-        kpi_layout = QHBoxLayout(self.kpi_frame)
-        kpi_layout.setContentsMargins(12, 6, 12, 6)
+        self.kpi_card = CustomCard()
+        kpi_layout = QHBoxLayout()
+        kpi_layout.setContentsMargins(0, 0, 0, 0)
+        kpi_layout.setSpacing(16)
 
-        self.lbl_kpi_total = QLabel("Total en Archivo: 0")
-        self.lbl_kpi_nuevos = QLabel("Nuevos: 0")
-        self.lbl_kpi_duplicados = QLabel("Duplicados: 0")
-        self.lbl_kpi_existentes = QLabel("Existentes en BD: 0")
-        self.lbl_kpi_archivo = QLabel("Archivo: Ninguno seleccionado")
-
-        self.lbl_kpi_total.setStyleSheet("font-weight: bold; font-size: 12px; color: #1E293B;")
-        self.lbl_kpi_nuevos.setStyleSheet(f"font-weight: bold; font-size: 12px; color: {Colors.SUCCESS};")
-        self.lbl_kpi_duplicados.setStyleSheet("font-weight: bold; font-size: 12px; color: #E11D48;")
-        self.lbl_kpi_existentes.setStyleSheet(f"font-weight: bold; font-size: 12px; color: {Colors.ACCENT};")
-        self.lbl_kpi_archivo.setStyleSheet("font-size: 12px; color: #64748B;")
+        self.lbl_kpi_archivo = CustomLabel("Archivo: Ninguno seleccionado", variant="muted")
+        self.lbl_kpi_total = CustomLabel("Total en Archivo: 0", variant="subheader")
+        self.lbl_kpi_nuevos = CustomLabel("Nuevos: 0", variant="subheader")
+        self.lbl_kpi_duplicados = CustomLabel("Duplicados: 0", variant="subheader")
+        self.lbl_kpi_existentes = CustomLabel("Existentes en BD: 0", variant="subheader")
 
         kpi_layout.addWidget(self.lbl_kpi_archivo)
         kpi_layout.addStretch()
@@ -156,7 +152,8 @@ class UbicacionesView(QWidget):
         kpi_layout.addWidget(self.lbl_kpi_nuevos)
         kpi_layout.addWidget(self.lbl_kpi_duplicados)
         kpi_layout.addWidget(self.lbl_kpi_existentes)
-        self.layout.addWidget(self.kpi_frame)
+        self.kpi_card.layout.addLayout(kpi_layout)
+        self.layout.addWidget(self.kpi_card)
 
         # 4. Preview / Catalog Table
         self.lbl_table_title = CustomLabel("Previsualización de Ubicaciones / Inventario del Desarrollo", variant="subheader")

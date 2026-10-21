@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor, QBrush
 
 from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
@@ -327,9 +328,7 @@ class RegularizarColaboradorView(QWidget):
         left_col.setSpacing(4)
         left_col.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        colab_title_lbl = QLabel()
-        colab_title_lbl.setText("Colaborador con Referencias Apartadas <font color='#EF4444'>*</font>")
-        colab_title_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        colab_title_lbl = CustomLabel("Colaborador con Referencias Apartadas *", variant="subheader")
         left_col.addWidget(colab_title_lbl)
 
         self.cb_colaborador = CustomComboBox()
@@ -347,8 +346,7 @@ class RegularizarColaboradorView(QWidget):
 
         obs_header_layout = QHBoxLayout()
         obs_header_layout.setSpacing(6)
-        obs_title_lbl = CustomLabel("Observaciones de la Regularización", variant="body")
-        obs_title_lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+        obs_title_lbl = CustomLabel("Observaciones de la Regularización", variant="subheader")
         obs_header_layout.addWidget(obs_title_lbl)
         obs_header_layout.addStretch()
         self.lbl_char_counter = CustomLabel("0 / 500", variant="muted")
@@ -395,34 +393,30 @@ class RegularizarColaboradorView(QWidget):
         self.layout.addWidget(self.form_card, stretch=0)
 
         # 3. KPI / Status Summary Bar
-        self.kpi_frame = QFrame()
-        self.kpi_frame.setStyleSheet(f"background-color: {Colors.SURFACE_LIGHT}; border: 1px solid {Colors.BORDER_LIGHT}; border-radius: 6px; padding: 6px;")
-        kpi_layout = QHBoxLayout(self.kpi_frame)
-        kpi_layout.setContentsMargins(12, 6, 12, 6)
+        self.kpi_card = CustomCard()
+        kpi_layout = QHBoxLayout()
+        kpi_layout.setContentsMargins(0, 0, 0, 0)
+        kpi_layout.setSpacing(16)
 
-        self.lbl_kpi_archivo = QLabel("Archivo: Ninguno seleccionado")
-        self.lbl_kpi_archivo.setStyleSheet("font-size: 12px; color: #64748B;")
+        self.lbl_kpi_archivo = CustomLabel("Archivo: Ninguno seleccionado", variant="muted")
         kpi_layout.addWidget(self.lbl_kpi_archivo)
         kpi_layout.addStretch()
 
-        self.lbl_kpi_total = QLabel("Total en Archivo: 0")
-        self.lbl_kpi_total.setStyleSheet("font-weight: bold; font-size: 12px; color: #1E293B;")
+        self.lbl_kpi_total = CustomLabel("Total en Archivo: 0", variant="subheader")
         kpi_layout.addWidget(self.lbl_kpi_total)
 
-        self.lbl_kpi_validos = QLabel("Válidos: 0")
-        self.lbl_kpi_validos.setStyleSheet(f"font-weight: bold; font-size: 12px; color: {Colors.SUCCESS};")
+        self.lbl_kpi_validos = CustomLabel("Válidos: 0", variant="subheader")
         kpi_layout.addWidget(self.lbl_kpi_validos)
 
-        self.lbl_kpi_errores = QLabel("Con Errores: 0")
-        self.lbl_kpi_errores.setStyleSheet("font-weight: bold; font-size: 12px; color: #E11D48;")
+        self.lbl_kpi_errores = CustomLabel("Con Errores: 0", variant="subheader")
         kpi_layout.addWidget(self.lbl_kpi_errores)
 
-        self.layout.addWidget(self.kpi_frame)
+        self.kpi_card.layout.addLayout(kpi_layout)
+        self.layout.addWidget(self.kpi_card)
 
         # 4. Preview Table Card
-        self.results_card = QFrame()
-        self.results_card.setObjectName("cardFrame")
-        results_card_layout = QVBoxLayout(self.results_card)
+        self.results_card = CustomCard()
+        results_card_layout = self.results_card.layout
         results_card_layout.setContentsMargins(16, 16, 16, 16)
         results_card_layout.setSpacing(12)
 
@@ -433,13 +427,11 @@ class RegularizarColaboradorView(QWidget):
             t_icon_lbl.setPixmap(table_icon.pixmap(16, 16))
             res_title_layout.addWidget(t_icon_lbl)
         res_title_lbl = CustomLabel("Previsualización de Registros a Regularizar", variant="subheader")
-        res_title_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #1E293B;")
         res_title_layout.addWidget(res_title_lbl)
         res_title_layout.addStretch()
         results_card_layout.addLayout(res_title_layout)
 
         self.preview_container = QFrame()
-        self.preview_container.setStyleSheet("background-color: transparent; border: none;")
         self.preview_stack = QVBoxLayout(self.preview_container)
         self.preview_stack.setContentsMargins(0, 0, 0, 0)
 
@@ -456,28 +448,11 @@ class RegularizarColaboradorView(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                border: 1px solid #E2E8F0;
-                border-radius: 6px;
-                gridline-color: #F1F5F9;
-                background-color: #FFFFFF;
-            }
-            QHeaderView::section {
-                background-color: #F8FAFC;
-                padding: 8px;
-                font-weight: bold;
-                border: none;
-                border-bottom: 1px solid #E2E8F0;
-                color: #475569;
-            }
-        """)
         self.table.setVisible(False)
         self.preview_stack.addWidget(self.table)
 
         # Placeholder Component
         self.placeholder_widget = QWidget()
-        self.placeholder_widget.setStyleSheet("background-color: transparent;")
         placeholder_layout = QVBoxLayout(self.placeholder_widget)
         placeholder_layout.setContentsMargins(40, 40, 40, 40)
         placeholder_layout.setSpacing(10)
@@ -492,7 +467,6 @@ class RegularizarColaboradorView(QWidget):
 
         placeholder_title = CustomLabel("No hay archivo cargado", variant="subheader")
         placeholder_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder_title.setStyleSheet("font-weight: bold; color: #475569;")
         placeholder_layout.addWidget(placeholder_title)
 
         placeholder_sub = CustomLabel("Seleccione un archivo Excel para validar y previsualizar las asignaciones a regularizar.", variant="muted")

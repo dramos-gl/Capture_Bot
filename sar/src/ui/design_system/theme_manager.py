@@ -137,6 +137,9 @@ class ThemeManager:
         QLineEdit:focus, QTextEdit:focus {{
             border: 1.5px solid {Colors.ACCENT};
         }}
+        QLineEdit[hasError="true"], QTextEdit[hasError="true"] {{
+            border: 1.5px solid {Colors.ERROR};
+        }}
         
         /* ComboBoxes */
         QComboBox {{
@@ -1435,6 +1438,46 @@ class ThemeManager:
             max-height: 40px;
             padding: 2px 12px;
             font-size: 13px;
+        }}
+
+        /* Help & Diagnostics Dialogs */
+        QFrame#aboutHeaderCard {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {"#1E293B" if not is_dark else "#0F172A"}, stop:1 {"#0F172A" if not is_dark else "#020617"});
+            border-radius: 12px;
+            padding: 16px;
+        }}
+        QLabel#aboutTitle {{
+            color: #FFFFFF;
+            font-size: 15px;
+            font-weight: bold;
+        }}
+        QLabel#aboutVersion {{
+            color: #38BDF8;
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        QLabel#aboutDesc {{
+            color: #94A3B8;
+            font-size: 11px;
+        }}
+        QFrame#helpInfoCard {{
+            background-color: {surf};
+            border: 1px solid {border};
+            border-radius: 8px;
+            padding: 12px;
+        }}
+        QLabel#helpInfoKey {{
+            color: {txt_secondary};
+            font-weight: 600;
+            font-size: 11px;
+        }}
+        QLabel#helpInfoVal {{
+            color: {txt_primary};
+            font-size: 11px;
+        }}
+        QTextBrowser#helpManualBrowser {{
+            border: none;
+            background-color: transparent;
         }}
         """
         return qss
