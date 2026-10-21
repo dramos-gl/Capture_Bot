@@ -81,8 +81,8 @@ class OrdenTramiteDialog(QDialog):
         form_layout.addWidget(lbl_des)
         form_layout.addWidget(self.combo_desarrollo)
 
-        # Paso 2: Régimen en Condominio
-        lbl_reg = CustomLabel("2. Régimen de Condominio (Macro-Lote):", variant="body")
+        # Paso 2: Régimen mz
+        lbl_reg = CustomLabel("2. Régimen mz (Macro-Lote):", variant="body")
         self.combo_regimen = CustomComboBox()
         self.combo_regimen.currentIndexChanged.connect(self._on_regimen_changed)
         form_layout.addWidget(lbl_reg)

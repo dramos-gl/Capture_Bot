@@ -202,8 +202,8 @@ Catálogo de contribuyentes. Fuente del correo para facturación.
 
 ---
 
-### Tabla: `satc_catalogo.regimen_condominio`
-Gobierna los macro-lotes que constituyen un Régimen en Condominio con $N$ UPEs.
+### Tabla: `satc_catalogo.regimen`
+Gobierna los macro-lotes fiduciarios que constituyen un Régimen en Condominio con $N$ UPEs o unidades autorizadas.
 
 | Campo | Tipo | Descripción |
 | :--- | :--- | :--- |
@@ -217,37 +217,35 @@ Gobierna los macro-lotes que constituyen un Régimen en Condominio con $N$ UPEs.
 | `upes_generadas` | INTEGER NOT NULL DEFAULT 0 | Contador de UPEs dadas de alta en el sistema |
 | `licencia_construccion_matriz` | VARCHAR(100) | Folio de la licencia de construcción general |
 | `clave_catastral_matriz` | VARCHAR(100) | Clave catastral del macro-lote previo a individualizar |
-| `activo` | BOOLEAN DEFAULT TRUE | |
-| `created_at` | TIMESTAMPTZ DEFAULT NOW() | |
-| `updated_at` | TIMESTAMPTZ | |
+| `activo` | BOOLEAN DEFAULT TRUE | Soft-delete |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | Auditoría de creación |
+| `updated_at` | TIMESTAMPTZ | Auditoría de actualización |
 
 ---
 
 ### Tabla: `satc_catalogo.vivienda`
-Unidad individual de control de trámites (Lote individual en fraccionamiento o UPE en régimen de condominio).
+Unidad individual soberana de control y ciclo de vida de trámites bajo Régimen de Condominio (Estructura Normalizada 3FN).
 
 | Campo | Tipo | Descripción |
 | :--- | :--- | :--- |
 | `vivienda_id` | BIGSERIAL PK | Identificador único de la vivienda / UPE |
-| `desarrollo_id` | BIGINT FK NOT NULL | Desarrollo al que pertenece (`sar_catalogo.desarrollo`) |
-| `regimen_id` | BIGINT FK NULL | Régimen en condominio (`satc_catalogo.regimen_condominio`). NULL si es Fraccionamiento |
-| `tipo_proyecto` | VARCHAR(30) NOT NULL | `FRACCIONAMIENTO` / `REGIMEN_CONDOMINIO` |
-| `sm` | VARCHAR(50) NULL | Supermanzana (heredada de régimen o directa de lote) |
-| `mz` | VARCHAR(50) NOT NULL | Manzana física |
-| `lt` | VARCHAR(50) NOT NULL | Lote físico |
-| `edificio` | VARCHAR(50) NULL | Edificio / Torre / Clúster (ej. "Torre A", "Edif 2", NULL si unifamiliar) |
-| `vivienda` | VARCHAR(50) NOT NULL | Número de vivienda, casa o interior (ej. "101", "Casa 4", "Depto 3B") |
-| `numero_upe` | VARCHAR(50) NULL | Consecutivo de Unidad de Propiedad Exclusiva (ej: "UPE-001" a "UPE-577") |
-| `calle` | VARCHAR(200) NULL | Nombre de la vialidad, calle o avenida |
-| `clave_catastral` | VARCHAR(100) NULL | Clave catastral individualizada asignada por Catastro |
-| `cuenta_predial` | VARCHAR(100) NULL | Número de cuenta de impuesto predial individual |
-| `descripcion` | TEXT NULL | Notas descriptivas de la vivienda (orientación, prototipo, etc.) |
+| `regimen_id` | BIGINT FK NOT NULL | Régimen matriz (`satc_catalogo.regimen`). Resuelve Desarrollo, SM, MZ y LT sin redundancia |
+| `numero_oficial` | VARCHAR(50) NULL | Número oficial asignado por la Dirección de Desarrollo Urbano |
+| `interior` | VARCHAR(50) NOT NULL | Número de departamento, casa interior o unidad privativa |
+| `edificio` | VARCHAR(50) NULL | Edificio / Torre / Clúster (ej. "Torre A", "Edif 2") |
+| `nivel` | VARCHAR(30) NULL | Nivel o piso arquitectónico (PB, Nivel 1, Roof, etc.) |
+| `calle` | VARCHAR(200) NULL | Nombre de la vialidad, calle o avenida oficial |
+| `destino` | VARCHAR(30) NOT NULL DEFAULT 'HABITACIONAL' | `HABITACIONAL`, `SERVICIO`, `COMERCIAL`, `MIXTO` |
+| `espacio` | VARCHAR(30) NOT NULL DEFAULT 'VIVIENDA' | `VIVIENDA`, `AREAS_COMUNES`, `ESTACIONAMIENTO`, `BODEGA` |
+| `folio_electronico` | VARCHAR(100) NULL | **Folio Registral RPP** (Boleta de Inscripción) |
+| `clave_catastral` | VARCHAR(100) NULL | Clave catastral individualizada asignada por Catastro Municipal |
+| `padron` | VARCHAR(100) NULL | Número de padrón o cuenta predial municipal |
 | `estado_vivienda_id` | BIGINT FK NOT NULL | Estado actual de la vivienda (`satc_catalogo.estado_vivienda`) |
-| `estatus_obra` | VARCHAR(50) DEFAULT 'EN_CONSTRUCCION' | `EN_CONSTRUCCION`, `TERMINADA`, `ENTREGADA` |
-| `fecha_venta` | DATE NULL | Fecha de contrato de compraventa |
-| `fecha_escrituracion` | DATE NULL | Fecha de firma notarial |
-| `activo` | BOOLEAN DEFAULT TRUE | |
-| `created_at` | TIMESTAMPTZ DEFAULT NOW() | |
+| `fecha_escrituracion` | DATE NULL | Fecha formal de firma notarial |
+| `descripcion` | TEXT NULL | Notas descriptivas de la vivienda (orientación, prototipo, etc.) |
+| `activo` | BOOLEAN DEFAULT TRUE | Soft-delete |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | Auditoría de creación |
+| `updated_at` | TIMESTAMPTZ | Auditoría de actualización |
 | `updated_at` | TIMESTAMPTZ | |
 
 ---

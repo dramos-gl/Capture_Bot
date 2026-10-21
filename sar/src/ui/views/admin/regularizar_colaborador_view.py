@@ -15,8 +15,208 @@ from sar.src.ui.design_system.tokens.colors import Colors
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
+from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.utils.icons import Icons
+
+
+class ValidarExcelRegularizacionWorker(QThread):
+    """Worker thread to parse and validate Excel file in background."""
+    finished = Signal(bool, dict, str)
+
+    def __init__(self, file_path: str, colab_id: int, desarrollos_cache: Dict[str, int],
+                 api_client, db_connector):
+        super().__init__()
+        self.file_path = file_path
+        self.colab_id = colab_id
+        self.desarrollos_cache = desarrollos_cache
+        self.api_client = api_client
+        self.db_connector = db_connector
+
+    def run(self):
+        try:
+            wb = openpyxl.load_workbook(self.file_path, read_only=True)
+            ws = wb.active
+            rows = list(ws.iter_rows(values_only=True))
+            if len(rows) <= 1:
+                self.finished.emit(False, {"tipo": "EMPTY"}, "El archivo no contiene filas de datos.")
+                return
+
+            raw_headers = [str(c).strip().upper() for c in rows[0] if c is not None]
+            header_map = {name: idx for idx, name in enumerate(raw_headers)}
+
+            req_cols = ["REFERENCIA", "DESARROLLO"]
+            missing = [c for c in req_cols if c not in header_map]
+            if missing:
+                self.finished.emit(False, {"tipo": "MISSING_COLS", "missing": missing},
+                                   f"El archivo debe contener al menos las columnas: {', '.join(missing)}")
+                return
+
+            def _clean_str(val: Any) -> Optional[str]:
+                if val is None:
+                    return None
+                s = str(val).strip().upper()
+                return s if s else None
+
+            def _clean_coord(val: Any) -> Optional[str]:
+                if val is None:
+                    return None
+                s = str(val).replace(" ", "").strip().upper()
+                return s if s else None
+
+            parsed_rows = []
+            all_refs = set()
+
+            for r_idx, row in enumerate(rows[1:], 2):
+                ref_idx = header_map.get("REFERENCIA")
+                ref_val = _clean_str(row[ref_idx]) if ref_idx is not None and len(row) > ref_idx else None
+                if not ref_val:
+                    continue
+
+                all_refs.add(ref_val)
+                des_idx = header_map.get("DESARROLLO")
+                des_val = _clean_str(row[des_idx]) if des_idx is not None and len(row) > des_idx else None
+
+                cli_idx = header_map.get("CLIENTE")
+                sm_idx = header_map.get("SM")
+                mz_idx = header_map.get("MANZANA") if "MANZANA" in header_map else header_map.get("MZ")
+                lt_idx = header_map.get("LOTE") if "LOTE" in header_map else header_map.get("LT")
+                ed_idx = header_map.get("EXT") if "EXT" in header_map else header_map.get("EDIF")
+                vi_idx = header_map.get("INT") if "INT" in header_map else header_map.get("VIV")
+                no_idx = header_map.get("NO_OFICIAL")
+                cr_idx = header_map.get("CREDITO_TITULAR")
+                pa_idx = header_map.get("PA")
+                fs_idx = header_map.get("FECHA_SOLICITUD")
+                fe_idx = header_map.get("FECHA_ESCRITURA")
+                ob_idx = header_map.get("OBSERVACIONES")
+
+                parsed_rows.append({
+                    "row_num": r_idx,
+                    "referencia": ref_val,
+                    "desarrollo_str": des_val,
+                    "cliente": _clean_str(row[cli_idx]) if cli_idx is not None and len(row) > cli_idx else None,
+                    "sm": _clean_coord(row[sm_idx]) if sm_idx is not None and len(row) > sm_idx else None,
+                    "mz": _clean_coord(row[mz_idx]) if mz_idx is not None and len(row) > mz_idx else None,
+                    "lote": _clean_coord(row[lt_idx]) if lt_idx is not None and len(row) > lt_idx else None,
+                    "edif": _clean_coord(row[ed_idx]) if ed_idx is not None and len(row) > ed_idx else None,
+                    "viv": _clean_coord(row[vi_idx]) if vi_idx is not None and len(row) > vi_idx else None,
+                    "no_oficial": _clean_str(row[no_idx]) if no_idx is not None and len(row) > no_idx else None,
+                    "credito_titular": _clean_str(row[cr_idx]) if cr_idx is not None and len(row) > cr_idx else None,
+                    "pa": _clean_str(row[pa_idx]) if pa_idx is not None and len(row) > pa_idx else None,
+                    "fecha_solicitud": str(row[fs_idx]).strip() if fs_idx is not None and len(row) > fs_idx and row[fs_idx] else None,
+                    "fecha_escritura": str(row[fe_idx]).strip() if fe_idx is not None and len(row) > fe_idx and row[fe_idx] else None,
+                    "observaciones": _clean_str(row[ob_idx]) if ob_idx is not None and len(row) > ob_idx else None,
+                })
+
+            if not parsed_rows:
+                self.finished.emit(False, {"tipo": "NO_ROWS"}, "No se encontraron referencias en las filas del archivo.")
+                return
+
+            # Batch query reference state and owner from DB/API
+            db_ref_info = {}
+            if all_refs:
+                refs_list = list(all_refs)
+                chunk_size = 500
+                if self.api_client.connect_via_api:
+                    for i in range(0, len(refs_list), chunk_size):
+                        chunk = refs_list[i:i + chunk_size]
+                        res = self.api_client.request(
+                            "POST",
+                            "/api/admin/referencias/info-regularizacion-batch",
+                            json={"referencias": chunk}
+                        )
+                        if isinstance(res, dict) and "referencias" in res:
+                            db_ref_info.update(res["referencias"])
+                else:
+                    from sqlalchemy import select
+                    from sar.src.storage.models import Referencia, AsignacionReferencia, LoteDetalle, LoteAsignacion, EstadoSistema
+                    with self.db_connector.get_session() as session:
+                        for i in range(0, len(refs_list), chunk_size):
+                            chunk = refs_list[i:i + chunk_size]
+                            stmt = (
+                                select(
+                                    Referencia.referencia_portal,
+                                    EstadoSistema.codigo.label("estado_codigo"),
+                                    LoteAsignacion.colaborador_id
+                                )
+                                .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+                                .outerjoin(AsignacionReferencia, Referencia.referencia_id == AsignacionReferencia.referencia_id)
+                                .outerjoin(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
+                                .outerjoin(LoteAsignacion, LoteDetalle.lote_asignacion_id == LoteAsignacion.lote_asignacion_id)
+                                .where(Referencia.referencia_portal.in_(chunk))
+                            )
+                            for row_db in session.execute(stmt).all():
+                                db_ref_info[row_db.referencia_portal] = {
+                                    "estado": row_db.estado_codigo,
+                                    "colaborador_id": row_db.colaborador_id
+                                }
+
+            payload_validado = []
+            results_to_render = []
+            valid_count = 0
+            error_count = 0
+
+            for p in parsed_rows:
+                ref_portal = p["referencia"]
+                info = db_ref_info.get(ref_portal)
+
+                is_valid = True
+                msg = "VÁLIDA: Lista para regularizar"
+
+                if not info:
+                    is_valid = False
+                    msg = "ERROR: La referencia no existe en el sistema."
+                elif info.get("estado") != "RESERVADA":
+                    is_valid = False
+                    msg = f"ERROR: Estado actual '{info.get('estado')}', debe ser 'RESERVADA'."
+                elif info.get("colaborador_id") != self.colab_id:
+                    is_valid = False
+                    msg = f"ERROR: Apartada a otro colaborador o sin asignación (ID: {info.get('colaborador_id')})."
+                elif not p["desarrollo_str"]:
+                    is_valid = False
+                    msg = "ERROR: Columna DESARROLLO requerida."
+                elif p["desarrollo_str"] not in self.desarrollos_cache:
+                    is_valid = False
+                    msg = f"ERROR: Desarrollo '{p['desarrollo_str']}' no existe en el catálogo."
+
+                if is_valid:
+                    valid_count += 1
+                    des_id = self.desarrollos_cache[p["desarrollo_str"]]
+                    payload_validado.append({
+                        "referencia": ref_portal,
+                        "desarrollo_id": des_id,
+                        "cliente": p["cliente"],
+                        "sm": p["sm"],
+                        "mz": p["mz"],
+                        "lote": p["lote"],
+                        "edif": p["edif"],
+                        "viv": p["viv"],
+                        "no_oficial": p["no_oficial"],
+                        "credito_titular": p["credito_titular"],
+                        "pa": p["pa"],
+                        "fecha_solicitud": p["fecha_solicitud"],
+                        "fecha_escritura": p["fecha_escritura"],
+                        "observaciones": p["observaciones"]
+                    })
+                else:
+                    error_count += 1
+
+                results_to_render.append({
+                    "valido": is_valid,
+                    "msg": msg,
+                    **p
+                })
+
+            result_data = {
+                "file_path": self.file_path,
+                "payload_validado": payload_validado,
+                "results_to_render": results_to_render,
+                "valid_count": valid_count,
+                "error_count": error_count
+            }
+            self.finished.emit(True, result_data, "")
+        except Exception as e:
+            self.finished.emit(False, {}, str(e))
 
 
 class RegularizarColaboradorWorker(QThread):
@@ -79,6 +279,8 @@ class RegularizarColaboradorView(QWidget):
         self.payload_validado: List[Dict[str, Any]] = []
         self.desarrollos_cache: Dict[str, int] = {}
         self.worker: Optional[RegularizarColaboradorWorker] = None
+        self.validation_worker: Optional[ValidarExcelRegularizacionWorker] = None
+        self.loading_dialog: Optional[GLLoadingDialog] = None
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(24, 24, 24, 24)
@@ -420,235 +622,110 @@ class RegularizarColaboradorView(QWidget):
         if not file_path:
             return
 
-        try:
-            wb = openpyxl.load_workbook(file_path, read_only=True)
-            ws = wb.active
-            rows = list(ws.iter_rows(values_only=True))
-            if len(rows) <= 1:
-                QMessageBox.warning(self, "Archivo Vacío", "El archivo no contiene filas de datos.")
-                return
+        # Modal spinner dialog
+        self.loading_dialog = GLLoadingDialog("Cargando y validando\narchivo Excel...", self)
 
-            raw_headers = [str(c).strip().upper() for c in rows[0] if c is not None]
-            header_map = {name: idx for idx, name in enumerate(raw_headers)}
+        self.validation_worker = ValidarExcelRegularizacionWorker(
+            file_path=file_path,
+            colab_id=colab_id,
+            desarrollos_cache=self.desarrollos_cache,
+            api_client=self.api_client,
+            db_connector=self.db_connector
+        )
+        self.validation_worker.finished.connect(self._on_validation_worker_finished)
+        self.validation_worker.start()
+        self.loading_dialog.exec()
 
-            req_cols = ["REFERENCIA", "DESARROLLO"]
-            missing = [c for c in req_cols if c not in header_map]
-            if missing:
-                QMessageBox.critical(self, "Columnas Faltantes", f"El archivo debe contener al menos las columnas: {', '.join(missing)}")
-                return
+    def _on_validation_worker_finished(self, success: bool, data: dict, error_msg: str):
+        """Receives results from background validation worker and renders preview."""
+        if self.loading_dialog:
+            self.loading_dialog.accept()
+            self.loading_dialog = None
 
-            def _clean_str(val: Any) -> Optional[str]:
-                if val is None:
-                    return None
-                s = str(val).strip().upper()
-                return s if s else None
-
-            def _clean_coord(val: Any) -> Optional[str]:
-                if val is None:
-                    return None
-                s = str(val).replace(" ", "").strip().upper()
-                return s if s else None
-
-            parsed_rows = []
-            all_refs = set()
-
-            for r_idx, row in enumerate(rows[1:], 2):
-                ref_idx = header_map.get("REFERENCIA")
-                ref_val = _clean_str(row[ref_idx]) if ref_idx is not None and len(row) > ref_idx else None
-                if not ref_val:
-                    continue
-
-                all_refs.add(ref_val)
-                des_idx = header_map.get("DESARROLLO")
-                des_val = _clean_str(row[des_idx]) if des_idx is not None and len(row) > des_idx else None
-
-                cli_idx = header_map.get("CLIENTE")
-                sm_idx = header_map.get("SM")
-                mz_idx = header_map.get("MANZANA") if "MANZANA" in header_map else header_map.get("MZ")
-                lt_idx = header_map.get("LOTE") if "LOTE" in header_map else header_map.get("LT")
-                ed_idx = header_map.get("EXT") if "EXT" in header_map else header_map.get("EDIF")
-                vi_idx = header_map.get("INT") if "INT" in header_map else header_map.get("VIV")
-                no_idx = header_map.get("NO_OFICIAL")
-                cr_idx = header_map.get("CREDITO_TITULAR")
-                pa_idx = header_map.get("PA")
-                fs_idx = header_map.get("FECHA_SOLICITUD")
-                fe_idx = header_map.get("FECHA_ESCRITURA")
-                ob_idx = header_map.get("OBSERVACIONES")
-
-                parsed_rows.append({
-                    "row_num": r_idx,
-                    "referencia": ref_val,
-                    "desarrollo_str": des_val,
-                    "cliente": _clean_str(row[cli_idx]) if cli_idx is not None and len(row) > cli_idx else None,
-                    "sm": _clean_coord(row[sm_idx]) if sm_idx is not None and len(row) > sm_idx else None,
-                    "mz": _clean_coord(row[mz_idx]) if mz_idx is not None and len(row) > mz_idx else None,
-                    "lote": _clean_coord(row[lt_idx]) if lt_idx is not None and len(row) > lt_idx else None,
-                    "edif": _clean_coord(row[ed_idx]) if ed_idx is not None and len(row) > ed_idx else None,
-                    "viv": _clean_coord(row[vi_idx]) if vi_idx is not None and len(row) > vi_idx else None,
-                    "no_oficial": _clean_str(row[no_idx]) if no_idx is not None and len(row) > no_idx else None,
-                    "credito_titular": _clean_str(row[cr_idx]) if cr_idx is not None and len(row) > cr_idx else None,
-                    "pa": _clean_str(row[pa_idx]) if pa_idx is not None and len(row) > pa_idx else None,
-                    "fecha_solicitud": str(row[fs_idx]).strip() if fs_idx is not None and len(row) > fs_idx and row[fs_idx] else None,
-                    "fecha_escritura": str(row[fe_idx]).strip() if fe_idx is not None and len(row) > fe_idx and row[fe_idx] else None,
-                    "observaciones": _clean_str(row[ob_idx]) if ob_idx is not None and len(row) > ob_idx else None,
-                })
-
-            if not parsed_rows:
-                QMessageBox.warning(self, "Sin Registros", "No se encontraron referencias en las filas del archivo.")
-                return
-
-            # Batch query reference state and owner from DB/API
-            db_ref_info = {}
-            if all_refs:
-                from sqlalchemy import select
-                from sar.src.storage.models import Referencia, AsignacionReferencia, LoteDetalle, LoteAsignacion, EstadoSistema
-                with self.db_connector.get_session() as session:
-                    refs_list = list(all_refs)
-                    chunk_size = 500
-                    for i in range(0, len(refs_list), chunk_size):
-                        chunk = refs_list[i:i + chunk_size]
-                        stmt = (
-                            select(
-                                Referencia.referencia_portal,
-                                EstadoSistema.codigo.label("estado_codigo"),
-                                LoteAsignacion.colaborador_id
-                            )
-                            .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
-                            .outerjoin(AsignacionReferencia, Referencia.referencia_id == AsignacionReferencia.referencia_id)
-                            .outerjoin(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
-                            .outerjoin(LoteAsignacion, LoteDetalle.lote_asignacion_id == LoteAsignacion.lote_asignacion_id)
-                            .where(Referencia.referencia_portal.in_(chunk))
-                        )
-                        for row_db in session.execute(stmt).all():
-                            db_ref_info[row_db.referencia_portal] = {
-                                "estado": row_db.estado_codigo,
-                                "colaborador_id": row_db.colaborador_id
-                            }
-
-            # Classify rows
-            self.payload_validado = []
-            results_to_render = []
-            valid_count = 0
-            error_count = 0
-
-            for p in parsed_rows:
-                ref_portal = p["referencia"]
-                info = db_ref_info.get(ref_portal)
-
-                is_valid = True
-                msg = "VÁLIDA: Lista para regularizar"
-
-                if not info:
-                    is_valid = False
-                    msg = "ERROR: La referencia no existe en el sistema."
-                elif info.get("estado") != "RESERVADA":
-                    is_valid = False
-                    msg = f"ERROR: Estado actual '{info.get('estado')}', debe ser 'RESERVADA'."
-                elif info.get("colaborador_id") != colab_id:
-                    is_valid = False
-                    msg = f"ERROR: Apartada a otro colaborador o sin asignación (ID: {info.get('colaborador_id')})."
-                elif not p["desarrollo_str"]:
-                    is_valid = False
-                    msg = "ERROR: Columna DESARROLLO requerida."
-                elif p["desarrollo_str"] not in self.desarrollos_cache:
-                    is_valid = False
-                    msg = f"ERROR: Desarrollo '{p['desarrollo_str']}' no existe en el catálogo."
-
-                if is_valid:
-                    valid_count += 1
-                    des_id = self.desarrollos_cache[p["desarrollo_str"]]
-                    self.payload_validado.append({
-                        "referencia": ref_portal,
-                        "desarrollo_id": des_id,
-                        "cliente": p["cliente"],
-                        "sm": p["sm"],
-                        "mz": p["mz"],
-                        "lote": p["lote"],
-                        "edif": p["edif"],
-                        "viv": p["viv"],
-                        "no_oficial": p["no_oficial"],
-                        "credito_titular": p["credito_titular"],
-                        "pa": p["pa"],
-                        "fecha_solicitud": p["fecha_solicitud"],
-                        "fecha_escritura": p["fecha_escritura"],
-                        "observaciones": p["observaciones"]
-                    })
-                else:
-                    error_count += 1
-
-                results_to_render.append({
-                    "valido": is_valid,
-                    "msg": msg,
-                    **p
-                })
-
-            # Render Table
-            self.table.setRowCount(0)
-            self.table.setRowCount(len(results_to_render))
-
-            for idx, r in enumerate(results_to_render):
-                item_ref = QTableWidgetItem(r["referencia"])
-                item_val = QTableWidgetItem("🟢 VÁLIDO" if r["valido"] else "🔴 ERROR")
-                item_msg = QTableWidgetItem(r["msg"])
-                item_cli = QTableWidgetItem(r["cliente"] or "")
-                item_des = QTableWidgetItem(r["desarrollo_str"] or "")
-                item_sm = QTableWidgetItem(r["sm"] or "")
-                item_mz = QTableWidgetItem(r["mz"] or "")
-                item_lt = QTableWidgetItem(r["lote"] or "")
-                item_ed = QTableWidgetItem(r["edif"] or "")
-                item_vi = QTableWidgetItem(r["viv"] or "")
-                item_no = QTableWidgetItem(r["no_oficial"] or "")
-                item_cr = QTableWidgetItem(r["credito_titular"] or "")
-                item_pa = QTableWidgetItem(r["pa"] or "")
-                item_fs = QTableWidgetItem(r["fecha_solicitud"] or "")
-                item_fe = QTableWidgetItem(r["fecha_escritura"] or "")
-
-                if not r["valido"]:
-                    brush = QBrush(QColor("#FEE2E2"))
-                    for itm in [item_ref, item_val, item_msg, item_cli, item_des, item_sm, item_mz, item_lt, item_ed, item_vi, item_no, item_cr, item_pa, item_fs, item_fe]:
-                        itm.setBackground(brush)
-
-                self.table.setItem(idx, 0, item_ref)
-                self.table.setItem(idx, 1, item_val)
-                self.table.setItem(idx, 2, item_msg)
-                self.table.setItem(idx, 3, item_cli)
-                self.table.setItem(idx, 4, item_des)
-                self.table.setItem(idx, 5, item_sm)
-                self.table.setItem(idx, 6, item_mz)
-                self.table.setItem(idx, 7, item_lt)
-                self.table.setItem(idx, 8, item_ed)
-                self.table.setItem(idx, 9, item_vi)
-                self.table.setItem(idx, 10, item_no)
-                self.table.setItem(idx, 11, item_cr)
-                self.table.setItem(idx, 12, item_pa)
-                self.table.setItem(idx, 13, item_fs)
-                self.table.setItem(idx, 14, item_fe)
-
-            self.table.resizeColumnsToContents()
-            self.placeholder_widget.setVisible(False)
-            self.table.setVisible(True)
-
-            file_name = os.path.basename(file_path)
-            self.lbl_kpi_archivo.setText(f"Archivo: {file_name}")
-            self.lbl_kpi_total.setText(f"Total en Archivo: {len(results_to_render)}")
-            self.lbl_kpi_validos.setText(f"Válidos: {valid_count}")
-            self.lbl_kpi_errores.setText(f"Con Errores: {error_count}")
-
-            self.btn_confirmar.setEnabled(valid_count > 0 and self.can_edit)
-
-            if valid_count > 0:
-                QMessageBox.information(
-                    self, "Validación Completa",
-                    f"Archivo validado.\nReferencias listas para regularizar: {valid_count}\nReferencias con error: {error_count}"
-                )
+        if not success:
+            tipo = data.get("tipo")
+            if tipo == "EMPTY":
+                QMessageBox.warning(self, "Archivo Vacío", error_msg)
+            elif tipo == "MISSING_COLS":
+                QMessageBox.critical(self, "Columnas Faltantes", error_msg)
+            elif tipo == "NO_ROWS":
+                QMessageBox.warning(self, "Sin Registros", error_msg)
             else:
-                QMessageBox.warning(
-                    self, "Sin Registros Válidos",
-                    f"No se encontró ninguna referencia válida para regularizar.\nTotal errores: {error_count}"
-                )
+                QMessageBox.critical(self, "Error", f"Error al procesar el archivo Excel: {error_msg}")
+            return
 
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error al procesar el archivo Excel: {e}")
+        file_path = data.get("file_path", "")
+        self.payload_validado = data.get("payload_validado", [])
+        results_to_render = data.get("results_to_render", [])
+        valid_count = data.get("valid_count", 0)
+        error_count = data.get("error_count", 0)
+
+        # Render Table
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(results_to_render))
+
+        for idx, r in enumerate(results_to_render):
+            item_ref = QTableWidgetItem(r["referencia"])
+            item_val = QTableWidgetItem("🟢 VÁLIDO" if r["valido"] else "🔴 ERROR")
+            item_msg = QTableWidgetItem(r["msg"])
+            item_cli = QTableWidgetItem(r["cliente"] or "")
+            item_des = QTableWidgetItem(r["desarrollo_str"] or "")
+            item_sm = QTableWidgetItem(r["sm"] or "")
+            item_mz = QTableWidgetItem(r["mz"] or "")
+            item_lt = QTableWidgetItem(r["lote"] or "")
+            item_ed = QTableWidgetItem(r["edif"] or "")
+            item_vi = QTableWidgetItem(r["viv"] or "")
+            item_no = QTableWidgetItem(r["no_oficial"] or "")
+            item_cr = QTableWidgetItem(r["credito_titular"] or "")
+            item_pa = QTableWidgetItem(r["pa"] or "")
+            item_fs = QTableWidgetItem(r["fecha_solicitud"] or "")
+            item_fe = QTableWidgetItem(r["fecha_escritura"] or "")
+
+            if not r["valido"]:
+                brush = QBrush(QColor("#FEE2E2"))
+                for itm in [item_ref, item_val, item_msg, item_cli, item_des, item_sm, item_mz, item_lt, item_ed, item_vi, item_no, item_cr, item_pa, item_fs, item_fe]:
+                    itm.setBackground(brush)
+
+            self.table.setItem(idx, 0, item_ref)
+            self.table.setItem(idx, 1, item_val)
+            self.table.setItem(idx, 2, item_msg)
+            self.table.setItem(idx, 3, item_cli)
+            self.table.setItem(idx, 4, item_des)
+            self.table.setItem(idx, 5, item_sm)
+            self.table.setItem(idx, 6, item_mz)
+            self.table.setItem(idx, 7, item_lt)
+            self.table.setItem(idx, 8, item_ed)
+            self.table.setItem(idx, 9, item_vi)
+            self.table.setItem(idx, 10, item_no)
+            self.table.setItem(idx, 11, item_cr)
+            self.table.setItem(idx, 12, item_pa)
+            self.table.setItem(idx, 13, item_fs)
+            self.table.setItem(idx, 14, item_fe)
+
+        self.table.resizeColumnsToContents()
+        self.placeholder_widget.setVisible(False)
+        self.table.setVisible(True)
+
+        file_name = os.path.basename(file_path)
+        self.lbl_kpi_archivo.setText(f"Archivo: {file_name}")
+        self.lbl_kpi_total.setText(f"Total en Archivo: {len(results_to_render)}")
+        self.lbl_kpi_validos.setText(f"Válidos: {valid_count}")
+        self.lbl_kpi_errores.setText(f"Con Errores: {error_count}")
+
+        self.btn_confirmar.setEnabled(valid_count > 0 and self.can_edit)
+
+        if valid_count > 0:
+            QMessageBox.information(
+                self, "Validación Completa",
+                f"Archivo validado.\nReferencias listas para regularizar: {valid_count}\nReferencias con error: {error_count}"
+            )
+        else:
+            QMessageBox.warning(
+                self, "Sin Registros Válidos",
+                f"No se encontró ninguna referencia válida para regularizar.\nTotal errores: {error_count}"
+            )
+
+
 
     def _on_confirmar_regularizacion(self):
         """Executes regularization via background worker."""

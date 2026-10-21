@@ -267,10 +267,10 @@ class TramitesControlView(QWidget):
         col_des.addWidget(lbl_des)
         col_des.addWidget(self.combo_desarrollo)
 
-        # Columna 2: Régimen en Condominio
+        # Columna 2: Régimen mz
         col_reg = QVBoxLayout()
         col_reg.setSpacing(4)
-        lbl_reg = CustomLabel("Régimen de Condominio (Macro-Lote) *", variant="body")
+        lbl_reg = CustomLabel("Régimen mz (Macro-Lote) *", variant="body")
         lbl_reg.setObjectName("formFieldLabel")
         self.combo_regimen = CustomComboBox(control_size="sm")
         self.combo_regimen.currentIndexChanged.connect(self._on_regimen_changed)

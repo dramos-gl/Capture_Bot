@@ -21,34 +21,29 @@ El objetivo central es erradicar omisiones operativas, garantizar la trazabilida
 
 ## 2. Modelos de Proyecto y Estructura Territorial
 
-La estructura espacial y catastral del SATC opera bajo una jerarquía territorial unificada de 6 niveles:
-$$\text{Desarrollo} \longrightarrow \text{SM (Supermanzana)} \longrightarrow \text{MZ (Manzana)} \longrightarrow \text{Lote} \longrightarrow \text{Edificio} \longrightarrow \text{Vivienda / UPE}$$
+La estructura espacial y catastral del SATC opera bajo una jerarquía territorial unificada normalizada:
+$$\text{Desarrollo} \longrightarrow \text{Régimen (Macro-Lote: SM, MZ, LT)} \longrightarrow \text{Edificio / Torre} \longrightarrow \text{Vivienda / Espacio Privativo (Interior)}$$
 
-### 2.1 Fraccionamiento (Modelo Lote a Lote Horizontal)
-En un desarrollo de tipo Fraccionamiento:
-* **Relación:** `1 Lote = 1 Vivienda` (`edificio` permanece NULL).
-* **Identificación:** `Desarrollo + SM + MZ + Lote + Vivienda (Casa)`.
-* **Dinámica de Trámites:** Cada lote se gestiona y apertura de forma individualizada para trámites de alineamiento, número oficial, cédula catastral, predial individual y permisos de construcción/terminación.
-
-### 2.2 Régimen de Condominio (Modelo Macro-Lote + UPEs Vertical o Mixto)
-En un desarrollo constituido bajo Régimen de Condominio:
-* **Relación:** `1 Macro-Lote (SM, MZ, Lote) = N UPEs (Unidades de Propiedad Exclusiva / Viviendas)`.
-* **Subdivisión Espacial:** Las UPEs pueden agruparse en **Edificios o Torres** (`edificio`) conteniendo múltiples departamentos o interiores (`vivienda`).
+### 2.1 Régimen (`satc_catalogo.regimen`)
+En el ecosistema inmobiliario formalizado:
+* **Relación Soberana:** `1 Desarrollo = N Regímenes`. Cada régimen representa un polígono físico o macro-lote fiduciario (`SM`, `MZ`, `LT`) con un número total de UPEs autorizadas (`total_upes`).
+* **Subdivisión Espacial:** Las viviendas se vinculan directamente al régimen matriz mediante `regimen_id`. Se agrupan opcionalmente por **Edificio o Torre** (`edificio`), nivel (`nivel`), número oficial (`numero_oficial`) e **interior** (`interior`).
 * **Ejemplo Operativo:**
   * **Desarrollo:** `AURA NOVA PLAYA`
-  * **Ubicación Fiduciaria:** `SM 10, MZ 1, LT 1`
-  * **UPEs Declaradas / Solicitadas:** `577 UPEs`
-  * **Distribución:** 577 viviendas distribuidas en Edificios/Torres o clusters (ej. *Torre A - Depto 101* = UPE-001).
+  * **Régimen:** `REGIMEN AURA NOVA PLAYA MZ1 LT1` (`SM 10, MZ 1, LT 1`)
+  * **UPEs Declaradas / Autorizadas:** `577 UPEs`
+  * **Distribución:** 577 unidades distribuidas en Torres (ej. *Torre A - Depto 101*).
 * **Nivel de Granularidad de los Trámites:**
-  1. **Nivel Régimen (Macro-Trámite):** 
+  1. **Nivel Régimen (Macro-Trámite Matriz):** 
      * Licencia de Construcción Matriz del Régimen.
      * Constitución y Autorización del Régimen en Condominio.
      * Dictámenes Generales de Protección Civil y Servicios Urbanos.
-  2. **Nivel Vivienda / UPE (Micro-Trámite Individualizado):**
-     * Solicitud de Individualización Catastral por UPE.
-     * Asignación de Clave Catastral y Padrón Municipal individual (577 registros).
-     * Recibo de Derechos Catastrales por UPE.
-     * Cédula Catastral Individual.
+  2. **Nivel Vivienda / Espacio (Micro-Trámite Individualizado):**
+     * Importación inicial de unidades (Estado: `PROYECTADA`).
+     * Asignación e importación de Folios Electrónicos del RPP (`folio_electronico`).
+     * Individualización y alta de Cédula Catastral (`clave_catastral` y `padron`).
+     * Recibo de Derechos Catastrales por UPE (Descargado por Bot A).
+     * Facturación CFDI (Timbrado por Bot C).
      * Certificado de No Adeudo Municipal para Venta / Escrituración.
 
 ---
@@ -73,10 +68,15 @@ El ciclo de vida de cada vivienda (o UPE) está ligado a tres grandes hitos de n
 * **Trámites Clave:** Constancia de Uso de Suelo, Número Oficial, Derechos de Aportación, Terminación de Obra.
 * **Control SATC:** Validación de que ningún lote/UPE inicie venta sin contar con la terminación de obra o prórroga de licencia respectiva.
 
+### 3.1.1 Individualización RPP (Constancia de Resolución)
+* **Disparador:** Emisión del documento oficial del Registro Público de la Propiedad (RPP) por individualización del Régimen en Condominio (ej. *Constancia de Resolución*).
+* **Extracción Automatizada (`RppResolutionExtractor`):** Procesamiento de la sección *FOLIOS GENERADOS*, extrayendo el número de fracción, interior, nivel, edificio, número oficial y los 20 dígitos del folio electrónico real.
+* **Transición de Estado:** Al asignar el folio electrónico, la vivienda transiciona de `PROYECTADA` a `EN_INDIVIDUALIZACION`.
+
 ### 3.2 Etapa de Venta (Comercialización)
 * **Disparador:** Asignación comercial de la vivienda a un cliente.
 * **Trámites Clave:** Asignación definitiva de Clave Catastral de la UPE, Alta en Padrón de Impuesto Predial del Municipio de Benito Juárez (Cancún).
-* **Control SATC:** Verificación de que las 577 UPEs cuenten con su clave catastral homologada antes de integrar el expediente notarial.
+* **Control SATC:** Verificación de que las UPEs cuenten con su clave catastral homologada antes de integrar el expediente notarial.
 
 ### 3.3 Etapa de Escrituración y Entrega
 * **Disparador:** Firma de contrato de compraventa y llamado a Notaría.

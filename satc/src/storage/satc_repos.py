@@ -569,35 +569,37 @@ class ViviendaRepository(BaseCancunRepository):
 
     def create_upe(
         self,
-        desarrollo_id: int,
         regimen_id: int,
-        numero_upe: str,
-        vivienda: str,
-        mz: str,
-        lt: str,
-        sm: Optional[str] = None,
+        interior: str,
+        numero_oficial: Optional[str] = None,
         edificio: Optional[str] = None,
+        nivel: Optional[str] = None,
         calle: Optional[str] = None,
+        destino: str = "HABITACIONAL",
+        espacio: str = "VIVIENDA",
+        folio_electronico: Optional[str] = None,
         clave_catastral: Optional[str] = None,
+        padron: Optional[str] = None,
         descripcion: Optional[str] = None,
+        fecha_escrituracion: Optional[date] = None,
         estado_codigo: str = "PROYECTADA"
     ) -> Vivienda:
         estado_id = self._get_estado_vivienda_id(estado_codigo)
         viv = Vivienda(
-            desarrollo_id=desarrollo_id,
             regimen_id=regimen_id,
-            tipo_proyecto="REGIMEN_CONDOMINIO",
-            sm=sm,
-            mz=mz,
-            lt=lt,
+            numero_oficial=numero_oficial,
+            interior=interior,
             edificio=edificio,
-            vivienda=vivienda,
-            numero_upe=numero_upe,
+            nivel=nivel,
             calle=calle,
+            destino=destino,
+            espacio=espacio,
+            folio_electronico=folio_electronico,
             clave_catastral=clave_catastral,
+            padron=padron,
             descripcion=descripcion,
+            fecha_escrituracion=fecha_escrituracion,
             estado_vivienda_id=estado_id,
-            estatus_obra="EN_CONSTRUCCION",
             activo=True,
             created_at=datetime.utcnow()
         )
@@ -608,26 +610,42 @@ class ViviendaRepository(BaseCancunRepository):
     def list_by_regimen(self, regimen_id: int) -> List[Vivienda]:
         stmt = (
             select(Vivienda)
-            .options(selectinload(Vivienda.estado), selectinload(Vivienda.regimen), selectinload(Vivienda.desarrollo))
+            .options(
+                selectinload(Vivienda.estado),
+                selectinload(Vivienda.regimen).selectinload(RegimenCondominio.desarrollo)
+            )
             .where(Vivienda.regimen_id == regimen_id)
             .order_by(Vivienda.vivienda_id.asc())
         )
         return list(self.session.execute(stmt).scalars().all())
 
-    def list_by_desarrollo(self, desarrollo_id: int, solo_sin_regimen: bool = False) -> List[Vivienda]:
+    def list_by_desarrollo(self, desarrollo_id: int) -> List[Vivienda]:
+        """Consulta viviendas de un desarrollo resolviéndolas a través de su régimen matriz."""
         stmt = (
             select(Vivienda)
-            .options(selectinload(Vivienda.estado), selectinload(Vivienda.regimen), selectinload(Vivienda.desarrollo))
-            .where(Vivienda.desarrollo_id == desarrollo_id)
+            .join(Vivienda.regimen)
+            .options(
+                selectinload(Vivienda.estado),
+                selectinload(Vivienda.regimen).selectinload(RegimenCondominio.desarrollo)
+            )
+            .where(RegimenCondominio.desarrollo_id == desarrollo_id)
+            .order_by(Vivienda.vivienda_id.asc())
         )
-        if solo_sin_regimen:
-            stmt = stmt.where(Vivienda.regimen_id.is_(None))
-        stmt = stmt.order_by(Vivienda.vivienda_id.asc())
         return list(self.session.execute(stmt).scalars().all())
 
     def count_by_regimen(self, regimen_id: int) -> int:
         stmt = select(func.count(Vivienda.vivienda_id)).where(Vivienda.regimen_id == regimen_id)
         return self.session.execute(stmt).scalar_one() or 0
+
+    def get_by_folio_electronico(self, folio_electronico: str) -> Optional[Vivienda]:
+        """Búsqueda directa por folio electrónico inmobiliario del RPP."""
+        stmt = select(Vivienda).where(Vivienda.folio_electronico == folio_electronico)
+        return self.session.execute(stmt).scalar_one_or_none()
+
+    def get_by_clave_catastral(self, clave_catastral: str) -> Optional[Vivienda]:
+        """Búsqueda directa por clave catastral individualizada."""
+        stmt = select(Vivienda).where(Vivienda.clave_catastral == clave_catastral)
+        return self.session.execute(stmt).scalar_one_or_none()
 
     def update_estado(self, vivienda_id: int, nuevo_estado_codigo: str) -> None:
         viv = self.get_by_id(vivienda_id)
@@ -635,6 +653,115 @@ class ViviendaRepository(BaseCancunRepository):
             viv.estado_vivienda_id = self._get_estado_vivienda_id(nuevo_estado_codigo)
             viv.updated_at = datetime.utcnow()
             self.session.flush()
+
+    def bulk_update_folios_rpp(self, regimen_id: int, updates: List[Dict[str, Any]]) -> Dict[str, int]:
+        """
+        Asocia masivamente folios electrónicos del RPP a viviendas de un régimen
+        usando (edificio, interior) o interior como clave de enlace flexible.
+        Transiciona el estado de la vivienda a 'EN_INDIVIDUALIZACION'.
+        """
+        st_indiv_id = self._get_estado_vivienda_id("EN_INDIVIDUALIZACION")
+        viviendas = self.list_by_regimen(regimen_id)
+        
+        # Mapeo estricto por (edificio normalizado, interior normalizado)
+        vivienda_map = {}
+        # Mapeo de respaldo por interior exclusivo (si es único en el régimen)
+        interior_map = {}
+        interior_counts = {}
+
+        for v in viviendas:
+            ed_norm = re.sub(r'^(EDIFICIO|TORRE)\s*', '', (v.edificio or "").strip().upper()).strip()
+            int_norm = (v.interior or "").strip().upper()
+            vivienda_map[(ed_norm, int_norm)] = v
+            # También guardar con edificio completo original
+            vivienda_map[((v.edificio or "").strip().upper(), int_norm)] = v
+            interior_counts[int_norm] = interior_counts.get(int_norm, 0) + 1
+            interior_map[int_norm] = v
+
+        actualizados = 0
+        no_encontrados = 0
+
+        for item in updates:
+            raw_edif = (item.get("edificio") or "").strip().upper()
+            ed_norm = re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_edif).strip()
+            inter = str(item.get("interior") or "").strip().upper()
+            folio = str(item.get("folio_electronico") or "").strip()
+
+            if not inter or not folio:
+                continue
+
+            # 1. Búsqueda directa exacta
+            target = vivienda_map.get((raw_edif, inter)) or vivienda_map.get((ed_norm, inter))
+
+            # 2. Búsqueda de respaldo por interior si no hay ambigüedad (solo 1 vivienda con ese interior)
+            if not target and interior_counts.get(inter) == 1:
+                target = interior_map.get(inter)
+
+            if target:
+                target.folio_electronico = folio
+                # Solo avanza estado si estaba en PROYECTADA
+                if target.estado and target.estado.codigo == "PROYECTADA":
+                    target.estado_vivienda_id = st_indiv_id
+                target.updated_at = datetime.utcnow()
+                actualizados += 1
+            else:
+                no_encontrados += 1
+
+        self.session.flush()
+        return {"actualizados": actualizados, "no_encontrados": no_encontrados}
+
+    def bulk_update_catastro(self, regimen_id: int, updates: List[Dict[str, Any]]) -> Dict[str, int]:
+        """
+        Asocia masivamente Clave Catastral y Padrón municipal a viviendas de un régimen
+        usando (interior, edificio) o folio_electronico como clave de enlace.
+        Transiciona el estado de la vivienda a 'LISTA_PARA_VENTA'.
+        """
+        st_venta_id = self._get_estado_vivienda_id("LISTA_PARA_VENTA")
+        viviendas = self.list_by_regimen(regimen_id)
+        
+        vivienda_by_interior = {
+            ((v.edificio or "").strip().upper(), v.interior.strip().upper()): v
+            for v in viviendas
+        }
+        vivienda_by_rpp = {
+            v.folio_electronico.strip().upper(): v
+            for v in viviendas if v.folio_electronico
+        }
+
+        actualizados = 0
+        no_encontrados = 0
+
+        for item in updates:
+            edif = (item.get("edificio") or "").strip().upper()
+            inter = str(item.get("interior") or "").strip().upper()
+            folio_rpp = str(item.get("folio_electronico") or "").strip().upper()
+            clave_cat = str(item.get("clave_catastral") or "").strip()
+            padron = str(item.get("padron") or "").strip()
+
+            if not clave_cat and not padron:
+                continue
+
+            # Buscar primero por folio RPP si existe, o por (edificio, interior)
+            target = None
+            if folio_rpp and folio_rpp in vivienda_by_rpp:
+                target = vivienda_by_rpp[folio_rpp]
+            elif (edif, inter) in vivienda_by_interior:
+                target = vivienda_by_interior[(edif, inter)]
+
+            if target:
+                if clave_cat:
+                    target.clave_catastral = clave_cat
+                if padron:
+                    target.padron = padron
+                if target.estado.codigo in ["PROYECTADA", "EN_INDIVIDUALIZACION"]:
+                    target.estado_vivienda_id = st_venta_id
+                target.updated_at = datetime.utcnow()
+                actualizados += 1
+            else:
+                no_encontrados += 1
+
+        self.session.flush()
+        return {"actualizados": actualizados, "no_encontrados": no_encontrados}
 
 
 class TramiteViviendaRepository(BaseCancunRepository):

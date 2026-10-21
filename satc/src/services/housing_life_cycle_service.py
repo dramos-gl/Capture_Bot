@@ -88,17 +88,15 @@ class HousingLifeCycleService:
         viviendas_creadas = []
         for i in range(rango_inicio, fin + 1):
             num_upe_str = f"{prefijo_upe}-{str(i).zfill(3)}"
-            vivienda_str = f"{str(i).zfill(3)}"
+            interior_str = f"{str(i).zfill(3)}"
             viv = self.vivienda_repo.create_upe(
-                desarrollo_id=regimen.desarrollo_id,
                 regimen_id=regimen.regimen_id,
-                numero_upe=num_upe_str,
-                vivienda=vivienda_str,
-                mz=regimen.mz,
-                lt=regimen.lt,
-                sm=regimen.sm,
+                interior=interior_str,
+                numero_oficial=num_upe_str,
                 edificio=edificio_defecto,
                 calle=calle_defecto,
+                destino="HABITACIONAL",
+                espacio="VIVIENDA",
                 descripcion=f"UPE {i} de {regimen.total_upes} - {regimen.nombre_regimen}",
                 estado_codigo="PROYECTADA"
             )
@@ -386,52 +384,60 @@ class HousingLifeCycleService:
         return [
             {
                 "vivienda_id": v.vivienda_id,
-                "desarrollo_id": v.desarrollo_id,
+                "desarrollo_id": v.desarrollo.desarrollo_id if v.desarrollo else None,
                 "desarrollo_nombre": v.desarrollo.nombre if v.desarrollo else "",
                 "regimen_id": v.regimen_id,
                 "regimen_nombre": v.regimen.nombre_regimen if v.regimen else "",
-                "tipo_proyecto": v.tipo_proyecto,
-                "sm": v.sm or "",
-                "mz": v.mz,
-                "lt": v.lt,
+                "sm": v.regimen.sm or "" if v.regimen else "",
+                "mz": v.regimen.mz if v.regimen else "",
+                "lt": v.regimen.lt if v.regimen else "",
+                "numero_oficial": v.numero_oficial or "",
+                "interior": v.interior,
                 "edificio": v.edificio or "",
-                "vivienda": v.vivienda,
-                "numero_upe": v.numero_upe or "",
+                "nivel": v.nivel or "",
                 "calle": v.calle or "",
+                "destino": v.destino,
+                "espacio": v.espacio,
+                "folio_electronico": v.folio_electronico or "",
                 "clave_catastral": v.clave_catastral or "",
-                "cuenta_predial": v.cuenta_predial or "",
+                "padron": v.padron or "",
+                "fecha_escrituracion": str(v.fecha_escrituracion) if v.fecha_escrituracion else "",
                 "descripcion": v.descripcion or "",
                 "estado_codigo": v.estado.codigo if v.estado else "",
                 "estado_nombre": v.estado.nombre if v.estado else "",
-                "estatus_obra": v.estatus_obra,
                 "activo": v.activo
             }
             for v in viviendas
         ]
 
     def get_viviendas_by_desarrollo(self, desarrollo_id: int, solo_sin_regimen: bool = False) -> List[Dict[str, Any]]:
-        viviendas = self.vivienda_repo.list_by_desarrollo(desarrollo_id, solo_sin_regimen=solo_sin_regimen)
+        viviendas = self.vivienda_repo.list_by_desarrollo(desarrollo_id)
+        if solo_sin_regimen:
+            viviendas = [v for v in viviendas if v.regimen_id is None]
         return [
             {
                 "vivienda_id": v.vivienda_id,
-                "desarrollo_id": v.desarrollo_id,
+                "desarrollo_id": v.desarrollo.desarrollo_id if v.desarrollo else desarrollo_id,
                 "desarrollo_nombre": v.desarrollo.nombre if v.desarrollo else "",
                 "regimen_id": v.regimen_id,
                 "regimen_nombre": v.regimen.nombre_regimen if v.regimen else "SIN RÉGIMEN",
-                "tipo_proyecto": v.tipo_proyecto,
-                "sm": v.sm or "",
-                "mz": v.mz,
-                "lt": v.lt,
+                "sm": v.regimen.sm or "" if v.regimen else "",
+                "mz": v.regimen.mz if v.regimen else "",
+                "lt": v.regimen.lt if v.regimen else "",
+                "numero_oficial": v.numero_oficial or "",
+                "interior": v.interior,
                 "edificio": v.edificio or "",
-                "vivienda": v.vivienda,
-                "numero_upe": v.numero_upe or "",
+                "nivel": v.nivel or "",
                 "calle": v.calle or "",
+                "destino": v.destino,
+                "espacio": v.espacio,
+                "folio_electronico": v.folio_electronico or "",
                 "clave_catastral": v.clave_catastral or "",
-                "cuenta_predial": v.cuenta_predial or "",
+                "padron": v.padron or "",
+                "fecha_escrituracion": str(v.fecha_escrituracion) if v.fecha_escrituracion else "",
                 "descripcion": v.descripcion or "",
                 "estado_codigo": v.estado.codigo if v.estado else "",
                 "estado_nombre": v.estado.nombre if v.estado else "",
-                "estatus_obra": v.estatus_obra,
                 "activo": v.activo
             }
             for v in viviendas
@@ -441,61 +447,46 @@ class HousingLifeCycleService:
         self,
         desarrollo_id: int,
         records: List[Dict[str, Any]],
-        regimen_id: Optional[int] = None,
+        regimen_id: int,
         usuario_id: int = 1,
         sesion_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        Importa masivamente viviendas/UPEs desde registros extraídos de Excel.
+        Importa masivamente viviendas/UPEs normalizadas asociadas a su régimen matriz.
         Validaciones de integridad:
-          1. Si regimen_id está presente:
-             - Valida que el régimen exista y pertenezca al desarrollo.
-             - Valida que total en archivo + UPEs ya existentes NO exceda total_upes del régimen.
-          2. Si regimen_id es None:
-             - Importa viviendas asociadas directamente al desarrollo (tipo_proyecto = 'FRACCIONAMIENTO').
-          3. Detección de duplicados en la base de datos por coordenadas únicas.
+          1. El régimen debe existir y pertenecer al desarrollo.
+          2. Valida que el total de registros no exceda el límite autorizado en el régimen.
+          3. Detección de duplicidad por (regimen_id, edificio, interior).
         """
-        if not desarrollo_id:
-            raise ValueError("El desarrollo_id es obligatorio para importar viviendas.")
+        if not desarrollo_id or not regimen_id:
+            raise ValueError("El desarrollo_id y regimen_id son obligatorios para importar viviendas.")
 
-        regimen = None
-        if regimen_id:
-            regimen = self.regimen_repo.get_by_id(regimen_id)
-            if not regimen:
-                raise ValueError(f"Régimen con ID {regimen_id} no existe.")
-            if regimen.desarrollo_id != desarrollo_id:
-                raise ValueError("El régimen seleccionado no pertenece al desarrollo indicado.")
+        regimen = self.regimen_repo.get_by_id(regimen_id)
+        if not regimen:
+            raise ValueError(f"Régimen con ID {regimen_id} no existe.")
+        if regimen.desarrollo_id != desarrollo_id:
+            raise ValueError("El régimen seleccionado no pertenece al desarrollo indicado.")
 
-            # Validación de UPEs autorizadas vs total en archivo
-            upes_existentes = self.vivienda_repo.count_by_regimen(regimen_id)
-            total_en_archivo = len(records)
-            if total_en_archivo > regimen.total_upes:
-                raise ValueError(
-                    f"Inconsistencia en archivo: El total de viviendas en el archivo ({total_en_archivo}) "
-                    f"supera el límite de UPEs autorizadas en el Régimen ({regimen.total_upes})."
-                )
+        # Validación de UPEs autorizadas vs total en archivo
+        upes_existentes = self.vivienda_repo.count_by_regimen(regimen_id)
+        total_en_archivo = len(records)
+        if (upes_existentes + total_en_archivo) > regimen.total_upes:
+            raise ValueError(
+                f"Inconsistencia en archivo: Las viviendas a importar ({total_en_archivo}) más las existentes ({upes_existentes}) "
+                f"superan el límite de UPEs autorizadas en el Régimen ({regimen.total_upes})."
+            )
 
-        # Cargar estado inicial por defecto (PROYECTADA o EN_CONSTRUCCION)
+        # Cargar estado inicial por defecto (PROYECTADA)
         estado_id = self.vivienda_repo._get_estado_vivienda_id("PROYECTADA")
 
-        # Cargar viviendas existentes del desarrollo/régimen para evitar duplicados en la misma importación
         from sqlalchemy import select
-        stmt = select(Vivienda).where(Vivienda.desarrollo_id == desarrollo_id)
-        if regimen_id:
-            stmt = stmt.where(Vivienda.regimen_id == regimen_id)
-        else:
-            stmt = stmt.where(Vivienda.regimen_id.is_(None))
-
+        stmt = select(Vivienda).where(Vivienda.regimen_id == regimen_id)
         existentes_db = self.session.execute(stmt).scalars().all()
-        # Clave única de comparación: (SM, MZ, LT, EDIFICIO, VIVIENDA, NUMERO_UPE)
+        # Clave única normalizada: (EDIFICIO, INTERIOR)
         existentes_keys = {
             (
-                (v.sm or "").strip().upper(),
-                (v.mz or "").strip().upper(),
-                (v.lt or "").strip().upper(),
                 (v.edificio or "").strip().upper(),
-                (v.vivienda or "").strip().upper(),
-                (v.numero_upe or "").strip().upper()
+                (v.interior or "").strip().upper()
             )
             for v in existentes_db
         }
@@ -503,52 +494,42 @@ class HousingLifeCycleService:
         nuevos_insertados = 0
         omitidos_duplicados = 0
 
-        tipo_proy = "REGIMEN_CONDOMINIO" if regimen_id else "FRACCIONAMIENTO"
-
         for r in records:
-            sm_val = str(r.get("sm") or (regimen.sm if regimen else "") or "").strip().upper() or None
-            mz_val = str(r.get("mz") or (regimen.mz if regimen else "") or "").strip().upper()
-            lt_val = str(r.get("lt") or (regimen.lt if regimen else "") or "").strip().upper()
-            edif_val = str(r.get("edificio") or "").strip().upper() or None
-            viv_val = str(r.get("vivienda") or "").strip().upper()
-            upe_val = str(r.get("numero_upe") or "").strip().upper() or None
-            calle_val = str(r.get("calle") or "").strip() or None
-            clave_cat_val = str(r.get("clave_catastral") or "").strip() or None
-            cuenta_predial_val = str(r.get("cuenta_predial") or "").strip() or None
-            desc_val = str(r.get("descripcion") or "").strip() or None
-
-            if not mz_val or not lt_val or not viv_val:
+            interior_val = str(r.get("interior") or r.get("vivienda") or "").strip().upper()
+            if not interior_val:
                 continue
 
-            k = (
-                sm_val or "",
-                mz_val,
-                lt_val,
-                edif_val or "",
-                viv_val,
-                upe_val or ""
-            )
+            edif_val = str(r.get("edificio") or "").strip().upper() or None
+            nivel_val = str(r.get("nivel") or "").strip().upper() or None
+            num_oficial_val = str(r.get("numero_oficial") or r.get("numero_upe") or "").strip() or None
+            calle_val = str(r.get("calle") or "").strip() or None
+            destino_val = str(r.get("destino") or "HABITACIONAL").strip().upper()
+            espacio_val = str(r.get("espacio") or "VIVIENDA").strip().upper()
+            folio_elec_val = str(r.get("folio_electronico") or "").strip() or None
+            clave_cat_val = str(r.get("clave_catastral") or "").strip() or None
+            padron_val = str(r.get("padron") or r.get("cuenta_predial") or "").strip() or None
+            desc_val = str(r.get("descripcion") or "").strip() or None
+
+            k = (edif_val or "", interior_val)
 
             if k in existentes_keys:
                 omitidos_duplicados += 1
                 continue
 
             nueva_viv = Vivienda(
-                desarrollo_id=desarrollo_id,
                 regimen_id=regimen_id,
-                tipo_proyecto=tipo_proy,
-                sm=sm_val,
-                mz=mz_val,
-                lt=lt_val,
+                numero_oficial=num_oficial_val,
+                interior=interior_val,
                 edificio=edif_val,
-                vivienda=viv_val,
-                numero_upe=upe_val,
+                nivel=nivel_val,
                 calle=calle_val,
+                destino=destino_val if destino_val in ['HABITACIONAL', 'SERVICIO', 'COMERCIAL', 'MIXTO'] else 'HABITACIONAL',
+                espacio=espacio_val if espacio_val in ['VIVIENDA', 'AREAS_COMUNES', 'ESTACIONAMIENTO', 'BODEGA'] else 'VIVIENDA',
+                folio_electronico=folio_elec_val,
                 clave_catastral=clave_cat_val,
-                cuenta_predial=cuenta_predial_val,
+                padron=padron_val,
                 descripcion=desc_val,
                 estado_vivienda_id=estado_id,
-                estatus_obra="EN_CONSTRUCCION",
                 activo=True,
                 created_at=datetime.utcnow()
             )
@@ -556,15 +537,15 @@ class HousingLifeCycleService:
             existentes_keys.add(k)
             nuevos_insertados += 1
 
-        # Si pertenece a un régimen, actualizar el contador upes_generadas
-        if regimen and nuevos_insertados > 0:
+        # Actualizar contador de UPEs generadas en el régimen
+        if nuevos_insertados > 0:
             regimen.upes_generadas = self.vivienda_repo.count_by_regimen(regimen_id) + nuevos_insertados
             regimen.updated_at = datetime.utcnow()
 
         self.session.commit()
 
         logger.info(
-            f"Importación de viviendas completada para desarrollo {desarrollo_id}: "
+            f"Importación de viviendas completada para régimen {regimen_id}: "
             f"{nuevos_insertados} insertados, {omitidos_duplicados} omitidos por duplicidad."
         )
 
@@ -574,6 +555,52 @@ class HousingLifeCycleService:
             "omitidos_duplicados": omitidos_duplicados,
             "regimen_id": regimen_id,
             "desarrollo_id": desarrollo_id
+        }
+
+    def vincular_folios_rpp_excel(self, regimen_id: int, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Enriquece las viviendas del régimen con sus Folios Electrónicos del RPP desde registros parseados.
+        Avanza el estado a 'EN_INDIVIDUALIZACION'.
+        """
+        regimen = self.regimen_repo.get_by_id(regimen_id)
+        if not regimen:
+            raise ValueError(f"Régimen con ID {regimen_id} no existe.")
+
+        res = self.vivienda_repo.bulk_update_folios_rpp(regimen_id, records)
+        self.session.commit()
+        logger.info(f"Folios RPP vinculados para régimen {regimen_id}: {res['actualizados']} actualizados, {res['no_encontrados']} no encontrados.")
+        return {
+            "regimen_id": regimen_id,
+            "actualizados": res["actualizados"],
+            "no_encontrados": res["no_encontrados"],
+            "total_en_archivo": len(records)
+        }
+
+    def vincular_folios_rpp_pdf(self, regimen_id: int, pdf_path: str) -> Dict[str, Any]:
+        """
+        Extrae y asocia los folios electrónicos del RPP directamente desde una Constancia de Resolución PDF.
+        """
+        from satc.src.services.rpp_resolution_extractor import RppResolutionExtractor
+        records = RppResolutionExtractor.extract_from_pdf(pdf_path)
+        return self.vincular_folios_rpp_excel(regimen_id=regimen_id, records=records)
+
+    def vincular_catastro_excel(self, regimen_id: int, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Enriquece las viviendas del régimen con su Clave Catastral y Padrón municipal.
+        Avanza el estado a 'LISTA_PARA_VENTA'.
+        """
+        regimen = self.regimen_repo.get_by_id(regimen_id)
+        if not regimen:
+            raise ValueError(f"Régimen con ID {regimen_id} no existe.")
+
+        res = self.vivienda_repo.bulk_update_catastro(regimen_id, records)
+        self.session.commit()
+        logger.info(f"Datos catastrales vinculados para régimen {regimen_id}: {res['actualizados']} actualizados, {res['no_encontrados']} no encontrados.")
+        return {
+            "regimen_id": regimen_id,
+            "actualizados": res["actualizados"],
+            "no_encontrados": res["no_encontrados"],
+            "total_en_archivo": len(records)
         }
 
 

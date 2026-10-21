@@ -541,6 +541,39 @@ def regularizar_referencias_colaborador(payload: RegularizarColaboradorRequest, 
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al regularizar asignaciones de colaborador: {str(e)}")
 
+@router.post("/referencias/info-regularizacion-batch")
+def info_regularizacion_batch(payload: ValidarBatchRequest, db: Session = Depends(get_db)):
+    """Obtiene el estado y colaborador asignatario de un lote de referencias para validación de regularización."""
+    try:
+        from sar.src.storage.models import Referencia, AsignacionReferencia, LoteDetalle, LoteAsignacion, EstadoSistema
+        refs_set = set(payload.referencias)
+        db_ref_info = {}
+        if refs_set:
+            refs_list = list(refs_set)
+            chunk_size = 500
+            for i in range(0, len(refs_list), chunk_size):
+                chunk = refs_list[i:i + chunk_size]
+                stmt = (
+                    select(
+                        Referencia.referencia_portal,
+                        EstadoSistema.codigo.label("estado_codigo"),
+                        LoteAsignacion.colaborador_id
+                    )
+                    .join(EstadoSistema, Referencia.estado_id == EstadoSistema.estado_id)
+                    .outerjoin(AsignacionReferencia, Referencia.referencia_id == AsignacionReferencia.referencia_id)
+                    .outerjoin(LoteDetalle, AsignacionReferencia.lote_detalle_id == LoteDetalle.lote_detalle_id)
+                    .outerjoin(LoteAsignacion, LoteDetalle.lote_asignacion_id == LoteAsignacion.lote_asignacion_id)
+                    .where(Referencia.referencia_portal.in_(chunk))
+                )
+                for row_db in db.execute(stmt).all():
+                    db_ref_info[row_db.referencia_portal] = {
+                        "estado": row_db.estado_codigo,
+                        "colaborador_id": row_db.colaborador_id
+                    }
+        return {"referencias": db_ref_info}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener info de regularización: {str(e)}")
+
 # ===========================================================================
 # ENDPOINTS: Catálogo de Ubicaciones (Procesos Especiales)
 # ===========================================================================

@@ -218,7 +218,7 @@ class EstadoTramite(Base):
 
 class RegimenCondominio(Base):
     """Mapea el macro-lote fiduciario del régimen en condominio."""
-    __tablename__ = "regimen_condominio"
+    __tablename__ = "regimen"
     __table_args__ = {"schema": "satc_catalogo"}
 
     regimen_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -241,37 +241,53 @@ class RegimenCondominio(Base):
 
 
 class Vivienda(Base):
-    """Mapea cada vivienda individual o Unidad de Propiedad Exclusiva (UPE)."""
+    """Mapea cada unidad privativa o espacio bajo Régimen de Condominio (Normalizado)."""
     __tablename__ = "vivienda"
     __table_args__ = {"schema": "satc_catalogo"}
 
     vivienda_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    desarrollo_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id"), nullable=False)
-    regimen_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.regimen_condominio.regimen_id", ondelete="SET NULL"))
-    tipo_proyecto: Mapped[str] = mapped_column(String(30), default="REGIMEN_CONDOMINIO", nullable=False)
-    sm: Mapped[Optional[str]] = mapped_column(String(50))
-    mz: Mapped[str] = mapped_column(String(50), nullable=False)
-    lt: Mapped[str] = mapped_column(String(50), nullable=False)
+    regimen_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.regimen.regimen_id", ondelete="RESTRICT"), nullable=False)
+    
+    # Identificación Urbana y Física
+    numero_oficial: Mapped[Optional[str]] = mapped_column(String(50))
+    interior: Mapped[str] = mapped_column(String(50), nullable=False)
     edificio: Mapped[Optional[str]] = mapped_column(String(50))
-    vivienda: Mapped[str] = mapped_column(String(50), nullable=False)
-    numero_upe: Mapped[Optional[str]] = mapped_column(String(50))
+    nivel: Mapped[Optional[str]] = mapped_column(String(30))
     calle: Mapped[Optional[str]] = mapped_column(String(200))
-    clave_catastral: Mapped[Optional[str]] = mapped_column(String(100))
-    cuenta_predial: Mapped[Optional[str]] = mapped_column(String(100))
-    descripcion: Mapped[Optional[str]] = mapped_column(Text)
+    
+    # Vocación y Régimen
+    destino: Mapped[str] = mapped_column(String(30), default="HABITACIONAL", nullable=False)
+    espacio: Mapped[str] = mapped_column(String(30), default="VIVIENDA", nullable=False)
+    
+    # Identidad Jurídica (RPP) y Catastral
+    folio_electronico: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    clave_catastral: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    padron: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    
+    # Ciclo y Auditoría
     estado_vivienda_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.estado_vivienda.estado_vivienda_id"), nullable=False)
-    estatus_obra: Mapped[str] = mapped_column(String(50), default="EN_CONSTRUCCION", nullable=False)
-    fecha_venta: Mapped[Optional[date]] = mapped_column(Date)
     fecha_escrituracion: Mapped[Optional[date]] = mapped_column(Date)
+    descripcion: Mapped[Optional[str]] = mapped_column(Text)
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
-    # Relaciones
-    desarrollo = relationship("Desarrollo", foreign_keys=[desarrollo_id])
-    regimen: Mapped[Optional[RegimenCondominio]] = relationship(back_populates="viviendas")
+    # Relaciones Soberanas
+    regimen: Mapped["RegimenCondominio"] = relationship(back_populates="viviendas")
     estado: Mapped[EstadoVivienda] = relationship()
     tramites: Mapped[List["TramiteVivienda"]] = relationship(back_populates="vivienda", cascade="all, delete-orphan")
+
+    @property
+    def desarrollo(self):
+        """Propiedad delegada: el desarrollo se resuelve a través del régimen matriz sin redundancia en BD."""
+        return self.regimen.desarrollo if self.regimen else None
+
+    @property
+    def ubicacion_macro(self) -> str:
+        """Formatea SM, MZ y LT heredados del régimen matriz."""
+        if not self.regimen:
+            return ""
+        return f"SM {self.regimen.sm or '-'}, MZ {self.regimen.mz}, LT {self.regimen.lt}"
 
 
 class TramiteVivienda(Base):
@@ -282,7 +298,7 @@ class TramiteVivienda(Base):
     tramite_vivienda_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     solicitud_tramite_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_produccion.solicitud_tramite.solicitud_tramite_id", ondelete="SET NULL"))
     vivienda_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.vivienda.vivienda_id", ondelete="CASCADE"))
-    regimen_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.regimen_condominio.regimen_id", ondelete="CASCADE"))
+    regimen_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.regimen.regimen_id", ondelete="CASCADE"))
     tipo_tramite_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.tipo_tramite.tipo_tramite_id"), nullable=False)
     estado_tramite_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.estado_tramite.estado_tramite_id"), nullable=False)
     folio_pase_caja: Mapped[Optional[str]] = mapped_column(String(100))
@@ -319,7 +335,7 @@ class OrdenTramite(Base):
     orden_tramite_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     folio_orden: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     desarrollo_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id"), nullable=False)
-    regimen_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.regimen_condominio.regimen_id", ondelete="SET NULL"))
+    regimen_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.regimen.regimen_id", ondelete="SET NULL"))
     descripcion: Mapped[Optional[str]] = mapped_column(Text)
     total_solicitudes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     total_viviendas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

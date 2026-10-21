@@ -88,7 +88,7 @@ class AdminMenuBar(QMenuBar):
         act_satc_tipos = self._add_action(menu_satc, "Tipos de Trámite Municipal", "documento_plantilla", color=Colors.ACCENT_BLUE)
         act_satc_estados_tr = self._add_action(menu_satc, "Estados de Trámite", "validar", color=Colors.SUCCESS)
         act_satc_estados_viv = self._add_action(menu_satc, "Estados de Vivienda / UPE", "actividad", color=Colors.ACCENT_AMBER)
-        act_satc_regimenes = self._add_action(menu_satc, "Regímenes en Condominio (Macro-Lotes)", "empresa", color=Colors.ACCENT_VIOLET)
+        act_satc_regimenes = self._add_action(menu_satc, "Regímenes mz", "empresa", color=Colors.ACCENT_VIOLET)
         menu_satc.addSeparator()
         act_satc_viviendas = self._add_action(menu_satc, "Importación Masiva de Viviendas (Excel)", "documento_cargar", color=Colors.ACCENT_EMERALD)
 
