@@ -83,6 +83,9 @@ class RppResolutionExtractor:
             # 4. Número oficial (tolerante a erratas de OCR/PDF ej. NUMEO, NUMEORO)
             m_nof = re.search(r'N[ÚU\ufffd]?M[EEO]*R?O?\s+OFICIAL\s*(\d+)', body, re.IGNORECASE)
             no_oficial = m_nof.group(1).strip() if m_nof else ""
+            # Si no viene explícito "NUMERO OFICIAL <N>" en el cuerpo, la columna "No." (num_fraccion) es su equivalente oficial
+            if not no_oficial and num_fraccion:
+                no_oficial = str(num_fraccion)
 
             # 5. Nivel / Planta (tolerante a puntos como NIVEL .3)
             m_niv = re.search(r'(PLANTA BAJA|NIVEL[\s\.]*\d+|PISO[\s\.]*\d+)', body, re.IGNORECASE)

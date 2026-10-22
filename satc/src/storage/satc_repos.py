@@ -668,6 +668,9 @@ class ViviendaRepository(BaseCancunRepository):
         # Mapeo de respaldo por interior exclusivo (si es único en el régimen)
         interior_map = {}
         interior_counts = {}
+        # Mapeo de respaldo por número oficial exclusivo (si es único en el régimen)
+        nof_map = {}
+        nof_counts = {}
 
         for v in viviendas:
             ed_norm = re.sub(r'^(EDIFICIO|TORRE)\s*', '', (v.edificio or "").strip().upper()).strip()
@@ -678,6 +681,18 @@ class ViviendaRepository(BaseCancunRepository):
             interior_counts[int_norm] = interior_counts.get(int_norm, 0) + 1
             interior_map[int_norm] = v
 
+            # Indexar por Número Oficial (blindaje secundario)
+            nof_raw = str(v.numero_oficial or "").strip().upper()
+            if nof_raw and nof_raw not in ("-", "N/A", "NONE"):
+                nof_map[nof_raw] = v
+                nof_counts[nof_raw] = nof_counts.get(nof_raw, 0) + 1
+                digits_match = re.search(r'\b(\d+)\b', nof_raw)
+                if digits_match:
+                    d_val = digits_match.group(1).lstrip("0") or "0"
+                    if d_val not in nof_map:
+                        nof_map[d_val] = v
+                    nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
+
         actualizados = 0
         no_encontrados = 0
 
@@ -686,16 +701,26 @@ class ViviendaRepository(BaseCancunRepository):
             ed_norm = re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_edif).strip()
             inter = str(item.get("interior") or "").strip().upper()
             folio = str(item.get("folio_electronico") or "").strip()
+            raw_nof = str(item.get("numero_oficial") or "").strip().upper()
 
             if not inter or not folio:
                 continue
 
-            # 1. Búsqueda directa exacta
+            # 1. Búsqueda directa exacta por (edificio, interior)
             target = vivienda_map.get((raw_edif, inter)) or vivienda_map.get((ed_norm, inter))
 
             # 2. Búsqueda de respaldo por interior si no hay ambigüedad (solo 1 vivienda con ese interior)
             if not target and interior_counts.get(inter) == 1:
                 target = interior_map.get(inter)
+
+            # 3. Blindaje secundario: Coincidencia por Número Oficial unívoco en el régimen
+            if not target and raw_nof:
+                digits_nof = re.search(r'\b(\d+)\b', raw_nof)
+                d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
+                if nof_counts.get(raw_nof) == 1:
+                    target = nof_map.get(raw_nof)
+                elif d_clean and nof_counts.get(d_clean) == 1:
+                    target = nof_map.get(d_clean)
 
             if target:
                 target.folio_electronico = folio
@@ -719,10 +744,33 @@ class ViviendaRepository(BaseCancunRepository):
         st_venta_id = self._get_estado_vivienda_id("LISTA_PARA_VENTA")
         viviendas = self.list_by_regimen(regimen_id)
         
-        vivienda_by_interior = {
-            ((v.edificio or "").strip().upper(), v.interior.strip().upper()): v
-            for v in viviendas
-        }
+        vivienda_by_interior = {}
+        interior_map = {}
+        interior_counts = {}
+        nof_map = {}
+        nof_counts = {}
+
+        for v in viviendas:
+            raw_ed = (v.edificio or "").strip().upper()
+            ed_clean = "" if raw_ed in ("-", "N/A", "NONE", "") else re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_ed).strip()
+            inter = (v.interior or "").strip().upper()
+            
+            vivienda_by_interior[(raw_ed, inter)] = v
+            vivienda_by_interior[(ed_clean, inter)] = v
+            interior_counts[inter] = interior_counts.get(inter, 0) + 1
+            interior_map[inter] = v
+
+            nof_raw = str(v.numero_oficial or "").strip().upper()
+            if nof_raw and nof_raw not in ("-", "N/A", "NONE"):
+                nof_map[nof_raw] = v
+                nof_counts[nof_raw] = nof_counts.get(nof_raw, 0) + 1
+                digits_match = re.search(r'\b(\d+)\b', nof_raw)
+                if digits_match:
+                    d_val = digits_match.group(1).lstrip("0") or "0"
+                    if d_val not in nof_map:
+                        nof_map[d_val] = v
+                    nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
+
         vivienda_by_rpp = {
             v.folio_electronico.strip().upper(): v
             for v in viviendas if v.folio_electronico
@@ -732,21 +780,34 @@ class ViviendaRepository(BaseCancunRepository):
         no_encontrados = 0
 
         for item in updates:
-            edif = (item.get("edificio") or "").strip().upper()
+            raw_ed = (item.get("edificio") or "").strip().upper()
+            ed_clean = "" if raw_ed in ("-", "N/A", "NONE", "") else re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_ed).strip()
             inter = str(item.get("interior") or "").strip().upper()
             folio_rpp = str(item.get("folio_electronico") or "").strip().upper()
             clave_cat = str(item.get("clave_catastral") or "").strip()
             padron = str(item.get("padron") or "").strip()
+            raw_nof = str(item.get("numero_oficial") or "").strip().upper()
 
             if not clave_cat and not padron:
                 continue
 
-            # Buscar primero por folio RPP si existe, o por (edificio, interior)
+            # Buscar primero por folio RPP si existe, o por (edificio, interior), o interior único, o número oficial único
             target = None
             if folio_rpp and folio_rpp in vivienda_by_rpp:
                 target = vivienda_by_rpp[folio_rpp]
-            elif (edif, inter) in vivienda_by_interior:
-                target = vivienda_by_interior[(edif, inter)]
+            elif (raw_ed, inter) in vivienda_by_interior:
+                target = vivienda_by_interior[(raw_ed, inter)]
+            elif (ed_clean, inter) in vivienda_by_interior:
+                target = vivienda_by_interior[(ed_clean, inter)]
+            elif interior_counts.get(inter) == 1:
+                target = interior_map.get(inter)
+            elif raw_nof:
+                digits_nof = re.search(r'\b(\d+)\b', raw_nof)
+                d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
+                if nof_counts.get(raw_nof) == 1:
+                    target = nof_map.get(raw_nof)
+                elif d_clean and nof_counts.get(d_clean) == 1:
+                    target = nof_map.get(d_clean)
 
             if target:
                 if clave_cat:

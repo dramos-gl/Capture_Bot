@@ -176,13 +176,35 @@ class ViviendasFileAnalyzeWorker(QThread):
                     else:
                         v_existentes = svc.get_viviendas_by_desarrollo(self.desarrollo_id)
 
-            existentes_keys = {
-                (
-                    (v.get("edificio") or "").strip().upper(),
-                    (v.get("interior") or "").strip().upper()
-                )
-                for v in v_existentes
-            }
+            # Normalizar existentes: (edificio_norm, interior_norm), conteo por interior y conteo por número oficial
+            existentes_map = {}
+            interior_map = {}
+            interior_counts = {}
+            nof_map = {}
+            nof_counts = {}
+            for v in v_existentes:
+                ed_raw = (v.get("edificio") or "").strip().upper()
+                ed_clean = "" if ed_raw in ("-", "N/A", "NONE", "") else re.sub(r'^(EDIFICIO|TORRE)\s*', '', ed_raw).strip()
+                int_clean = (v.get("interior") or "").strip().upper()
+                existentes_map[(ed_clean, int_clean)] = v
+                if ed_raw and ed_raw != "-":
+                    existentes_map[(ed_raw, int_clean)] = v
+                interior_counts[int_clean] = interior_counts.get(int_clean, 0) + 1
+                interior_map[int_clean] = v
+
+                # Indexar por Número Oficial (blindaje secundario)
+                nof_raw = str(v.get("numero_oficial") or "").strip().upper()
+                if nof_raw and nof_raw not in ("-", "N/A", "NONE"):
+                    # Clave tal cual
+                    nof_map[nof_raw] = v
+                    nof_counts[nof_raw] = nof_counts.get(nof_raw, 0) + 1
+                    # Clave numérica limpia si aplica (ej. "UPE-101" -> "101")
+                    digits_match = re.search(r'\b(\d+)\b', nof_raw)
+                    if digits_match:
+                        d_val = digits_match.group(1).lstrip("0") or "0"
+                        if d_val not in nof_map:
+                            nof_map[d_val] = v
+                        nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
 
             # Clasificación de registros y estados
             nuevos_cnt = 0
@@ -190,28 +212,57 @@ class ViviendasFileAnalyzeWorker(QThread):
             processed_records = []
 
             for r in records:
-                raw_ed = r["edificio"].upper()
-                ed_norm = re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_ed).strip()
-                int_norm = r["interior"].upper()
+                raw_ed = (r.get("edificio") or "").strip().upper()
+                ed_clean = "" if raw_ed in ("-", "N/A", "NONE", "") else re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_ed).strip()
+                int_clean = (r.get("interior") or "").strip().upper()
+                raw_nof = str(r.get("numero_oficial") or "").strip().upper()
 
-                es_dup = (raw_ed, int_norm) in existentes_keys or (ed_norm, int_norm) in existentes_keys
+                # 1. Coincidencia directa por (edificio, interior)
+                target_v = existentes_map.get((ed_clean, int_clean)) or existentes_map.get((raw_ed, int_clean))
+                
+                # 2. Respaldo para áreas comunes / servicios sin edificio asignado o con interior único en el régimen
+                if not target_v and interior_counts.get(int_clean) == 1:
+                    target_v = interior_map.get(int_clean)
+
+                # 3. Blindaje secundario: Coincidencia por Número Oficial unívoco en el régimen
+                if not target_v and raw_nof:
+                    digits_nof = re.search(r'\b(\d+)\b', raw_nof)
+                    d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
+                    if nof_counts.get(raw_nof) == 1:
+                        target_v = nof_map.get(raw_nof)
+                    elif d_clean and nof_counts.get(d_clean) == 1:
+                        target_v = nof_map.get(d_clean)
+
                 if self.modo in ("RPP", "CATASTRO"):
-                    if es_dup:
+                    if target_v:
                         status_str = "VINCULABLE"
                         nuevos_cnt += 1
+                        # Preservar atributos fidedignos de la vivienda en BD (Destino, Espacio, Edificio real)
+                        r_display = dict(r)
+                        r_display["destino"] = target_v.get("destino") or r.get("destino") or "HABITACIONAL"
+                        r_display["espacio"] = target_v.get("espacio") or r.get("espacio") or "VIVIENDA"
+                        r_display["edificio"] = target_v.get("edificio") or ""
+                        if r_display["edificio"] == "-":
+                            r_display["edificio"] = ""
+                        r_display["nivel"] = target_v.get("nivel") or r.get("nivel") or ""
+                        r_display["numero_oficial"] = target_v.get("numero_oficial") or r.get("numero_oficial") or ""
+                        r_display["calle"] = target_v.get("calle") or r.get("calle") or ""
+                        r_display["descripcion"] = target_v.get("descripcion") or r.get("descripcion") or ""
                     else:
                         status_str = "NO ENCONTRADO"
                         duplicados_cnt += 1
+                        r_display = r
                 else:
-                    if es_dup:
+                    if target_v:
                         status_str = "DUPLICADO"
                         duplicados_cnt += 1
                     else:
                         status_str = "NUEVO"
                         nuevos_cnt += 1
+                    r_display = r
 
                 processed_records.append({
-                    "data": r,
+                    "data": r_display,
                     "status": status_str
                 })
 
@@ -579,11 +630,11 @@ class SatcCatalogsView(QWidget):
 
         # Indicador de archivo cargado adjunto al título de la tabla
         self.lbl_v_sep = CustomLabel("|", variant="muted")
-        self.lbl_v_sep.setStyleSheet("color: #94A3B8; font-size: 14px; font-weight: normal; margin: 0 4px;")
+        self.lbl_v_sep.setStyleSheet(f"color: {Colors.TEXT_DARK_SECONDARY}; font-size: 14px; font-weight: normal; margin: 0 4px;")
         self.card_viviendas.add_header_widget(self.lbl_v_sep)
 
         self.lbl_vkpi_archivo = CustomLabel("Archivo: Ninguno", variant="muted")
-        self.lbl_vkpi_archivo.setStyleSheet("font-size: 12px; color: #64748B; font-weight: normal;")
+        self.lbl_vkpi_archivo.setStyleSheet(f"font-size: 12px; color: {Colors.TEXT_LIGHT_MUTED}; font-weight: normal;")
         self.card_viviendas.add_header_widget(self.lbl_vkpi_archivo)
 
         # Campo Buscar alineado al encabezado de la tabla (Homologado con GlCrudTable)
@@ -593,7 +644,7 @@ class SatcCatalogsView(QWidget):
         self.search_viviendas_input.setMinimumWidth(220)
         self.search_viviendas_input.setMaximumWidth(320)
         self.search_viviendas_input.setClearButtonEnabled(True)
-        self.search_viviendas_input.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
+        self.search_viviendas_input.addAction(Icons.search(Colors.TEXT_LIGHT_MUTED), QLineEdit.LeadingPosition)
         self.search_viviendas_input.textChanged.connect(self._on_search_viviendas_text_changed)
         self.card_viviendas.add_header_widget(self.search_viviendas_input)
 
@@ -603,13 +654,19 @@ class SatcCatalogsView(QWidget):
             "Estado Carga", "Régimen Matriz", "No. Oficial", "Interior", "Edificio", "Nivel", 
             "Destino", "Espacio", "Folio RPP", "Clave Catastral", "Padrón", "Calle", "Notas"
         ])
-        self.tbl_viviendas.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tbl_viviendas.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.tbl_viviendas.horizontalHeader().setStretchLastSection(True)
+        self.tbl_viviendas.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.tbl_viviendas.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_viviendas.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tbl_viviendas.setShowGrid(False)
         self.tbl_viviendas.verticalHeader().setVisible(False)
         self.tbl_viviendas.verticalHeader().setDefaultSectionSize(26)
+        
+        # Anchos iniciales confortables y proporcionales
+        col_widths = [110, 160, 90, 80, 80, 70, 110, 90, 130, 140, 110, 160, 200]
+        for c_idx, width in enumerate(col_widths):
+            self.tbl_viviendas.setColumnWidth(c_idx, width)
         
         self.card_viviendas.layout.addWidget(self.tbl_viviendas)
         lay_import_viv.addWidget(self.card_viviendas)
@@ -1321,7 +1378,6 @@ class SatcCatalogsView(QWidget):
                             for r in all_regs if r.desarrollo_id == des_id and r.activo
                         ]
 
-                self.cmb_v_regimen.addItem("-- Sin Régimen (Directo a Desarrollo / Fraccionamiento) --", "SIN_REGIMEN")
                 for r in regs:
                     total_u = r.get("total_upes", 0)
                     self.cmb_v_regimen.addItem(f"{r.get('nombre_regimen')} (Capacidad: {total_u} UPEs)", r.get("regimen_id"))
@@ -1334,9 +1390,26 @@ class SatcCatalogsView(QWidget):
     def _on_v_regimen_changed(self):
         """Carga las viviendas de forma asíncrona en segundo plano sin congelar la interfaz."""
         des_id = self.cmb_v_desarrollo.currentData()
-        raw_reg_id = self.cmb_v_regimen.currentData()
-        reg_id = None if raw_reg_id in (None, "SIN_REGIMEN") else raw_reg_id
+        reg_id = self.cmb_v_regimen.currentData()
 
+        # Detener limpiamente cualquier worker de carga en ejecución previa
+        if self._v_load_worker and self._v_load_worker.isRunning():
+            try:
+                self._v_load_worker.finished.disconnect()
+            except Exception:
+                pass
+            self._v_load_worker.quit()
+            self._v_load_worker.wait(50)
+            self._v_load_worker = None
+
+        if self._v_loading_dialog:
+            try:
+                self._v_loading_dialog.close()
+            except Exception:
+                pass
+            self._v_loading_dialog = None
+
+        # Reset y limpieza inmediata de estado y tabla
         self._v_parsed_records = []
         self.btn_v_ejecutar.setEnabled(False)
         self.btn_v_exportar_datos.setEnabled(False)
@@ -1348,9 +1421,11 @@ class SatcCatalogsView(QWidget):
         self.search_viviendas_input.clear()
         self.search_viviendas_input.blockSignals(False)
 
-        # Si no se ha seleccionado desarrollo o régimen, mantener la tabla limpia sin congelamiento
-        if not des_id or raw_reg_id is None:
-            self.tbl_viviendas.setRowCount(0)
+        # Limpiar la tabla de forma atómica para que el usuario perciba el cambio de inmediato
+        self.tbl_viviendas.setRowCount(0)
+
+        # Si no se ha seleccionado desarrollo o régimen, mantener la tabla limpia en reposo
+        if not des_id or reg_id is None:
             self.lbl_vkpi_bd.setText("EnBD: 0")
             self.lbl_vkpi_regimen_info.setText("Total UPE: N/A")
             self.lbl_vkpi_con_rpp.setText("Con Folio: 0")
@@ -1358,9 +1433,10 @@ class SatcCatalogsView(QWidget):
             self.action_state_changed.emit()
             return
 
-        # Desplegar indicador de carga no bloqueante
-        self._v_loading_dialog = GLLoadingDialog("Cargando padrón de viviendas...", self)
-        self._v_loading_dialog.show()
+        # Desplegar estado de carga visual en el encabezado
+        self.lbl_vkpi_archivo.setText("Consultando viviendas del régimen...")
+        self.lbl_vkpi_archivo.setStyleSheet(f"font-size: 12px; color: {Colors.ACCENT}; font-weight: bold;")
+        self.lbl_vkpi_bd.setText("Cargando...")
 
         # Iniciar worker en background
         self._v_load_worker = ViviendasLoadWorker(
@@ -1374,9 +1450,8 @@ class SatcCatalogsView(QWidget):
 
     def _on_v_load_finished(self, success: bool, result_data: dict, error_msg: str):
         """Puebla la tabla de viviendas y las métricas una vez culminada la consulta asíncrona."""
-        if self._v_loading_dialog:
-            self._v_loading_dialog.close()
-            self._v_loading_dialog = None
+        self.lbl_vkpi_archivo.setText("Archivo: Ninguno")
+        self.lbl_vkpi_archivo.setStyleSheet(f"font-size: 12px; color: {Colors.TEXT_LIGHT_MUTED}; font-weight: normal;")
 
         if not success:
             QMessageBox.critical(self, "Error al Cargar Viviendas", f"No se pudieron cargar las viviendas: {error_msg}")
@@ -1385,6 +1460,11 @@ class SatcCatalogsView(QWidget):
         viviendas = result_data.get("viviendas", [])
         tot_u = result_data.get("tot_u", 0)
         reg_id = result_data.get("regimen_id")
+
+        # Comprobar que el resultado corresponda al régimen actualmente seleccionado
+        current_reg_id = self.cmb_v_regimen.currentData()
+        if current_reg_id != reg_id:
+            return
 
         if reg_id:
             self.lbl_vkpi_regimen_info.setText(f"Total UPE: {tot_u}")
