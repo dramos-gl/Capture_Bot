@@ -1200,18 +1200,18 @@ class ThemeManager:
         QToolBar#adminActionToolbar {{
             background-color: {surf};
             border-bottom: 1px solid {border};
-            padding: 4px 12px;
-            spacing: 6px;
+            padding: 3px 8px;
+            spacing: 3px;
         }}
         QToolBar#adminActionToolbar QToolButton {{
             background-color: transparent;
             color: {txt_primary};
             border: 1px solid transparent;
-            border-radius: 6px;
-            padding: 4px 8px;
-            font-size: 11px;
+            border-radius: 4px;
+            padding: 2px 4px;
+            font-size: 10px;
             font-weight: 500;
-            min-width: 68px;
+            min-width: 52px;
             min-height: 52px;
             max-height: 52px;
         }}
@@ -1237,7 +1237,7 @@ class ThemeManager:
         QToolBar#adminActionToolbar QToolBarSeparator {{
             width: 1px;
             background-color: {border};
-            margin: 6px 8px;
+            margin: 4px 6px;
         }}
         
         /* ScrollBars */

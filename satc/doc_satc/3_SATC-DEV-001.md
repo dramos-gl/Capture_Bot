@@ -57,12 +57,15 @@ satc/
 ├── settings.json                   # Configuración de conexión y rutas
 ├── .env                            # Credenciales (NO versionado)
 ├── requirements.txt                # Dependencias del proyecto
+├── config/                         # Archivos de configuración y patrones externos
+│   └── rpp_ocr_patterns.json       # Patrones regex parametrizados para resoluciones RPP
 │
 ├── doc_satc/                  # Documentación oficial
 │   ├── 0_SATC.md
 │   ├── 1_SATC-BLUEPRINT-001.md
 │   ├── 2_SATC-DB-001.md
-│   └── 3_SATC-DEV-001.md
+│   ├── 3_SATC-DEV-001.md
+│   └── 4_SATC-TEC-001.md
 │
 └── src/
     │

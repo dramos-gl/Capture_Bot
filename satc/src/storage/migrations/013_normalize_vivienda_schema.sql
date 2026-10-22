@@ -70,6 +70,12 @@ BEGIN
         SET padron = COALESCE(padron, cuenta_predial)
         WHERE padron IS NULL;
     END IF;
+
+    -- Normalizar coherencia de dominio: Destino = SERVICIO debe ser espacio = AREAS_COMUNES
+    UPDATE satc_catalogo.vivienda
+    SET espacio = 'AREAS_COMUNES'
+    WHERE UPPER(TRIM(destino)) = 'SERVICIO' 
+      AND (espacio IS NULL OR UPPER(TRIM(espacio)) = 'VIVIENDA');
 END $$;
 
 -- Asegurar que interior no sea nulo tras la migración

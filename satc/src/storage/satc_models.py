@@ -261,7 +261,9 @@ class Vivienda(Base):
     
     # Identidad Jurídica (RPP) y Catastral
     folio_electronico: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    fecha_alta_folio: Mapped[Optional[date]] = mapped_column(Date)
     clave_catastral: Mapped[Optional[str]] = mapped_column(String(100), index=True)
+    fecha_alta_cc: Mapped[Optional[date]] = mapped_column(Date)
     padron: Mapped[Optional[str]] = mapped_column(String(100), index=True)
     
     # Ciclo y Auditoría

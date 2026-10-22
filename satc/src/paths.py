@@ -8,6 +8,8 @@ from pathlib import Path
 ROOT_DIR: Path = Path(__file__).parent.parent
 
 # Fuentes de configuración
+CONFIG_DIR: Path = ROOT_DIR / "config"
+RPP_PATTERNS_FILE: Path = CONFIG_DIR / "rpp_ocr_patterns.json"
 SETTINGS_FILE: Path = ROOT_DIR / "settings.json"
 ENV_FILE: Path = ROOT_DIR / ".env"
 

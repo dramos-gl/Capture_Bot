@@ -21,6 +21,7 @@ class GLActionToolbar(QToolBar):
     refresh_requested = Signal()
     export_requested = Signal()
     help_requested = Signal()
+    exit_requested = Signal()
 
     # Acciones operativas contextuales (Importación de Viviendas / Procesos)
     template_requested = Signal()
@@ -115,6 +116,12 @@ class GLActionToolbar(QToolBar):
         )
         self.addAction(self.act_help)
 
+        # 6. Salir del Sistema (Botón permanente)
+        self.act_exit = self._create_action(
+            "Salir", "salir", "Salir del sistema con confirmación", "#EF4444", self.exit_requested.emit
+        )
+        self.addAction(self.act_exit)
+
     def set_actions_mode(self, mode: str = "default"):
         """Switches the toolbar action block between standard CRUD and specialized module workflows."""
         self._actions_mode = mode
@@ -133,6 +140,7 @@ class GLActionToolbar(QToolBar):
             self.act_export.setVisible(True)
             self.act_refresh.setVisible(True)
             self.act_help.setVisible(True)
+            self.act_exit.setVisible(True)
         else:
             # Restaurar botones estándar
             self.act_new.setVisible(True)
@@ -146,6 +154,7 @@ class GLActionToolbar(QToolBar):
             self.act_export.setVisible(True)
             self.act_refresh.setVisible(True)
             self.act_help.setVisible(True)
+            self.act_exit.setVisible(True)
 
     def _create_action(self, text: str, icon_name: str, tooltip: str, color: str, callback: Optional[Callable] = None) -> QAction:
         action = QAction(self)

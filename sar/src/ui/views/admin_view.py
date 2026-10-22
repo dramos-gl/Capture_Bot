@@ -122,6 +122,7 @@ class AdminWindow(QMainWindow):
         self.action_toolbar.refresh_requested.connect(self._on_toolbar_refresh)
         self.action_toolbar.export_requested.connect(self._on_toolbar_export)
         self.action_toolbar.help_requested.connect(self._on_toolbar_help)
+        self.action_toolbar.exit_requested.connect(self._on_toolbar_exit)
 
         # Acciones operativas para el módulo Importación de Viviendas
         self.action_toolbar.template_requested.connect(self._on_toolbar_template)
@@ -343,22 +344,25 @@ class AdminWindow(QMainWindow):
             }
             target_tab_idx = tab_map.get(view_name)
 
-        if target_view_key not in self.instantiated_views and target_view_key in self.view_factories:
-            # Instantiate view on-demand for the first time
-            view_instance = self.view_factories[target_view_key]()
-            self.stacked_widget.addWidget(view_instance)
-            self.instantiated_views[target_view_key] = view_instance
-            if hasattr(view_instance, "action_state_changed"):
-                view_instance.action_state_changed.connect(lambda: self._update_toolbar_state(view_instance))
-            
-        if target_view_key in self.instantiated_views:
-            view = self.instantiated_views[target_view_key]
-            if target_tab_idx is not None and hasattr(view, "tabs"):
-                view.tabs.setCurrentIndex(target_tab_idx)
-            if hasattr(view, "refresh_data"):
-                view.refresh_data()
-            self.stacked_widget.setCurrentWidget(view)
-            # Mapeo de submódulos a categoría de herramientas en la toolbar
+        # Feedback visual ágil y no intrusivo: cursor de espera durante la preparación de la vista
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            if target_view_key not in self.instantiated_views and target_view_key in self.view_factories:
+                # Instantiate view on-demand for the first time
+                view_instance = self.view_factories[target_view_key]()
+                self.stacked_widget.addWidget(view_instance)
+                self.instantiated_views[target_view_key] = view_instance
+                if hasattr(view_instance, "action_state_changed"):
+                    view_instance.action_state_changed.connect(lambda: self._update_toolbar_state(view_instance))
+                
+            if target_view_key in self.instantiated_views:
+                view = self.instantiated_views[target_view_key]
+                if target_tab_idx is not None and hasattr(view, "tabs"):
+                    view.tabs.setCurrentIndex(target_tab_idx)
+                if hasattr(view, "refresh_data"):
+                    view.refresh_data()
+                self.stacked_widget.setCurrentWidget(view)
+                # Mapeo de submódulos a categoría de herramientas en la toolbar
             category_map = {
                 "usuarios": "SEGURIDAD",
                 "roles": "SEGURIDAD",
@@ -388,6 +392,8 @@ class AdminWindow(QMainWindow):
             category = category_map.get(view_name, "SATC" if "satc" in view_name else "CATALOGOS")
             self.action_toolbar.set_module_context(category, view_name)
             self._update_toolbar_state(view)
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def _get_active_crud_panel(self, view):
         """Helper to find the active CrudTablePanel in single or tabbed views."""
@@ -588,6 +594,10 @@ class AdminWindow(QMainWindow):
             self.logout_requested.emit()
 
     def _handle_exit_action(self):
+        self.close()
+
+    def _on_toolbar_exit(self):
+        """Dispara el cierre de la ventana principal, activando la confirmación de salida de closeEvent."""
         self.close()
 
     def _on_toolbar_help(self):

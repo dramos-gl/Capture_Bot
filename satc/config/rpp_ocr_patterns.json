@@ -1,0 +1,24 @@
+{
+  "description": "Patrones de expresiones regulares tolerantes a erratas de OCR y mecanografía del RPP Cancún",
+  "version": "1.0.0",
+  "upe_header_patterns": [
+    "UNIDAD(?:ES)?\\s+DE\\s+PROPIEDAD\\s+EXCLUSIVA",
+    "UNIDA(?:DES)?\\s+DE\\s+PROPIEDAD\\s+EXCLUSIVA",
+    "UNIDAD(?:ES)?\\s+DE\\s+PO?RPIEDAD\\s+EXCLUSIVA",
+    "UNIDA(?:DES)?\\s+DE\\s+PO?RPIEDAD\\s+EXCLUSIVA",
+    "UNID[AÁ]D(?:ES)?\\s+DE\\s+PROPIED[AÁ]D\\s+EXCLUSIVA",
+    "UPE"
+  ],
+  "numero_oficial_patterns": [
+    "N[ÚU\ufffd]?M[EEO]*R?O?\\s+OF[IÍ]?C[IÍ]?AL\\s*(\\d+)",
+    "N[ÚU\ufffd]?M[EEO]*R?O?\\s*(\\d+)\\s+OF[IÍ]?C[IÍ]?AL",
+    "NO\\.?\\s*OF[IÍ]?C[IÍ]?AL\\s*(\\d+)",
+    "NUM\\.?\\s*OF[IÍ]?C[IÍ]?AL\\s*(\\d+)"
+  ],
+  "edificio_patterns": [
+    "(EDIFICIO\\s+[A-Z0-9]+|\\bTORRE\\s+[A-Z0-9]+|\\bEDIF\\.?\\s+[A-Z0-9]+)"
+  ],
+  "nivel_patterns": [
+    "(PLANTA\\s+BAJA|NIVEL[\\s\\.]*\\d+|PISO[\\s\\.]*\\d+|PB)"
+  ]
+}

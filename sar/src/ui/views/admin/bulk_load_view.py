@@ -159,30 +159,27 @@ class BulkLoadView(QWidget):
             return
             
         try:
-            with self.db_connector.get_session() as session:
-                resumen = session.execute(text("""
-                    SELECT gr.grupo_id, r.rfc, c.alias AS concepto_alias,
-                           gr.cantidad_solicitada, gr.cantidad_generada, gr.cantidad_autorizada
-                    FROM sar_produccion.grupo_referencia gr
-                    JOIN sar_catalogo.rfc r ON gr.rfc_id = r.rfc_id
-                    JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
-                    WHERE gr.orden_id = :oid
-                    ORDER BY gr.grupo_id
-                """), {"oid": orden_id}).mappings().all()
+            if self.api_client.connect_via_api:
+                resumen = self.api_client.request("GET", f"/api/admin/ordenes/{orden_id}/resumen-carga")
+            else:
+                with self.db_connector.get_session() as session:
+                    from sar.src.services.admin_service import AdminService
+                    svc = AdminService(session)
+                    resumen = svc.get_resumen_orden_carga_masiva(orden_id)
                 
-                self.table.setColumnCount(5)
-                self.table.setHorizontalHeaderLabels(["Grupo ID", "RFC Emisor", "Concepto", "Cantidad Solicitada", "Cantidad Cargada"])
-                self.table.setRowCount(len(resumen))
+            self.table.setColumnCount(5)
+            self.table.setHorizontalHeaderLabels(["Grupo ID", "RFC Emisor", "Concepto", "Cantidad Solicitada", "Cantidad Cargada"])
+            self.table.setRowCount(len(resumen))
+            
+            for idx, row in enumerate(resumen):
+                self.table.setItem(idx, 0, QTableWidgetItem(str(row['grupo_id'])))
+                self.table.setItem(idx, 1, QTableWidgetItem(row['rfc']))
+                self.table.setItem(idx, 2, QTableWidgetItem(row['concepto_alias']))
+                self.table.setItem(idx, 3, QTableWidgetItem(str(row['cantidad_solicitada'])))
+                self.table.setItem(idx, 4, QTableWidgetItem(str(row['cantidad_generada'])))
                 
-                for idx, row in enumerate(resumen):
-                    self.table.setItem(idx, 0, QTableWidgetItem(str(row['grupo_id'])))
-                    self.table.setItem(idx, 1, QTableWidgetItem(row['rfc']))
-                    self.table.setItem(idx, 2, QTableWidgetItem(row['concepto_alias']))
-                    self.table.setItem(idx, 3, QTableWidgetItem(str(row['cantidad_solicitada'])))
-                    self.table.setItem(idx, 4, QTableWidgetItem(str(row['cantidad_generada'])))
-                    
-                self.table.resizeColumnsToContents()
-                self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+            self.table.resizeColumnsToContents()
+            self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         except Exception as e:
             print("Error loading order summary:", e)
 

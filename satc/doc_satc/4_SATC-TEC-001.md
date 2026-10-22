@@ -100,6 +100,50 @@ Si por razones operativas el usuario decide continuar con el procesamiento mient
 
 ---
 
+---
+
+### 3.5 Subsistema de Extracción OCR y Vinculación RPP Parametrizado
+
+Para la vinculación masiva y automática de Folios Reales Electrónicos de Resoluciones de Régimen de Propiedad en Condominio emitidas por el RPP y el Catastro:
+1. **Extractor Desacoplado (`RppResolutionExtractor`)**:
+   - Lee documentos PDF de resoluciones, detecta la sección `'FOLIOS GENERADOS'` y segmenta las Unidades de Propiedad Exclusiva (UPE).
+   - Extrae de forma estructurada: `numero_fraccion`, `interior`, `edificio`, `nivel`, `numero_oficial` y `folio_electronico`.
+2. **Cero Hardcodeo de Patrones Regex (`rpp_ocr_patterns.json`)**:
+   - Los patrones regulares y variaciones ortográficas se parametrizan en `satc/config/rpp_ocr_patterns.json`.
+   - Soporta erratas mecanográficas y OCR habituales en los oficios (ej. `UNIDA DE PORPIEDAD`, `OFCIAL`, `NUMEO`, `NÚMERO`, `EDIFCIO`).
+   - Implementa un mecanismo de fallback seguro (`DEFAULT_PATTERNS`) en caso de ausencia temporal del archivo de configuración.
+3. **Criterios de Vinculación y Blindaje de Datos**:
+   - Vinculación Primaria: Coincidencia por `Fracción / UPE` o `Interior`.
+   - Vinculación Secundaria: Coincidencia por `Número Oficial` (columna `'No.'` del oficio RPP / Catastro).
+   - Filtros Interactivos en KPIs: La interfaz (`SatcCatalogsView`) permite filtrar registros con un solo clic sobre los indicadores (ej. faltantes, no vinculables o huérfanos).
+
+---
+
+### 3.6 Reglas de Integridad Empresarial para Carga Inicial de Viviendas
+
+Para garantizar la rigurosidad y exactitud contable/catastral de un sistema de grado empresarial:
+1. **Bloqueo Preventivo ante Régimen Completo (Fast-Fail)**:
+   - Si un régimen ya cuenta con el 100% de sus viviendas físicas en BD (`viviendas_en_bd >= total_upes`), la interfaz bloquea la Carga Inicial, alerta al usuario y conmuta automáticamente a la etapa operativa siguiente: `'2. Vincular Folios RPP'`.
+   - Se prohíbe explícitamente seleccionar archivos en modo Carga Inicial si la capacidad está agotada.
+2. **Validación Estricta de Capacidad Restante y Desduplicación Interna**:
+   - **Excedente**: Si `len(archivo) > total_upes`, el análisis asíncrono rechaza la carga inmediatamente.
+   - **Duplicados Internos en Archivo**: Si el archivo Excel contiene filas repetidas para la misma clave `(Edificio, Interior)`, se rechaza la carga indicando los ejemplos conflictivos para su corrección previa.
+   - **Alerta de Carga Parcial**: Si `len(archivo) < total_upes`, el sistema notifica de forma destacada al operador la cantidad faltante antes de confirmar la inserción, previniendo cargas incompletas por descuido humano.
+3. **Coherencia de Destino vs Espacio**:
+   - `DESTINO = 'SERVICIO'` asigna forzosamente por defecto `ESPACIO = 'AREAS_COMUNES'` (impidiendo que se registre erróneamente como `'VIVIENDA'`).
+4. **Validaciones en Botón "Cargar Archivo" y Cambio de Operación**:
+   - **Precondiciones Obligatorias**: El botón `'Cargar Archivo'` exige estrictamente la selección previa de un **Desarrollo**, un **Régimen en Condominio** y una **Operación** antes de abrir el explorador de archivos.
+   - **Reactividad de la Tabla en Conmutación de Operación**: Al cambiar de operación, el sistema limpia el staging de análisis anterior y recarga automáticamente la tabla de viviendas directamente desde la base de datos para ese régimen, garantizando una vista limpia y consistente del padrón registrado sin residuos de previsualizaciones previas.
+5. **Exportación Dual Inteligente (Excel)**:
+   - **Modo Padrón en BD**: Al seleccionar un régimen con viviendas existentes en BD, el botón `'Exportar Datos'` se activa inmediatamente permitiendo descargar el padrón completo registrado (`Padron_Viviendas_[Desarrollo]_[Regimen].xlsx`).
+   - **Modo Análisis de Archivo**: Si se carga un archivo (Excel o PDF de resolución), el botón `'Exportar Datos'` prioriza la exportación de los datos extraídos/analizados (`Datos_Extraidos_[Modo]_[Desarrollo].xlsx`), conservando ambas funcionalidades de forma complementaria y sin fricción.
+6. **Lógica de Refresco y Preservación de Estado (`Refrescar`)**:
+   - **Recarga Integral Asíncrona**: Al presionar `'Refrescar'` en la Toolbar superior, el sistema consulta los datos frescos desde la base de datos o API.
+   - **Preservación de Selección**: Si el operador ya tenía un régimen seleccionado, el refresco recarga los catálogos y re-selecciona automáticamente el mismo régimen, actualizando los registros de viviendas, contadores de avance y métricas sin obligar al usuario a volver a seleccionar el régimen.
+   - **Limpieza de Residuos**: Si había un archivo en staging no aplicado, el refresco lo descarta y regresa la tabla al padrón fidedigno de la base de datos.
+
+---
+
 ## 4. Parámetros Principales del Sistema
 
 | Parámetro | Clave BD / Código | Valor Predeterminado / Descripción |
@@ -109,3 +153,5 @@ Si por razones operativas el usuario decide continuar con el procesamiento mient
 | **URL Portal Facturas** | `CANCUN_PORTAL_FACTURA_URL` | `https://benitojuarez.expidefactura.com/` |
 | **Reintentos Máximos** | `CANCUN_MAX_REINTENTOS` | `3` (Intentos automáticos por folio en error) |
 | **Timeout Transacción** | `CANCUN_BOT_TIMEOUT_MS` | `30000` (Tiempo de espera en ms) |
+| **Configuración OCR RPP** | `RPP_PATTERNS_FILE` | `satc/config/rpp_ocr_patterns.json` (Patrones regex y erratas toleradas) |
+

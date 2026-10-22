@@ -672,3 +672,36 @@ class AdminService:
             sesion_id=sesion_id
         )
 
+    def get_resumen_orden_carga_masiva(self, orden_id: int) -> List[Dict[str, Any]]:
+        """Obtiene el resumen de grupos, solicitados y generados para una orden dada."""
+        from sqlalchemy import text
+        resumen = self.session.execute(text("""
+            SELECT gr.grupo_id, r.rfc, c.alias AS concepto_alias,
+                   gr.cantidad_solicitada, gr.cantidad_generada, gr.cantidad_autorizada
+            FROM sar_produccion.grupo_referencia gr
+            JOIN sar_catalogo.rfc r ON gr.rfc_id = r.rfc_id
+            JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+            WHERE gr.orden_id = :oid
+            ORDER BY gr.grupo_id
+        """), {"oid": orden_id}).mappings().all()
+        return [dict(r) for r in resumen]
+
+    def get_resumen_orden_migracion(self, orden_id: int) -> List[Dict[str, Any]]:
+        """Obtiene el resumen de referencias por delegación y grupo para migración de una orden."""
+        from sqlalchemy import text
+        resumen = self.session.execute(text("""
+            SELECT gr.grupo_id, r.rfc, c.alias AS concepto_alias,
+                   d.nombre AS delegacion_actual, d.delegacion_id,
+                   COUNT(ref.referencia_id) AS total_refs
+            FROM sar_produccion.grupo_referencia gr
+            JOIN sar_catalogo.rfc r ON gr.rfc_id = r.rfc_id
+            JOIN sar_catalogo.concepto c ON gr.concepto_id = c.concepto_id
+            JOIN sar_produccion.solicitud sol ON sol.grupo_id = gr.grupo_id
+            JOIN sar_catalogo.delegacion d ON sol.delegacion_id = d.delegacion_id
+            JOIN sar_produccion.referencia ref ON ref.grupo_id = gr.grupo_id
+            WHERE gr.orden_id = :oid
+            GROUP BY gr.grupo_id, r.rfc, c.alias, d.nombre, d.delegacion_id
+            ORDER BY gr.grupo_id, d.delegacion_id
+        """), {"oid": orden_id}).mappings().all()
+        return [dict(r) for r in resumen]
+

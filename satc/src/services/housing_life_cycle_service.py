@@ -399,7 +399,9 @@ class HousingLifeCycleService:
                 "destino": v.destino,
                 "espacio": v.espacio,
                 "folio_electronico": v.folio_electronico or "",
+                "fecha_alta_folio": str(v.fecha_alta_folio) if v.fecha_alta_folio else "",
                 "clave_catastral": v.clave_catastral or "",
+                "fecha_alta_cc": str(v.fecha_alta_cc) if v.fecha_alta_cc else "",
                 "padron": v.padron or "",
                 "fecha_escrituracion": str(v.fecha_escrituracion) if v.fecha_escrituracion else "",
                 "descripcion": v.descripcion or "",
@@ -432,7 +434,9 @@ class HousingLifeCycleService:
                 "destino": v.destino,
                 "espacio": v.espacio,
                 "folio_electronico": v.folio_electronico or "",
+                "fecha_alta_folio": str(v.fecha_alta_folio) if v.fecha_alta_folio else "",
                 "clave_catastral": v.clave_catastral or "",
+                "fecha_alta_cc": str(v.fecha_alta_cc) if v.fecha_alta_cc else "",
                 "padron": v.padron or "",
                 "fecha_escrituracion": str(v.fecha_escrituracion) if v.fecha_escrituracion else "",
                 "descripcion": v.descripcion or "",
@@ -504,7 +508,20 @@ class HousingLifeCycleService:
             num_oficial_val = str(r.get("numero_oficial") or r.get("numero_upe") or "").strip() or None
             calle_val = str(r.get("calle") or "").strip() or None
             destino_val = str(r.get("destino") or "HABITACIONAL").strip().upper()
-            espacio_val = str(r.get("espacio") or "VIVIENDA").strip().upper()
+            if destino_val not in ['HABITACIONAL', 'SERVICIO', 'COMERCIAL', 'MIXTO']:
+                destino_val = 'HABITACIONAL'
+
+            espacio_val = str(r.get("espacio") or "").strip().upper()
+            # Regla de Coherencia Catastral: Si destino es SERVICIO, el espacio por default es AREAS_COMUNES (nunca VIVIENDA)
+            if destino_val == "SERVICIO":
+                if not espacio_val or espacio_val == "VIVIENDA":
+                    espacio_val = "AREAS_COMUNES"
+            elif not espacio_val:
+                espacio_val = "VIVIENDA"
+
+            if espacio_val not in ['VIVIENDA', 'AREAS_COMUNES', 'ESTACIONAMIENTO', 'BODEGA']:
+                espacio_val = 'AREAS_COMUNES' if destino_val == 'SERVICIO' else 'VIVIENDA'
+
             folio_elec_val = str(r.get("folio_electronico") or "").strip() or None
             clave_cat_val = str(r.get("clave_catastral") or "").strip() or None
             padron_val = str(r.get("padron") or r.get("cuenta_predial") or "").strip() or None
@@ -523,8 +540,8 @@ class HousingLifeCycleService:
                 edificio=edif_val,
                 nivel=nivel_val,
                 calle=calle_val,
-                destino=destino_val if destino_val in ['HABITACIONAL', 'SERVICIO', 'COMERCIAL', 'MIXTO'] else 'HABITACIONAL',
-                espacio=espacio_val if espacio_val in ['VIVIENDA', 'AREAS_COMUNES', 'ESTACIONAMIENTO', 'BODEGA'] else 'VIVIENDA',
+                destino=destino_val,
+                espacio=espacio_val,
                 folio_electronico=folio_elec_val,
                 clave_catastral=clave_cat_val,
                 padron=padron_val,

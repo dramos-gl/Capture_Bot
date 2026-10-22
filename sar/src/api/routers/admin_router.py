@@ -692,5 +692,28 @@ def vincular_catastro_satc(regimen_id: int, payload: ImportarViviendasSATCReques
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al vincular datos catastrales: {str(e)}")
 
+# ===========================================================================
+# ENDPOINTS: Resúmenes de Órdenes para Procesos Especiales
+# ===========================================================================
+
+@router.get("/ordenes/{orden_id}/resumen-carga")
+def get_resumen_orden_carga(orden_id: int, db: Session = Depends(get_db)):
+    """Retorna el resumen de grupos y cuotas para la carga masiva de una orden."""
+    try:
+        service = AdminService(db)
+        return service.get_resumen_orden_carga_masiva(orden_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener resumen de carga para la orden {orden_id}: {str(e)}")
+
+@router.get("/ordenes/{orden_id}/resumen-migracion")
+def get_resumen_orden_migracion(orden_id: int, db: Session = Depends(get_db)):
+    """Retorna el resumen de referencias por delegación para migración de una orden."""
+    try:
+        service = AdminService(db)
+        return service.get_resumen_orden_migracion(orden_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener resumen de migración para la orden {orden_id}: {str(e)}")
+
+
 
 

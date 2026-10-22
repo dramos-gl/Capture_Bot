@@ -724,6 +724,9 @@ class ViviendaRepository(BaseCancunRepository):
 
             if target:
                 target.folio_electronico = folio
+                fecha_folio = item.get("fecha_alta_folio") or item.get("fecha")
+                if fecha_folio:
+                    target.fecha_alta_folio = fecha_folio
                 # Solo avanza estado si estaba en PROYECTADA
                 if target.estado and target.estado.codigo == "PROYECTADA":
                     target.estado_vivienda_id = st_indiv_id
@@ -738,7 +741,7 @@ class ViviendaRepository(BaseCancunRepository):
     def bulk_update_catastro(self, regimen_id: int, updates: List[Dict[str, Any]]) -> Dict[str, int]:
         """
         Asocia masivamente Clave Catastral y Padrón municipal a viviendas de un régimen
-        usando (interior, edificio) o folio_electronico como clave de enlace.
+        usando prioritariamente folio_electronico, o secundariamente (edificio, interior) o número oficial.
         Transiciona el estado de la vivienda a 'LISTA_PARA_VENTA'.
         """
         st_venta_id = self._get_estado_vivienda_id("LISTA_PARA_VENTA")
@@ -791,16 +794,19 @@ class ViviendaRepository(BaseCancunRepository):
             if not clave_cat and not padron:
                 continue
 
-            # Buscar primero por folio RPP si existe, o por (edificio, interior), o interior único, o número oficial único
+            # 1. Prioridad Soberana: Búsqueda por folio RPP si existe
             target = None
             if folio_rpp and folio_rpp in vivienda_by_rpp:
                 target = vivienda_by_rpp[folio_rpp]
+            # 2. Respaldo secundario: (edificio, interior)
             elif (raw_ed, inter) in vivienda_by_interior:
                 target = vivienda_by_interior[(raw_ed, inter)]
             elif (ed_clean, inter) in vivienda_by_interior:
                 target = vivienda_by_interior[(ed_clean, inter)]
+            # 3. Respaldo por interior unívoco
             elif interior_counts.get(inter) == 1:
                 target = interior_map.get(inter)
+            # 4. Respaldo por Número Oficial unívoco
             elif raw_nof:
                 digits_nof = re.search(r'\b(\d+)\b', raw_nof)
                 d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
@@ -814,6 +820,9 @@ class ViviendaRepository(BaseCancunRepository):
                     target.clave_catastral = clave_cat
                 if padron:
                     target.padron = padron
+                fecha_cc = item.get("fecha_alta_cc") or item.get("fecha")
+                if fecha_cc:
+                    target.fecha_alta_cc = fecha_cc
                 if target.estado.codigo in ["PROYECTADA", "EN_INDIVIDUALIZACION"]:
                     target.estado_vivienda_id = st_venta_id
                 target.updated_at = datetime.utcnow()

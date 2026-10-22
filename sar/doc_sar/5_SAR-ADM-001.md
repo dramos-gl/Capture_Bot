@@ -2,10 +2,10 @@
 ## Diseño Funcional y Arquitectura UI/UX
 ### Módulo de Administración del Sistema (SAR)
 
-**Documento:** SAR-ADM-001
-**Versión:** 1.0
-**Estado:** Propuesta de Análisis
-**Metodología:** Business-First Architecture (BFA)
+**Documento:** SAR-ADM-001  
+**Versión:** 2.6 (Actualizada tras Auditoría SAR-AUDIT-ADM-2026-001)  
+**Estado:** Aprobado e Implementado  
+**Metodología:** Business-First Architecture (BFA) & Multidisciplinar SAR-AI-PROMPTS-001  
 
 ---
 
@@ -213,3 +213,27 @@ Todo guardado transaccional desde el módulo de administración invocará a `Aud
 1.  **Desarrollo Iterativo**: Construir la versión 1.0 del CRUD solo para las 4 tablas críticas (`Usuario`, `RFC`, `Concepto`, `ParametroSistema`) mediante vistas estáticas pero reutilizando componentes Atómicos. Implementar el motor dinámico en la versión 2.0.
 2.  **Caché en Frontend**: Dado que catálogos como Concepto o EstadoSistema cambian raramente, la UI debe cachearlos tras el login, e implementar un botón para "Refrescar Caché" o refrescarlos pasivamente en *background*, evitando saturar la base de datos con SELECTs por cada renderizado de combobox.
 3.  **Manejo de Contraseñas Seguras**: El CRUD de Usuarios nunca debe traer el hash desde backend a la vista. El campo contraseña solo servirá para establecer una nueva y viajará hasheada o será validada contra políticas de fortaleza.
+
+---
+
+## 9. Paridad Funcional y Transparencia de Transporte (CONNECT_VIA_API)
+
+En cumplimiento de la regla de oro de **Transparencia de Transporte**, todos los submódulos de administración implementan simetría estricta de datos entre la conexión directa a base de datos PostgreSQL (`CONNECT_VIA_API: false`) y la comunicación REST mediante FastAPI (`CONNECT_VIA_API: true`).
+
+### 9.1 Matriz de Servicios y Endpoints Estandarizados
+
+| Dominio Funcional | Servicio de Negocio (`AdminService`) | Endpoint Central FastAPI (`admin_router.py`) | Vista / Diálogo UI (`AdminView`) |
+|---|---|---|---|
+| **Seguridad** | `UsuarioRepository` / `AdminService` | `/api/admin/data/usuarios`, `/save/usuarios`, `/roles-for-user` | `UsersView`, `RolesView`, `PermissionsView` |
+| **Catálogos Base** | `CatalogoRepository` / `AdminService` | `/api/admin/data/{entity}`, `/save/{entity}`, `/desarrollo_empresas` | `CatalogsView`, `GeographyView`, `RfcsView`, `StatusView` |
+| **Configuración** | `ConfigRepository` / `AdminService` | `/api/admin/data/parametros`, `/save/parametros`, `/data/localizadores` | `ParametersView`, `LocalizersView` |
+| **Reserva / Regularización** | `InventarioRepository` | `/api/admin/referencias/reservar-lote-manual`, `regularizar-colaborador` | `ReservasProcesoView`, `RegularizarColaboradorView` |
+| **Fusión de Lotes** | `InventarioUIService` | `/api/docs/inventario/lotes/activos-destinatario`, `lotes/fusionar` | `FusionLotesView` |
+| **Catálogos SATC** | `HousingLifeCycleService` | `/api/admin/satc/viviendas/{id}`, `/vincular-rpp`, `/vincular-catastro` | `SatcCatalogsView` |
+| **Carga Masiva (Resumen)** | `AdminService.get_resumen_orden_carga_masiva` | `GET /api/admin/ordenes/{orden_id}/resumen-carga` | `BulkLoadView` |
+| **Migración (Resumen)** | `AdminService.get_resumen_orden_migracion` | `GET /api/admin/ordenes/{orden_id}/resumen-migracion` | `MigrationView` |
+
+### 9.2 Garantías de Atomic Design y Cero Hardcodeo Visual
+*   Todas las vistas operan con tokens de espaciado y paletas oficiales (`sar.src.ui.design_system.tokens`).
+*   Queda prohibido el uso de `setStyleSheet` ad-hoc en vistas y formularios de administración.
+*   Cualquier cambio de apariencia se gestiona centralizadamente mediante `ThemeManager` y los átomos/moléculas del sistema.

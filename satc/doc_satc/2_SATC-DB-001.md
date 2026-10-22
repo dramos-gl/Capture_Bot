@@ -238,7 +238,9 @@ Unidad individual soberana de control y ciclo de vida de trámites bajo Régimen
 | `destino` | VARCHAR(30) NOT NULL DEFAULT 'HABITACIONAL' | `HABITACIONAL`, `SERVICIO`, `COMERCIAL`, `MIXTO` |
 | `espacio` | VARCHAR(30) NOT NULL DEFAULT 'VIVIENDA' | `VIVIENDA`, `AREAS_COMUNES`, `ESTACIONAMIENTO`, `BODEGA` |
 | `folio_electronico` | VARCHAR(100) NULL | **Folio Registral RPP** (Boleta de Inscripción) |
+| `fecha_alta_folio` | DATE NULL | Fecha de expedición o alta del folio electrónico en el RPP |
 | `clave_catastral` | VARCHAR(100) NULL | Clave catastral individualizada asignada por Catastro Municipal |
+| `fecha_alta_cc` | DATE NULL | Fecha de alta o expedición de la clave catastral en Catastro Municipal |
 | `padron` | VARCHAR(100) NULL | Número de padrón o cuenta predial municipal |
 | `estado_vivienda_id` | BIGINT FK NOT NULL | Estado actual de la vivienda (`satc_catalogo.estado_vivienda`) |
 | `fecha_escrituracion` | DATE NULL | Fecha formal de firma notarial |
@@ -246,7 +248,6 @@ Unidad individual soberana de control y ciclo de vida de trámites bajo Régimen
 | `activo` | BOOLEAN DEFAULT TRUE | Soft-delete |
 | `created_at` | TIMESTAMPTZ DEFAULT NOW() | Auditoría de creación |
 | `updated_at` | TIMESTAMPTZ | Auditoría de actualización |
-| `updated_at` | TIMESTAMPTZ | |
 
 ---
 
