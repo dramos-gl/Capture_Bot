@@ -21,6 +21,12 @@ class GLActionToolbar(QToolBar):
     refresh_requested = Signal()
     export_requested = Signal()
     help_requested = Signal()
+
+    # Acciones operativas contextuales (Importación de Viviendas / Procesos)
+    template_requested = Signal()
+    import_file_requested = Signal()
+    clean_requested = Signal()
+    apply_requested = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,6 +38,7 @@ class GLActionToolbar(QToolBar):
         
         self.current_category: Optional[str] = None
         self._module_actions = []
+        self._actions_mode = "default"
         
         # Oculta inicialmente por defecto (hasta que se seleccione un módulo)
         self.setVisible(False)
@@ -65,22 +72,80 @@ class GLActionToolbar(QToolBar):
         self.act_edit.setEnabled(False)
         self.addAction(self.act_edit)
 
-        # 4. Operaciones de Datos (Refrescar y Exportar)
-        self.act_refresh = self._create_action(
-            "Refrescar", "actualizar", "Recargar datos de la tabla (F5)", "#14B8A6", self.refresh_requested.emit
+        # 3.1 Acciones Especiales para Importación de Viviendas (Modo dinámico)
+        self.act_template = self._create_action(
+            "Plantilla\nExcel", "documento_descargar", "Descargar plantilla oficial en Excel", "#2563EB", self.template_requested.emit
         )
-        self.addAction(self.act_refresh)
+        self.act_template.setVisible(False)
+        self.addAction(self.act_template)
 
+        self.act_import_file = self._create_action(
+            "Cargar\nArchivo", "importar", "Cargar archivo Excel o Constancia PDF", "#06B6D4", self.import_file_requested.emit
+        )
+        self.act_import_file.setVisible(False)
+        self.addAction(self.act_import_file)
+
+        # 4. Operaciones de Datos (Exportar y Refrescar)
         self.act_export = self._create_action(
             "Exportar", "exportar", "Exportar datos a archivo", "#475569", self.export_requested.emit
         )
         self.addAction(self.act_export)
+
+        self.act_clean = self._create_action(
+            "Limpiar", "limpiar", "Limpiar datos y filtros de la vista", "#64748B", self.clean_requested.emit
+        )
+        self.act_clean.setVisible(False)
+        self.addAction(self.act_clean)
+
+        self.act_apply = self._create_action(
+            "Aplicar\nCambios", "guardar", "Aplicar e importar cambios a la base de datos", "#10B981", self.apply_requested.emit
+        )
+        self.act_apply.setVisible(False)
+        self.act_apply.setEnabled(False)
+        self.addAction(self.act_apply)
+
+        self.act_refresh = self._create_action(
+            "Refrescar", "actualizar", "Recargar datos de la tabla (F5)", "#14B8A6", self.refresh_requested.emit
+        )
+        self.addAction(self.act_refresh)
 
         # 5. Ayuda y Diagnóstico
         self.act_help = self._create_action(
             "Ayuda", "ayuda", "Abrir guía de ayuda (F1)", "#2563EB", self.help_requested.emit
         )
         self.addAction(self.act_help)
+
+    def set_actions_mode(self, mode: str = "default"):
+        """Switches the toolbar action block between standard CRUD and specialized module workflows."""
+        self._actions_mode = mode
+        if mode == "viviendas":
+            # Ocultar botones estándar Nuevo y Editar
+            self.act_new.setVisible(False)
+            self.act_edit.setVisible(False)
+            self.act_new.setEnabled(False)
+            self.act_edit.setEnabled(False)
+            
+            # Mostrar botones de importación
+            self.act_template.setVisible(True)
+            self.act_import_file.setVisible(True)
+            self.act_clean.setVisible(True)
+            self.act_apply.setVisible(True)
+            self.act_export.setVisible(True)
+            self.act_refresh.setVisible(True)
+            self.act_help.setVisible(True)
+        else:
+            # Restaurar botones estándar
+            self.act_new.setVisible(True)
+            self.act_edit.setVisible(True)
+            
+            # Ocultar botones de importación
+            self.act_template.setVisible(False)
+            self.act_import_file.setVisible(False)
+            self.act_clean.setVisible(False)
+            self.act_apply.setVisible(False)
+            self.act_export.setVisible(True)
+            self.act_refresh.setVisible(True)
+            self.act_help.setVisible(True)
 
     def _create_action(self, text: str, icon_name: str, tooltip: str, color: str, callback: Optional[Callable] = None) -> QAction:
         action = QAction(self)
@@ -122,12 +187,15 @@ class GLActionToolbar(QToolBar):
                     label, icon_name, tooltip, color,
                     lambda vk=view_key: self.view_requested.emit(vk)
                 )
+                act.setCheckable(True)
                 act.setData(view_key)
                 self.insertAction(self.sep_crud, act)
                 self._module_actions.append(act)
 
         # Sincronizar resaltado de la acción activa
         self.act_home.setChecked(False)
+        for act in self._module_actions:
+            act.setChecked(act.data() == active_view_key)
         self.setVisible(True)
 
     def _get_category_items(self, category: str) -> list:

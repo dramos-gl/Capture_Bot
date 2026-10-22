@@ -656,4 +656,41 @@ def bulk_import_satc_viviendas(payload: ImportarViviendasSATCRequest, db: Sessio
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al importar viviendas SATC: {str(e)}")
 
+@router.post("/satc/viviendas/{regimen_id}/vincular-rpp")
+def vincular_folios_rpp_satc(regimen_id: int, payload: ImportarViviendasSATCRequest, db: Session = Depends(get_db)):
+    """Vincula los folios electrónicos del RPP para las viviendas de un régimen."""
+    try:
+        from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+        svc = HousingLifeCycleService(db)
+        res = svc.vincular_folios_rpp_excel(
+            regimen_id=regimen_id,
+            records=payload.records
+        )
+        return res
+    except ValueError as ve:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al vincular folios RPP: {str(e)}")
+
+@router.post("/satc/viviendas/{regimen_id}/vincular-catastro")
+def vincular_catastro_satc(regimen_id: int, payload: ImportarViviendasSATCRequest, db: Session = Depends(get_db)):
+    """Vincula claves catastrales y cuentas prediales para las viviendas de un régimen."""
+    try:
+        from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+        svc = HousingLifeCycleService(db)
+        res = svc.vincular_catastro_excel(
+            regimen_id=regimen_id,
+            records=payload.records
+        )
+        return res
+    except ValueError as ve:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al vincular datos catastrales: {str(e)}")
+
+
 

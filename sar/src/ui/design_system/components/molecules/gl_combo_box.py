@@ -18,6 +18,14 @@ class CustomComboBox(QComboBox):
         else:
             self.setFixedHeight(Spacing.CONTROL_HEIGHT_COMPACT)
 
+    def add_items(self, items: list[str]):
+        """Convenience method to add an iterable of strings (Design System standard)."""
+        self.addItems(items)
+
+    def set_current_text(self, text: str):
+        """Convenience method to set current combobox selection by string label."""
+        self.setCurrentText(text)
+
     def wheelEvent(self, event: QWheelEvent):
         """Suppress passive wheel events when the dropdown popup is closed.
 

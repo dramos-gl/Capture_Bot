@@ -7,22 +7,276 @@ from openpyxl.utils import get_column_letter
 
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel, QTabWidget,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QFileDialog
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QFileDialog,
+    QSizePolicy, QLineEdit
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QColor
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
 from sar.src.ui.design_system.components.molecules.gl_combo_box import CustomComboBox
+from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.molecules.gl_loading_dialog import GLLoadingDialog
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.components.organisms.gl_crud_table import CrudTablePanel
 from sar.src.ui.design_system.components.organisms.gl_dialog import CustomDialog
 from sar.src.storage.repositories import CatalogoRepository
 from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+
+
+class ViviendasFileAnalyzeWorker(QThread):
+    """Worker thread para leer, validar y analizar archivos Excel o Constancias RPP PDF en segundo plano."""
+    finished = Signal(bool, dict, str)
+
+    def __init__(self, api_client, db_connector, file_path: str, desarrollo_id: int, regimen_id: Optional[int], modo: str):
+        super().__init__()
+        self.api_client = api_client
+        self.db_connector = db_connector
+        self.file_path = file_path
+        self.desarrollo_id = desarrollo_id
+        self.regimen_id = regimen_id
+        self.modo = modo
+
+    def run(self):
+        try:
+            records = []
+            is_pdf = self.file_path.lower().endswith(".pdf")
+
+            if is_pdf:
+                if self.modo != "RPP":
+                    self.finished.emit(
+                        False, {},
+                        "El archivo seleccionado es una Constancia de Resolución PDF.\n"
+                        "Por favor seleccione la operación '2. Vincular Folios RPP' para procesarlo."
+                    )
+                    return
+                from satc.src.services.rpp_resolution_extractor import RppResolutionExtractor
+                raw_extracted = RppResolutionExtractor.extract_from_pdf(self.file_path)
+                for r in raw_extracted:
+                    records.append({
+                        "interior": r["interior"],
+                        "edificio": r["edificio"],
+                        "nivel": r.get("nivel", ""),
+                        "numero_oficial": r.get("numero_oficial", ""),
+                        "calle": "",
+                        "destino": "HABITACIONAL",
+                        "espacio": "VIVIENDA",
+                        "folio_electronico": r["folio_electronico"],
+                        "clave_catastral": "",
+                        "padron": "",
+                        "descripcion": f"Folio RPP extraído de Constancia (Frac. #{r['numero_fraccion']})"
+                    })
+            else:
+                wb = openpyxl.load_workbook(self.file_path, data_only=True)
+                ws = wb.active
+                rows = list(ws.iter_rows(values_only=True))
+                if not rows or len(rows) < 2:
+                    self.finished.emit(False, {}, "El archivo seleccionado no contiene filas de datos.")
+                    return
+
+                raw_headers = [str(h or "").strip().upper() for h in rows[0]]
+                def get_col_idx(*names):
+                    for name in names:
+                        if name.upper() in raw_headers:
+                            return raw_headers.index(name.upper())
+                    return -1
+
+                idx_int = get_col_idx("INTERIOR", "VIVIENDA", "DEPTO", "DEPARTAMENTO", "CASA")
+                idx_ed = get_col_idx("EDIFICIO", "EDIF", "TORRE")
+                idx_niv = get_col_idx("NIVEL", "PISO", "PLANTA")
+                idx_nof = get_col_idx("NUMERO_OFICIAL", "NO_OFICIAL", "NUMERO_UPE", "NUM_UPE", "UPE")
+                idx_calle = get_col_idx("CALLE", "VIALIDAD", "DIRECCION")
+                idx_dest = get_col_idx("DESTINO", "USO")
+                idx_esp = get_col_idx("ESPACIO", "TIPO_ESPACIO")
+                idx_rpp = get_col_idx("FOLIO_ELECTRONICO", "FOLIO_RPP", "RPP")
+                idx_cat = get_col_idx("CLAVE_CATASTRAL", "CATASTRO", "CLAVE_CAT")
+                idx_pad = get_col_idx("PADRON", "CUENTA_PREDIAL", "PREDIAL")
+                idx_desc = get_col_idx("DESCRIPCION", "DESCRIPCIÓN", "NOTAS", "OBSERVACIONES")
+
+                if idx_int == -1:
+                    self.finished.emit(
+                        False, {},
+                        "El archivo debe contener al menos la columna 'INTERIOR' o 'VIVIENDA'."
+                    )
+                    return
+
+                for row in rows[1:]:
+                    if not any(row):
+                        continue
+                    interior = str(row[idx_int] or "").strip()
+                    if not interior:
+                        continue
+
+                    ed = str(row[idx_ed] or "").strip() if idx_ed != -1 and row[idx_ed] is not None else ""
+                    niv = str(row[idx_niv] or "").strip() if idx_niv != -1 and row[idx_niv] is not None else ""
+                    nof = str(row[idx_nof] or "").strip() if idx_nof != -1 and row[idx_nof] is not None else ""
+                    calle = str(row[idx_calle] or "").strip() if idx_calle != -1 and row[idx_calle] is not None else ""
+                    dest = str(row[idx_dest] or "HABITACIONAL").strip().upper() if idx_dest != -1 and row[idx_dest] is not None else "HABITACIONAL"
+                    esp = str(row[idx_esp] or "VIVIENDA").strip().upper() if idx_esp != -1 and row[idx_esp] is not None else "VIVIENDA"
+                    rpp = str(row[idx_rpp] or "").strip() if idx_rpp != -1 and row[idx_rpp] is not None else ""
+                    cat = str(row[idx_cat] or "").strip() if idx_cat != -1 and row[idx_cat] is not None else ""
+                    pad = str(row[idx_pad] or "").strip() if idx_pad != -1 and row[idx_pad] is not None else ""
+                    desc = str(row[idx_desc] or "").strip() if idx_desc != -1 and row[idx_desc] is not None else ""
+
+                    records.append({
+                        "interior": interior,
+                        "edificio": ed,
+                        "nivel": niv,
+                        "numero_oficial": nof,
+                        "calle": calle,
+                        "destino": dest,
+                        "espacio": esp,
+                        "folio_electronico": rpp,
+                        "clave_catastral": cat,
+                        "padron": pad,
+                        "descripcion": desc
+                    })
+
+            if not records:
+                self.finished.emit(False, {}, "No se detectaron registros con Interior válido.")
+                return
+
+            # Validación de UPEs autorizadas vs total en archivo
+            tot_upes = 0
+            if self.regimen_id:
+                if self.api_client.connect_via_api:
+                    all_regs = self.api_client.request("GET", "/api/admin/data/satc_regimenes")
+                    target = next((r for r in all_regs if r.get("regimen_id") == self.regimen_id), None)
+                    tot_upes = target.get("total_upes", 0) if target else 0
+                else:
+                    with self.db_connector.get_session() as session:
+                        svc = HousingLifeCycleService(session)
+                        target = svc.regimen_repo.get_by_id(self.regimen_id)
+                        tot_upes = target.total_upes if target else 0
+
+                if len(records) > tot_upes:
+                    self.finished.emit(
+                        False, {},
+                        f"El archivo contiene {len(records)} unidades, lo cual SUPERA la capacidad autorizada "
+                        f"del Régimen ({tot_upes} UPEs).\n\n"
+                        f"Por favor verifique el archivo para no exceder las {tot_upes} UPEs del macro-lote."
+                    )
+                    return
+
+            # Consultar existentes en BD para marcar si es NUEVO, VINCULABLE o DUPLICADO
+            if self.api_client.connect_via_api:
+                params = {"desarrollo_id": self.desarrollo_id}
+                if self.regimen_id:
+                    params["regimen_id"] = self.regimen_id
+                v_existentes = self.api_client.request("GET", f"/api/admin/satc/viviendas/{self.desarrollo_id}", data=params)
+            else:
+                with self.db_connector.get_session() as session:
+                    svc = HousingLifeCycleService(session)
+                    if self.regimen_id:
+                        v_existentes = svc.get_viviendas_by_regimen(self.regimen_id)
+                    else:
+                        v_existentes = svc.get_viviendas_by_desarrollo(self.desarrollo_id)
+
+            existentes_keys = {
+                (
+                    (v.get("edificio") or "").strip().upper(),
+                    (v.get("interior") or "").strip().upper()
+                )
+                for v in v_existentes
+            }
+
+            # Clasificación de registros y estados
+            nuevos_cnt = 0
+            duplicados_cnt = 0
+            processed_records = []
+
+            for r in records:
+                raw_ed = r["edificio"].upper()
+                ed_norm = re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_ed).strip()
+                int_norm = r["interior"].upper()
+
+                es_dup = (raw_ed, int_norm) in existentes_keys or (ed_norm, int_norm) in existentes_keys
+                if self.modo in ("RPP", "CATASTRO"):
+                    if es_dup:
+                        status_str = "VINCULABLE"
+                        nuevos_cnt += 1
+                    else:
+                        status_str = "NO ENCONTRADO"
+                        duplicados_cnt += 1
+                else:
+                    if es_dup:
+                        status_str = "DUPLICADO"
+                        duplicados_cnt += 1
+                    else:
+                        status_str = "NUEVO"
+                        nuevos_cnt += 1
+
+                processed_records.append({
+                    "data": r,
+                    "status": status_str
+                })
+
+            result_data = {
+                "records": records,
+                "processed_records": processed_records,
+                "file_name": os.path.basename(self.file_path),
+                "nuevos_cnt": nuevos_cnt,
+                "duplicados_cnt": duplicados_cnt,
+                "tot_upes": tot_upes
+            }
+            self.finished.emit(True, result_data, "")
+        except Exception as e:
+            self.finished.emit(False, {}, str(e))
+
+
+class ViviendasLoadWorker(QThread):
+    """Worker thread para cargar viviendas y capacidad del régimen en segundo plano sin congelar la UI."""
+    finished = Signal(bool, dict, str)
+
+    def __init__(self, api_client, db_connector, desarrollo_id: int, regimen_id: Optional[int]):
+        super().__init__()
+        self.api_client = api_client
+        self.db_connector = db_connector
+        self.desarrollo_id = desarrollo_id
+        self.regimen_id = regimen_id
+
+    def run(self):
+        try:
+            tot_u = 0
+            # 1. Consultar capacidad del régimen si aplica
+            if self.regimen_id:
+                if self.api_client.connect_via_api:
+                    all_regs = self.api_client.request("GET", "/api/admin/data/satc_regimenes")
+                    target = next((r for r in all_regs if r.get("regimen_id") == self.regimen_id), None)
+                    tot_u = target.get("total_upes", 0) if target else 0
+                else:
+                    with self.db_connector.get_session() as session:
+                        svc = HousingLifeCycleService(session)
+                        target = svc.regimen_repo.get_by_id(self.regimen_id)
+                        tot_u = target.total_upes if target else 0
+
+            # 2. Consultar viviendas registradas
+            if self.api_client.connect_via_api:
+                params = {"desarrollo_id": self.desarrollo_id}
+                if self.regimen_id:
+                    params["regimen_id"] = self.regimen_id
+                viviendas = self.api_client.request("GET", f"/api/admin/satc/viviendas/{self.desarrollo_id}", data=params)
+            else:
+                with self.db_connector.get_session() as session:
+                    svc = HousingLifeCycleService(session)
+                    if self.regimen_id:
+                        viviendas = svc.get_viviendas_by_regimen(self.regimen_id)
+                    else:
+                        viviendas = svc.get_viviendas_by_desarrollo(self.desarrollo_id)
+
+            res = {
+                "viviendas": viviendas,
+                "tot_u": tot_u,
+                "regimen_id": self.regimen_id,
+                "desarrollo_id": self.desarrollo_id
+            }
+            self.finished.emit(True, res, "")
+        except Exception as e:
+            self.finished.emit(False, {}, str(e))
 
 
 class ViviendasImportWorker(QThread):
@@ -85,6 +339,7 @@ class ViviendasImportWorker(QThread):
 
 class SatcCatalogsView(QWidget):
     """Sub-vista integrada para la administración de catálogos maestros de SATC."""
+    action_state_changed = Signal()
 
     def __init__(self, db_connector, current_user_id, current_sesion_id, can_edit, parent=None):
         super().__init__(parent)
@@ -105,6 +360,8 @@ class SatcCatalogsView(QWidget):
 
     def _build_ui(self):
         self.tabs = QTabWidget(self)
+        self.tabs.setObjectName("seamlessTabWidget")
+        self.tabs.tabBar().setVisible(False)
         self.layout.addWidget(self.tabs)
 
         # ---------------------------------------------------------
@@ -187,114 +444,159 @@ class SatcCatalogsView(QWidget):
         lay_import_viv.setContentsMargins(12, 12, 12, 12)
         lay_import_viv.setSpacing(12)
 
-        # 1. Banner explicativo
-        self.lbl_v_desc = CustomLabel(
-            "<b>Importación y Padrón Maestro de Viviendas / UPEs:</b><br/>"
-            "Cargue o consulte masivamente el listado de viviendas del desarrollo.<br/>"
-            "• <b>Con Régimen:</b> Valida estrictamente que el total de viviendas cargadas no exceda las UPEs autorizadas del macro-lote.<br/>"
-            "• <b>Sin Régimen (Directo a Desarrollo):</b> Permite la importación de fraccionamientos unifamiliares o manzanas abiertas sin macro-lote.",
-            variant="body"
-        )
-        self.lbl_v_desc.setWordWrap(True)
-        self.lbl_v_desc.setStyleSheet(f"background-color: {Colors.SURFACE_LIGHT}; border: 1px solid {Colors.BORDER_LIGHT}; padding: 10px 14px; border-radius: 6px; color: {Colors.TEXT_LIGHT_SECONDARY};")
-        lay_import_viv.addWidget(self.lbl_v_desc)
-
-        # 2. Barra de filtros y controles
+        # 1. Barra de filtros y controles (Elástica y adaptativa a pantallas pequeñas)
         ctl_box = QHBoxLayout()
         ctl_box.setSpacing(10)
 
         ctl_box.addWidget(CustomLabel("Desarrollo *:", variant="body"))
         self.cmb_v_desarrollo = CustomComboBox()
-        self.cmb_v_desarrollo.setMinimumWidth(200)
+        self.cmb_v_desarrollo.setMinimumWidth(160)
+        self.cmb_v_desarrollo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.cmb_v_desarrollo.currentIndexChanged.connect(self._on_v_desarrollo_changed)
-        ctl_box.addWidget(self.cmb_v_desarrollo)
+        ctl_box.addWidget(self.cmb_v_desarrollo, 1)
 
         ctl_box.addWidget(CustomLabel("Régimen *:", variant="body"))
         self.cmb_v_regimen = CustomComboBox()
-        self.cmb_v_regimen.setMinimumWidth(240)
+        self.cmb_v_regimen.setMinimumWidth(180)
+        self.cmb_v_regimen.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.cmb_v_regimen.currentIndexChanged.connect(self._on_v_regimen_changed)
-        ctl_box.addWidget(self.cmb_v_regimen)
+        ctl_box.addWidget(self.cmb_v_regimen, 1)
 
         ctl_box.addWidget(CustomLabel("Operación:", variant="body"))
         self.cmb_v_modo = CustomComboBox()
-        self.cmb_v_modo.setMinimumWidth(210)
+        self.cmb_v_modo.setMinimumWidth(180)
+        self.cmb_v_modo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.cmb_v_modo.addItem("-- Selecciona Operación --", None)
         self.cmb_v_modo.addItem("1. Carga Inicial (Física)", "INICIAL")
         self.cmb_v_modo.addItem("2. Vincular Folios RPP", "RPP")
         self.cmb_v_modo.addItem("3. Vincular Cédula / Catastro", "CATASTRO")
         self.cmb_v_modo.currentIndexChanged.connect(self._on_v_modo_changed)
         ctl_box.addWidget(self.cmb_v_modo)
 
+        ctl_box.addStretch()
+
+        # Botones operativos desacoplados (sus acciones se invocan desde la Toolbar superior)
         self.btn_v_plantilla = CustomButton("Plantilla Excel", is_secondary=True, icon_name="excel")
         self.btn_v_plantilla.clicked.connect(self._on_v_descargar_plantilla)
-        ctl_box.addWidget(self.btn_v_plantilla)
+        self.btn_v_plantilla.hide()
 
         self.btn_v_seleccionar = CustomButton("Cargar Archivo", is_secondary=True, icon_name="documento_cargar")
         self.btn_v_seleccionar.clicked.connect(self._on_v_seleccionar_archivo)
-        ctl_box.addWidget(self.btn_v_seleccionar)
+        self.btn_v_seleccionar.hide()
 
         self.btn_v_exportar_datos = CustomButton("Exportar Datos", is_secondary=True, icon_name="excel")
         self.btn_v_exportar_datos.clicked.connect(self._on_v_exportar_datos)
         self.btn_v_exportar_datos.setEnabled(False)
-        ctl_box.addWidget(self.btn_v_exportar_datos)
+        self.btn_v_exportar_datos.hide()
 
         self.btn_v_limpiar = CustomButton("Limpiar", is_secondary=True, icon_name="cancelar")
         self.btn_v_limpiar.clicked.connect(self._on_v_limpiar)
-        ctl_box.addWidget(self.btn_v_limpiar)
-
-        ctl_box.addStretch()
+        self.btn_v_limpiar.hide()
 
         self.btn_v_ejecutar = CustomButton("Aplicar Cambios", icon_name="guardar")
         self.btn_v_ejecutar.clicked.connect(self._on_v_ejecutar_importacion)
         self.btn_v_ejecutar.setEnabled(False)
         self.btn_v_ejecutar.setVisible(self.can_edit)
-        ctl_box.addWidget(self.btn_v_ejecutar)
+        self.btn_v_ejecutar.hide()
 
         lay_import_viv.addLayout(ctl_box)
 
-        # 3. KPI Bar con Estado del Ciclo de Vida (Atomic Design: GLInfoBanner / Tokens de Colors)
+        # 2. Information Row / Metrics Bar (Limpio, transparente, perfectamente distribuido y uniforme)
         self.kpi_v_frame = QFrame()
-        self.kpi_v_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {Colors.SURFACE_LIGHT};
-                border: 1px solid {Colors.BORDER_LIGHT};
-                border-radius: 6px;
-                padding: 4px;
-            }}
+        self.kpi_v_frame.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+                border: none;
+            }
         """)
         kpi_lay = QHBoxLayout(self.kpi_v_frame)
-        kpi_lay.setContentsMargins(12, 6, 12, 6)
-        kpi_lay.setSpacing(14)
+        kpi_lay.setContentsMargins(0, 4, 0, 4)
+        kpi_lay.setSpacing(6)
 
-        self.lbl_vkpi_archivo = CustomLabel("Archivo: Ninguno", variant="muted")
+        def _make_metric_dot(color_val: str) -> QLabel:
+            dot = QLabel()
+            dot.setFixedSize(10, 10)
+            dot.setStyleSheet(f"background-color: {color_val}; border-radius: 5px; border: none;")
+            return dot
+
+        # Puntos indicadores de color (Atomic Design: Tokens de Colors)
+        self.dot_vkpi_total = _make_metric_dot(Colors.TEXT_LIGHT_MUTED)
         self.lbl_vkpi_total_arch = CustomLabel("En Archivo: 0", variant="body")
+
+        self.dot_vkpi_nuevos = _make_metric_dot(Colors.SUCCESS)
         self.lbl_vkpi_nuevos = CustomLabel("Nuevos / Vinculables: 0", variant="body")
+
+        self.dot_vkpi_duplicados = _make_metric_dot(Colors.ERROR)
         self.lbl_vkpi_duplicados = CustomLabel("Duplicados / Sin Coincidencia: 0", variant="body")
-        self.lbl_vkpi_regimen_info = CustomLabel("Capacidad Régimen: N/A", variant="body")
-        self.lbl_vkpi_bd = CustomLabel("Registrados en BD: 0", variant="body")
-        self.lbl_vkpi_con_rpp = CustomLabel("Con Folio RPP: 0", variant="body")
-        self.lbl_vkpi_con_catastro = CustomLabel("Con Catastro: 0", variant="body")
 
-        self.lbl_vkpi_archivo.setStyleSheet("font-size: 11px; color: #64748B;")
-        self.lbl_vkpi_total_arch.setStyleSheet("font-weight: bold; font-size: 11px; color: #1E293B;")
-        self.lbl_vkpi_nuevos.setStyleSheet(f"font-weight: bold; font-size: 11px; color: {Colors.SUCCESS};")
-        self.lbl_vkpi_duplicados.setStyleSheet("font-weight: bold; font-size: 11px; color: #E11D48;")
-        self.lbl_vkpi_regimen_info.setStyleSheet(f"font-weight: bold; font-size: 11px; color: {Colors.ACCENT_VIOLET};")
-        self.lbl_vkpi_bd.setStyleSheet(f"font-weight: bold; font-size: 11px; color: {Colors.ACCENT};")
-        self.lbl_vkpi_con_rpp.setStyleSheet("font-weight: bold; font-size: 11px; color: #D97706;")
-        self.lbl_vkpi_con_catastro.setStyleSheet(f"font-weight: bold; font-size: 11px; color: {Colors.SUCCESS};")
+        self.dot_vkpi_regimen = _make_metric_dot(Colors.ACCENT_VIOLET)
+        self.lbl_vkpi_regimen_info = CustomLabel("Total UPE: N/A", variant="body")
 
-        kpi_lay.addWidget(self.lbl_vkpi_archivo)
-        kpi_lay.addStretch()
+        self.dot_vkpi_bd = _make_metric_dot(Colors.ACCENT)
+        self.lbl_vkpi_bd = CustomLabel("EnBD: 0", variant="body")
+
+        self.dot_vkpi_rpp = _make_metric_dot(Colors.WARNING)
+        self.lbl_vkpi_con_rpp = CustomLabel("Con Folio: 0", variant="body")
+
+        self.dot_vkpi_catastro = _make_metric_dot(Colors.SUCCESS)
+        self.lbl_vkpi_con_catastro = CustomLabel("Con CC: 0", variant="body")
+
+        # Layout equitativo y balanceado de manera uniforme sin hueco central
+        kpi_lay.addWidget(self.dot_vkpi_total)
         kpi_lay.addWidget(self.lbl_vkpi_total_arch)
+        kpi_lay.addSpacing(16)
+
+        kpi_lay.addWidget(self.dot_vkpi_nuevos)
         kpi_lay.addWidget(self.lbl_vkpi_nuevos)
+        kpi_lay.addSpacing(16)
+
+        kpi_lay.addWidget(self.dot_vkpi_duplicados)
         kpi_lay.addWidget(self.lbl_vkpi_duplicados)
+        kpi_lay.addSpacing(16)
+
+        kpi_lay.addWidget(self.dot_vkpi_regimen)
         kpi_lay.addWidget(self.lbl_vkpi_regimen_info)
+        kpi_lay.addSpacing(16)
+
+        kpi_lay.addWidget(self.dot_vkpi_bd)
         kpi_lay.addWidget(self.lbl_vkpi_bd)
+        kpi_lay.addSpacing(16)
+
+        kpi_lay.addWidget(self.dot_vkpi_rpp)
         kpi_lay.addWidget(self.lbl_vkpi_con_rpp)
+        kpi_lay.addSpacing(16)
+
+        kpi_lay.addWidget(self.dot_vkpi_catastro)
         kpi_lay.addWidget(self.lbl_vkpi_con_catastro)
+
+        kpi_lay.addStretch()
+
         lay_import_viv.addWidget(self.kpi_v_frame)
 
-        # 4. Tabla de Visualización / Importación
+        # 3. Contenedor de Tarjeta Estandarizada y Tabla (Atomic Design: CustomCard)
+        self.card_viviendas = CustomCard("Padrón e Importación de Viviendas", parent=self)
+        self.card_viviendas.setObjectName("cardFrame")
+
+        # Indicador de archivo cargado adjunto al título de la tabla
+        self.lbl_v_sep = CustomLabel("|", variant="muted")
+        self.lbl_v_sep.setStyleSheet("color: #94A3B8; font-size: 14px; font-weight: normal; margin: 0 4px;")
+        self.card_viviendas.add_header_widget(self.lbl_v_sep)
+
+        self.lbl_vkpi_archivo = CustomLabel("Archivo: Ninguno", variant="muted")
+        self.lbl_vkpi_archivo.setStyleSheet("font-size: 12px; color: #64748B; font-weight: normal;")
+        self.card_viviendas.add_header_widget(self.lbl_vkpi_archivo)
+
+        # Campo Buscar alineado al encabezado de la tabla (Homologado con GlCrudTable)
+        self.search_viviendas_input = CustomInput(control_size="md", parent=self)
+        self.search_viviendas_input.setObjectName("viviendasSearchInput")
+        self.search_viviendas_input.setPlaceholderText("Buscar en padrón...")
+        self.search_viviendas_input.setMinimumWidth(220)
+        self.search_viviendas_input.setMaximumWidth(320)
+        self.search_viviendas_input.setClearButtonEnabled(True)
+        self.search_viviendas_input.addAction(Icons.search("#64748B"), QLineEdit.LeadingPosition)
+        self.search_viviendas_input.textChanged.connect(self._on_search_viviendas_text_changed)
+        self.card_viviendas.add_header_widget(self.search_viviendas_input)
+
         self.tbl_viviendas = QTableWidget()
         self.tbl_viviendas.setColumnCount(13)
         self.tbl_viviendas.setHorizontalHeaderLabels([
@@ -305,29 +607,18 @@ class SatcCatalogsView(QWidget):
         self.tbl_viviendas.horizontalHeader().setStretchLastSection(True)
         self.tbl_viviendas.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_viviendas.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.tbl_viviendas.setStyleSheet(f"""
-            QTableWidget {{
-                background-color: {Colors.SURFACE_LIGHT};
-                border: 1px solid {Colors.BORDER_LIGHT};
-                border-radius: 6px;
-                gridline-color: #E2E8F0;
-                font-size: 12px;
-            }}
-            QHeaderView::section {{
-                background-color: #F8FAFC;
-                color: #475569;
-                font-weight: bold;
-                padding: 6px;
-                border: none;
-                border-bottom: 1px solid {Colors.BORDER_LIGHT};
-            }}
-        """)
-        lay_import_viv.addWidget(self.tbl_viviendas)
+        self.tbl_viviendas.setShowGrid(False)
+        self.tbl_viviendas.verticalHeader().setVisible(False)
+        self.tbl_viviendas.verticalHeader().setDefaultSectionSize(26)
+        
+        self.card_viviendas.layout.addWidget(self.tbl_viviendas)
+        lay_import_viv.addWidget(self.card_viviendas)
 
         self.tabs.addTab(self.tab_import_viviendas, "Importación de Viviendas")
 
         self._v_parsed_records = []
         self._v_worker = None
+        self._v_load_worker = None
 
     # =========================================================================
     # 1. DIALOGOS & ACCIONES: TIPO DE TRÁMITE
@@ -1010,11 +1301,11 @@ class SatcCatalogsView(QWidget):
     # 5. HANDLERS: IMPORTACIÓN Y PADRÓN DE VIVIENDAS / UPES
     # =========================================================================
     def _on_v_desarrollo_changed(self):
-        """Recarga los regímenes disponibles para el desarrollo y consulta las viviendas en BD."""
+        """Recarga los regímenes disponibles para el desarrollo y limpia la tabla si no hay selección."""
         des_id = self.cmb_v_desarrollo.currentData()
         self.cmb_v_regimen.blockSignals(True)
         self.cmb_v_regimen.clear()
-        self.cmb_v_regimen.addItem("-- Sin Régimen (Directo a Desarrollo / Fraccionamiento) --", None)
+        self.cmb_v_regimen.addItem("-- Seleccione un Régimen --", None)
 
         if des_id:
             try:
@@ -1030,19 +1321,21 @@ class SatcCatalogsView(QWidget):
                             for r in all_regs if r.desarrollo_id == des_id and r.activo
                         ]
 
+                self.cmb_v_regimen.addItem("-- Sin Régimen (Directo a Desarrollo / Fraccionamiento) --", "SIN_REGIMEN")
                 for r in regs:
                     total_u = r.get("total_upes", 0)
                     self.cmb_v_regimen.addItem(f"{r.get('nombre_regimen')} (Capacidad: {total_u} UPEs)", r.get("regimen_id"))
-            except Exception as e:
+            except Exception:
                 pass
 
         self.cmb_v_regimen.blockSignals(False)
         self._on_v_regimen_changed()
 
     def _on_v_regimen_changed(self):
-        """Carga las viviendas existentes en la base de datos para el desarrollo/régimen seleccionado."""
+        """Carga las viviendas de forma asíncrona en segundo plano sin congelar la interfaz."""
         des_id = self.cmb_v_desarrollo.currentData()
-        reg_id = self.cmb_v_regimen.currentData()
+        raw_reg_id = self.cmb_v_regimen.currentData()
+        reg_id = None if raw_reg_id in (None, "SIN_REGIMEN") else raw_reg_id
 
         self._v_parsed_records = []
         self.btn_v_ejecutar.setEnabled(False)
@@ -1051,50 +1344,62 @@ class SatcCatalogsView(QWidget):
         self.lbl_vkpi_total_arch.setText("En Archivo: 0")
         self.lbl_vkpi_nuevos.setText("Nuevos / Vinculables: 0")
         self.lbl_vkpi_duplicados.setText("Duplicados / Sin Coincidencia: 0")
+        self.search_viviendas_input.blockSignals(True)
+        self.search_viviendas_input.clear()
+        self.search_viviendas_input.blockSignals(False)
 
-        if not des_id:
+        # Si no se ha seleccionado desarrollo o régimen, mantener la tabla limpia sin congelamiento
+        if not des_id or raw_reg_id is None:
             self.tbl_viviendas.setRowCount(0)
-            self.lbl_vkpi_bd.setText("Registrados en BD: 0")
-            self.lbl_vkpi_regimen_info.setText("Capacidad Régimen: N/A")
+            self.lbl_vkpi_bd.setText("EnBD: 0")
+            self.lbl_vkpi_regimen_info.setText("Total UPE: N/A")
+            self.lbl_vkpi_con_rpp.setText("Con Folio: 0")
+            self.lbl_vkpi_con_catastro.setText("Con CC: 0")
+            self.action_state_changed.emit()
             return
 
+        # Desplegar indicador de carga no bloqueante
+        self._v_loading_dialog = GLLoadingDialog("Cargando padrón de viviendas...", self)
+        self._v_loading_dialog.show()
+
+        # Iniciar worker en background
+        self._v_load_worker = ViviendasLoadWorker(
+            api_client=self.api_client,
+            db_connector=self.db_connector,
+            desarrollo_id=des_id,
+            regimen_id=reg_id
+        )
+        self._v_load_worker.finished.connect(self._on_v_load_finished)
+        self._v_load_worker.start()
+
+    def _on_v_load_finished(self, success: bool, result_data: dict, error_msg: str):
+        """Puebla la tabla de viviendas y las métricas una vez culminada la consulta asíncrona."""
+        if self._v_loading_dialog:
+            self._v_loading_dialog.close()
+            self._v_loading_dialog = None
+
+        if not success:
+            QMessageBox.critical(self, "Error al Cargar Viviendas", f"No se pudieron cargar las viviendas: {error_msg}")
+            return
+
+        viviendas = result_data.get("viviendas", [])
+        tot_u = result_data.get("tot_u", 0)
+        reg_id = result_data.get("regimen_id")
+
+        if reg_id:
+            self.lbl_vkpi_regimen_info.setText(f"Total UPE: {tot_u}")
+        else:
+            self.lbl_vkpi_regimen_info.setText("Sin Régimen (Abierto)")
+
+        self.lbl_vkpi_bd.setText(f"EnBD: {len(viviendas)}")
+
+        con_rpp = sum(1 for v in viviendas if v.get("folio_electronico"))
+        con_cat = sum(1 for v in viviendas if v.get("clave_catastral"))
+        self.lbl_vkpi_con_rpp.setText(f"Con Folio: {con_rpp}")
+        self.lbl_vkpi_con_catastro.setText(f"Con CC: {con_cat}")
+
+        self.tbl_viviendas.setUpdatesEnabled(False)
         try:
-            if self.api_client.connect_via_api:
-                params = {"desarrollo_id": des_id}
-                if reg_id:
-                    params["regimen_id"] = reg_id
-                viviendas = self.api_client.request("GET", f"/api/admin/satc/viviendas/{des_id}", data=params)
-            else:
-                with self.db_connector.get_session() as session:
-                    svc = HousingLifeCycleService(session)
-                    if reg_id:
-                        viviendas = svc.get_viviendas_by_regimen(reg_id)
-                    else:
-                        viviendas = svc.get_viviendas_by_desarrollo(des_id)
-
-            # Capacidad del régimen
-            if reg_id:
-                if self.api_client.connect_via_api:
-                    all_regs = self.api_client.request("GET", "/api/admin/data/satc_regimenes")
-                    target = next((r for r in all_regs if r.get("regimen_id") == reg_id), None)
-                    tot_u = target.get("total_upes", 0) if target else 0
-                else:
-                    with self.db_connector.get_session() as session:
-                        svc = HousingLifeCycleService(session)
-                        target = svc.regimen_repo.get_by_id(reg_id)
-                        tot_u = target.total_upes if target else 0
-                self.lbl_vkpi_regimen_info.setText(f"Capacidad Régimen: {tot_u} UPEs")
-            else:
-                self.lbl_vkpi_regimen_info.setText("Sin Régimen (Abierto)")
-
-            self.lbl_vkpi_bd.setText(f"Registrados en BD: {len(viviendas)}")
-            
-            # Conteo de estado registral y catastral
-            con_rpp = sum(1 for v in viviendas if v.get("folio_electronico"))
-            con_cat = sum(1 for v in viviendas if v.get("clave_catastral"))
-            self.lbl_vkpi_con_rpp.setText(f"Con Folio RPP: {con_rpp}")
-            self.lbl_vkpi_con_catastro.setText(f"Con Catastro: {con_cat}")
-
             self.tbl_viviendas.setRowCount(len(viviendas))
             for idx, v in enumerate(viviendas):
                 item_st = QTableWidgetItem("REGISTRADO")
@@ -1112,39 +1417,67 @@ class SatcCatalogsView(QWidget):
                 self.tbl_viviendas.setItem(idx, 10, QTableWidgetItem(str(v.get("padron") or "")))
                 self.tbl_viviendas.setItem(idx, 11, QTableWidgetItem(str(v.get("calle") or "")))
                 self.tbl_viviendas.setItem(idx, 12, QTableWidgetItem(str(v.get("descripcion") or "")))
+        finally:
+            self.tbl_viviendas.setUpdatesEnabled(True)
 
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudieron cargar las viviendas: {e}")
+        self.action_state_changed.emit()
+
+    def _on_search_viviendas_text_changed(self, text: str):
+        """Filtra reactivamente las filas visibles en la tabla de viviendas en base al texto buscado."""
+        search_term = text.strip().lower()
+        self.tbl_viviendas.setUpdatesEnabled(False)
+        try:
+            for row in range(self.tbl_viviendas.rowCount()):
+                if not search_term:
+                    self.tbl_viviendas.setRowHidden(row, False)
+                    continue
+
+                row_matches = False
+                for col in range(self.tbl_viviendas.columnCount()):
+                    item = self.tbl_viviendas.item(row, col)
+                    if item and search_term in item.text().lower():
+                        row_matches = True
+                        break
+                self.tbl_viviendas.setRowHidden(row, not row_matches)
+        finally:
+            self.tbl_viviendas.setUpdatesEnabled(True)
 
     def _on_v_limpiar(self):
         """Limpia completamente la pantalla, filtros, registros cargados, tabla e indicadores de métricas."""
         self.cmb_v_desarrollo.blockSignals(True)
         self.cmb_v_regimen.blockSignals(True)
+        self.cmb_v_modo.blockSignals(True)
         try:
             self.cmb_v_desarrollo.setCurrentIndex(0)
             self.cmb_v_regimen.clear()
-            self.cmb_v_regimen.addItem("-- Sin Régimen (Directo a Desarrollo / Fraccionamiento) --", None)
+            self.cmb_v_regimen.addItem("-- Seleccione un Régimen --", None)
             self.cmb_v_regimen.setCurrentIndex(0)
+            self.cmb_v_modo.setCurrentIndex(0)
         finally:
             self.cmb_v_desarrollo.blockSignals(False)
             self.cmb_v_regimen.blockSignals(False)
+            self.cmb_v_modo.blockSignals(False)
 
         self._v_parsed_records = []
         self.btn_v_ejecutar.setEnabled(False)
         self.btn_v_exportar_datos.setEnabled(False)
+        self.search_viviendas_input.blockSignals(True)
+        self.search_viviendas_input.clear()
+        self.search_viviendas_input.blockSignals(False)
 
-        # Reset completo de indicadores KPI
+        # Reset completo de indicadores KPI (Nomenclatura concisa)
         self.lbl_vkpi_archivo.setText("Archivo: Ninguno")
         self.lbl_vkpi_total_arch.setText("En Archivo: 0")
         self.lbl_vkpi_nuevos.setText("Nuevos / Vinculables: 0")
         self.lbl_vkpi_duplicados.setText("Duplicados / Sin Coincidencia: 0")
-        self.lbl_vkpi_regimen_info.setText("Capacidad Régimen: N/A")
-        self.lbl_vkpi_bd.setText("Registrados en BD: 0")
-        self.lbl_vkpi_con_rpp.setText("Con Folio RPP: 0")
-        self.lbl_vkpi_con_catastro.setText("Con Catastro: 0")
+        self.lbl_vkpi_regimen_info.setText("Total UPE: N/A")
+        self.lbl_vkpi_bd.setText("EnBD: 0")
+        self.lbl_vkpi_con_rpp.setText("Con Folio: 0")
+        self.lbl_vkpi_con_catastro.setText("Con CC: 0")
 
         # Limpiar tabla
         self.tbl_viviendas.setRowCount(0)
+        self.action_state_changed.emit()
 
     def _on_v_exportar_datos(self):
         """Descarga los registros analizados/extraídos a una plantilla Excel (.xlsx) para validación visual humana."""
@@ -1231,27 +1564,28 @@ class SatcCatalogsView(QWidget):
         self.lbl_vkpi_nuevos.setText("Nuevos / Vinculables: 0")
         self.lbl_vkpi_duplicados.setText("Duplicados / Sin Coincidencia: 0")
 
-        if modo == "RPP":
-            self.lbl_v_desc.setText(
-                "<b>2. Vinculación de Folios Electrónicos del RPP:</b><br/>"
-                "Cargue la relación de folios registrales para las viviendas ya existentes en el régimen.<br/>"
-                "• Relaciona cada registro mediante <b>EDIFICIO</b> e <b>INTERIOR</b>.<br/>"
-                "• Al asignar el folio RPP, la vivienda avanza automáticamente al estado <b>EN_INDIVIDUALIZACION</b>."
-            )
-        elif modo == "CATASTRO":
-            self.lbl_v_desc.setText(
-                "<b>3. Vinculación de Cédula Catastral y Padrón Municipal:</b><br/>"
-                "Cargue las claves catastrales y cuentas prediales asignadas por Catastro Cancún.<br/>"
-                "• Enlaza mediante <b>FOLIO_ELECTRONICO</b> o por <b>(EDIFICIO, INTERIOR)</b>.<br/>"
-                "• Al completar los datos catastrales, la vivienda transiciona a <b>LISTA_PARA_VENTA</b>."
-            )
-        else:
-            self.lbl_v_desc.setText(
-                "<b>1. Carga Inicial de Viviendas (Física):</b><br/>"
-                "Importe masivamente las viviendas/espacios privativos autorizados para el régimen.<br/>"
-                "• Se dan de alta en estado <b>PROYECTADA</b> (con interior, edificio, nivel, destino y espacio).<br/>"
-                "• No requieren folios RPP ni claves catastrales en esta etapa."
-            )
+        if hasattr(self, "lbl_v_desc") and self.lbl_v_desc is not None:
+            if modo == "RPP":
+                self.lbl_v_desc.setText(
+                    "<b>2. Vinculación de Folios Electrónicos del RPP:</b><br/>"
+                    "Cargue la relación de folios registrales para las viviendas ya existentes en el régimen.<br/>"
+                    "• Relaciona cada registro mediante <b>EDIFICIO</b> e <b>INTERIOR</b>.<br/>"
+                    "• Al asignar el folio RPP, la vivienda avanza automáticamente al estado <b>EN_INDIVIDUALIZACION</b>."
+                )
+            elif modo == "CATASTRO":
+                self.lbl_v_desc.setText(
+                    "<b>3. Vinculación de Cédula Catastral y Padrón Municipal:</b><br/>"
+                    "Cargue las claves catastrales y cuentas prediales asignadas por Catastro Cancún.<br/>"
+                    "• Enlaza mediante <b>FOLIO_ELECTRONICO</b> o por <b>(EDIFICIO, INTERIOR)</b>.<br/>"
+                    "• Al completar los datos catastrales, la vivienda transiciona a <b>LISTA_PARA_VENTA</b>."
+                )
+            else:
+                self.lbl_v_desc.setText(
+                    "<b>1. Carga Inicial de Viviendas (Física):</b><br/>"
+                    "Importe masivamente las viviendas/espacios privativos autorizados para el régimen.<br/>"
+                    "• Se dan de alta en estado <b>PROYECTADA</b> (con interior, edificio, nivel, destino y espacio).<br/>"
+                    "• No requieren folios RPP ni claves catastrales en esta etapa."
+                )
 
     def _on_v_descargar_plantilla(self):
         """Genera una plantilla Excel (.xlsx) estandarizada según el modo de operación seleccionado."""
@@ -1343,7 +1677,7 @@ class SatcCatalogsView(QWidget):
             QMessageBox.critical(self, "Error", f"No se pudo generar la plantilla: {e}")
 
     def _on_v_seleccionar_archivo(self):
-        """Lee archivo Excel o Constancia PDF del RPP, valida y previsualiza en la tabla."""
+        """Abre el diálogo de archivo y ejecuta la lectura y validación en segundo plano sin congelar la UI."""
         des_id = self.cmb_v_desarrollo.currentData()
         reg_id = self.cmb_v_regimen.currentData()
         modo = self.cmb_v_modo.currentData()
@@ -1359,226 +1693,105 @@ class SatcCatalogsView(QWidget):
         if not file_path:
             return
 
+        is_pdf = file_path.lower().endswith(".pdf")
+        if is_pdf and modo != "RPP":
+            QMessageBox.warning(
+                self, "Modo de Operación Requerido",
+                "El archivo seleccionado es una Constancia de Resolución PDF.\n"
+                "Por favor seleccione la operación '2. Vincular Folios RPP' para procesarlo."
+            )
+            return
+
+        # Deshabilitar botones operativos mientras se analiza el archivo
+        self.btn_v_seleccionar.setEnabled(False)
+        self.btn_v_ejecutar.setEnabled(False)
+        self.btn_v_exportar_datos.setEnabled(False)
+
+        # Mostrar indicador de carga no bloqueante
+        loading_msg = "Extrayendo Constancia PDF..." if is_pdf else "Analizando archivo y validando datos..."
+        self._v_loading_dialog = GLLoadingDialog(loading_msg, self)
+        self._v_loading_dialog.show()
+
+        # Iniciar worker en background
+        self._v_analyze_worker = ViviendasFileAnalyzeWorker(
+            api_client=self.api_client,
+            db_connector=self.db_connector,
+            file_path=file_path,
+            desarrollo_id=des_id,
+            regimen_id=reg_id,
+            modo=modo
+        )
+        self._v_analyze_worker.finished.connect(self._on_v_file_analyze_finished)
+        self._v_analyze_worker.start()
+
+    def _on_v_file_analyze_finished(self, success: bool, result_data: dict, error_msg: str):
+        """Maneja el resultado del análisis asíncrono y actualiza la tabla y métricas de forma fluida."""
+        if self._v_loading_dialog:
+            self._v_loading_dialog.close()
+            self._v_loading_dialog = None
+
+        self.btn_v_seleccionar.setEnabled(True)
+
+        if not success:
+            QMessageBox.critical(self, "Error al Analizar Archivo", error_msg)
+            return
+
+        records = result_data.get("records", [])
+        processed = result_data.get("processed_records", [])
+        file_name = result_data.get("file_name", "")
+        nuevos_cnt = result_data.get("nuevos_cnt", 0)
+        duplicados_cnt = result_data.get("duplicados_cnt", 0)
+        modo = self.cmb_v_modo.currentData()
+        reg_id = self.cmb_v_regimen.currentData()
+        reg_label = self.cmb_v_regimen.currentText() if reg_id else ""
+
+        self._v_parsed_records = records
+        self.lbl_vkpi_archivo.setText(f"Archivo: {file_name}")
+        self.lbl_vkpi_total_arch.setText(f"En Archivo: {len(records)}")
+
+        self.tbl_viviendas.setUpdatesEnabled(False)
         try:
-            records = []
-            is_pdf = file_path.lower().endswith(".pdf")
+            self.tbl_viviendas.setRowCount(len(processed))
+            for idx, item in enumerate(processed):
+                r = item["data"]
+                st_text = item["status"]
 
-            if is_pdf:
-                if modo != "RPP":
-                    QMessageBox.warning(
-                        self, "Modo de Operación Requerido",
-                        "El archivo seleccionado es una Constancia de Resolución PDF.\n"
-                        "Por favor seleccione la operación '2. Vincular Folios RPP' para procesarlo."
-                    )
-                    return
-                from satc.src.services.rpp_resolution_extractor import RppResolutionExtractor
-                raw_extracted = RppResolutionExtractor.extract_from_pdf(file_path)
-                for r in raw_extracted:
-                    records.append({
-                        "interior": r["interior"],
-                        "edificio": r["edificio"],
-                        "nivel": r.get("nivel", ""),
-                        "numero_oficial": r.get("numero_oficial", ""),
-                        "calle": "",
-                        "destino": "HABITACIONAL",
-                        "espacio": "VIVIENDA",
-                        "folio_electronico": r["folio_electronico"],
-                        "clave_catastral": "",
-                        "padron": "",
-                        "descripcion": f"Folio RPP extraído de Constancia (Frac. #{r['numero_fraccion']})"
-                    })
-            else:
-                wb = openpyxl.load_workbook(file_path, data_only=True)
-                ws = wb.active
-                rows = list(ws.iter_rows(values_only=True))
-                if not rows or len(rows) < 2:
-                    QMessageBox.warning(self, "Archivo Vacío", "El archivo seleccionado no contiene filas de datos.")
-                    return
-
-                # Mapeo de cabeceras
-                raw_headers = [str(h or "").strip().upper() for h in rows[0]]
-                def get_col_idx(*names):
-                    for name in names:
-                        if name.upper() in raw_headers:
-                            return raw_headers.index(name.upper())
-                    return -1
-
-                idx_int = get_col_idx("INTERIOR", "VIVIENDA", "DEPTO", "DEPARTAMENTO", "CASA")
-                idx_ed = get_col_idx("EDIFICIO", "EDIF", "TORRE")
-                idx_niv = get_col_idx("NIVEL", "PISO", "PLANTA")
-                idx_nof = get_col_idx("NUMERO_OFICIAL", "NO_OFICIAL", "NUMERO_UPE", "NUM_UPE", "UPE")
-                idx_calle = get_col_idx("CALLE", "VIALIDAD", "DIRECCION")
-                idx_dest = get_col_idx("DESTINO", "USO")
-                idx_esp = get_col_idx("ESPACIO", "TIPO_ESPACIO")
-                idx_rpp = get_col_idx("FOLIO_ELECTRONICO", "FOLIO_RPP", "RPP")
-                idx_cat = get_col_idx("CLAVE_CATASTRAL", "CATASTRO", "CLAVE_CAT")
-                idx_pad = get_col_idx("PADRON", "CUENTA_PREDIAL", "PREDIAL")
-                idx_desc = get_col_idx("DESCRIPCION", "DESCRIPCIÓN", "NOTAS", "OBSERVACIONES")
-
-                if idx_int == -1:
-                    QMessageBox.critical(
-                        self, "Encabezado Faltante",
-                        "El archivo debe contener al menos la columna 'INTERIOR' o 'VIVIENDA'."
-                    )
-                    return
-
-                for row in rows[1:]:
-                    if not any(row):
-                        continue
-                    interior = str(row[idx_int] or "").strip()
-                    if not interior:
-                        continue
-
-                    ed = str(row[idx_ed] or "").strip() if idx_ed != -1 and row[idx_ed] is not None else ""
-                    niv = str(row[idx_niv] or "").strip() if idx_niv != -1 and row[idx_niv] is not None else ""
-                    nof = str(row[idx_nof] or "").strip() if idx_nof != -1 and row[idx_nof] is not None else ""
-                    calle = str(row[idx_calle] or "").strip() if idx_calle != -1 and row[idx_calle] is not None else ""
-                    dest = str(row[idx_dest] or "HABITACIONAL").strip().upper() if idx_dest != -1 and row[idx_dest] is not None else "HABITACIONAL"
-                    esp = str(row[idx_esp] or "VIVIENDA").strip().upper() if idx_esp != -1 and row[idx_esp] is not None else "VIVIENDA"
-                    rpp = str(row[idx_rpp] or "").strip() if idx_rpp != -1 and row[idx_rpp] is not None else ""
-                    cat = str(row[idx_cat] or "").strip() if idx_cat != -1 and row[idx_cat] is not None else ""
-                    pad = str(row[idx_pad] or "").strip() if idx_pad != -1 and row[idx_pad] is not None else ""
-                    desc = str(row[idx_desc] or "").strip() if idx_desc != -1 and row[idx_desc] is not None else ""
-
-                    records.append({
-                        "interior": interior,
-                        "edificio": ed,
-                        "nivel": niv,
-                        "numero_oficial": nof,
-                        "calle": calle,
-                        "destino": dest,
-                        "espacio": esp,
-                        "folio_electronico": rpp,
-                        "clave_catastral": cat,
-                        "padron": pad,
-                        "descripcion": desc
-                    })
-
-            if not records:
-                QMessageBox.warning(self, "Sin Registros Válidos", "No se detectaron registros con Interior válido.")
-                return
-
-            # =========================================================
-            # VALIDACIÓN CRÍTICA: TOTAL EN ARCHIVO VS TOTAL UPES EN RÉGIMEN
-            # =========================================================
-            if reg_id:
-                if self.api_client.connect_via_api:
-                    all_regs = self.api_client.request("GET", "/api/admin/data/satc_regimenes")
-                    target = next((r for r in all_regs if r.get("regimen_id") == reg_id), None)
-                    tot_upes = target.get("total_upes", 0) if target else 0
+                item_st = QTableWidgetItem(st_text)
+                if st_text in ("NUEVO", "VINCULABLE"):
+                    item_st.setForeground(QColor("#16A34A"))
                 else:
-                    with self.db_connector.get_session() as session:
-                        svc = HousingLifeCycleService(session)
-                        target = svc.regimen_repo.get_by_id(reg_id)
-                        tot_upes = target.total_upes if target else 0
+                    item_st.setForeground(QColor("#DC2626"))
 
-                if len(records) > tot_upes:
-                    QMessageBox.critical(
-                        self, "Validación de Capacidad de Régimen (Error)",
-                        f"El archivo contiene {len(records)} unidades, lo cual SUPERA la capacidad autorizada "
-                        f"del Régimen ({tot_upes} UPEs).\n\n"
-                        f"Por favor verifique el archivo para no exceder las {tot_upes} UPEs del macro-lote."
-                    )
-                    return
+                self.tbl_viviendas.setItem(idx, 0, item_st)
+                self.tbl_viviendas.setItem(idx, 1, QTableWidgetItem(reg_label))
+                self.tbl_viviendas.setItem(idx, 2, QTableWidgetItem(r["numero_oficial"]))
+                self.tbl_viviendas.setItem(idx, 3, QTableWidgetItem(r["interior"]))
+                self.tbl_viviendas.setItem(idx, 4, QTableWidgetItem(r["edificio"]))
+                self.tbl_viviendas.setItem(idx, 5, QTableWidgetItem(r["nivel"]))
+                self.tbl_viviendas.setItem(idx, 6, QTableWidgetItem(r["destino"]))
+                self.tbl_viviendas.setItem(idx, 7, QTableWidgetItem(r["espacio"]))
+                self.tbl_viviendas.setItem(idx, 8, QTableWidgetItem(r["folio_electronico"]))
+                self.tbl_viviendas.setItem(idx, 9, QTableWidgetItem(r["clave_catastral"]))
+                self.tbl_viviendas.setItem(idx, 10, QTableWidgetItem(r["padron"]))
+                self.tbl_viviendas.setItem(idx, 11, QTableWidgetItem(r["calle"]))
+                self.tbl_viviendas.setItem(idx, 12, QTableWidgetItem(r["descripcion"]))
+        finally:
+            self.tbl_viviendas.setUpdatesEnabled(True)
 
-            self._v_parsed_records = records
-            self.lbl_vkpi_archivo.setText(f"Archivo: {os.path.basename(file_path)}")
-            self.lbl_vkpi_total_arch.setText(f"En Archivo: {len(records)}")
+        self._v_nuevos_cnt = nuevos_cnt
+        self._v_duplicados_cnt = duplicados_cnt
 
-            # Consultar existentes en BD para marcar si es NUEVO o DUPLICADO
-            if self.api_client.connect_via_api:
-                params = {"desarrollo_id": des_id}
-                if reg_id:
-                    params["regimen_id"] = reg_id
-                v_existentes = self.api_client.request("GET", f"/api/admin/satc/viviendas/{des_id}", data=params)
-            else:
-                with self.db_connector.get_session() as session:
-                    svc = HousingLifeCycleService(session)
-                    if reg_id:
-                        v_existentes = svc.get_viviendas_by_regimen(reg_id)
-                    else:
-                        v_existentes = svc.get_viviendas_by_desarrollo(des_id)
+        if modo in ("RPP", "CATASTRO"):
+            self.lbl_vkpi_nuevos.setText(f"Vinculables: {nuevos_cnt}")
+            self.lbl_vkpi_duplicados.setText(f"Sin Coincidencia: {duplicados_cnt}")
+            self.btn_v_ejecutar.setEnabled(nuevos_cnt > 0)
+        else:
+            self.lbl_vkpi_nuevos.setText(f"Nuevos: {nuevos_cnt}")
+            self.lbl_vkpi_duplicados.setText(f"Duplicados: {duplicados_cnt}")
+            self.btn_v_ejecutar.setEnabled(nuevos_cnt > 0)
 
-            existentes_keys = {
-                (
-                    (v.get("edificio") or "").strip().upper(),
-                    (v.get("interior") or "").strip().upper()
-                )
-                for v in v_existentes
-            }
-
-            nuevos_cnt = 0
-            duplicados_cnt = 0
-
-            self.tbl_viviendas.setUpdatesEnabled(False)
-            try:
-                self.tbl_viviendas.setRowCount(len(records))
-                reg_label = self.cmb_v_regimen.currentText() if reg_id else ""
-
-                for idx, r in enumerate(records):
-                    raw_ed = r["edificio"].upper()
-                    ed_norm = re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_ed).strip()
-                    int_norm = r["interior"].upper()
-
-                    # Comprobar presencia en la base de datos
-                    es_dup = (raw_ed, int_norm) in existentes_keys or (ed_norm, int_norm) in existentes_keys
-                    if modo == "RPP":
-                        if es_dup:
-                            item_st = QTableWidgetItem("VINCULABLE")
-                            item_st.setForeground(QColor("#16A34A"))
-                            nuevos_cnt += 1
-                        else:
-                            item_st = QTableWidgetItem("NO ENCONTRADO")
-                            item_st.setForeground(QColor("#E11D48"))
-                            duplicados_cnt += 1
-                    elif modo == "CATASTRO":
-                        if es_dup:
-                            item_st = QTableWidgetItem("VINCULABLE")
-                            item_st.setForeground(QColor("#16A34A"))
-                            nuevos_cnt += 1
-                        else:
-                            item_st = QTableWidgetItem("NO ENCONTRADO")
-                            item_st.setForeground(QColor("#E11D48"))
-                            duplicados_cnt += 1
-                    else:
-                        if es_dup:
-                            duplicados_cnt += 1
-                            item_st = QTableWidgetItem("DUPLICADO")
-                            item_st.setForeground(QColor("#E11D48"))
-                        else:
-                            nuevos_cnt += 1
-                            item_st = QTableWidgetItem("NUEVO")
-                            item_st.setForeground(QColor("#16A34A"))
-
-                    self.tbl_viviendas.setItem(idx, 0, item_st)
-                    self.tbl_viviendas.setItem(idx, 1, QTableWidgetItem(reg_label))
-                    self.tbl_viviendas.setItem(idx, 2, QTableWidgetItem(r["numero_oficial"]))
-                    self.tbl_viviendas.setItem(idx, 3, QTableWidgetItem(r["interior"]))
-                    self.tbl_viviendas.setItem(idx, 4, QTableWidgetItem(r["edificio"]))
-                    self.tbl_viviendas.setItem(idx, 5, QTableWidgetItem(r["nivel"]))
-                    self.tbl_viviendas.setItem(idx, 6, QTableWidgetItem(r["destino"]))
-                    self.tbl_viviendas.setItem(idx, 7, QTableWidgetItem(r["espacio"]))
-                    self.tbl_viviendas.setItem(idx, 8, QTableWidgetItem(r["folio_electronico"]))
-                    self.tbl_viviendas.setItem(idx, 9, QTableWidgetItem(r["clave_catastral"]))
-                    self.tbl_viviendas.setItem(idx, 10, QTableWidgetItem(r["padron"]))
-                    self.tbl_viviendas.setItem(idx, 11, QTableWidgetItem(r["calle"]))
-                    self.tbl_viviendas.setItem(idx, 12, QTableWidgetItem(r["descripcion"]))
-            finally:
-                self.tbl_viviendas.setUpdatesEnabled(True)
-
-            if modo in ("RPP", "CATASTRO"):
-                self.lbl_vkpi_nuevos.setText(f"Vinculables: {nuevos_cnt}")
-                self.lbl_vkpi_duplicados.setText(f"Sin Coincidencia: {duplicados_cnt}")
-                self.btn_v_ejecutar.setEnabled(len(records) > 0)
-            else:
-                self.lbl_vkpi_nuevos.setText(f"Nuevos: {nuevos_cnt}")
-                self.lbl_vkpi_duplicados.setText(f"Duplicados: {duplicados_cnt}")
-                self.btn_v_ejecutar.setEnabled(nuevos_cnt > 0)
-
-            self.btn_v_exportar_datos.setEnabled(len(records) > 0)
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error al Analizar Excel", f"Ocurrió un error al procesar el archivo:\n{e}")
+        self.btn_v_exportar_datos.setEnabled(len(records) > 0)
+        self.action_state_changed.emit()
 
     def _on_v_ejecutar_importacion(self):
         """Ejecuta la importación en un hilo background mediante ViviendasImportWorker mostrando indicador visual."""
@@ -1589,28 +1802,39 @@ class SatcCatalogsView(QWidget):
             return
 
         total_recs = len(self._v_parsed_records)
+        target_cnt = getattr(self, "_v_nuevos_cnt", total_recs)
+        sin_coincidencia = getattr(self, "_v_duplicados_cnt", 0)
         reg_txt = self.cmb_v_regimen.currentText() if reg_id else "Directo a Desarrollo"
         des_txt = self.cmb_v_desarrollo.currentText()
 
         modo = self.cmb_v_modo.currentData()
         if modo == "RPP":
             modo_titulo = "Vinculación de Folios RPP"
-            modo_desc = f"¿Está seguro de vincular los <b>Folios Electrónicos RPP</b> para <b>{total_recs}</b> registros?"
-            loading_txt = f"Vinculando {total_recs} Folios RPP...\nPor favor espere."
+            modo_desc = f"¿Está seguro de vincular los <b>Folios Electrónicos RPP</b> para las <b>{target_cnt}</b> viviendas detectadas?"
+            loading_txt = f"Vinculando {target_cnt} Folios RPP...\nPor favor espere."
+            detalle_procesar = f"<b>Total a vincular:</b> {target_cnt} viviendas (de {total_recs} en archivo)"
+            if sin_coincidencia > 0:
+                detalle_procesar += f"<br/><b>Sin coincidencia:</b> {sin_coincidencia} registros omitidos"
         elif modo == "CATASTRO":
             modo_titulo = "Vinculación Catastral y Predial"
-            modo_desc = f"¿Está seguro de vincular las <b>Claves Catastrales y Padrones</b> para <b>{total_recs}</b> registros?"
-            loading_txt = f"Vinculando Catastro y Padrón para {total_recs} viviendas...\nPor favor espere."
+            modo_desc = f"¿Está seguro de vincular las <b>Claves Catastrales y Padrones</b> para las <b>{target_cnt}</b> viviendas detectadas?"
+            loading_txt = f"Vinculando Catastro y Padrón para {target_cnt} viviendas...\nPor favor espere."
+            detalle_procesar = f"<b>Total a vincular:</b> {target_cnt} viviendas (de {total_recs} en archivo)"
+            if sin_coincidencia > 0:
+                detalle_procesar += f"<br/><b>Sin coincidencia:</b> {sin_coincidencia} registros omitidos"
         else:
             modo_titulo = "Carga Inicial de Viviendas"
-            modo_desc = f"¿Está seguro de aplicar la <b>Carga Inicial</b> de <b>{total_recs}</b> viviendas en estado <i>PROYECTADA</i>?"
-            loading_txt = f"Importando {total_recs} viviendas/UPEs...\nPor favor espere."
+            modo_desc = f"¿Está seguro de aplicar la <b>Carga Inicial</b> de <b>{target_cnt}</b> viviendas nuevas en estado <i>PROYECTADA</i>?"
+            loading_txt = f"Importando {target_cnt} viviendas nuevas...\nPor favor espere."
+            detalle_procesar = f"<b>Nuevas a crear:</b> {target_cnt} viviendas (de {total_recs} en archivo)"
+            if sin_coincidencia > 0:
+                detalle_procesar += f"<br/><b>Duplicadas:</b> {sin_coincidencia} registros omitidos"
 
         msg_confirm = (
             f"{modo_desc}<br/><br/>"
             f"<b>Desarrollo:</b> {des_txt}<br/>"
             f"<b>Régimen:</b> {reg_txt}<br/>"
-            f"<b>Total a procesar:</b> {total_recs} registros"
+            f"{detalle_procesar}"
         )
 
         reply = QMessageBox.question(

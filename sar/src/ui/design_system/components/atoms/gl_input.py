@@ -17,3 +17,8 @@ class CustomInput(QLineEdit):
         elif control_size == "lg":
             self.setFixedHeight(Spacing.CONTROL_HEIGHT_LARGE)
 
+    def set_focus(self):
+        """Pythonic alias for Qt's setFocus()."""
+        self.setFocus()
+
+

@@ -121,7 +121,13 @@ class AdminWindow(QMainWindow):
         self.action_toolbar.edit_requested.connect(self._on_toolbar_edit)
         self.action_toolbar.refresh_requested.connect(self._on_toolbar_refresh)
         self.action_toolbar.export_requested.connect(self._on_toolbar_export)
-        self.action_toolbar.help_requested.connect(self._show_help_manual)
+        self.action_toolbar.help_requested.connect(self._on_toolbar_help)
+
+        # Acciones operativas para el módulo Importación de Viviendas
+        self.action_toolbar.template_requested.connect(self._on_toolbar_template)
+        self.action_toolbar.import_file_requested.connect(self._on_toolbar_import_file)
+        self.action_toolbar.clean_requested.connect(self._on_toolbar_clean)
+        self.action_toolbar.apply_requested.connect(self._on_toolbar_apply)
         
         # Central Content Setup (Maximizando área de trabajo útil)
         self.central_widget = QWidget()
@@ -323,6 +329,9 @@ class AdminWindow(QMainWindow):
         # Para los submódulos de satc que comparten la misma vista por pestañas:
         target_tab_idx = None
         target_view_key = view_name
+        if view_name == "satc_catalogos":
+            view_name = "satc_tipos_tramite"
+
         if view_name in ["satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas"]:
             target_view_key = "satc_catalogos"
             tab_map = {
@@ -339,6 +348,8 @@ class AdminWindow(QMainWindow):
             view_instance = self.view_factories[target_view_key]()
             self.stacked_widget.addWidget(view_instance)
             self.instantiated_views[target_view_key] = view_instance
+            if hasattr(view_instance, "action_state_changed"):
+                view_instance.action_state_changed.connect(lambda: self._update_toolbar_state(view_instance))
             
         if target_view_key in self.instantiated_views:
             view = self.instantiated_views[target_view_key]
@@ -429,6 +440,7 @@ class AdminWindow(QMainWindow):
         """Enables or disables toolbar CRUD buttons based on view capabilities and selection."""
         view = view or self.stacked_widget.currentWidget()
         if not view or view == self.welcome_widget:
+            self.action_toolbar.set_actions_mode("default")
             self.action_toolbar.set_crud_enabled(False, False)
             self.action_toolbar.act_refresh.setEnabled(False)
             self.action_toolbar.act_export.setEnabled(False)
@@ -436,22 +448,35 @@ class AdminWindow(QMainWindow):
 
         self.action_toolbar.act_refresh.setEnabled(True)
         self.action_toolbar.act_export.setEnabled(True)
+
+        # Verificar si la vista activa es el submódulo de Importación de Viviendas
+        is_viviendas = False
+        if hasattr(view, "tabs") and hasattr(view, "tab_import_viviendas"):
+            is_viviendas = (view.tabs.currentWidget() == view.tab_import_viviendas)
+
+        if is_viviendas:
+            self.action_toolbar.set_actions_mode("viviendas")
+            # En modo viviendas, la habilitación de guardar y exportar depende de los registros cargados
+            can_apply = getattr(view.btn_v_ejecutar, "isEnabled", lambda: False)()
+            can_export = getattr(view.btn_v_exportar_datos, "isEnabled", lambda: False)()
+            self.action_toolbar.act_apply.setEnabled(can_apply)
+            self.action_toolbar.act_export.setEnabled(can_export)
+            return
+        else:
+            self.action_toolbar.set_actions_mode("default")
         
         crud = self._get_active_crud_panel(view)
         if crud and hasattr(crud, "btn_add") and hasattr(crud, "btn_edit"):
             can_add = getattr(crud.btn_add, "isVisible", lambda: True)() and crud.btn_add.isEnabled()
-            can_edit = crud.btn_edit.isEnabled()
+            can_edit = bool(crud.table.selectedItems()) if hasattr(crud, "table") else False
             self.action_toolbar.set_crud_enabled(can_add, can_edit)
             
             # Sincronizar dinámicamente cuando cambie la selección en la grilla
-            if hasattr(crud, "table") and hasattr(crud.table, "itemSelectionChanged"):
-                try:
-                    crud.table.itemSelectionChanged.disconnect()
-                except Exception:
-                    pass
-                crud.table.itemSelectionChanged.connect(
-                    lambda: self.action_toolbar.act_edit.setEnabled(crud.btn_edit.isEnabled())
-                )
+            if hasattr(crud, "table"):
+                def _sync_edit_state():
+                    has_sel = bool(crud.table.selectedItems())
+                    self.action_toolbar.act_edit.setEnabled(has_sel)
+                crud.table.itemSelectionChanged.connect(_sync_edit_state)
         else:
             can_edit_view = getattr(view, "can_edit", False)
             self.action_toolbar.set_crud_enabled(can_edit_view, False)
@@ -466,28 +491,67 @@ class AdminWindow(QMainWindow):
         """Triggers create action on the currently visible view/panel."""
         view = self.stacked_widget.currentWidget()
         crud = self._get_active_crud_panel(view)
-        if crud and crud.btn_add.isEnabled():
-            crud.add_requested.emit()
+        if crud:
+            can_add = getattr(crud.btn_add, "isVisible", lambda: True)() and crud.btn_add.isEnabled()
+            if can_add:
+                crud.add_requested.emit()
 
     def _on_toolbar_edit(self):
         """Triggers edit action on the selected item in the active view/panel."""
         view = self.stacked_widget.currentWidget()
         crud = self._get_active_crud_panel(view)
-        if crud and crud.btn_edit.isEnabled():
+        if crud and hasattr(crud, "table") and crud.table.selectedItems():
             crud._on_edit_button_clicked()
+
+    def _on_toolbar_template(self):
+        """Triggers official excel template download on the active viviendas view."""
+        view = self.stacked_widget.currentWidget()
+        if hasattr(view, "_on_v_descargar_plantilla"):
+            view._on_v_descargar_plantilla()
+
+    def _on_toolbar_import_file(self):
+        """Triggers excel or pdf file selection and parsing on the active viviendas view."""
+        view = self.stacked_widget.currentWidget()
+        if hasattr(view, "_on_v_seleccionar_archivo"):
+            view._on_v_seleccionar_archivo()
+            self._update_toolbar_state(view)
+
+    def _on_toolbar_clean(self):
+        """Cleans and resets filters and data on the active viviendas view."""
+        view = self.stacked_widget.currentWidget()
+        if hasattr(view, "_on_v_limpiar"):
+            view._on_v_limpiar()
+            self._update_toolbar_state(view)
+
+    def _on_toolbar_apply(self):
+        """Applies parsed housing records to the database."""
+        view = self.stacked_widget.currentWidget()
+        if hasattr(view, "_on_v_ejecutar_importacion"):
+            view._on_v_ejecutar_importacion()
+            self._update_toolbar_state(view)
 
     def _on_toolbar_refresh(self):
         """Refreshes the active view data."""
         view = self.stacked_widget.currentWidget()
+        if hasattr(view, "tabs") and hasattr(view, "tab_import_viviendas") and view.tabs.currentWidget() == view.tab_import_viviendas:
+            if hasattr(view, "_on_v_regimen_changed"):
+                view._on_v_regimen_changed()
+                self._update_toolbar_state(view)
+                return
         if hasattr(view, "refresh_data"):
             view.refresh_data()
             self._update_toolbar_state(view)
 
     def _on_toolbar_export(self):
-        """Exports visible table data to CSV."""
+        """Exports visible table data to CSV or delegates to specialized export handler."""
         view = self.stacked_widget.currentWidget()
+        if hasattr(view, "tabs") and hasattr(view, "tab_import_viviendas") and view.tabs.currentWidget() == view.tab_import_viviendas:
+            if hasattr(view, "_on_v_exportar_datos"):
+                view._on_v_exportar_datos()
+                return
+
         crud = self._get_active_crud_panel(view)
-        table = getattr(crud, "table", None) or getattr(view, "table", None) or getattr(view, "table_res", None)
+        table = getattr(crud, "table", None) or getattr(view, "table", None) or getattr(view, "table_res", None) or getattr(view, "tbl_viviendas", None)
         if not table or table.rowCount() == 0:
             QMessageBox.information(self, "Exportar", "No hay registros disponibles para exportar.")
             return
@@ -526,8 +590,13 @@ class AdminWindow(QMainWindow):
     def _handle_exit_action(self):
         self.close()
 
-    def _show_help_manual(self):
-        dialog = UserManualDialog(self)
+    def _on_toolbar_help(self):
+        """Abre la guía de ayuda específica contextualizada al módulo activo de la barra de herramientas."""
+        active_cat = getattr(self.action_toolbar, "current_category", "") or "SATC"
+        self._show_help_manual(module_category=active_cat)
+
+    def _show_help_manual(self, module_category: str = ""):
+        dialog = UserManualDialog(self, initial_category=module_category)
         dialog.exec()
 
     def _show_help_shortcuts(self):

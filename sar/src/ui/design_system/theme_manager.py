@@ -1064,6 +1064,11 @@ class ThemeManager:
             border-radius: 0px;
             padding: 8px;
         }}
+        QTabWidget#seamlessTabWidget::pane, QTabWidget[tabBarVisible="false"]::pane {{
+            border: none;
+            background-color: transparent;
+            padding: 0px;
+        }}
         QTabBar::tab {{
             background-color: transparent;
             color: {txt_secondary};
@@ -1203,10 +1208,12 @@ class ThemeManager:
             color: {txt_primary};
             border: 1px solid transparent;
             border-radius: 6px;
-            padding: 6px 10px;
+            padding: 4px 8px;
             font-size: 11px;
             font-weight: 500;
             min-width: 68px;
+            min-height: 52px;
+            max-height: 52px;
         }}
         QToolBar#adminActionToolbar QToolButton:hover {{
             background-color: {"rgba(37, 99, 235, 0.08)" if not is_dark else "rgba(96, 165, 250, 0.12)"};

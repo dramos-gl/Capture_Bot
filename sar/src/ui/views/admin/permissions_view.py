@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 from sar.src.ui.design_system.components.organisms.gl_message_dialog import GLMessageBox as QMessageBox
 from sar.src.ui.design_system.components.atoms.gl_checkbox import CustomCheckBox
+from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from PySide6.QtCore import Qt
 from sar.src.ui.design_system.components.atoms.gl_button import CustomButton
 from sar.src.ui.design_system.tokens.colors import Colors

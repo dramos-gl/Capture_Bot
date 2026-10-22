@@ -40,6 +40,8 @@ class CatalogsView(QWidget):
         
     def _build_ui(self):
         self.tabs = QTabWidget(self)
+        self.tabs.setObjectName("seamlessTabWidget")
+        self.tabs.tabBar().setVisible(False)
         self.layout.addWidget(self.tabs)
         
         # 1. Conceptos Tab

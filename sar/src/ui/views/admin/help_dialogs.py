@@ -392,10 +392,11 @@ import subprocess
 class UserManualDialog(QDialog):
     """Interactive User and Administrator Guide dialog with categorized topics and file viewer."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, initial_category: str = ""):
         super().__init__(parent)
+        self.initial_category = (initial_category or "").upper()
         self.setWindowTitle("Manual de Administración y Guía de Operación — SAR")
-        self.resize(860, 620)
+        self.resize(880, 640)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self._build_ui()
 
@@ -407,7 +408,7 @@ class UserManualDialog(QDialog):
         header_layout = QHBoxLayout()
         icon_lbl = QLabel()
         icon_lbl.setPixmap(Icons.get_pixmap("documento_abrir", size=24, color="#2563EB"))
-        lbl_title = CustomLabel("Centro de Documentación y Guías Operativas SAR", variant="header")
+        lbl_title = CustomLabel("Centro de Documentación y Guías Operativas SAR / SATC", variant="header")
         header_layout.addWidget(icon_lbl)
         header_layout.addWidget(lbl_title)
         header_layout.addStretch()
@@ -417,6 +418,20 @@ class UserManualDialog(QDialog):
         self.tabs = QTabWidget(self)
 
         manual_topics = [
+            ("🏛️ Trámites SATC", """
+                <h3 style='color: #1E293B;'>Submódulo de Trámites de Vivienda y Catálogos SATC</h3>
+                <p>Guía de operación para la gestión de trámites municipales, regímenes y vivienda.</p>
+                <div style='background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 10px; border-radius: 6px; margin-bottom: 12px;'>
+                    <b>📌 Alcance Operativo:</b> Este módulo centraliza los parámetros normativos y catálogos de expedientes de vivienda ante dependencias municipales.
+                </div>
+                <ul>
+                    <li><b>1. Tipos de Trámite SATC:</b> Alta y mantenimiento de trámites municipales (Licencias, Número Oficial, RPP, Catastro), definiendo vigencia en días y etapa de disparo.</li>
+                    <li><b>2. Estados de Trámite:</b> Configuración del ciclo de vida del trámite (Iniciado, En Cotejo, Dictamen Favorable, Concluido, Rechazado).</li>
+                    <li><b>3. Estados de Vivienda:</b> Control del semáforo y estatus físico/legal de la unidad habitacional o UPE.</li>
+                    <li><b>4. Regímenes en Condominio:</b> Definición de Supermanzanas, Manzanas y Lotes maestros vinculados a desarrollos inmobiliarios.</li>
+                    <li><b>5. Padrón Maestro e Importación:</b> Importación masiva de viviendas desde archivos Excel con validación de duplicados y asignación a régimen.</li>
+                </ul>
+            """),
             ("📘 Guía Operativa (Usuario)", """
                 <h3 style='color: #1E293B;'>Flujo Operativo de Referencias y Derechos</h3>
                 <p>Guía esencial para operadores de captura, supervisores y facturación.</p>
@@ -474,6 +489,16 @@ class UserManualDialog(QDialog):
                 </div>
             """)
             self.tabs.addTab(browser, tab_name)
+
+        # Tab selección automática según el módulo de origen
+        if self.initial_category == "SATC":
+            self.tabs.setCurrentIndex(0)
+        elif self.initial_category in ("SEGURIDAD", "CATALOGOS"):
+            self.tabs.setCurrentIndex(2)  # Manual de Administración
+        elif self.initial_category in ("PROCESOS", "CONFIGURACION"):
+            self.tabs.setCurrentIndex(3)  # Infraestructura y DB
+        else:
+            self.tabs.setCurrentIndex(0)
 
         layout.addWidget(self.tabs)
 
