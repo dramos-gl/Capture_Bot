@@ -439,7 +439,8 @@ class FacturaCancunRepository(BaseCancunRepository):
 
 from satc.src.storage.satc_models import (
     TipoTramite, EstadoVivienda, EstadoTramite, 
-    RegimenCondominio, Vivienda, TramiteVivienda, RequisitoDocumento
+    RegimenCondominio, Vivienda, TramiteVivienda, RequisitoDocumento,
+    CampoCanonico, CampoEtiquetaAncla, CampoFormatoMunicipio
 )
 
 
@@ -993,5 +994,50 @@ class SolicitudTramiteRepository(BaseCancunRepository):
             .order_by(SolicitudTramite.solicitud_tramite_id.asc())
         )
         return list(self.session.execute(stmt).scalars().all())
+
+
+class MetadataRulesRepository(BaseCancunRepository):
+    """Encapsula operaciones de consulta y administración para reglas de extracción metadata-driven."""
+
+    def list_campos(self, solo_activos: bool = True) -> List[CampoCanonico]:
+        stmt = select(CampoCanonico).options(
+            selectinload(CampoCanonico.anclas),
+            selectinload(CampoCanonico.formatos).selectinload(CampoFormatoMunicipio.municipio)
+        ).order_by(CampoCanonico.campo_id.asc())
+        if solo_activos:
+            stmt = stmt.where(CampoCanonico.activo == True)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def get_campo_by_codigo(self, codigo: str) -> Optional[CampoCanonico]:
+        stmt = select(CampoCanonico).options(
+            selectinload(CampoCanonico.anclas),
+            selectinload(CampoCanonico.formatos).selectinload(CampoFormatoMunicipio.municipio)
+        ).where(CampoCanonico.codigo == codigo)
+        return self.session.execute(stmt).scalars().first()
+
+    def list_formatos_by_municipio(self, municipio_id: int, solo_activos: bool = True) -> List[CampoFormatoMunicipio]:
+        stmt = (
+            select(CampoFormatoMunicipio)
+            .options(
+                selectinload(CampoFormatoMunicipio.campo),
+                selectinload(CampoFormatoMunicipio.municipio)
+            )
+            .where(CampoFormatoMunicipio.municipio_id == municipio_id)
+            .order_by(CampoFormatoMunicipio.prioridad.asc())
+        )
+        if solo_activos:
+            stmt = stmt.where(CampoFormatoMunicipio.activo == True)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def list_anclas_by_campo(self, campo_id: int, solo_activos: bool = True) -> List[CampoEtiquetaAncla]:
+        stmt = (
+            select(CampoEtiquetaAncla)
+            .where(CampoEtiquetaAncla.campo_id == campo_id)
+            .order_by(CampoEtiquetaAncla.prioridad.asc())
+        )
+        if solo_activos:
+            stmt = stmt.where(CampoEtiquetaAncla.activo == True)
+        return list(self.session.execute(stmt).scalars().all())
+
 
 

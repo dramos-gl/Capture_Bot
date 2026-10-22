@@ -304,6 +304,23 @@ class ViviendasFileAnalyzeWorker(QThread):
                         r_display["numero_oficial"] = target_v.get("numero_oficial") or r.get("numero_oficial") or ""
                         r_display["calle"] = target_v.get("calle") or r.get("calle") or ""
                         r_display["descripcion"] = target_v.get("descripcion") or r.get("descripcion") or ""
+
+                        # Validación Metadata-Driven de Clave Catastral
+                        if self.modo == "CATASTRO":
+                            cc_val = str(r.get("clave_catastral") or "").strip()
+                            if cc_val:
+                                from satc.src.services.metadata_extraction_service import MetadataExtractionService
+                                # Resolver sesión si está disponible o validar con motor desacoplado
+                                with self.db_connector.get_session() as s_meta:
+                                    meta_svc = MetadataExtractionService(s_meta)
+                                    # Por defecto validar Benito Juárez (ID: 2) si no se especifica otro municipio
+                                    es_val, cc_clean, err_msg = meta_svc.es_clave_catastral_valida(cc_val, municipio_id=2)
+                                    if not es_val:
+                                        # Si no cumple Cancún, validar si cumple Playa (ID: 8) o Tulum (ID: 9)
+                                        es_val_p, _, _ = meta_svc.es_clave_catastral_valida(cc_val, municipio_id=8)
+                                        es_val_t, _, _ = meta_svc.es_clave_catastral_valida(cc_val, municipio_id=9)
+                                        if not es_val_p and not es_val_t:
+                                            r_display["descripcion"] = f"⚠️ [CC INVÁLIDA: {err_msg}] {r_display['descripcion']}".strip()
                     else:
                         status_str = "NO ENCONTRADO"
                         duplicados_cnt += 1

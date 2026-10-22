@@ -115,6 +115,60 @@ satc_auditoria       → Bitácora de eventos, cambios y errores
 
 ---
 
+### Tabla: `satc_configuracion.campo_canonico`
+Catálogo canónico de campos de negocio para extracción y validación documental desacoplada (*Metadata-Driven*).
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `campo_id` | BIGSERIAL PK | Identificador único del campo |
+| `codigo` | VARCHAR(50) UNIQUE | Identificador de sistema (ej. `clave_catastral`, `folio_electronico`, `padron`) |
+| `nombre` | VARCHAR(100) NOT NULL | Nombre representativo para la interfaz |
+| `descripcion` | TEXT NULL | Propósito de negocio del dato |
+| `activo` | BOOLEAN DEFAULT TRUE | Soft-delete |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | Fecha de alta |
+| `updated_at` | TIMESTAMPTZ | Fecha de última actualización |
+
+---
+
+### Tabla: `satc_configuracion.campo_etiqueta_ancla`
+Variaciones sintácticas, etiquetas y anclas de texto para localizar datos en OCR / PDFs / texto plano.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `etiqueta_id` | BIGSERIAL PK | Identificador único del ancla |
+| `campo_id` | BIGINT FK NOT NULL | Campo canónico asociado (`satc_configuracion.campo_canonico`) |
+| `etiqueta` | VARCHAR(100) NOT NULL | Etiqueta representativa (ej. `Clave Catastral`, `C.C.`, `Folio Real`) |
+| `regex_ancla` | TEXT NOT NULL | Expresión regular insensible a mayúsculas para detectar la etiqueta |
+| `prioridad` | INTEGER DEFAULT 1 | Orden de búsqueda en cascada |
+| `activo` | BOOLEAN DEFAULT TRUE | Soft-delete |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | Fecha de alta |
+
+---
+
+### Tabla: `satc_configuracion.campo_formato_municipio`
+Reglas estructurales, máscaras, expresiones regulares de captura/validación y tolerancia OCR clasificadas por jurisdicción municipal.
+
+| Campo | Tipo | Descripción |
+| :--- | :--- | :--- |
+| `formato_id` | BIGSERIAL PK | Identificador único del formato |
+| `campo_id` | BIGINT FK NOT NULL | Campo canónico asociado (`satc_configuracion.campo_canonico`) |
+| `municipio_id` | BIGINT FK NOT NULL | Municipio oficial (`sar_catalogo.municipio`) |
+| `nombre_variante` | VARCHAR(100) NOT NULL | Nombre de la variante (ej. `Cancún 18 Caracteres`, `Playa Con Guión`) |
+| `prioridad` | INTEGER DEFAULT 1 | Prioridad de evaluación en cascada (1 = Principal, 2 = Secundaria) |
+| `regex_extraccion` | TEXT NOT NULL | Patrón regex para captura directa (con grupos de captura) |
+| `regex_validacion` | TEXT NOT NULL | Patrón regex estricto para validar el dato depurado |
+| `longitud_min` | INTEGER NULL | Longitud de caracteres mínima permitida |
+| `longitud_max` | INTEGER NULL | Longitud de caracteres máxima permitida |
+| `remover_caracteres`| VARCHAR(50) DEFAULT ' -/' | Caracteres a eliminar antes de validar |
+| `permite_sliding_window` | BOOLEAN DEFAULT FALSE | Habilita búsqueda por ventanas deslizantes en cadenas fusionadas de OCR |
+| `descripcion_error`| VARCHAR(255) NULL | Mensaje de retroalimentación en caso de invalidez |
+| `activo` | BOOLEAN DEFAULT TRUE | Soft-delete |
+| `created_at` | TIMESTAMPTZ DEFAULT NOW() | Fecha de alta |
+| `updated_at` | TIMESTAMPTZ | Fecha de última actualización |
+
+
+---
+
 ## 5. Catálogos
 
 ### Tabla: `satc_catalogo.estado_vivienda`

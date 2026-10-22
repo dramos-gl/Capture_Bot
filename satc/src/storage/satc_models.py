@@ -405,3 +405,71 @@ class RequisitoDocumento(Base):
     # Relaciones
     tramite: Mapped[TramiteVivienda] = relationship(back_populates="requisitos")
 
+
+# =============================================================================
+# MODELOS DE CONFIGURACIÓN Y EXTRACCIÓN METADATA-DRIVEN (satc_configuracion)
+# =============================================================================
+
+class CampoCanonico(Base):
+    """Mapea el catálogo de campos canónicos de negocio para extracción documental."""
+    __tablename__ = "campo_canonico"
+    __table_args__ = {"schema": "satc_configuracion"}
+
+    campo_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    nombre: Mapped[str] = mapped_column(String(100), nullable=False)
+    descripcion: Mapped[Optional[str]] = mapped_column(Text)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Relaciones
+    anclas: Mapped[List["CampoEtiquetaAncla"]] = relationship(back_populates="campo", cascade="all, delete-orphan")
+    formatos: Mapped[List["CampoFormatoMunicipio"]] = relationship(back_populates="campo", cascade="all, delete-orphan")
+
+
+class CampoEtiquetaAncla(Base):
+    """Mapea variaciones de escritura y anclas OCR para localizar campos en documentos."""
+    __tablename__ = "campo_etiqueta_ancla"
+    __table_args__ = {"schema": "satc_configuracion"}
+
+    etiqueta_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    campo_id: Mapped[int] = mapped_column(ForeignKey("satc_configuracion.campo_canonico.campo_id", ondelete="CASCADE"), nullable=False)
+    etiqueta: Mapped[str] = mapped_column(String(100), nullable=False)
+    regex_ancla: Mapped[str] = mapped_column(Text, nullable=False)
+    prioridad: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    campo: Mapped[CampoCanonico] = relationship(back_populates="anclas")
+
+
+class CampoFormatoMunicipio(Base):
+    """Mapea reglas de validación y extracción estructural por jurisdicción municipal."""
+    __tablename__ = "campo_formato_municipio"
+    __table_args__ = {"schema": "satc_configuracion"}
+
+    formato_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    campo_id: Mapped[int] = mapped_column(ForeignKey("satc_configuracion.campo_canonico.campo_id", ondelete="CASCADE"), nullable=False)
+    municipio_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.municipio.municipio_id", ondelete="RESTRICT"), nullable=False)
+    nombre_variante: Mapped[str] = mapped_column(String(100), nullable=False)
+    prioridad: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    
+    regex_extraccion: Mapped[str] = mapped_column(Text, nullable=False)
+    regex_validacion: Mapped[str] = mapped_column(Text, nullable=False)
+    longitud_min: Mapped[Optional[int]] = mapped_column(Integer)
+    longitud_max: Mapped[Optional[int]] = mapped_column(Integer)
+    remover_caracteres: Mapped[Optional[str]] = mapped_column(String(50), default=" -/")
+    permite_sliding_window: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    
+    descripcion_error: Mapped[Optional[str]] = mapped_column(String(255))
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Relaciones
+    campo: Mapped[CampoCanonico] = relationship(back_populates="formatos")
+    municipio = relationship("Municipio", foreign_keys=[municipio_id])
+
+
