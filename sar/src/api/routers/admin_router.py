@@ -240,6 +240,45 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: 
                 }
                 for r in items
             ]
+        elif entity == "satc_formatos_municipio":
+            from satc.src.storage.satc_repos import MetadataRulesRepository
+            repo = MetadataRulesRepository(db)
+            items = repo.list_all_formatos(solo_activos=False)
+            return [
+                {
+                    "formato_id": f.formato_id,
+                    "campo_id": f.campo_id,
+                    "campo_nombre": f.campo.nombre if f.campo else "N/A",
+                    "campo_codigo": f.campo.codigo if f.campo else "",
+                    "municipio_id": f.municipio_id,
+                    "municipio_nombre": f.municipio.nombre if f.municipio else "N/A",
+                    "nombre_variante": f.nombre_variante,
+                    "prioridad": f.prioridad,
+                    "regex_extraccion": f.regex_extraccion,
+                    "regex_validacion": f.regex_validacion,
+                    "longitud_min": f.longitud_min,
+                    "longitud_max": f.longitud_max,
+                    "remover_caracteres": f.remover_caracteres or "",
+                    "permite_sliding_window": f.permite_sliding_window,
+                    "descripcion_error": f.descripcion_error or "",
+                    "activo": f.activo
+                }
+                for f in items
+            ]
+        elif entity == "satc_campos":
+            from satc.src.storage.satc_repos import MetadataRulesRepository
+            repo = MetadataRulesRepository(db)
+            items = repo.list_campos(solo_activos=False)
+            return [
+                {
+                    "campo_id": c.campo_id,
+                    "codigo": c.codigo,
+                    "nombre": c.nombre,
+                    "descripcion": c.descripcion or "",
+                    "activo": c.activo
+                }
+                for c in items
+            ]
         else:
             raise HTTPException(status_code=400, detail=f"Entidad desconocida: {entity}")
     except Exception as e:
@@ -365,6 +404,14 @@ def save_admin_entity(entity: str, request: AdminSaveRequest, db: Session = Depe
             res = satc_svc.save_regimen_condominio(request.data)
             db.commit()
             return {"detail": "Régimen en condominio guardado con éxito", "id": res.regimen_id}
+        elif entity == "satc_formatos_municipio":
+            from satc.src.storage.satc_repos import MetadataRulesRepository
+            from satc.src.services.metadata_extraction_service import MetadataExtractionService
+            repo = MetadataRulesRepository(db)
+            res = repo.save_formato(request.data)
+            db.commit()
+            MetadataExtractionService.clear_cache()
+            return {"detail": "Regla de formato municipal guardada con éxito", "id": res.formato_id}
         else:
             raise HTTPException(status_code=400, detail=f"Entidad desconocida para guardar: {entity}")
     except Exception as e:

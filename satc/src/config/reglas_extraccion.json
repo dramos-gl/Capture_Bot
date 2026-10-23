@@ -1,0 +1,174 @@
+{
+  "version": "1.0.0",
+  "descripcion": "Configuración maestra de extracción gobernada por metadatos para trámites de vivienda SATC",
+  "campos": [
+    {
+      "slug": "clave_catastral",
+      "nombre": "Clave Catastral",
+      "descripcion": "Identificador catastral municipal único del predio o UPE",
+      "tipo_dato": "STRING",
+      "etiquetas_ancla": [
+        {
+          "etiqueta": "CLAVE CATASTRAL",
+          "regex_ancla": "(?:c(?:lave)?\\.?\\s*cat(?:astral)?\\.?|c\\.?c\\.?)[\\s:]*([A-Z0-9\\-]+)",
+          "prioridad": 1
+        },
+        {
+          "etiqueta": "DATOS DEL PREDIO / CC",
+          "regex_ancla": "datos\\s+del\\s+predio[\\s\\S]*?(?:c(?:lave)?\\.?\\s*cat(?:astral)?\\.?)[\\s:]*([A-Z0-9\\-]+)",
+          "prioridad": 2
+        },
+        {
+          "etiqueta": "CVE CATASTRO",
+          "regex_ancla": "(?:cve\\.?|clave)\\s*catastro[\\s:]*([A-Z0-9\\-]+)",
+          "prioridad": 3
+        }
+      ],
+      "variantes_municipio": [
+        {
+          "jurisdiccion": "CANCUN",
+          "nombre_variante": "Cancún 18 Caracteres (18 Números o 17 Números + 1 Letra)",
+          "prioridad": 1,
+          "regex_extraccion": "(?:[1-9]\\d{17}|[1-9]\\d{16}[A-Z])",
+          "regex_validacion": "^[1-9](?:\\d{17}|\\d{16}[A-Z])$",
+          "longitud_min": 18,
+          "longitud_max": 18,
+          "remover_caracteres": " -/",
+          "permite_sliding_window": true,
+          "descripcion_error": "La clave catastral de Cancún (18 chars) debe iniciar con 1-9 y contener 18 números o 17 números y 1 letra."
+        },
+        {
+          "jurisdiccion": "CANCUN",
+          "nombre_variante": "Cancún 17 Caracteres (16 Números + 1 Letra)",
+          "prioridad": 2,
+          "regex_extraccion": "(?:[1-9]\\d{15}[A-Z])",
+          "regex_validacion": "^[1-9]\\d{15}[A-Z]$",
+          "longitud_min": 17,
+          "longitud_max": 17,
+          "remover_caracteres": " -/",
+          "permite_sliding_window": true,
+          "descripcion_error": "La clave catastral de Cancún (17 chars) debe iniciar con 1-9 y contener exactamente 16 números y 1 letra."
+        },
+        {
+          "jurisdiccion": "PLAYA",
+          "nombre_variante": "Playa del Carmen (Con Guión 16 a 19 caracteres)",
+          "prioridad": 1,
+          "regex_extraccion": "(?:[1-9]\\d{14}-\\d{1,3})",
+          "regex_validacion": "^[1-9]\\d{14}-\\d{1,3}$",
+          "longitud_min": 16,
+          "longitud_max": 19,
+          "remover_caracteres": " ",
+          "permite_sliding_window": false,
+          "descripcion_error": "La clave de Solidaridad/Playa con guión debe tener base de 15 dígitos numéricos seguidos de un guión y de 1 a 3 dígitos."
+        },
+        {
+          "jurisdiccion": "PLAYA",
+          "nombre_variante": "Playa del Carmen (Sin Guión 15 Dígitos Continuos)",
+          "prioridad": 2,
+          "regex_extraccion": "(?:[1-9]\\d{14})",
+          "regex_validacion": "^[1-9]\\d{14}$",
+          "longitud_min": 15,
+          "longitud_max": 15,
+          "remover_caracteres": " -/",
+          "permite_sliding_window": false,
+          "descripcion_error": "La clave de Solidaridad/Playa continua debe contener exactamente 15 dígitos numéricos sin letras."
+        },
+        {
+          "jurisdiccion": "TULUM",
+          "nombre_variante": "Tulum (Con Guión 16 a 19 caracteres)",
+          "prioridad": 1,
+          "regex_extraccion": "(?:[1-9]\\d{14}-\\d{1,3})",
+          "regex_validacion": "^[1-9]\\d{14}-\\d{1,3}$",
+          "longitud_min": 16,
+          "longitud_max": 19,
+          "remover_caracteres": " ",
+          "permite_sliding_window": false,
+          "descripcion_error": "La clave de Tulum con guión debe tener base de 15 dígitos numéricos seguidos de un guión y de 1 a 3 dígitos."
+        },
+        {
+          "jurisdiccion": "TULUM",
+          "nombre_variante": "Tulum (Sin Guión 15 Dígitos Continuos)",
+          "prioridad": 2,
+          "regex_extraccion": "(?:[1-9]\\d{14})",
+          "regex_validacion": "^[1-9]\\d{14}$",
+          "longitud_min": 15,
+          "longitud_max": 15,
+          "remover_caracteres": " -/",
+          "permite_sliding_window": false,
+          "descripcion_error": "La clave de Tulum continua debe contener exactamente 15 dígitos numéricos sin letras."
+        }
+      ]
+    },
+    {
+      "slug": "folio_electronico",
+      "nombre": "Folio Electrónico RPP",
+      "descripcion": "Folio de inscripción del Registro Público de la Propiedad (RPP)",
+      "tipo_dato": "STRING",
+      "etiquetas_ancla": [
+        {
+          "etiqueta": "FOLIO ELECTRONICO",
+          "regex_ancla": "(?:folio\\s*electr[oó]nico|folio\\s*real|f\\.e\\.)[\\s:]*(\\d{1,20})",
+          "prioridad": 1
+        },
+        {
+          "etiqueta": "FOLIO INSCRIPCION",
+          "regex_ancla": "(?:no\\.?\\s*folio|folio)[\\s:]*(\\d{1,20})",
+          "prioridad": 2
+        }
+      ],
+      "variantes_municipio": [
+        {
+          "jurisdiccion": "GLOBAL",
+          "nombre_variante": "Folio Electrónico RPP 20 Dígitos (Quintana Roo)",
+          "prioridad": 1,
+          "regex_extraccion": "(?:\\b20\\d{18}\\b|\\b\\d{20}\\b)",
+          "regex_validacion": "^\\d{20}$",
+          "longitud_min": 20,
+          "longitud_max": 20,
+          "remover_caracteres": " -/",
+          "permite_sliding_window": true,
+          "descripcion_error": "El folio electrónico RPP debe contener exactamente 20 dígitos numéricos (comenzando habitualmente con el código 20)."
+        },
+        {
+          "jurisdiccion": "GLOBAL",
+          "nombre_variante": "Folio Numérico Breve / Histórico",
+          "prioridad": 2,
+          "regex_extraccion": "(?:\\b[1-9]\\d{3,9}\\b)",
+          "regex_validacion": "^[1-9]\\d{3,9}$",
+          "longitud_min": 4,
+          "longitud_max": 10,
+          "remover_caracteres": " -/",
+          "permite_sliding_window": false,
+          "descripcion_error": "El folio numérico general debe tener entre 4 y 10 dígitos numéricos sin ceros iniciales."
+        }
+      ]
+    },
+    {
+      "slug": "padron",
+      "nombre": "Padrón Catastral / Número de Cuenta",
+      "descripcion": "Número de padrón municipal o cuenta predial asignada",
+      "tipo_dato": "STRING",
+      "etiquetas_ancla": [
+        {
+          "etiqueta": "PADRON",
+          "regex_ancla": "(?:padr[oó]n|num(?:ero)?\\.?\\s*padr[oó]n|cta\\.?\\s*predial)[\\s:]*([A-Z0-9\\-]+)",
+          "prioridad": 1
+        }
+      ],
+      "variantes_municipio": [
+        {
+          "jurisdiccion": "GLOBAL",
+          "nombre_variante": "Padrón Numérico Municipal (Hasta 10 Dígitos)",
+          "prioridad": 1,
+          "regex_extraccion": "(?:\\b[1-9]\\d{2,9}\\b)",
+          "regex_validacion": "^[1-9]\\d{2,9}$",
+          "longitud_min": 3,
+          "longitud_max": 10,
+          "remover_caracteres": " -/",
+          "permite_sliding_window": false,
+          "descripcion_error": "El padrón municipal debe ser numérico con longitud máxima de 10 dígitos."
+        }
+      ]
+    }
+  ]
+}

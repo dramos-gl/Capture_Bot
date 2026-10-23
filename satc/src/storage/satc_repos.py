@@ -2,6 +2,7 @@
 CancunBot — Repositorios de Base de Datos (SQLAlchemy 2.0)
 Encapsula el acceso y manipulación de datos para las entidades de R2F-Cancún.
 """
+import re
 import logging
 from datetime import datetime
 from typing import List, Optional, Tuple
@@ -1038,6 +1039,69 @@ class MetadataRulesRepository(BaseCancunRepository):
         if solo_activos:
             stmt = stmt.where(CampoEtiquetaAncla.activo == True)
         return list(self.session.execute(stmt).scalars().all())
+
+    def list_all_formatos(self, solo_activos: bool = False) -> List[CampoFormatoMunicipio]:
+        stmt = (
+            select(CampoFormatoMunicipio)
+            .options(
+                selectinload(CampoFormatoMunicipio.campo),
+                selectinload(CampoFormatoMunicipio.municipio)
+            )
+            .order_by(CampoFormatoMunicipio.municipio_id.asc(), CampoFormatoMunicipio.prioridad.asc())
+        )
+        if solo_activos:
+            stmt = stmt.where(CampoFormatoMunicipio.activo == True)
+        return list(self.session.execute(stmt).scalars().all())
+
+    def get_formato_by_id(self, formato_id: int) -> Optional[CampoFormatoMunicipio]:
+        stmt = (
+            select(CampoFormatoMunicipio)
+            .options(
+                selectinload(CampoFormatoMunicipio.campo),
+                selectinload(CampoFormatoMunicipio.municipio)
+            )
+            .where(CampoFormatoMunicipio.formato_id == formato_id)
+        )
+        return self.session.execute(stmt).scalars().first()
+
+    def save_formato(self, data: Dict[str, Any]) -> CampoFormatoMunicipio:
+        fid = data.get("formato_id")
+        if fid:
+            obj = self.get_formato_by_id(int(fid))
+            if not obj:
+                raise ValueError(f"Formato municipal con ID {fid} no existe.")
+            obj.campo_id = int(data.get("campo_id", obj.campo_id))
+            obj.municipio_id = int(data.get("municipio_id", obj.municipio_id))
+            obj.nombre_variante = str(data.get("nombre_variante", obj.nombre_variante)).strip()
+            obj.prioridad = int(data.get("prioridad", obj.prioridad) or 1)
+            obj.regex_extraccion = str(data.get("regex_extraccion", obj.regex_extraccion)).strip()
+            obj.regex_validacion = str(data.get("regex_validacion", obj.regex_validacion)).strip()
+            obj.longitud_min = int(data["longitud_min"]) if data.get("longitud_min") is not None and str(data["longitud_min"]).strip() != "" else None
+            obj.longitud_max = int(data["longitud_max"]) if data.get("longitud_max") is not None and str(data["longitud_max"]).strip() != "" else None
+            obj.remover_caracteres = data.get("remover_caracteres", obj.remover_caracteres)
+            obj.permite_sliding_window = bool(data.get("permite_sliding_window", obj.permite_sliding_window))
+            obj.descripcion_error = data.get("descripcion_error", obj.descripcion_error)
+            obj.activo = bool(data.get("activo", obj.activo))
+            obj.updated_at = datetime.utcnow()
+        else:
+            obj = CampoFormatoMunicipio(
+                campo_id=int(data["campo_id"]),
+                municipio_id=int(data["municipio_id"]),
+                nombre_variante=str(data["nombre_variante"]).strip(),
+                prioridad=int(data.get("prioridad", 1) or 1),
+                regex_extraccion=str(data["regex_extraccion"]).strip(),
+                regex_validacion=str(data["regex_validacion"]).strip(),
+                longitud_min=int(data["longitud_min"]) if data.get("longitud_min") is not None and str(data["longitud_min"]).strip() != "" else None,
+                longitud_max=int(data["longitud_max"]) if data.get("longitud_max") is not None and str(data["longitud_max"]).strip() != "" else None,
+                remover_caracteres=data.get("remover_caracteres", " -/"),
+                permite_sliding_window=bool(data.get("permite_sliding_window", False)),
+                descripcion_error=data.get("descripcion_error"),
+                activo=bool(data.get("activo", True)),
+                created_at=datetime.utcnow()
+            )
+            self.session.add(obj)
+        self.session.flush()
+        return obj
 
 
 

@@ -215,6 +215,7 @@ class GLActionToolbar(QToolBar):
                 ("Estados de\nTrámite", "satc_estados_tramite", "Catálogo de Estados de Trámite SATC", "#10B981", "satc_estados_tramite"),
                 ("Estados de\nVivienda", "satc_estados_vivienda", "Estados de Ciclo de Vivienda / UPE", "#F59E0B", "satc_estados_vivienda"),
                 ("Regímenes\nmz", "satc_regimenes", "Regímenes en Condominio (SM, MZ, LT)", "#8B5CF6", "satc_regimenes"),
+                ("Reglas de\nExtracción", "satc_formatos", "Reglas y Formatos de Extracción Municipal (OCR)", "#14B8A6", "satc_formatos"),
                 ("Importación de\nViviendas", "satc_viviendas", "Padrón Maestro e Importación de Viviendas", "#06B6D4", "satc_viviendas"),
             ]
         elif category == "SEGURIDAD":

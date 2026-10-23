@@ -58,14 +58,16 @@ satc/
 ├── .env                            # Credenciales (NO versionado)
 ├── requirements.txt                # Dependencias del proyecto
 ├── config/                         # Archivos de configuración y patrones externos
-│   └── rpp_ocr_patterns.json       # Patrones regex parametrizados para resoluciones RPP
+│   ├── rpp_ocr_patterns.json       # Patrones regex parametrizados para resoluciones RPP
+│   └── reglas_extraccion.json      # Catálogo maestro gobernado por metadatos (SATC-STD-002)
 │
 ├── doc_satc/                  # Documentación oficial
 │   ├── 0_SATC.md
 │   ├── 1_SATC-BLUEPRINT-001.md
 │   ├── 2_SATC-DB-001.md
 │   ├── 3_SATC-DEV-001.md
-│   └── 4_SATC-TEC-001.md
+│   ├── 4_SATC-TEC-001.md
+│   └── 8_SATC-STD-002.md           # Estándar de Extracción Parametrizada y Metadatos OCR
 │
 └── src/
     │

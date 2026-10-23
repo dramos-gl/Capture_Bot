@@ -19,6 +19,7 @@
 | **SATC-RPA-001** | Resiliencia, Captcha & UX Portal Cancún | Automatización & RPA | [5_SATC-RPA-001.md](5_SATC-RPA-001.md) |
 | **SATC-AISLAMIENTO-001** | Principio de Aislamiento Estricto | Arquitectura y Coexistencia | [6_SATC-AISLAMIENTO-001.md](6_SATC-AISLAMIENTO-001.md) |
 | **SATC-CICLO-VIDA-001** | Ciclo de Vida de Trámites por Vivienda (UPEs) | Gobernanza & Ciclo de Vida | [7_SATC-CICLO-VIDA-001.md](7_SATC-CICLO-VIDA-001.md) |
+| **SATC-STD-002** | Estándar de Extracción Parametrizada y Metadatos OCR | Estándar Técnico & Gobernanza | [8_SATC-STD-002.md](8_SATC-STD-002.md) |
 
 ---
 

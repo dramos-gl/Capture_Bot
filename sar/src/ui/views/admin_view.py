@@ -248,10 +248,9 @@ class AdminWindow(QMainWindow):
             "update_facturas": lambda: UpdateFacturasView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("PROCESOS_ESPECIALES", "ADM:UPDATE_FACTURAS")),
         }
         
-        # Registrar factorías para SATC solo si el subsistema está disponible
         if SatcCatalogsView is not None:
             satc_factory = lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC"))
-            for key in ["satc_catalogos", "satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas"]:
+            for key in ["satc_catalogos", "satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_formatos", "satc_viviendas"]:
                 self.view_factories[key] = satc_factory
         
         # Vista de bienvenida no invasiva inicial
@@ -313,6 +312,7 @@ class AdminWindow(QMainWindow):
             "satc_estados_tramite": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
             "satc_estados_vivienda": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
             "satc_regimenes": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
+            "satc_formatos": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
             "satc_viviendas": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
         }
         
@@ -333,14 +333,15 @@ class AdminWindow(QMainWindow):
         if view_name == "satc_catalogos":
             view_name = "satc_tipos_tramite"
 
-        if view_name in ["satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas"]:
+        if view_name in ["satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas", "satc_formatos"]:
             target_view_key = "satc_catalogos"
             tab_map = {
                 "satc_tipos_tramite": 0,
                 "satc_estados_tramite": 1,
                 "satc_estados_vivienda": 2,
                 "satc_regimenes": 3,
-                "satc_viviendas": 4
+                "satc_viviendas": 4,
+                "satc_formatos": 5
             }
             target_tab_idx = tab_map.get(view_name)
 
@@ -388,6 +389,7 @@ class AdminWindow(QMainWindow):
                 "satc_estados_vivienda": "SATC",
                 "satc_regimenes": "SATC",
                 "satc_viviendas": "SATC",
+                "satc_formatos": "SATC",
             }
             category = category_map.get(view_name, "SATC" if "satc" in view_name else "CATALOGOS")
             self.action_toolbar.set_module_context(category, view_name)
@@ -429,7 +431,8 @@ class AdminWindow(QMainWindow):
                     getattr(view, "tbl_est_tramite", None),
                     getattr(view, "tbl_est_vivienda", None),
                     getattr(view, "tbl_regimenes", None),
-                    getattr(view, "tbl_viviendas", None)
+                    getattr(view, "tbl_viviendas", None),
+                    getattr(view, "tbl_formatos", None)
                 ]
                 if 0 <= idx < len(panels) and isinstance(panels[idx], CrudTablePanel):
                     return panels[idx]

@@ -47,29 +47,49 @@ class ViviendasFileAnalyzeWorker(QThread):
             is_pdf = self.file_path.lower().endswith(".pdf")
 
             if is_pdf:
-                if self.modo != "RPP":
+                if self.modo == "CATASTRO":
+                    from satc.src.services.catastro_oficio_extractor import CatastroOficioExtractor
+                    raw_extracted = CatastroOficioExtractor.extract_from_pdf(self.file_path)
+                    for r in raw_extracted:
+                        records.append({
+                            "interior": r.get("interior", ""),
+                            "edificio": r.get("edificio", ""),
+                            "nivel": "",
+                            "numero_oficial": r.get("numero_oficial", ""),
+                            "calle": "",
+                            "destino": "HABITACIONAL",
+                            "espacio": "VIVIENDA",
+                            "folio_electronico": r.get("folio_electronico", ""),
+                            "clave_catastral": r.get("clave_catastral", ""),
+                            "fecha_alta_cc": r.get("fecha_alta_cc", ""),
+                            "padron": "",
+                            "descripcion": r.get("descripcion", "Extraído de Oficio de Catastro")
+                        })
+                elif self.modo == "RPP":
+                    from satc.src.services.rpp_resolution_extractor import RppResolutionExtractor
+                    raw_extracted = RppResolutionExtractor.extract_from_pdf(self.file_path)
+                    for r in raw_extracted:
+                        records.append({
+                            "interior": r["interior"],
+                            "edificio": r["edificio"],
+                            "nivel": r.get("nivel", ""),
+                            "numero_oficial": r.get("numero_oficial", ""),
+                            "calle": "",
+                            "destino": "HABITACIONAL",
+                            "espacio": "VIVIENDA",
+                            "folio_electronico": r["folio_electronico"],
+                            "clave_catastral": "",
+                            "fecha_alta_cc": "",
+                            "padron": "",
+                            "descripcion": f"Folio RPP extraído de Constancia (Frac. #{r['numero_fraccion']})"
+                        })
+                else:
                     self.finished.emit(
                         False, {},
-                        "El archivo seleccionado es una Constancia de Resolución PDF.\n"
-                        "Por favor seleccione la operación '2. Vincular Folios RPP' para procesarlo."
+                        "El archivo seleccionado es un PDF.\n"
+                        "Por favor seleccione '2. Vincular Folios RPP' o '3. Vincular Cédula / Catastro'."
                     )
                     return
-                from satc.src.services.rpp_resolution_extractor import RppResolutionExtractor
-                raw_extracted = RppResolutionExtractor.extract_from_pdf(self.file_path)
-                for r in raw_extracted:
-                    records.append({
-                        "interior": r["interior"],
-                        "edificio": r["edificio"],
-                        "nivel": r.get("nivel", ""),
-                        "numero_oficial": r.get("numero_oficial", ""),
-                        "calle": "",
-                        "destino": "HABITACIONAL",
-                        "espacio": "VIVIENDA",
-                        "folio_electronico": r["folio_electronico"],
-                        "clave_catastral": "",
-                        "padron": "",
-                        "descripcion": f"Folio RPP extraído de Constancia (Frac. #{r['numero_fraccion']})"
-                    })
             else:
                 wb = openpyxl.load_workbook(self.file_path, data_only=True)
                 ws = wb.active
@@ -191,7 +211,8 @@ class ViviendasFileAnalyzeWorker(QThread):
                         target = svc.regimen_repo.get_by_id(self.regimen_id)
                         tot_upes = target.total_upes if target else 0
 
-                if len(records) > tot_upes:
+                # En Carga Inicial es donde se restringe estrictamente la capacidad del macro-lote
+                if self.modo == "INICIAL" and len(records) > tot_upes:
                     self.finished.emit(
                         False, {},
                         f"El archivo contiene {len(records)} unidades, lo cual SUPERA la capacidad autorizada "
@@ -815,6 +836,24 @@ class SatcCatalogsView(QWidget):
 
         self.tabs.addTab(self.tab_import_viviendas, "Importación de Viviendas")
 
+        # ---------------------------------------------------------
+        # Pestaña 6: Reglas de Extracción y Validación (Metadata-Driven)
+        # ---------------------------------------------------------
+        self.tab_formatos = QWidget()
+        lay_formatos = QHBoxLayout(self.tab_formatos)
+        lay_formatos.setContentsMargins(0, 0, 0, 0)
+        self.tbl_formatos = CrudTablePanel("Reglas y Formatos de Extracción por Municipio (SATC)")
+        self.tbl_formatos.setup_table(
+            ["ID", "Municipio", "Campo", "Variante", "Prioridad", "Regex Validación", "Longitud", "Sliding Window", "Estado"],
+            ["formato_id", "municipio_nombre", "campo_nombre", "nombre_variante", "prioridad", "regex_validacion", "longitud_min", "permite_sliding_window", "activo"]
+        )
+        self.tbl_formatos.add_requested.connect(self._on_new_formato)
+        self.tbl_formatos.edit_requested.connect(self._on_edit_formato)
+        self.tbl_formatos.btn_add.setVisible(self.can_edit)
+        self.tbl_formatos.btn_edit.setVisible(self.can_edit)
+        lay_formatos.addWidget(self.tbl_formatos)
+        self.tabs.addTab(self.tab_formatos, "Reglas de Extracción")
+
         self._v_parsed_records = []
         self._v_worker = None
         self._v_load_worker = None
@@ -1387,6 +1426,192 @@ class SatcCatalogsView(QWidget):
             QMessageBox.critical(self, "Error", str(e))
 
     # =========================================================================
+    # 5. DIALOGOS & ACCIONES: REGLAS Y FORMATOS MUNICIPALES (Metadata-Driven)
+    # =========================================================================
+    def _create_formato_dialog(self, title: str) -> CustomDialog:
+        dialog = CustomDialog(title, self)
+        dialog.setMinimumWidth(620)
+
+        card = QFrame(dialog)
+        card.setObjectName("card_formato")
+        card.setStyleSheet(f"""
+            QFrame#card_formato {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+
+        lbl = CustomLabel("⚙️ REGLA ESTRUCTURAL DE EXTRACCIÓN Y VALIDACIÓN", variant="subheader")
+        lbl.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay.addWidget(lbl)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.cmb_f_municipio = CustomComboBox(dialog)
+        self.cmb_f_municipio.setMinimumHeight(32)
+        form.addRow(CustomLabel("Municipio Oficial *:", variant="body"), self.cmb_f_municipio)
+
+        self.cmb_f_campo = CustomComboBox(dialog)
+        self.cmb_f_campo.setMinimumHeight(32)
+        form.addRow(CustomLabel("Campo Canónico *:", variant="body"), self.cmb_f_campo)
+
+        self.inp_f_variante = CustomInput("Ej. Cancún 18 Caracteres", control_size="md", parent=dialog)
+        form.addRow(CustomLabel("Nombre Variante *:", variant="body"), self.inp_f_variante)
+
+        self.inp_f_prioridad = CustomInput("1", control_size="md", parent=dialog)
+        form.addRow(CustomLabel("Prioridad Cascada *:", variant="body"), self.inp_f_prioridad)
+
+        self.inp_f_regex_extraccion = CustomInput(r"Ej. \b([1-9](?:\d{17}|\d{16}[A-Z]))\b", control_size="md", parent=dialog)
+        form.addRow(CustomLabel("Regex Extracción Directa *:", variant="body"), self.inp_f_regex_extraccion)
+
+        self.inp_f_regex_validacion = CustomInput(r"Ej. ^[1-9](?:\d{17}|\d{16}[A-Z])$", control_size="md", parent=dialog)
+        form.addRow(CustomLabel("Regex Validación Estricta *:", variant="body"), self.inp_f_regex_validacion)
+
+        # Contenedor horizontal para longitudes
+        lay_long = QHBoxLayout()
+        self.inp_f_long_min = CustomInput("Min (ej. 15)", control_size="md", parent=dialog)
+        self.inp_f_long_max = CustomInput("Max (ej. 18)", control_size="md", parent=dialog)
+        lay_long.addWidget(self.inp_f_long_min)
+        lay_long.addWidget(self.inp_f_long_max)
+        form.addRow(CustomLabel("Rango Longitud:", variant="body"), lay_long)
+
+        self.inp_f_remover = CustomInput(" -/", control_size="md", parent=dialog)
+        form.addRow(CustomLabel("Remover Caracteres:", variant="body"), self.inp_f_remover)
+
+        self.inp_f_error = CustomInput("Mensaje informativo en caso de invalidez", control_size="md", parent=dialog)
+        form.addRow(CustomLabel("Descripción Error:", variant="body"), self.inp_f_error)
+
+        self.chk_f_sliding = CustomCheckBox("Habilitar Ventana Deslizante (Sliding Window en bloques fusionados de OCR)", parent=dialog)
+        form.addRow("", self.chk_f_sliding)
+
+        self.chk_f_activo = CustomCheckBox("Regla Activa en Producción", parent=dialog)
+        self.chk_f_activo.setChecked(True)
+        form.addRow("", self.chk_f_activo)
+
+        lay.addLayout(form)
+        dialog.add_widget(card)
+
+        # Llenar dropdowns
+        self.cmb_f_municipio.clear()
+        for m in getattr(self, "_muns_list", []):
+            self.cmb_f_municipio.addItem(m.get("nombre", ""), m.get("municipio_id"))
+
+        self.cmb_f_campo.clear()
+        for c in getattr(self, "_campos_list", []):
+            self.cmb_f_campo.addItem(f"{c.get('nombre')} ({c.get('codigo')})", c.get("campo_id"))
+
+        dialog.set_primary_button_text("Guardar Regla")
+        dialog.primary_button_clicked.connect(lambda: self._save_formato(dialog))
+        return dialog
+
+    def _on_new_formato(self):
+        self.current_formato_id = None
+        dialog = self._create_formato_dialog("Nueva Regla de Extracción Municipal")
+        self.inp_f_variante.set_text("")
+        self.inp_f_prioridad.set_text("1")
+        self.inp_f_regex_extraccion.set_text("")
+        self.inp_f_regex_validacion.set_text("")
+        self.inp_f_long_min.set_text("")
+        self.inp_f_long_max.set_text("")
+        self.inp_f_remover.set_text(" -/")
+        self.inp_f_error.set_text("")
+        self.chk_f_sliding.setChecked(False)
+        self.chk_f_activo.setChecked(True)
+        self.inp_f_variante.set_focus()
+        dialog.exec()
+
+    def _on_edit_formato(self, data: Dict[str, Any]):
+        if not data:
+            return
+        self.current_formato_id = data.get("formato_id")
+        dialog = self._create_formato_dialog("Editar Regla de Extracción Municipal")
+
+        mun_id = data.get("municipio_id")
+        if mun_id:
+            idx_m = self.cmb_f_municipio.findData(mun_id)
+            if idx_m >= 0:
+                self.cmb_f_municipio.setCurrentIndex(idx_m)
+
+        cmp_id = data.get("campo_id")
+        if cmp_id:
+            idx_c = self.cmb_f_campo.findData(cmp_id)
+            if idx_c >= 0:
+                self.cmb_f_campo.setCurrentIndex(idx_c)
+
+        self.inp_f_variante.set_text(data.get("nombre_variante", "") or "")
+        self.inp_f_prioridad.set_text(str(data.get("prioridad", 1) or 1))
+        self.inp_f_regex_extraccion.set_text(data.get("regex_extraccion", "") or "")
+        self.inp_f_regex_validacion.set_text(data.get("regex_validacion", "") or "")
+        self.inp_f_long_min.set_text(str(data.get("longitud_min")) if data.get("longitud_min") is not None else "")
+        self.inp_f_long_max.set_text(str(data.get("longitud_max")) if data.get("longitud_max") is not None else "")
+        self.inp_f_remover.set_text(data.get("remover_caracteres", " -/") or " -/")
+        self.inp_f_error.set_text(data.get("descripcion_error", "") or "")
+        self.chk_f_sliding.setChecked(bool(data.get("permite_sliding_window", False)))
+        self.chk_f_activo.setChecked(bool(data.get("activo", True)))
+
+        self.inp_f_variante.set_focus()
+        dialog.exec()
+
+    def _save_formato(self, dialog: CustomDialog):
+        mun_id = self.cmb_f_municipio.currentData()
+        cmp_id = self.cmb_f_campo.currentData()
+        variante = self.inp_f_variante.text().strip()
+        regex_val = self.inp_f_regex_validacion.text().strip()
+        regex_ext = self.inp_f_regex_extraccion.text().strip()
+
+        if not mun_id or not cmp_id:
+            QMessageBox.warning(self, "Validación", "Debe seleccionar un municipio y un campo canónico.")
+            return
+        if not variante or not regex_val or not regex_ext:
+            QMessageBox.warning(self, "Validación", "Nombre de variante, regex de extracción y regex de validación son obligatorios.")
+            return
+
+        try:
+            prio = int(self.inp_f_prioridad.text().strip() or 1)
+        except ValueError:
+            prio = 1
+
+        data = {
+            "formato_id": self.current_formato_id,
+            "municipio_id": int(mun_id),
+            "campo_id": int(cmp_id),
+            "nombre_variante": variante,
+            "prioridad": prio,
+            "regex_extraccion": regex_ext,
+            "regex_validacion": regex_val,
+            "longitud_min": self.inp_f_long_min.text().strip() or None,
+            "longitud_max": self.inp_f_long_max.text().strip() or None,
+            "remover_caracteres": self.inp_f_remover.text().strip() or " -/",
+            "permite_sliding_window": self.chk_f_sliding.isChecked(),
+            "descripcion_error": self.inp_f_error.text().strip() or None,
+            "activo": self.chk_f_activo.isChecked()
+        }
+
+        try:
+            if self.api_client.connect_via_api:
+                payload = {"usuario_id": self.current_user_id, "sesion_id": self.current_sesion_id, "data": data}
+                self.api_client.request("POST", "/api/admin/save/satc_formatos_municipio", data=payload)
+            else:
+                from satc.src.storage.satc_repos import MetadataRulesRepository
+                from satc.src.services.metadata_extraction_service import MetadataExtractionService
+                with self.db_connector.get_session() as session:
+                    repo = MetadataRulesRepository(session)
+                    repo.save_formato(data)
+                    session.commit()
+                    MetadataExtractionService.clear_cache()
+            QMessageBox.information(self, "Éxito", "Regla de extracción municipal guardada correctamente.")
+            dialog.accept()
+            self.refresh_data()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+    # =========================================================================
     # CARGA Y REFRESH DE DATOS
     # =========================================================================
     def refresh_data(self):
@@ -1397,6 +1622,9 @@ class SatcCatalogsView(QWidget):
                 est_tramite = self.api_client.request("GET", "/api/admin/data/satc_estados_tramite")
                 est_vivienda = self.api_client.request("GET", "/api/admin/data/satc_estados_vivienda")
                 regimenes = self.api_client.request("GET", "/api/admin/data/satc_regimenes")
+                formatos = self.api_client.request("GET", "/api/admin/data/satc_formatos_municipio")
+                self._muns_list = self.api_client.request("GET", "/api/admin/data/municipios")
+                self._campos_list = self.api_client.request("GET", "/api/admin/data/satc_campos")
             else:
                 with self.db_connector.get_session() as session:
                     cat_repo = CatalogoRepository(session)
@@ -1404,6 +1632,13 @@ class SatcCatalogsView(QWidget):
                     self.desarrollos_list = [
                         {"desarrollo_id": d.desarrollo_id, "nombre": d.nombre, "alias": d.alias}
                         for d in des_objs
+                    ]
+
+                    # Municipios para diálogos
+                    muns_objs = cat_repo.get_all_municipios()
+                    self._muns_list = [
+                        {"municipio_id": m.municipio_id, "nombre": m.nombre, "codigo_portal": m.codigo_portal}
+                        for m in muns_objs
                     ]
 
                     satc_svc = HousingLifeCycleService(session)
@@ -1470,10 +1705,50 @@ class SatcCatalogsView(QWidget):
                         for r in reg_objs
                     ]
 
+                    # Metadatos de Extracción SATC
+                    from satc.src.storage.satc_repos import MetadataRulesRepository
+                    meta_repo = MetadataRulesRepository(session)
+                    campos_objs = meta_repo.list_campos()
+                    self._campos_list = [
+                        {
+                            "campo_id": c.campo_id,
+                            "codigo": c.codigo,
+                            "nombre": c.nombre,
+                            "descripcion": c.descripcion or "",
+                            "activo": c.activo
+                        }
+                        for c in campos_objs
+                    ]
+
+                    formatos_objs = meta_repo.list_all_formatos(solo_activos=False)
+                    formatos = [
+                        {
+                            "formato_id": f.formato_id,
+                            "campo_id": f.campo_id,
+                            "campo_nombre": f.campo.nombre if f.campo else "",
+                            "campo_codigo": f.campo.codigo if f.campo else "",
+                            "municipio_id": f.municipio_id,
+                            "municipio_nombre": f.municipio.nombre if f.municipio else "TODOS",
+                            "nombre_variante": f.nombre_variante,
+                            "regex_extraccion": f.regex_extraccion,
+                            "regex_validacion": f.regex_validacion,
+                            "longitud_min": f.longitud_min,
+                            "longitud_max": f.longitud_max,
+                            "remover_caracteres": f.remover_caracteres or "",
+                            "permite_sliding_window": f.permite_sliding_window,
+                            "descripcion_error": f.descripcion_error or "",
+                            "prioridad": f.prioridad,
+                            "activo": f.activo
+                        }
+                        for f in formatos_objs
+                    ]
+
             self.tbl_tipos.populate(tipos)
             self.tbl_est_tramite.populate(est_tramite)
             self.tbl_est_vivienda.populate(est_vivienda)
             self.tbl_regimenes.populate(regimenes)
+            if hasattr(self, "tbl_formatos"):
+                self.tbl_formatos.populate(formatos)
 
             # Actualizar dropdown de desarrollos en pestaña de viviendas
             current_v_des = self.cmb_v_desarrollo.currentData()
@@ -2132,19 +2407,20 @@ class SatcCatalogsView(QWidget):
                 )
                 return
 
-        filtro = "Todos los Soportados (*.xlsx *.xls *.pdf);;Constancias RPP PDF (*.pdf);;Plantillas Excel (*.xlsx *.xls)"
+        filtro = "Todos los Soportados (*.xlsx *.xls *.pdf);;Constancias RPP o Catastro PDF (*.pdf);;Plantillas Excel (*.xlsx *.xls)"
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Seleccionar Archivo (Excel o Constancia PDF)", "", filtro
+            self, "Seleccionar Archivo (Excel o Constancia / Oficio PDF)", "", filtro
         )
         if not file_path:
             return
 
         is_pdf = file_path.lower().endswith(".pdf")
-        if is_pdf and modo != "RPP":
+        if is_pdf and modo not in ("RPP", "CATASTRO"):
             QMessageBox.warning(
                 self, "Modo de Operación Requerido",
-                "El archivo seleccionado es una Constancia de Resolución PDF.\n"
-                "Por favor seleccione la operación '2. Vincular Folios RPP' para procesarlo."
+                "Los archivos PDF son válidos para '2. Vincular Folios RPP' (Constancia de Resolución)\n"
+                "o '3. Vincular Cédula / Catastro' (Oficio de Alta de Predio).\n\n"
+                "Para '1. Carga Inicial' utilice la plantilla Excel."
             )
             return
 
@@ -2154,7 +2430,7 @@ class SatcCatalogsView(QWidget):
         self.btn_v_exportar_datos.setEnabled(False)
 
         # Mostrar indicador de carga no bloqueante
-        loading_msg = "Extrayendo Constancia PDF..." if is_pdf else "Analizando archivo y validando datos..."
+        loading_msg = "Extrayendo datos del PDF (OCR)..." if is_pdf else "Analizando archivo y validando datos..."
         self._v_loading_dialog = GLLoadingDialog(loading_msg, self)
         self._v_loading_dialog.show()
 

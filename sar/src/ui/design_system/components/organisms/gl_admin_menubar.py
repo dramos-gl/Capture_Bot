@@ -119,6 +119,7 @@ class AdminMenuBar(QMenuBar):
         act_satc_estados_tr = self._add_action(menu_satc, "Estados de Trámite", "satc_estados_tramite", color=Colors.SUCCESS)
         act_satc_estados_viv = self._add_action(menu_satc, "Estados de Vivienda / UPE", "satc_estados_vivienda", color=Colors.ACCENT_AMBER)
         act_satc_regimenes = self._add_action(menu_satc, "Regímenes en Condominio (SM, MZ, LT)", "satc_regimenes", color=Colors.ACCENT_VIOLET)
+        act_satc_formatos = self._add_action(menu_satc, "Reglas de Extracción y Validación Municipal", "satc_formatos", color=Colors.ACCENT_TEAL)
         menu_satc.addSeparator()
         act_satc_viviendas = self._add_action(menu_satc, "Importación Masiva de Viviendas (Excel SATC)", "satc_viviendas", color=Colors.ACCENT_CYAN)
 
@@ -126,6 +127,7 @@ class AdminMenuBar(QMenuBar):
         act_satc_estados_tr.triggered.connect(lambda: self.view_requested.emit("satc_estados_tramite"))
         act_satc_estados_viv.triggered.connect(lambda: self.view_requested.emit("satc_estados_vivienda"))
         act_satc_regimenes.triggered.connect(lambda: self.view_requested.emit("satc_regimenes"))
+        act_satc_formatos.triggered.connect(lambda: self.view_requested.emit("satc_formatos"))
         act_satc_viviendas.triggered.connect(lambda: self.view_requested.emit("satc_viviendas"))
 
         # 7. ❓ Ayuda y Diagnóstico

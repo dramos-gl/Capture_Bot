@@ -146,6 +146,57 @@ class MetadataExtractionService:
 
         return False, val, errores[0] if errores else "No coincide con ningún formato catastral autorizado."
 
+    def validar_campo(self, codigo_campo: str, valor_raw: str, municipio_id: Optional[int] = None) -> Tuple[bool, str, str]:
+        """
+        Valida genéricamente cualquier campo canónico (clave_catastral, folio_electronico, padron, etc.)
+        contra las reglas y variantes registradas en base de datos.
+        Retorna: (es_valido: bool, valor_limpio: str, mensaje_error: str)
+        """
+        if not valor_raw:
+            return False, "", f"Campo '{codigo_campo}' vacío."
+
+        val = str(valor_raw).strip()
+
+        # Validación específica de clave catastral
+        if codigo_campo == "clave_catastral":
+            return self.es_clave_catastral_valida(val, municipio_id)
+
+        # Cargar reglas
+        if municipio_id:
+            self._ensure_cache_loaded(municipio_id)
+            rules = self._cache_compiled_rules.get(municipio_id, [])
+        else:
+            rules = []
+            for m_rules in self._cache_compiled_rules.values():
+                rules.extend(m_rules)
+
+        field_rules = [r for r in rules if r["codigo_campo"] == codigo_campo]
+        if not field_rules:
+            return True, val, ""
+
+        errores = []
+        for rule in field_rules:
+            val_to_check = val
+            chars_to_strip = rule["remover_caracteres"]
+            if chars_to_strip:
+                for c in chars_to_strip:
+                    val_to_check = val_to_check.replace(c, '')
+
+            l_val = len(val_to_check)
+            if rule["longitud_min"] is not None and l_val < rule["longitud_min"]:
+                errores.append(rule["descripcion_error"])
+                continue
+            if rule["longitud_max"] is not None and l_val > rule["longitud_max"]:
+                errores.append(rule["descripcion_error"])
+                continue
+
+            if rule["regex_validacion"].match(val) or rule["regex_validacion"].match(val_to_check):
+                return True, val_to_check, ""
+            else:
+                errores.append(rule["descripcion_error"])
+
+        return False, val, errores[0] if errores else f"El valor no cumple las reglas de '{codigo_campo}'."
+
     def extraer_clave_catastral_de_texto(self, texto: str, municipio_id: int = 2) -> Optional[str]:
         """
         Aplica la estrategia de 4 intentos en cascada descrita en la especificación técnica:
@@ -175,17 +226,14 @@ class MetadataExtractionService:
         # ---------------------------------------------------------------------
         # INTENTO 2: Caída Estructural Cancún (Tolerancia a OCR y Ventana Deslizante)
         # ---------------------------------------------------------------------
-        # Priorizar a partir de la palabra observacion / observaciones
         obs_match = re.search(r'observaci[oó]n(?:es)?[:\s\S]*', texto, re.IGNORECASE)
         segmentos_a_evaluar = [obs_match.group(0), texto] if obs_match else [texto]
 
         cancun_sliding_rules = [r for r in catastro_rules if r["permite_sliding_window"]]
         if cancun_sliding_rules:
             for seg in segmentos_a_evaluar:
-                # Buscar palabras/bloques fusionados entre 17 y 39 caracteres
                 cadenas = re.findall(r'[A-Z0-9\-]{17,39}', seg.upper())
                 for cad in cadenas:
-                    # Ventana deslizante para longitudes 18 y 17
                     for w_len in (18, 17):
                         if len(cad) >= w_len:
                             for start_i in range(len(cad) - w_len + 1):
@@ -197,7 +245,7 @@ class MetadataExtractionService:
         # ---------------------------------------------------------------------
         # INTENTO 3: Caída Estructural Playa / Tulum (Patrón numérico directo)
         # ---------------------------------------------------------------------
-        if municipio_id in (8, 9):  # Playa del Carmen / Tulum
+        if municipio_id in (8, 9):
             direct_matches = re.findall(r'\b([1-9]\d{14}(?:-\d{1,3})?)\b', texto)
             for dm in direct_matches:
                 valido, limpio, _ = self.es_clave_catastral_valida(dm, municipio_id)
@@ -212,5 +260,42 @@ class MetadataExtractionService:
             valido, limpio, _ = self.es_clave_catastral_valida(seg_cand, municipio_id)
             if valido:
                 return limpio
+
+        return None
+
+    def extraer_campo_de_texto(self, codigo_campo: str, texto: str, municipio_id: int = 2) -> Optional[str]:
+        """
+        Extrae genéricamente cualquier campo canónico aplicando:
+        1. Búsqueda por anclas registradas.
+        2. Extracción directa por regex de variante registrada.
+        3. Sliding Window si la variante lo autoriza.
+        """
+        if not texto:
+            return None
+
+        if codigo_campo == "clave_catastral":
+            return self.extraer_clave_catastral_de_texto(texto, municipio_id)
+
+        self._ensure_cache_loaded(municipio_id)
+        rules = self._cache_compiled_rules.get(municipio_id, [])
+        field_rules = [r for r in rules if r["codigo_campo"] == codigo_campo]
+
+        # 1. Por anclas
+        anclas = self._cache_anclas_campo.get(codigo_campo, [])
+        for ancla_rx in anclas:
+            for match in ancla_rx.finditer(texto):
+                candidato = match.group(1).strip()
+                valido, limpio, _ = self.validar_campo(codigo_campo, candidato, municipio_id)
+                if valido:
+                    return limpio
+
+        # 2. Por patrones directos y sliding window
+        for rule in field_rules:
+            rx_ext = rule["regex_extraccion"]
+            for match in rx_ext.finditer(texto):
+                cand = match.group(0).strip()
+                valido, limpio, _ = self.validar_campo(codigo_campo, cand, municipio_id)
+                if valido:
+                    return limpio
 
         return None
