@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, select
 
 from sar.src.storage.db_connector import DatabaseConnector
 from sar.src.storage.repositories import OperacionRepository, ProduccionRepository, SolicitudRepository
@@ -886,35 +886,73 @@ def registrar_referencia_bot(request: RegistrarReferenciaBotRequest, db: Session
         if request.fecha_vigencia:
             fecha_vig = datetime.datetime.strptime(request.fecha_vigencia, "%Y-%m-%d").date()
 
-        ref = Referencia(
-            grupo_id=request.grupo_id,
-            solicitud_id=request.solicitud_id,
-            consecutivo_grupo=request.consecutivo,
-            referencia_portal=request.referencia_portal,
-            importe=request.importe,
-            fecha_generacion=datetime.datetime.now(datetime.timezone.utc),
-            fecha_vigencia=fecha_vig,
-            estado_id=state_id,
-            usuario_asignado=request.usuario_id
+        exist_stmt = select(Referencia).where(
+            Referencia.grupo_id == request.grupo_id,
+            Referencia.consecutivo_grupo == request.consecutivo
         )
-        db.add(ref)
-        db.flush()
+        existing_ref = db.execute(exist_stmt).scalars().first()
 
-        pdf = ArchivoPDF(
-            referencia_id=ref.referencia_id,
-            tipo_archivo="BOLETA_PAGO",
-            estado_archivo="DESCARGADO",
-            nombre_archivo=request.pdf_filename,
-            ruta_archivo=request.pdf_path,
-            hash_sha256=request.pdf_hash,
-            tamano_bytes=request.pdf_size
-        )
-        db.add(pdf)
+        if existing_ref:
+            existing_ref.solicitud_id = request.solicitud_id
+            existing_ref.referencia_portal = request.referencia_portal
+            existing_ref.importe = request.importe
+            existing_ref.fecha_vigencia = fecha_vig
+            existing_ref.estado_id = state_id
+            existing_ref.usuario_asignado = request.usuario_id
+            ref_id = existing_ref.referencia_id
+
+            pdf_exist = db.execute(
+                select(ArchivoPDF).where(ArchivoPDF.referencia_id == ref_id)
+            ).scalars().first()
+            if pdf_exist:
+                pdf_exist.nombre_archivo = request.pdf_filename
+                pdf_exist.ruta_archivo = request.pdf_path
+                pdf_exist.hash_sha256 = request.pdf_hash
+                pdf_exist.tamano_bytes = request.pdf_size
+            else:
+                pdf = ArchivoPDF(
+                    referencia_id=ref_id,
+                    tipo_archivo="BOLETA_PAGO",
+                    estado_archivo="DESCARGADO",
+                    nombre_archivo=request.pdf_filename,
+                    ruta_archivo=request.pdf_path,
+                    hash_sha256=request.pdf_hash,
+                    tamano_bytes=request.pdf_size
+                )
+                db.add(pdf)
+            ref = existing_ref
+        else:
+            ref = Referencia(
+                grupo_id=request.grupo_id,
+                solicitud_id=request.solicitud_id,
+                consecutivo_grupo=request.consecutivo,
+                referencia_portal=request.referencia_portal,
+                importe=request.importe,
+                fecha_generacion=datetime.datetime.now(datetime.timezone.utc),
+                fecha_vigencia=fecha_vig,
+                estado_id=state_id,
+                usuario_asignado=request.usuario_id
+            )
+            db.add(ref)
+            db.flush()
+
+            pdf = ArchivoPDF(
+                referencia_id=ref.referencia_id,
+                tipo_archivo="BOLETA_PAGO",
+                estado_archivo="DESCARGADO",
+                nombre_archivo=request.pdf_filename,
+                ruta_archivo=request.pdf_path,
+                hash_sha256=request.pdf_hash,
+                tamano_bytes=request.pdf_size
+            )
+            db.add(pdf)
 
         sol = db.get(Solicitud, request.solicitud_id)
         if sol:
-            sol.ultimo_consecutivo = request.consecutivo
-            sol.cantidad_generada = (sol.cantidad_generada or 0) + 1
+            if request.consecutivo > (sol.ultimo_consecutivo or 0):
+                sol.ultimo_consecutivo = request.consecutivo
+            if not existing_ref:
+                sol.cantidad_generada = (sol.cantidad_generada or 0) + 1
             if request.consecutivo >= sol.consecutivo_fin:
                 sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
             if not sol.fecha_inicio:
@@ -924,7 +962,8 @@ def registrar_referencia_bot(request: RegistrarReferenciaBotRequest, db: Session
         if grupo:
             if request.consecutivo > (grupo.ultimo_consecutivo or 0):
                 grupo.ultimo_consecutivo = request.consecutivo
-            grupo.cantidad_generada = (grupo.cantidad_generada or 0) + 1
+            if not existing_ref:
+                grupo.cantidad_generada = (grupo.cantidad_generada or 0) + 1
 
         db.commit()
         return {"referencia_id": ref.referencia_id, "referencia_portal": ref.referencia_portal}

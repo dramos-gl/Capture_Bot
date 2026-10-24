@@ -683,7 +683,7 @@ class ViviendaRepository(BaseCancunRepository):
             interior_counts[int_norm] = interior_counts.get(int_norm, 0) + 1
             interior_map[int_norm] = v
 
-            # Indexar por Número Oficial (blindaje secundario)
+            # Indexar por Número Oficial (Prioridad Primaria)
             nof_raw = str(v.numero_oficial or "").strip().upper()
             if nof_raw and nof_raw not in ("-", "N/A", "NONE"):
                 nof_map[nof_raw] = v
@@ -691,9 +691,10 @@ class ViviendaRepository(BaseCancunRepository):
                 digits_match = re.search(r'\b(\d+)\b', nof_raw)
                 if digits_match:
                     d_val = digits_match.group(1).lstrip("0") or "0"
-                    if d_val not in nof_map:
-                        nof_map[d_val] = v
-                    nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
+                    if d_val != nof_raw:
+                        if d_val not in nof_map:
+                            nof_map[d_val] = v
+                        nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
 
         actualizados = 0
         no_encontrados = 0
@@ -708,21 +709,23 @@ class ViviendaRepository(BaseCancunRepository):
             if not inter or not folio:
                 continue
 
-            # 1. Búsqueda directa exacta por (edificio, interior)
-            target = vivienda_map.get((raw_edif, inter)) or vivienda_map.get((ed_norm, inter))
-
-            # 2. Búsqueda de respaldo por interior si no hay ambigüedad (solo 1 vivienda con ese interior)
-            if not target and interior_counts.get(inter) == 1:
-                target = interior_map.get(inter)
-
-            # 3. Blindaje secundario: Coincidencia por Número Oficial unívoco en el régimen
-            if not target and raw_nof:
+            target = None
+            # 1. Prioridad Primaria: Coincidencia por Número Oficial unívoco en el régimen (NO OFICIAL)
+            if raw_nof:
                 digits_nof = re.search(r'\b(\d+)\b', raw_nof)
                 d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
                 if nof_counts.get(raw_nof) == 1:
                     target = nof_map.get(raw_nof)
                 elif d_clean and nof_counts.get(d_clean) == 1:
                     target = nof_map.get(d_clean)
+
+            # 2. Prioridad Secundaria: Búsqueda física directa exacta por combinación (Edificio, Interior/UPE)
+            if not target:
+                target = vivienda_map.get((raw_edif, inter)) or vivienda_map.get((ed_norm, inter))
+
+            # 3. Respaldo exclusivo para áreas comunes sin edificio asignado si el interior es único
+            if not target and not raw_edif and not ed_norm and interior_counts.get(inter) == 1:
+                target = interior_map.get(inter)
 
             if target:
                 target.folio_electronico = folio
@@ -772,9 +775,10 @@ class ViviendaRepository(BaseCancunRepository):
                 digits_match = re.search(r'\b(\d+)\b', nof_raw)
                 if digits_match:
                     d_val = digits_match.group(1).lstrip("0") or "0"
-                    if d_val not in nof_map:
-                        nof_map[d_val] = v
-                    nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
+                    if d_val != nof_raw:
+                        if d_val not in nof_map:
+                            nof_map[d_val] = v
+                        nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
 
         vivienda_by_rpp = {
             v.folio_electronico.strip().upper(): v
@@ -796,26 +800,30 @@ class ViviendaRepository(BaseCancunRepository):
             if not clave_cat and not padron:
                 continue
 
-            # 1. Prioridad Soberana: Búsqueda por folio RPP si existe
             target = None
-            if folio_rpp and folio_rpp in vivienda_by_rpp:
-                target = vivienda_by_rpp[folio_rpp]
-            # 2. Respaldo secundario: (edificio, interior)
-            elif (raw_ed, inter) in vivienda_by_interior:
-                target = vivienda_by_interior[(raw_ed, inter)]
-            elif (ed_clean, inter) in vivienda_by_interior:
-                target = vivienda_by_interior[(ed_clean, inter)]
-            # 3. Respaldo por interior unívoco
-            elif interior_counts.get(inter) == 1:
-                target = interior_map.get(inter)
-            # 4. Respaldo por Número Oficial unívoco
-            elif raw_nof:
+            # 1. Prioridad Primaria: Coincidencia por Número Oficial unívoco (NO OFICIAL)
+            if raw_nof:
                 digits_nof = re.search(r'\b(\d+)\b', raw_nof)
                 d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
                 if nof_counts.get(raw_nof) == 1:
                     target = nof_map.get(raw_nof)
                 elif d_clean and nof_counts.get(d_clean) == 1:
                     target = nof_map.get(d_clean)
+
+            # 2. Prioridad Secundaria: Búsqueda por folio RPP si existe
+            if not target and folio_rpp and folio_rpp in vivienda_by_rpp:
+                target = vivienda_by_rpp[folio_rpp]
+
+            # 3. Prioridad Terciaria: Coincidencia física exacta por (edificio, interior/UPE)
+            if not target:
+                if (raw_ed, inter) in vivienda_by_interior:
+                    target = vivienda_by_interior[(raw_ed, inter)]
+                elif (ed_clean, inter) in vivienda_by_interior:
+                    target = vivienda_by_interior[(ed_clean, inter)]
+
+            # 4. Respaldo exclusivo para áreas comunes sin edificio asignado con interior unívoco
+            if not target and not raw_ed and not ed_clean and interior_counts.get(inter) == 1:
+                target = interior_map.get(inter)
 
             if target:
                 if clave_cat:

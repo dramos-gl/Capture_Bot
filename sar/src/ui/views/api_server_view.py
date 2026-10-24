@@ -40,6 +40,8 @@ class ServiceControlWorker(QThread):
                     ["sc", "query", self.service_name],
                     capture_output=True,
                     text=True,
+                    encoding="cp1252" if sys.platform == "win32" else "utf-8",
+                    errors="replace",
                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 )
                 stdout = result.stdout or ""
@@ -59,6 +61,8 @@ class ServiceControlWorker(QThread):
                     cmd,
                     capture_output=True,
                     text=True,
+                    encoding="cp1252" if sys.platform == "win32" else "utf-8",
+                    errors="replace",
                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 )
                 if result.returncode == 0:
@@ -110,6 +114,8 @@ class SystemHealthCheckWorker(QThread):
                     ["sc", "query", self.service_name],
                     capture_output=True,
                     text=True,
+                    encoding="cp1252" if sys.platform == "win32" else "utf-8",
+                    errors="replace",
                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 )
                 stdout = res.stdout or ""
@@ -557,6 +563,8 @@ class APIServerWindow(QMainWindow):
                         [nssm_path, "get", "SAR_API", "AppEnvironment"],
                         capture_output=True,
                         text=True,
+                        encoding="cp1252" if sys.platform == "win32" else "utf-8",
+                        errors="replace",
                         creationflags=subprocess.CREATE_NO_WINDOW
                     )
                     if res.returncode == 0 and res.stdout:
@@ -962,6 +970,8 @@ class APIServerWindow(QMainWindow):
                             [nssm_path, "set", "SAR_API", "AppEnvironment", f"DB_USER={self.txt_db_user.text()}", f"DB_PASSWORD={self.txt_db_password.text()}"],
                             capture_output=True,
                             text=True,
+                            encoding="cp1252" if sys.platform == "win32" else "utf-8",
+                            errors="replace",
                             creationflags=subprocess.CREATE_NO_WINDOW
                         )
                         if res.returncode == 0:

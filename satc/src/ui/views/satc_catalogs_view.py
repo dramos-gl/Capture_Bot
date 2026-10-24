@@ -50,6 +50,13 @@ class ViviendasFileAnalyzeWorker(QThread):
                 if self.modo == "CATASTRO":
                     from satc.src.services.catastro_oficio_extractor import CatastroOficioExtractor
                     raw_extracted = CatastroOficioExtractor.extract_from_pdf(self.file_path)
+                    if not raw_extracted:
+                        self.finished.emit(
+                            False, {},
+                            "No se pudieron extraer registros del Oficio de Catastro PDF.\n"
+                            "Verifique que el documento contenga tablas escaneadas con Claves Catastrales legibles."
+                        )
+                        return
                     for r in raw_extracted:
                         records.append({
                             "interior": r.get("interior", ""),
@@ -98,53 +105,101 @@ class ViviendasFileAnalyzeWorker(QThread):
                     self.finished.emit(False, {}, "El archivo seleccionado no contiene filas de datos.")
                     return
 
-                raw_headers = [str(h or "").strip().upper() for h in rows[0]]
+                # Detección inteligente de la fila de encabezados (revisar primeras 10 filas)
+                header_row_idx = 0
+                idx_int = -1
+                idx_desc = -1
+                raw_headers = []
+
+                for r_idx in range(min(10, len(rows))):
+                    candidate_headers = [str(h or "").strip().upper() for h in rows[r_idx]]
+                    def test_idx(*names):
+                        for name in names:
+                            for c_i, ch in enumerate(candidate_headers):
+                                if ch == name.upper() or ch.startswith(name.upper()):
+                                    return c_i
+                        return -1
+
+                    t_int = test_idx("INTERIOR", "VIVIENDA", "DEPTO", "DEPARTAMENTO", "CASA", "UPE", "INMUEBLE")
+                    t_desc = test_idx("DESCRIPCION", "DESCRIPCIÓN", "NOTAS", "OBSERVACIONES", "CONCEPTO", "DETALLE")
+                    if t_int != -1 or t_desc != -1:
+                        header_row_idx = r_idx
+                        raw_headers = candidate_headers
+                        break
+
+                if not raw_headers:
+                    header_row_idx = 0
+                    raw_headers = [str(h or "").strip().upper() for h in rows[0]]
+
                 def get_col_idx(*names):
                     for name in names:
-                        if name.upper() in raw_headers:
-                            return raw_headers.index(name.upper())
+                        for c_i, ch in enumerate(raw_headers):
+                            if ch == name.upper() or ch.startswith(name.upper()):
+                                return c_i
                     return -1
 
-                idx_int = get_col_idx("INTERIOR", "VIVIENDA", "DEPTO", "DEPARTAMENTO", "CASA")
-                idx_ed = get_col_idx("EDIFICIO", "EDIF", "TORRE")
+                idx_int = get_col_idx("INTERIOR", "VIVIENDA", "DEPTO", "DEPARTAMENTO", "CASA", "UPE", "INMUEBLE")
+                idx_ed = get_col_idx("EDIFICIO", "EDIF", "TORRE", "EDIF.")
                 idx_niv = get_col_idx("NIVEL", "PISO", "PLANTA")
-                idx_nof = get_col_idx("NO. OFICIAL", "NO._OFICIAL", "NO_OFICIAL", "NUMERO_OFICIAL", "NUMERO OFICIAL", "NUMERO_UPE", "NUM_UPE", "UPE")
+                idx_nof = get_col_idx("NO. OFICIAL", "NO._OFICIAL", "NO_OFICIAL", "NUMERO_OFICIAL", "NUMERO OFICIAL", "NUMERO_UPE", "NUM_UPE", "NO.OFICIAL")
                 idx_calle = get_col_idx("CALLE", "VIALIDAD", "DIRECCION")
                 idx_dest = get_col_idx("DESTINO", "USO")
                 idx_esp = get_col_idx("ESPACIO", "TIPO_ESPACIO")
-                idx_rpp = get_col_idx("FOLIO", "FOLIO_RPP", "FOLIO_ELECTRONICO", "RPP", "FOLIO REAL")
-                idx_cat = get_col_idx("CEDULA CATASTRAL", "CEDULA_CATASTRAL", "CEDULA", "CLAVE_CATASTRAL", "CLAVE CATASTRAL", "CATASTRO", "CLAVE_CAT")
+                idx_rpp = get_col_idx("FOLIO", "FOLIO_RPP", "FOLIO_ELECTRONICO", "RPP", "FOLIO REAL", "FOLIO_REAL")
+                idx_cat = get_col_idx("CEDULA CATASTRAL", "CEDULA_CATASTRAL", "CEDULA", "CLAVE_CATASTRAL", "CLAVE CATASTRAL", "CATASTRO", "CLAVE_CAT", "CLAVE")
                 idx_pad = get_col_idx("PADRON", "CUENTA_PREDIAL", "PREDIAL")
                 idx_fec = get_col_idx("FECHA", "FECHA_ALTA", "FECHA_ALTA_FOLIO", "FECHA_ALTA_CC", "FECHA ALTA", "FECHA EXPEDICION", "FECHA_EXPEDICION")
-                idx_desc = get_col_idx("DESCRIPCION", "DESCRIPCIÓN", "NOTAS", "OBSERVACIONES")
+                idx_desc = get_col_idx("DESCRIPCION", "DESCRIPCIÓN", "NOTAS", "OBSERVACIONES", "CONCEPTO", "DETALLE")
 
-                if idx_int == -1:
+                if idx_int == -1 and idx_desc == -1:
                     self.finished.emit(
                         False, {},
-                        "El archivo debe contener al menos la columna 'INTERIOR' o 'VIVIENDA'."
+                        "El archivo debe contener al menos la columna 'INTERIOR', 'VIVIENDA', 'UPE' o 'DESCRIPCION'."
                     )
                     return
 
-                for row in rows[1:]:
+                for row in rows[header_row_idx + 1:]:
                     if not any(row):
                         continue
-                    interior = str(row[idx_int] or "").strip()
+
+                    desc = str(row[idx_desc] or "").strip() if idx_desc != -1 and idx_desc < len(row) and row[idx_desc] is not None else ""
+                    interior = str(row[idx_int] or "").strip() if idx_int != -1 and idx_int < len(row) and row[idx_int] is not None else ""
+                    nof = str(row[idx_nof] or "").strip() if idx_nof != -1 and idx_nof < len(row) and row[idx_nof] is not None else ""
+                    ed = str(row[idx_ed] or "").strip() if idx_ed != -1 and idx_ed < len(row) and row[idx_ed] is not None else ""
+
+                    # Extracción inteligente desde columna DESCRIPCION (ej: "SM-258 MZ-502 L-01 E-A UPE 101 NO OFICIAL 1 PB...")
+                    if desc:
+                        if not interior:
+                            upe_m = re.search(r"\bUPE\s*(\d+)\b", desc, re.IGNORECASE)
+                            if upe_m:
+                                interior = upe_m.group(1).strip()
+                        if not nof:
+                            nof_m = re.search(r"\bNO\.?\s*OFICIAL\s*(\d+)\b", desc, re.IGNORECASE)
+                            if nof_m:
+                                nof = nof_m.group(1).strip()
+                        if not ed:
+                            ed_m = re.search(r"\bE-([A-Z0-9]+)\b", desc, re.IGNORECASE)
+                            if ed_m:
+                                ed = ed_m.group(1).strip().upper()
+
+                    # Si después de analizar no tenemos interior pero sí número oficial, usar número oficial como interior
+                    if not interior and nof:
+                        interior = nof
+
                     if not interior:
                         continue
 
-                    ed = str(row[idx_ed] or "").strip() if idx_ed != -1 and row[idx_ed] is not None else ""
-                    niv = str(row[idx_niv] or "").strip() if idx_niv != -1 and row[idx_niv] is not None else ""
-                    nof = str(row[idx_nof] or "").strip() if idx_nof != -1 and row[idx_nof] is not None else ""
-                    calle = str(row[idx_calle] or "").strip() if idx_calle != -1 and row[idx_calle] is not None else ""
-                    dest = str(row[idx_dest] or "HABITACIONAL").strip().upper() if idx_dest != -1 and row[idx_dest] is not None else "HABITACIONAL"
-                    esp_raw = str(row[idx_esp] or "").strip().upper() if idx_esp != -1 and row[idx_esp] is not None else ""
+                    niv = str(row[idx_niv] or "").strip() if idx_niv != -1 and idx_niv < len(row) and row[idx_niv] is not None else ""
+                    calle = str(row[idx_calle] or "").strip() if idx_calle != -1 and idx_calle < len(row) and row[idx_calle] is not None else ""
+                    dest = str(row[idx_dest] or "HABITACIONAL").strip().upper() if idx_dest != -1 and idx_dest < len(row) and row[idx_dest] is not None else "HABITACIONAL"
+                    esp_raw = str(row[idx_esp] or "").strip().upper() if idx_esp != -1 and idx_esp < len(row) and row[idx_esp] is not None else ""
                     if dest == "SERVICIO":
                         esp = esp_raw if esp_raw and esp_raw not in ["VIVIENDA", ""] else "AREAS_COMUNES"
                     else:
                         esp = esp_raw or "VIVIENDA"
-                    rpp = str(row[idx_rpp] or "").strip() if idx_rpp != -1 and row[idx_rpp] is not None else ""
-                    cat = str(row[idx_cat] or "").strip() if idx_cat != -1 and row[idx_cat] is not None else ""
-                    pad = str(row[idx_pad] or "").strip() if idx_pad != -1 and row[idx_pad] is not None else ""
+                    rpp = str(row[idx_rpp] or "").strip() if idx_rpp != -1 and idx_rpp < len(row) and row[idx_rpp] is not None else ""
+                    cat = str(row[idx_cat] or "").strip() if idx_cat != -1 and idx_cat < len(row) and row[idx_cat] is not None else ""
+                    pad = str(row[idx_pad] or "").strip() if idx_pad != -1 and idx_pad < len(row) and row[idx_pad] is not None else ""
                     raw_fec = row[idx_fec] if idx_fec != -1 and row[idx_fec] is not None else None
                     fec_str = ""
                     if raw_fec is not None:
@@ -179,22 +234,49 @@ class ViviendasFileAnalyzeWorker(QThread):
                 self.finished.emit(False, {}, "No se detectaron registros con Interior válido.")
                 return
 
-            # Detección de duplicados internos dentro del mismo archivo (mismo edificio e interior)
-            seen_file_keys = set()
+            # Detección exhaustiva de duplicados internos dentro del mismo archivo
+            seen_file_keys = {}
+            seen_folios = {}
+            seen_claves = {}
             file_duplicates = []
-            for r in records:
+            duplicate_folios = []
+            duplicate_claves = []
+
+            for idx_r, r in enumerate(records):
+                # 1. Duplicidad física de unidad: (edificio, interior)
                 k_file = ((r.get("edificio") or "").strip().upper(), (r.get("interior") or "").strip().upper())
                 if k_file in seen_file_keys:
-                    file_duplicates.append(f"{k_file[0]} Int {k_file[1]}")
-                seen_file_keys.add(k_file)
+                    prev_idx = seen_file_keys[k_file]
+                    file_duplicates.append((f"{k_file[0]} Int {k_file[1]}", prev_idx, idx_r))
+                else:
+                    seen_file_keys[k_file] = idx_r
 
+                # 2. Duplicidad de Folio Electrónico RPP dentro del archivo
+                fol_raw = str(r.get("folio_electronico") or "").strip().upper()
+                if fol_raw and fol_raw not in ("-", "N/A", "NONE"):
+                    if fol_raw in seen_folios:
+                        prev_idx = seen_folios[fol_raw]
+                        duplicate_folios.append((fol_raw, prev_idx, idx_r))
+                    else:
+                        seen_folios[fol_raw] = idx_r
+
+                # 3. Duplicidad de Clave Catastral dentro del archivo
+                cc_raw = str(r.get("clave_catastral") or "").strip().upper()
+                if cc_raw and cc_raw not in ("-", "N/A", "NONE"):
+                    if cc_raw in seen_claves:
+                        prev_idx = seen_claves[cc_raw]
+                        duplicate_claves.append((cc_raw, prev_idx, idx_r))
+                    else:
+                        seen_claves[cc_raw] = idx_r
+
+            # En Carga Inicial: si hay unidades duplicadas internamente, se bloquea la operación para no corromper la BD
             if file_duplicates and self.modo == "INICIAL":
-                ejemplos = ", ".join(file_duplicates[:5])
+                ejemplos = ", ".join([d[0] for d in file_duplicates[:5]])
                 self.finished.emit(
                     False, {},
                     f"El archivo contiene {len(file_duplicates)} registros duplicados internamente:\n"
                     f"({ejemplos}{'...' if len(file_duplicates) > 5 else ''}).\n\n"
-                    "Por favor elimine las filas duplicadas en el archivo Excel antes de continuar."
+                    "Por favor elimine las filas duplicadas en el archivo antes de continuar."
                 )
                 return
 
@@ -257,7 +339,7 @@ class ViviendasFileAnalyzeWorker(QThread):
                 if fol_raw and fol_raw not in ("-", "N/A", "NONE"):
                     rpp_map[fol_raw] = v
 
-                # Indexar por Número Oficial (blindaje secundario)
+                # Indexar por Número Oficial (Prioridad Primaria en Vinculación)
                 nof_raw = str(v.get("numero_oficial") or "").strip().upper()
                 if nof_raw and nof_raw not in ("-", "N/A", "NONE"):
                     # Clave tal cual
@@ -267,9 +349,10 @@ class ViviendasFileAnalyzeWorker(QThread):
                     digits_match = re.search(r'\b(\d+)\b', nof_raw)
                     if digits_match:
                         d_val = digits_match.group(1).lstrip("0") or "0"
-                        if d_val not in nof_map:
-                            nof_map[d_val] = v
-                        nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
+                        if d_val != nof_raw:
+                            if d_val not in nof_map:
+                                nof_map[d_val] = v
+                            nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
 
             # Clasificación de registros y estados
             nuevos_cnt = 0
@@ -286,26 +369,34 @@ class ViviendasFileAnalyzeWorker(QThread):
 
                 target_v = None
 
-                # 1. En Cédula Catastral: Prioridad Soberana por Folio Electrónico RPP
-                if self.modo == "CATASTRO" and raw_folio and raw_folio in rpp_map:
-                    target_v = rpp_map.get(raw_folio)
-
-                # 2. Coincidencia directa por (edificio, interior)
-                if not target_v:
-                    target_v = existentes_map.get((ed_clean, int_clean)) or existentes_map.get((raw_ed, int_clean))
-                
-                # 3. Respaldo para áreas comunes / servicios sin edificio asignado o con interior único en el régimen
-                if not target_v and interior_counts.get(int_clean) == 1:
-                    target_v = interior_map.get(int_clean)
-
-                # 4. Blindaje secundario: Coincidencia por Número Oficial unívoco en el régimen
-                if not target_v and raw_nof:
+                # 1. VALIDACIÓN PRIMARIA: Coincidencia por Número Oficial unívoco en el régimen (NO OFICIAL)
+                if raw_nof:
                     digits_nof = re.search(r'\b(\d+)\b', raw_nof)
                     d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
                     if nof_counts.get(raw_nof) == 1:
                         target_v = nof_map.get(raw_nof)
                     elif d_clean and nof_counts.get(d_clean) == 1:
                         target_v = nof_map.get(d_clean)
+
+                # 2. VALIDACIÓN SECUNDARIA: Coincidencia por Folio Electrónico RPP
+                if not target_v and raw_folio and raw_folio in rpp_map:
+                    target_v = rpp_map.get(raw_folio)
+
+                # 3. VALIDACIÓN TERCIARIA: Coincidencia física exacta por combinación de (Edificio, UPE/Interior)
+                if not target_v:
+                    target_v = existentes_map.get((ed_clean, int_clean)) or existentes_map.get((raw_ed, int_clean))
+
+                # 4. Respaldo exclusivo para áreas de servicio/comunes que no tengan edificio pero su UPE/interior sea 100% único
+                if not target_v and not ed_clean and not raw_ed and interior_counts.get(int_clean) == 1:
+                    target_v = interior_map.get(int_clean)
+
+                # 5. Blindaje de Inferencia: Si es CATASTRO y no hubo coincidencia, deducir por el sufijo de la Clave Catastral
+                if not target_v and self.modo == "CATASTRO":
+                    raw_cc = str(r.get("clave_catastral") or "").strip()
+                    if raw_cc.startswith("60") and len(raw_cc) == 18:
+                        cc_nof = raw_cc[-4:].lstrip("0") or "0"
+                        if nof_counts.get(cc_nof) == 1:
+                            target_v = nof_map.get(cc_nof)
 
                 if self.modo in ("RPP", "CATASTRO"):
                     if target_v:
@@ -314,7 +405,7 @@ class ViviendasFileAnalyzeWorker(QThread):
                         v_id = target_v.get("vivienda_id")
                         if v_id is not None:
                             matched_v_ids.add(v_id)
-                        # Preservar atributos fidedignos de la vivienda en BD (Destino, Espacio, Edificio real)
+                        # Preservar atributos fidedignos de la vivienda en BD (Destino, Espacio, Edificio real y Folio RPP)
                         r_display = dict(r)
                         r_display["destino"] = target_v.get("destino") or r.get("destino") or "HABITACIONAL"
                         r_display["espacio"] = target_v.get("espacio") or r.get("espacio") or "VIVIENDA"
@@ -325,6 +416,11 @@ class ViviendasFileAnalyzeWorker(QThread):
                         r_display["numero_oficial"] = target_v.get("numero_oficial") or r.get("numero_oficial") or ""
                         r_display["calle"] = target_v.get("calle") or r.get("calle") or ""
                         r_display["descripcion"] = target_v.get("descripcion") or r.get("descripcion") or ""
+
+                        # Blindaje ante sellos: Si el oficio traía el folio RPP obstaculizado por sello, rescatar el fidedigno de la BD
+                        if not r_display.get("folio_electronico") and target_v.get("folio_electronico"):
+                            r_display["folio_electronico"] = target_v.get("folio_electronico")
+                            r["folio_electronico"] = target_v.get("folio_electronico")
 
                         # Validación Metadata-Driven de Clave Catastral
                         if self.modo == "CATASTRO":
@@ -355,6 +451,22 @@ class ViviendasFileAnalyzeWorker(QThread):
                         nuevos_cnt += 1
                     r_display = r
 
+                # Detección de colisiones de duplicados internos en este registro específico
+                advertencias_dup = []
+                if self.modo == "RPP" and raw_folio:
+                    if any(df[0] == raw_folio for df in duplicate_folios):
+                        advertencias_dup.append(f"⚠️ [FOLIO DUPLICADO EN ARCHIVO: {raw_folio}]")
+                elif self.modo == "CATASTRO":
+                    cc_raw_val = str(r.get("clave_catastral") or "").strip().upper()
+                    if cc_raw_val and any(dc[0] == cc_raw_val for dc in duplicate_claves):
+                        advertencias_dup.append(f"⚠️ [CC DUPLICADA EN ARCHIVO: {cc_raw_val}]")
+                    if raw_folio and any(df[0] == raw_folio for df in duplicate_folios):
+                        advertencias_dup.append(f"⚠️ [FOLIO DUPLICADO EN ARCHIVO: {raw_folio}]")
+
+                if advertencias_dup:
+                    desc_orig = r_display.get("descripcion") or ""
+                    r_display["descripcion"] = f"{' '.join(advertencias_dup)} {desc_orig}".strip()
+
                 processed_records.append({
                     "data": r_display,
                     "status": status_str
@@ -375,7 +487,10 @@ class ViviendasFileAnalyzeWorker(QThread):
                 "file_name": os.path.basename(self.file_path),
                 "nuevos_cnt": nuevos_cnt,
                 "duplicados_cnt": duplicados_cnt,
-                "tot_upes": tot_upes
+                "tot_upes": tot_upes,
+                "duplicate_folios": duplicate_folios,
+                "duplicate_claves": duplicate_claves,
+                "file_duplicates": file_duplicates
             }
             self.finished.emit(True, result_data, "")
         except Exception as e:
@@ -2514,6 +2629,8 @@ class SatcCatalogsView(QWidget):
 
         self._v_nuevos_cnt = nuevos_cnt
         self._v_duplicados_cnt = duplicados_cnt
+        self._v_duplicate_folios = result_data.get("duplicate_folios", [])
+        self._v_duplicate_claves = result_data.get("duplicate_claves", [])
 
         if modo in ("RPP", "CATASTRO"):
             self.lbl_vkpi_nuevos.setText(f"Vinculables: {nuevos_cnt}")
@@ -2562,20 +2679,36 @@ class SatcCatalogsView(QWidget):
         total_recs = len(self._v_parsed_records)
         target_cnt = getattr(self, "_v_nuevos_cnt", total_recs)
         sin_coincidencia = getattr(self, "_v_duplicados_cnt", 0)
+        dup_folios = getattr(self, "_v_duplicate_folios", [])
+        dup_claves = getattr(self, "_v_duplicate_claves", [])
         reg_txt = self.cmb_v_regimen.currentText() if reg_id else "Directo a Desarrollo"
         des_txt = self.cmb_v_desarrollo.currentText()
+
+        advertencia_dups_str = ""
+        if dup_folios:
+            f_ej = ", ".join([d[0] for d in dup_folios[:3]])
+            advertencia_dups_str += (
+                f"<br/><b style='color: #DC2626;'>⚠️ ADVERTENCIA: Hay {len(dup_folios)} Folio(s) RPP repetidos en varias filas del archivo "
+                f"({f_ej}{'...' if len(dup_folios) > 3 else ''}).</b>"
+            )
+        if dup_claves:
+            c_ej = ", ".join([d[0] for d in dup_claves[:3]])
+            advertencia_dups_str += (
+                f"<br/><b style='color: #DC2626;'>⚠️ ADVERTENCIA: Hay {len(dup_claves)} Clave(s) Catastral(es) repetidas en varias filas del archivo "
+                f"({c_ej}{'...' if len(dup_claves) > 3 else ''}).</b>"
+            )
 
         modo = self.cmb_v_modo.currentData()
         if modo == "RPP":
             modo_titulo = "Vinculación de Folios RPP"
-            modo_desc = f"¿Está seguro de vincular los <b>Folios Electrónicos RPP</b> para las <b>{target_cnt}</b> viviendas detectadas?"
+            modo_desc = f"¿Está seguro de vincular los <b>Folios Electrónicos RPP</b> para las <b>{target_cnt}</b> viviendas detectadas?{advertencia_dups_str}"
             loading_txt = f"Vinculando {target_cnt} Folios RPP...\nPor favor espere."
             detalle_procesar = f"<b>Total a vincular:</b> {target_cnt} viviendas (de {total_recs} en archivo)"
             if sin_coincidencia > 0:
                 detalle_procesar += f"<br/><b>Sin coincidencia:</b> {sin_coincidencia} registros omitidos"
         elif modo == "CATASTRO":
             modo_titulo = "Vinculación Catastral y Predial"
-            modo_desc = f"¿Está seguro de vincular las <b>Claves Catastrales y Padrones</b> para las <b>{target_cnt}</b> viviendas detectadas?"
+            modo_desc = f"¿Está seguro de vincular las <b>Claves Catastrales y Padrones</b> para las <b>{target_cnt}</b> viviendas detectadas?{advertencia_dups_str}"
             loading_txt = f"Vinculando Catastro y Padrón para {target_cnt} viviendas...\nPor favor espere."
             detalle_procesar = f"<b>Total a vincular:</b> {target_cnt} viviendas (de {total_recs} en archivo)"
             if sin_coincidencia > 0:

@@ -936,7 +936,15 @@ class OperacionRepository(BaseRepository):
         from sqlalchemy import text
         stmt = text("""
             SELECT 
-                s.solicitud_id, s.consecutivo_inicio, s.consecutivo_fin, s.ultimo_consecutivo,
+                s.solicitud_id, s.consecutivo_inicio, s.consecutivo_fin,
+                GREATEST(
+                    COALESCE(s.ultimo_consecutivo, 0),
+                    COALESCE((
+                        SELECT MAX(r.consecutivo_grupo)
+                        FROM sar_produccion.referencia r
+                        WHERE r.solicitud_id = s.solicitud_id
+                    ), 0)
+                ) AS ultimo_consecutivo,
                 s.grupo_id,
                 rfc.rfc, rfc.razon_social, rfc.calle, rfc.codigo_postal, rfc.municipio as rfc_municipio,
                 rfc.colonia, rfc.no_exterior, rfc.no_interior, rfc.localidad, rfc.estado as rfc_estado,

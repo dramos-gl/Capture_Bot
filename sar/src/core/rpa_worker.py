@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any
 from PySide6.QtCore import QThread, Signal
 from playwright.sync_api import sync_playwright
 from sar.src.core.playwright_setup import resolve_chromium_executable
-from sqlalchemy import text
+from sqlalchemy import text, select
 
 from sar.src.storage.repositories import ReferenciaRepository, AuditRepository, ConfigRepository
 from sar.src.storage.models import Referencia, ArchivoPDF, EstadoSistema, Solicitud, GrupoReferencia, OrdenGeneracion
@@ -404,35 +404,77 @@ class RpaWorker(QThread):
                 if not state_id:
                     state_id = session.execute(text("SELECT estado_id FROM sar_catalogo.estado_sistema LIMIT 1")).scalar() or 1
                     
-                ref = Referencia(
-                    grupo_id=self.ctx["grupo_id"],
-                    solicitud_id=self.ctx["solicitud_id"],
-                    consecutivo_grupo=consecutivo,
-                    referencia_portal=ref_portal,
-                    importe=importe,
-                    fecha_generacion=datetime.datetime.now(datetime.timezone.utc),
-                    fecha_vigencia=fecha_vig,
-                    estado_id=state_id,
-                    usuario_asignado=self.ctx.get("usuario_id")
+                # Blindaje idempotente: verificar si ya existe la llave (grupo_id, consecutivo_grupo)
+                exist_stmt = select(Referencia).where(
+                    Referencia.grupo_id == self.ctx["grupo_id"],
+                    Referencia.consecutivo_grupo == consecutivo
                 )
-                session.add(ref)
-                session.flush()
+                existing_ref = session.execute(exist_stmt).scalars().first()
                 
-                pdf = ArchivoPDF(
-                    referencia_id=ref.referencia_id,
-                    tipo_archivo="BOLETA_PAGO",
-                    estado_archivo="DESCARGADO",
-                    nombre_archivo=filename,
-                    ruta_archivo=path,
-                    hash_sha256=sha256,
-                    tamano_bytes=size
-                )
-                session.add(pdf)
+                if existing_ref:
+                    # Actualizar registro existente en lugar de colisionar con uq_referencia_grupo
+                    existing_ref.solicitud_id = self.ctx["solicitud_id"]
+                    existing_ref.referencia_portal = ref_portal
+                    existing_ref.importe = importe
+                    existing_ref.fecha_vigencia = fecha_vig
+                    existing_ref.estado_id = state_id
+                    existing_ref.usuario_asignado = self.ctx.get("usuario_id")
+                    ref_id = existing_ref.referencia_id
+                    
+                    # Verificar o actualizar ArchivoPDF asociado
+                    pdf_exist = session.execute(
+                        select(ArchivoPDF).where(ArchivoPDF.referencia_id == ref_id)
+                    ).scalars().first()
+                    if pdf_exist:
+                        pdf_exist.nombre_archivo = filename
+                        pdf_exist.ruta_archivo = path
+                        pdf_exist.hash_sha256 = sha256
+                        pdf_exist.tamano_bytes = size
+                    else:
+                        pdf = ArchivoPDF(
+                            referencia_id=ref_id,
+                            tipo_archivo="BOLETA_PAGO",
+                            estado_archivo="DESCARGADO",
+                            nombre_archivo=filename,
+                            ruta_archivo=path,
+                            hash_sha256=sha256,
+                            tamano_bytes=size
+                        )
+                        session.add(pdf)
+                else:
+                    ref = Referencia(
+                        grupo_id=self.ctx["grupo_id"],
+                        solicitud_id=self.ctx["solicitud_id"],
+                        consecutivo_grupo=consecutivo,
+                        referencia_portal=ref_portal,
+                        importe=importe,
+                        fecha_generacion=datetime.datetime.now(datetime.timezone.utc),
+                        fecha_vigencia=fecha_vig,
+                        estado_id=state_id,
+                        usuario_asignado=self.ctx.get("usuario_id")
+                    )
+                    session.add(ref)
+                    session.flush()
+                    ref_id = ref.referencia_id
+                    
+                    pdf = ArchivoPDF(
+                        referencia_id=ref_id,
+                        tipo_archivo="BOLETA_PAGO",
+                        estado_archivo="DESCARGADO",
+                        nombre_archivo=filename,
+                        ruta_archivo=path,
+                        hash_sha256=sha256,
+                        tamano_bytes=size
+                    )
+                    session.add(pdf)
                 
                 sol = session.get(Solicitud, self.ctx["solicitud_id"])
                 if sol:
-                    sol.ultimo_consecutivo = consecutivo
-                    sol.cantidad_generada = (sol.cantidad_generada or 0) + 1
+                    if consecutivo > (sol.ultimo_consecutivo or 0):
+                        sol.ultimo_consecutivo = consecutivo
+                    # Solo incrementar cantidad_generada si fue inserción nueva
+                    if not existing_ref:
+                        sol.cantidad_generada = (sol.cantidad_generada or 0) + 1
                     if consecutivo >= self.ctx["consecutivo_fin"]:
                         sol.fecha_fin = datetime.datetime.now(datetime.timezone.utc)
                     if not sol.fecha_inicio:
@@ -442,7 +484,8 @@ class RpaWorker(QThread):
                 if grupo:
                     if consecutivo > (grupo.ultimo_consecutivo or 0):
                         grupo.ultimo_consecutivo = consecutivo
-                    grupo.cantidad_generada = (grupo.cantidad_generada or 0) + 1
+                    if not existing_ref:
+                        grupo.cantidad_generada = (grupo.cantidad_generada or 0) + 1
                     
                 session.commit()
 
