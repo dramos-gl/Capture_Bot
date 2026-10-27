@@ -60,21 +60,48 @@ class CatastroOficioExtractor:
     def extract_from_pdf(cls, pdf_path: str, progress_callback=None) -> List[Dict[str, Any]]:
         """
         Extrae la totalidad de registros tabulares de todas las páginas del PDF.
+        Aplica procesamiento paralelo multi-núcleo y OCR focalizado para máximo rendimiento.
         Retorna lista de diccionarios normalizados para la UI y la base de datos.
         """
         if not os.path.exists(pdf_path):
             raise FileNotFoundError(f"Archivo no encontrado: {pdf_path}")
 
-        records: List[Dict[str, Any]] = []
+        # Extraer imágenes crudas de cada página
+        page_payloads = []
         with pdfplumber.open(pdf_path) as pdf:
             total_pages = len(pdf.pages)
             for page_idx in range(total_pages):
-                if progress_callback:
-                    progress_callback(page_idx + 1, total_pages)
-
                 page = pdf.pages[page_idx]
-                page_records = cls._extract_page_records(page, page_idx + 1)
-                records.extend(page_records)
+                raw_data = page.images[0]['stream'].get_rawdata() if page.images else None
+                page_payloads.append((page_idx + 1, raw_data))
+
+        # Procesamiento concurrente de páginas aprovechando los núcleos del sistema
+        records: List[Dict[str, Any]] = []
+        max_workers = min(4, os.cpu_count() or 2)
+        completed_count = 0
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _worker(item):
+            p_num, r_data = item
+            if not r_data:
+                return p_num, []
+            return p_num, cls._extract_page_records_from_raw(r_data, p_num)
+
+        page_results = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_page = {executor.submit(_worker, payload): payload[0] for payload in page_payloads}
+            for future in as_completed(future_to_page):
+                p_num, p_recs = future.result()
+                page_results[p_num] = p_recs
+                completed_count += 1
+                if progress_callback:
+                    progress_callback(completed_count, total_pages)
+
+        # Reensamblar en orden natural de páginas
+        for p_idx in range(1, total_pages + 1):
+            if p_idx in page_results:
+                records.extend(page_results[p_idx])
 
         # Consolidación y deduplicación inteligente: preservar la fila con mayor información por Clave Catastral
         dedup_map: Dict[str, Dict[str, Any]] = {}
@@ -108,13 +135,23 @@ class CatastroOficioExtractor:
 
     @classmethod
     def _extract_page_records(cls, page, page_num: int) -> List[Dict[str, Any]]:
-        records = []
         if not page.images:
+            return []
+        raw_data = page.images[0]['stream'].get_rawdata()
+        return cls._extract_page_records_from_raw(raw_data, page_num)
+
+    @classmethod
+    def _extract_page_records_from_raw(cls, raw_data: bytes, page_num: int) -> List[Dict[str, Any]]:
+        records = []
+        if not raw_data:
             return records
 
-        img = page.images[0]
-        raw_data = img['stream'].get_rawdata()
-        temp_img = f"temp_ocr_p{page_num}_{os.getpid()}.png"
+        # Identificador único de proceso e hilo para evitar colisiones en disco
+        import threading
+        th_id = threading.get_ident()
+
+        # 1. OCR Primario sobre la imagen original (Mantiene 100% de nitidez para texto negro y claves)
+        temp_img = f"temp_ocr_p{page_num}_{os.getpid()}_{th_id}.png"
         with open(temp_img, "wb") as f:
             f.write(raw_data)
 
@@ -130,7 +167,54 @@ class CatastroOficioExtractor:
             return records
         finally:
             if os.path.exists(temp_img):
-                os.remove(temp_img)
+                try:
+                    os.remove(temp_img)
+                except Exception:
+                    pass
+
+        # 2. Respaldo Híbrido Quirúrgico: OCR Canal Rojo (R) FOCALIZADO en la franja vertical de folios
+        # En lugar de procesar la página entera de 3300x2550 px, recorta solo la columna de folios (~0.7s vs 14s)
+        folio_red_by_top = {}
+        temp_red_crop = f"temp_red_crop_p{page_num}_{os.getpid()}_{th_id}.png"
+        try:
+            from PIL import Image
+            import io
+            pil_img = Image.open(io.BytesIO(raw_data))
+            if pil_img.mode in ("RGB", "RGBA"):
+                r_chan = pil_img.split()[0]
+                w, h = r_chan.size
+                # La columna de folios RPP se ubica en X: 2000 a 2650 px
+                crop_x1 = int(w * 0.60)  # ~1980 px
+                crop_x2 = int(w * 0.81)  # ~2670 px
+                crop_f = r_chan.crop((crop_x1, 0, crop_x2, h))
+                crop_f.save(temp_red_crop)
+
+                res_red = subprocess.run(
+                    [
+                        "tesseract", temp_red_crop, "stdout",
+                        "--psm", "6",
+                        "-c", "tessedit_char_whitelist=0123456789",
+                        "tsv"
+                    ],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30
+                )
+                reader_red = csv.DictReader(res_red.stdout.splitlines(), delimiter="\t")
+                for rw in reader_red:
+                    txt = rw.get("text", "").strip()
+                    m_f = re.search(r"\b(20\d{18}|\d{20})\b", txt)
+                    if m_f:
+                        try:
+                            folio_red_by_top[int(rw["top"])] = m_f.group(1)
+                        except (ValueError, KeyError):
+                            pass
+        except Exception as e_red:
+            logger.debug(f"Aislamiento por canal rojo omitido en pág {page_num}: {e_red}")
+        finally:
+            if os.path.exists(temp_red_crop):
+                try:
+                    os.remove(temp_red_crop)
+                except Exception:
+                    pass
 
         lines = tsv_output.splitlines()
         if not lines:
@@ -204,17 +288,36 @@ class CatastroOficioExtractor:
             if cc_m:
                 cc_val = cc_m.group(1)
                 fol_val = folio_m.group(1) if folio_m else ""
+
+                # Si el folio vino tapado por el sello, rescatar del mapa del canal rojo por cercanía vertical (Y +/- 15px)
+                if not fol_val and folio_red_by_top:
+                    avg_y = r.get("avg_top", 0)
+                    candidatos = [
+                        (abs(top_f - avg_y), f_val)
+                        for top_f, f_val in folio_red_by_top.items()
+                        if abs(top_f - avg_y) <= 15
+                    ]
+                    if candidatos:
+                        candidatos.sort(key=lambda x: x[0])
+                        fol_val = candidatos[0][1]
+
                 fec_val = fecha_m.group(1) if fecha_m else ""
                 ed_val = ed_m.group(1).upper() if ed_m else ""
                 upe_val = upe_m.group(1) if upe_m else ""
                 nof_val = nof_m.group(1) if nof_m else ""
 
-                # Respaldo inteligente: Si el sello borró la columna de descripción, inferir el NO OFICIAL del sufijo de la CC
-                if not nof_val and cc_val.startswith("60"):
+                # Auditoría de Inconsistencia: Si la Clave Catastral termina en un número y la descripción dice otro
+                inconsistencia_desc = ""
+                if cc_val.startswith("60"):
                     suffix_cc = cc_val[-4:].lstrip("0") or "0"
-                    nof_val = suffix_cc
-                    if not upe_val:
-                        upe_val = suffix_cc
+                    if nof_val and nof_val != suffix_cc:
+                        inconsistencia_desc = f"⚠️ [OFICIO CON ERROR EN TEXTO: CC termina en {suffix_cc} pero dice NO OFICIAL {nof_val}]"
+                        # Prevalece la verdad matemática de la Clave Catastral
+                        nof_val = suffix_cc
+                    elif not nof_val:
+                        nof_val = suffix_cc
+                        if not upe_val:
+                            upe_val = suffix_cc
 
                 # Normalizar fecha a formato YYYY-MM-DD para PostgreSQL
                 fec_db = ""
@@ -222,6 +325,10 @@ class CatastroOficioExtractor:
                     partes = fec_val.split("/")
                     if len(partes) == 3:
                         fec_db = f"{partes[2]}-{partes[1]}-{partes[0]}"
+
+                desc_final = f"Oficio Catastro Pág {page_num} | {line_txt[:80]}"
+                if inconsistencia_desc:
+                    desc_final = f"{inconsistencia_desc} {desc_final}"
 
                 records.append({
                     "clave_catastral": cc_val,
@@ -233,7 +340,7 @@ class CatastroOficioExtractor:
                     "calle": "",
                     "destino": "HABITACIONAL",
                     "espacio": "VIVIENDA",
-                    "descripcion": f"Oficio Catastro Pág {page_num} | {line_txt[:80]}"
+                    "descripcion": desc_final
                 })
 
         return records

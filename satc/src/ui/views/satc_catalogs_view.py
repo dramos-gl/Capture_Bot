@@ -317,7 +317,12 @@ class ViviendasFileAnalyzeWorker(QThread):
                     else:
                         v_existentes = svc.get_viviendas_by_desarrollo(self.desarrollo_id)
 
-            # Normalizar existentes: (edificio_norm, interior_norm), conteo por interior, conteo por número oficial y mapa por folio RPP
+            # Normalizar existentes:
+            # - Tupla conjunta completa: (edificio, interior, no_oficial)
+            # - Tupla física: (edificio, interior)
+            # - Mapa por folio electrónico RPP
+            # - Conteo por interior y número oficial
+            tupla_completa_map = {}
             existentes_map = {}
             interior_map = {}
             interior_counts = {}
@@ -328,31 +333,34 @@ class ViviendasFileAnalyzeWorker(QThread):
                 ed_raw = (v.get("edificio") or "").strip().upper()
                 ed_clean = "" if ed_raw in ("-", "N/A", "NONE", "") else re.sub(r'^(EDIFICIO|TORRE)\s*', '', ed_raw).strip()
                 int_clean = (v.get("interior") or "").strip().upper()
+                nof_raw = str(v.get("numero_oficial") or "").strip().upper()
+                digits_match = re.search(r'\b(\d+)\b', nof_raw)
+                nof_clean = digits_match.group(1).lstrip("0") or "0" if digits_match else nof_raw
+
+                # Indexar tupla completa conjunta (Edificio, UPE/Interior, Número Oficial)
+                if int_clean:
+                    tupla_completa_map[(ed_clean, int_clean, nof_clean)] = v
+                    tupla_completa_map[(ed_raw if ed_raw != "-" else "", int_clean, nof_clean)] = v
+
                 existentes_map[(ed_clean, int_clean)] = v
                 if ed_raw and ed_raw != "-":
                     existentes_map[(ed_raw, int_clean)] = v
                 interior_counts[int_clean] = interior_counts.get(int_clean, 0) + 1
                 interior_map[int_clean] = v
 
-                # Indexar por Folio Electrónico RPP (Prioridad Primaria en Vinculación Catastral)
+                # Indexar por Folio Electrónico RPP (Prioridad Primaria Soberana)
                 fol_raw = str(v.get("folio_electronico") or "").strip().upper()
                 if fol_raw and fol_raw not in ("-", "N/A", "NONE"):
                     rpp_map[fol_raw] = v
 
-                # Indexar por Número Oficial (Prioridad Primaria en Vinculación)
-                nof_raw = str(v.get("numero_oficial") or "").strip().upper()
+                # Indexar por Número Oficial
                 if nof_raw and nof_raw not in ("-", "N/A", "NONE"):
-                    # Clave tal cual
                     nof_map[nof_raw] = v
                     nof_counts[nof_raw] = nof_counts.get(nof_raw, 0) + 1
-                    # Clave numérica limpia si aplica (ej. "UPE-101" -> "101")
-                    digits_match = re.search(r'\b(\d+)\b', nof_raw)
-                    if digits_match:
-                        d_val = digits_match.group(1).lstrip("0") or "0"
-                        if d_val != nof_raw:
-                            if d_val not in nof_map:
-                                nof_map[d_val] = v
-                            nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
+                    if nof_clean != nof_raw:
+                        if nof_clean not in nof_map:
+                            nof_map[nof_clean] = v
+                        nof_counts[nof_clean] = nof_counts.get(nof_clean, 0) + 1
 
             # Clasificación de registros y estados
             nuevos_cnt = 0
@@ -365,32 +373,29 @@ class ViviendasFileAnalyzeWorker(QThread):
                 ed_clean = "" if raw_ed in ("-", "N/A", "NONE", "") else re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_ed).strip()
                 int_clean = (r.get("interior") or "").strip().upper()
                 raw_nof = str(r.get("numero_oficial") or "").strip().upper()
+                digits_nof = re.search(r'\b(\d+)\b', raw_nof)
+                nof_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else raw_nof
                 raw_folio = str(r.get("folio_electronico") or "").strip().upper()
 
                 target_v = None
 
-                # 1. VALIDACIÓN PRIMARIA: Coincidencia por Número Oficial unívoco en el régimen (NO OFICIAL)
-                if raw_nof:
-                    digits_nof = re.search(r'\b(\d+)\b', raw_nof)
-                    d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
-                    if nof_counts.get(raw_nof) == 1:
-                        target_v = nof_map.get(raw_nof)
-                    elif d_clean and nof_counts.get(d_clean) == 1:
-                        target_v = nof_map.get(d_clean)
-
-                # 2. VALIDACIÓN SECUNDARIA: Coincidencia por Folio Electrónico RPP
-                if not target_v and raw_folio and raw_folio in rpp_map:
+                # 1. VALIDACIÓN PRIMARIA: Coincidencia por Folio Electrónico RPP fidedigno
+                if raw_folio and raw_folio in rpp_map:
                     target_v = rpp_map.get(raw_folio)
+
+                # 2. VALIDACIÓN SECUNDARIA: Coincidencia conjunta por (Edificio, UPE/Interior, Número Oficial)
+                if not target_v and int_clean and nof_clean:
+                    target_v = tupla_completa_map.get((ed_clean, int_clean, nof_clean)) or tupla_completa_map.get((raw_ed, int_clean, nof_clean))
 
                 # 3. VALIDACIÓN TERCIARIA: Coincidencia física exacta por combinación de (Edificio, UPE/Interior)
                 if not target_v:
                     target_v = existentes_map.get((ed_clean, int_clean)) or existentes_map.get((raw_ed, int_clean))
 
-                # 4. Respaldo exclusivo para áreas de servicio/comunes que no tengan edificio pero su UPE/interior sea 100% único
+                # 4. Respaldo para áreas comunes sin edificio asignado con interior unívoco
                 if not target_v and not ed_clean and not raw_ed and interior_counts.get(int_clean) == 1:
                     target_v = interior_map.get(int_clean)
 
-                # 5. Blindaje de Inferencia: Si es CATASTRO y no hubo coincidencia, deducir por el sufijo de la Clave Catastral
+                # 5. Inferencia Catastral: Si es CATASTRO y no hubo coincidencia, deducir por sufijo de Clave Catastral
                 if not target_v and self.modo == "CATASTRO":
                     raw_cc = str(r.get("clave_catastral") or "").strip()
                     if raw_cc.startswith("60") and len(raw_cc) == 18:

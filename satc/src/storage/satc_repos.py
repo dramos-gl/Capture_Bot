@@ -758,27 +758,31 @@ class ViviendaRepository(BaseCancunRepository):
         nof_map = {}
         nof_counts = {}
 
+        tupla_completa_map = {}
         for v in viviendas:
             raw_ed = (v.edificio or "").strip().upper()
             ed_clean = "" if raw_ed in ("-", "N/A", "NONE", "") else re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_ed).strip()
             inter = (v.interior or "").strip().upper()
+            nof_raw = str(v.numero_oficial or "").strip().upper()
+            digits_match = re.search(r'\b(\d+)\b', nof_raw)
+            nof_clean = digits_match.group(1).lstrip("0") or "0" if digits_match else nof_raw
+
+            if inter:
+                tupla_completa_map[(ed_clean, inter, nof_clean)] = v
+                tupla_completa_map[(raw_ed if raw_ed != "-" else "", inter, nof_clean)] = v
             
             vivienda_by_interior[(raw_ed, inter)] = v
             vivienda_by_interior[(ed_clean, inter)] = v
             interior_counts[inter] = interior_counts.get(inter, 0) + 1
             interior_map[inter] = v
 
-            nof_raw = str(v.numero_oficial or "").strip().upper()
             if nof_raw and nof_raw not in ("-", "N/A", "NONE"):
                 nof_map[nof_raw] = v
                 nof_counts[nof_raw] = nof_counts.get(nof_raw, 0) + 1
-                digits_match = re.search(r'\b(\d+)\b', nof_raw)
-                if digits_match:
-                    d_val = digits_match.group(1).lstrip("0") or "0"
-                    if d_val != nof_raw:
-                        if d_val not in nof_map:
-                            nof_map[d_val] = v
-                        nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
+                if nof_clean != nof_raw:
+                    if nof_clean not in nof_map:
+                        nof_map[nof_clean] = v
+                    nof_counts[nof_clean] = nof_counts.get(nof_clean, 0) + 1
 
         vivienda_by_rpp = {
             v.folio_electronico.strip().upper(): v
@@ -796,23 +800,20 @@ class ViviendaRepository(BaseCancunRepository):
             clave_cat = str(item.get("clave_catastral") or "").strip()
             padron = str(item.get("padron") or "").strip()
             raw_nof = str(item.get("numero_oficial") or "").strip().upper()
+            digits_nof = re.search(r'\b(\d+)\b', raw_nof)
+            nof_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else raw_nof
 
             if not clave_cat and not padron:
                 continue
 
             target = None
-            # 1. Prioridad Primaria: Coincidencia por Número Oficial unívoco (NO OFICIAL)
-            if raw_nof:
-                digits_nof = re.search(r'\b(\d+)\b', raw_nof)
-                d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
-                if nof_counts.get(raw_nof) == 1:
-                    target = nof_map.get(raw_nof)
-                elif d_clean and nof_counts.get(d_clean) == 1:
-                    target = nof_map.get(d_clean)
-
-            # 2. Prioridad Secundaria: Búsqueda por folio RPP si existe
-            if not target and folio_rpp and folio_rpp in vivienda_by_rpp:
+            # 1. Prioridad Primaria Soberana: Búsqueda unívoca por folio RPP
+            if folio_rpp and folio_rpp in vivienda_by_rpp:
                 target = vivienda_by_rpp[folio_rpp]
+
+            # 2. Prioridad Secundaria: Coincidencia conjunta por (Edificio, UPE/Interior, Número Oficial)
+            if not target and inter and nof_clean:
+                target = tupla_completa_map.get((ed_clean, inter, nof_clean)) or tupla_completa_map.get((raw_ed, inter, nof_clean))
 
             # 3. Prioridad Terciaria: Coincidencia física exacta por (edificio, interior/UPE)
             if not target:
@@ -821,9 +822,15 @@ class ViviendaRepository(BaseCancunRepository):
                 elif (ed_clean, inter) in vivienda_by_interior:
                     target = vivienda_by_interior[(ed_clean, inter)]
 
-            # 4. Respaldo exclusivo para áreas comunes sin edificio asignado con interior unívoco
+            # 4. Respaldo para áreas comunes sin edificio asignado con interior unívoco
             if not target and not raw_ed and not ed_clean and interior_counts.get(inter) == 1:
                 target = interior_map.get(inter)
+
+            # 5. Inferencia Catastral: Sufijo de Clave Catastral
+            if not target and clave_cat.startswith("60") and len(clave_cat) == 18:
+                cc_nof = clave_cat[-4:].lstrip("0") or "0"
+                if nof_counts.get(cc_nof) == 1:
+                    target = nof_map.get(cc_nof)
 
             if target:
                 if clave_cat:
