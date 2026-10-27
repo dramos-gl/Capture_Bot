@@ -74,7 +74,7 @@ class RppResolutionExtractor:
         return patterns
 
     @classmethod
-    def extract_from_pdf(cls, pdf_path: str) -> List[Dict[str, Any]]:
+    def extract_from_pdf(cls, pdf_path: str, progress_callback: Optional[Any] = None) -> List[Dict[str, Any]]:
         """
         Lee el archivo PDF del RPP y extrae todos los folios generados para cada vivienda/UPE.
         Retorna lista de diccionarios normalizados:
@@ -92,7 +92,13 @@ class RppResolutionExtractor:
 
         reader = pypdf.PdfReader(pdf_path)
         pages_clean = []
-        for page in reader.pages:
+        tot_pages = len(reader.pages)
+        for idx, page in enumerate(reader.pages):
+            if progress_callback:
+                try:
+                    progress_callback(idx + 1, tot_pages)
+                except Exception:
+                    pass
             txt = page.extract_text() or ""
             # Remover encabezados de certificación digital que se insertan en los saltos de página
             txt = re.sub(r'CERTIFICADO DIGITAL[\s\S]*?P[\w\W]{1,10}gina \d+ de \d+\s*', '', txt)

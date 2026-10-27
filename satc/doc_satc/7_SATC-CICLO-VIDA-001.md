@@ -70,20 +70,83 @@ El ciclo de vida de cada vivienda (o UPE) está ligado a tres grandes hitos de n
 
 ### 3.1.1 Individualización RPP (Constancia de Resolución)
 * **Disparador:** Emisión del documento oficial del Registro Público de la Propiedad (RPP) por individualización del Régimen en Condominio (ej. *Constancia de Resolución*).
-* **Extracción Automatizada (`RppResolutionExtractor`):** Procesamiento de la sección *FOLIOS GENERADOS*, extrayendo el número de fracción, interior, nivel, edificio, número oficial y los 20 dígitos del folio electrónico real.
+* **Extracción Automatizada (`RppResolutionExtractor`):** Procesamiento de la sección *FOLIOS GENERADOS*, extrayendo el número de fracción, interior, nivel, edificio, número oficial y los 20 dígitos del folio electrónico real con reporte de avance por página vía callback.
+* **Regla de Vinculación para Unidades de Servicio (`destino = SERVICIO`):** En las áreas comunes o unidades de servicio donde el campo `edificio` es `null` o `'-'`, el enlace no exige torre/edificio y se concilia de manera unívoca y prioritaria mediante la tupla **`(interior, numero_oficial)`**.
 * **Transición de Estado:** Al asignar el folio electrónico, la vivienda transiciona de `PROYECTADA` a `EN_INDIVIDUALIZACION`.
 
-### 3.2 Etapa de Venta (Comercialización)
+### 3.1.2 Individualización Catastral (Oficio de Alta de Predio de Catastro)
+* **Disparador:** Emisión del oficio municipal de alta de predios y asignación de claves catastrales por régimen de condominio.
+* **Extracción Automatizada (`CatastroOficioExtractor`):** 
+  * **Aislamiento Cromático por Canal Rojo (R):** Segmentación que atenúa sellos y tintas azules institucionales de Catastro para recuperar con máxima nitidez los 20 dígitos del folio electrónico y los 18 dígitos de la clave catastral (`tessedit_char_whitelist=0123456789`).
+  * **Procesamiento Concurrente Multi-Core (`ProcessPoolExecutor`):** Renderizado y extracción OCR en paralelo por página a 300 DPI con reporte de progreso en tiempo real (`progress_callback`).
+  * **Heurística de Validación Primaria y Erratas Tipográficas:** La conciliación vincula primariamente mediante `folio_electronico` (identificador soberano). Cuando se detecta discrepancia entre los dígitos del folio y la descripción textual del oficio (ej. *Folio termina en 36 pero el texto dice NO OFICIAL 33*), el sistema vincula exitosamente la vivienda correcta e inyecta una advertencia formal clasificada para auditoría.
+* **Experiencia de Usuario Homologada (UX / UI):**
+  * **Spinner Circular con Porcentaje en Tiempo Real:** El componente `CircularSpinner` calcula y proyecta en el centro exacto el porcentaje de avance (`11% ... 100%`) con tipografía institucional, manteniendo la animación circular de 50 ms.
+  * **Cronómetro y Desglose Final:** Al concluir el análisis y la vinculación en BD, se despliega el tiempo exacto transcurrido (`XX seg` o `X min Y seg`).
+  * **KPI Dinámico de Alertas:** Indicador interactivo tipo toggle (`Con Advertencia: X`) que filtra al instante los registros con erratas detectadas en el documento oficial sin requerir recargar la vista.
+
+### 3.2 Flujo Integral Post-Claves Catastrales (Preliminar / Pendiente de Confirmación)
+
+> [!NOTE]
+> **Estado del Flujo:** Propuesta conceptual preliminar sujeta a confirmación formal de negocio. No se han aplicado cambios a nivel de esquema físico ni migraciones de base de datos hasta que el flujo operativo definitivo sea ratificado.
+
+Una vez formalizada la asignación de las **Claves Catastrales Individuales** de cada vivienda o UPE (mediante el Oficio de Alta de Predio o Cédula Catastral matriz), la secuencia operativa proyectada contempla cuatro etapas:
+
+```
+[Claves Catastrales Individuales]
+               │
+               ▼
+   [Etapa 1: Cédula Catastral]
+   ├── Emisión: Documento Oficial Cédula Catastral (PDF)
+   └── Captura: Folio de Cédula, Fecha de Emisión y Vigencia
+               │
+               ▼
+   [Etapa 2: Determinación y Apertura Predial]
+   ├── Generación de Periodo Fiscal (Año / Bimestres)
+   └── Vinculación de Cuenta Predial Individual
+               │
+               ▼
+   [Etapa 3: Pago de Impuesto Predial]
+   ├── Emisión/Descarga de Recibo Oficial de Pago (Tesorería)
+   └── Facturación CFDI (si aplica)
+               │
+               ▼
+   [Etapa 4: Padrón y Constancia Catastral]
+   ├── Integración del Padrón Municipal de la Vivienda
+   └── Habilitación para Constancia de No Adeudo Predial (NAP)
+```
+
+#### Detalle Operativo por Etapa:
+
+1. **Etapa 1: Cédula Catastral Individual**
+   * **Emisión Documental:** Generación/Recepción del documento oficial en PDF de la Cédula Catastral individualizada por UPE.
+   * **Captura de Metadatos:** Registro y validación del `folio_cedula`, `fecha_emision` y `fecha_vigencia` de la cédula catastral.
+   * **Control de Vigencia:** Alerta temprana si la cédula excede su periodo de validez oficial antes de escrituración.
+
+2. **Etapa 2: Determinación y Apertura Predial**
+   * **Determinación Fiscal:** Generación y cálculo del periodo fiscal aplicable (ejercicio anual y bimestres gravables correspondientes).
+   * **Cuenta Predial Individual:** Vinculación definitiva de la cuenta o clave predial individualizada (`padron`), segregándola del macro-lote base.
+
+3. **Etapa 3: Pago de Impuesto Predial**
+   * **Pase de Caja y Tesorería:** Generación del pase a caja municipal y pago de la contribución predial.
+   * **Descarga Automatizada (Bot A):** Recuperación del Recibo Oficial de Pago de Tesorería Municipal con extracción de datos e inyección de hash SHA-256.
+   * **Timbrado CFDI (Bot C):** Facturación electrónica en el portal municipal (si aplica para acreditamiento o comprobación fiscal empresarial).
+
+4. **Etapa 4: Padrón y Constancia Catastral (NAP)**
+   * **Integración al Padrón Municipal:** Consolidación de la vivienda como unidad tributaria independiente en el padrón activo de Benito Juárez (Cancún).
+   * **Habilitación Notarial:** Cumplimiento de pre-requisitos y expedición de la **Constancia de No Adeudo Predial (NAP)**, habilitando la vivienda para su pase formal a Notaría (Estado: `EN_ESCRITURACION`).
+
+### 3.3 Etapa de Venta (Comercialización)
 * **Disparador:** Asignación comercial de la vivienda a un cliente.
-* **Trámites Clave:** Asignación definitiva de Clave Catastral de la UPE, Alta en Padrón de Impuesto Predial del Municipio de Benito Juárez (Cancún).
+* **Trámites Clave:** Asignación definitiva de Clave Catastral de la UPE, Cédula Catastral Vigente y Apertura en Padrón de Impuesto Predial.
 * **Control SATC:** Verificación de que las UPEs cuenten con su clave catastral homologada antes de integrar el expediente notarial.
 
-### 3.3 Etapa de Escrituración y Entrega
+### 3.4 Etapa de Escrituración y Entrega
 * **Disparador:** Firma de contrato de compraventa y llamado a Notaría.
 * **Trámites Clave:** Certificado de No Adeudo Predial, Impuesto Sobre Adquisición de Bienes Inmuebles (ISABI), Constancia de No Adeudo de Agua/Drenaje, Verificación de Finiquito de Derechos.
 * **Control SATC:** Auditoría documental estricta. Ninguna vivienda pasa a "Escriturada" si presenta adeudos fiscales o trámites en estado pendiente.
 
-### 3.4 Obligaciones Post-Venta
+### 3.5 Obligaciones Post-Venta
 * **Obligaciones Remanentes:**
   * Notificación de traslado de dominio al contribuyente final.
   * Finiquito de garantías fiduciarias y cancelación de gravámenes del régimen matriz.
@@ -142,6 +205,21 @@ Representa la situación física, comercial y jurídica de la unidad privativa:
 | `ESCRITURADA` | Escriturada | Título de propiedad formalmente protocolizado. | Trámites de traslado de dominio concluidos. |
 | `EN_GARANTIA` | En Garantía / Post-Venta | Obligaciones remanentes de finiquito y seguimiento de garantías. | Finiquito de gravámenes del régimen matriz. |
 | `CONCLUIDA` | Ciclo Concluido | Vivienda con expediente digital 100% cerrado, auditado y comprobado en ERP. | Cero obligaciones pendientes. |
+
+### 4.1.1 Bitácora Inmutable de Historial de Estados (`satc_catalogo.vivienda_historial_estado`)
+Para satisfacer los requisitos de auditoría notarial, fiscal y de seguridad operativa, **toda transición de estado queda registrada de manera inmutable** en la tabla histórica:
+* **Entidad:** `satc_catalogo.vivienda_historial_estado`.
+* **Datos Auditados:**
+  - `vivienda_id`: Clave primaria de la vivienda.
+  - `estado_anterior_id`: Estado previo (o `NULL` en creación).
+  - `estado_nuevo_id`: Nuevo estado asignado.
+  - `usuario_id`: Usuario responsable que ejecutó la operación (vía UI o API REST).
+  - `sesion_id`: Sesión activa de auditoría.
+  - `origen_cambio`: Clasificador del disparador (`CARGA_INICIAL`, `VINCULAR_RPP`, `VINCULAR_CATASTRO`, `MANUAL`, `API`).
+  - `motivo`: Explicación textual del evento (ej. *Vinculación de Folio RPP: 2026...* o *Vinculación Catastral (CC: 6016...)*).
+  - `metadata_adicional`: Objeto JSONB con los datos contextuales procesados en ese momento.
+  - `created_at`: Sello temporal con zona horaria (`TIMESTAMPTZ`).
+* **Salvaguarda Soberana vía Trigger (`trg_vivienda_historial_estado`)**: Se implementó una función y trigger nativo en PostgreSQL (`AFTER UPDATE OF estado_vivienda_id ON satc_catalogo.vivienda`) que captura cualquier transición manual o externa en base de datos previniendo registros huérfanos sin bitácora.
 
 ### 4.2 Estados del Trámite de Vivienda (`satc_produccion.tramite_vivienda`)
 

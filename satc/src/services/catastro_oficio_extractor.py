@@ -319,12 +319,20 @@ class CatastroOficioExtractor:
                         if not upe_val:
                             upe_val = suffix_cc
 
-                # Normalizar fecha a formato YYYY-MM-DD para PostgreSQL
+                # Normalizar fecha a formato YYYY-MM-DD para PostgreSQL con validación de rangos de calendario
                 fec_db = ""
                 if fec_val:
                     partes = fec_val.split("/")
                     if len(partes) == 3:
-                        fec_db = f"{partes[2]}-{partes[1]}-{partes[0]}"
+                        try:
+                            d_cand, m_cand, y_cand = int(partes[0]), int(partes[1]), int(partes[2])
+                            # Verificar si mes y día vienen invertidos por errata de OCR
+                            if 1 <= d_cand <= 12 and 1 <= m_cand <= 31 and d_cand != m_cand and m_cand > 12:
+                                d_cand, m_cand = m_cand, d_cand
+                            if 1900 <= y_cand <= 2100 and 1 <= m_cand <= 12 and 1 <= d_cand <= 31:
+                                fec_db = f"{y_cand:04d}-{m_cand:02d}-{d_cand:02d}"
+                        except ValueError:
+                            fec_db = ""
 
                 desc_final = f"Oficio Catastro Pág {page_num} | {line_txt[:80]}"
                 if inconsistencia_desc:
@@ -333,7 +341,7 @@ class CatastroOficioExtractor:
                 records.append({
                     "clave_catastral": cc_val,
                     "folio_electronico": fol_val,
-                    "fecha_alta_cc": fec_db or fec_val,
+                    "fecha_alta_cc": fec_db,
                     "edificio": ed_val,
                     "interior": upe_val or nof_val,
                     "numero_oficial": nof_val,

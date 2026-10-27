@@ -278,11 +278,35 @@ class Vivienda(Base):
     regimen: Mapped["RegimenCondominio"] = relationship(back_populates="viviendas")
     estado: Mapped[EstadoVivienda] = relationship()
     tramites: Mapped[List["TramiteVivienda"]] = relationship(back_populates="vivienda", cascade="all, delete-orphan")
+    historiales: Mapped[List["ViviendaHistorialEstado"]] = relationship(back_populates="vivienda", cascade="all, delete-orphan", order_by="ViviendaHistorialEstado.created_at.desc()")
 
     @property
     def desarrollo(self):
         """Propiedad delegada: el desarrollo se resuelve a través del régimen matriz sin redundancia en BD."""
         return self.regimen.desarrollo if self.regimen else None
+
+
+class ViviendaHistorialEstado(Base):
+    """Mapea la bitácora histórica inmutable de cambios de estado de la vivienda."""
+    __tablename__ = "vivienda_historial_estado"
+    __table_args__ = {"schema": "satc_catalogo"}
+
+    historial_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    vivienda_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.vivienda.vivienda_id", ondelete="CASCADE"), nullable=False)
+    estado_anterior_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_catalogo.estado_vivienda.estado_vivienda_id", ondelete="RESTRICT"))
+    estado_nuevo_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.estado_vivienda.estado_vivienda_id", ondelete="RESTRICT"), nullable=False)
+    usuario_id: Mapped[Optional[int]] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id", ondelete="SET NULL"))
+    sesion_id: Mapped[Optional[int]] = mapped_column(Integer)
+    origen_cambio: Mapped[str] = mapped_column(String(50), default="MANUAL", nullable=False)
+    motivo: Mapped[Optional[str]] = mapped_column(String(255))
+    metadata_adicional: Mapped[Optional[dict]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    vivienda: Mapped["Vivienda"] = relationship(back_populates="historiales")
+    estado_anterior: Mapped[Optional[EstadoVivienda]] = relationship(foreign_keys=[estado_anterior_id])
+    estado_nuevo: Mapped[EstadoVivienda] = relationship(foreign_keys=[estado_nuevo_id])
+    usuario: Mapped[Optional[Usuario]] = relationship(foreign_keys=[usuario_id])
 
     @property
     def ubicacion_macro(self) -> str:

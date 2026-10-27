@@ -482,6 +482,16 @@ Toda extracción queda descartada de inmediato si incumple cualquiera de las dos
 1. **Inicio con Cero**: Si `candidate.startswith("0")` -> Descarte inmediato.
 2. **Caracteres Prohibidos**: Si contiene símbolos distintos a `[A-Z0-9\-]` -> Descarte inmediato.
 
+### 4.4. Estándar de Extracción Cromática y Validación Híbrida para Oficios de Catastro
+1. **Aislamiento Cromático por Canal Rojo (R):**
+   - En oficios sellados o rubricados con tinta azul (típicos de Catastro Quintana Roo), la conversión tradicional a escala de grises oscurece los sellos y degrada el OCR.
+   - **Solución Estándar:** Extraer el canal rojo (`img_cv[:, :, 2]`) donde la tinta azul refleja alta reflectancia (aparece clara/blanca) y la tinta negra de impresión se mantiene oscura, permitiendo un binarizado Otsu nítido.
+2. **Recorte Quirúrgico por Franjas Horizontales:**
+   - La página se renderiza a 300 DPI y se divide en renglones. Las columnas numéricas críticas (Clave Catastral de 18 dígitos y Folio Electrónico de 20 dígitos) se extraen mediante *bounding boxes* dedicados con `tessedit_char_whitelist=0123456789`.
+3. **Validación Primaria Soberana por Folio Electrónico:**
+   - La clave primaria de asociación contra el catálogo de viviendas es el `folio_electronico`.
+   - Cuando el texto descriptivo del oficio contenga erratas mecanográficas (ej. discrepancia en el número oficial respecto a los dígitos del folio), la vinculación se realiza por el folio real y se emite una advertencia clasificada `⚠️ [OFICIO CON ERROR EN TEXTO]` sin descartar el registro.
+
 ---
 
 ## 5. Matriz de Aseguramiento de Calidad y Pruebas Unitarias (QA Lead)

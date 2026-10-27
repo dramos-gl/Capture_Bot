@@ -31,6 +31,7 @@ from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
 class ViviendasFileAnalyzeWorker(QThread):
     """Worker thread para leer, validar y analizar archivos Excel o Constancias RPP PDF en segundo plano."""
     finished = Signal(bool, dict, str)
+    progress_updated = Signal(int, int, str)
 
     def __init__(self, api_client, db_connector, file_path: str, desarrollo_id: int, regimen_id: Optional[int], modo: str):
         super().__init__()
@@ -42,6 +43,8 @@ class ViviendasFileAnalyzeWorker(QThread):
         self.modo = modo
 
     def run(self):
+        import time
+        start_time = time.time()
         try:
             records = []
             is_pdf = self.file_path.lower().endswith(".pdf")
@@ -49,7 +52,11 @@ class ViviendasFileAnalyzeWorker(QThread):
             if is_pdf:
                 if self.modo == "CATASTRO":
                     from satc.src.services.catastro_oficio_extractor import CatastroOficioExtractor
-                    raw_extracted = CatastroOficioExtractor.extract_from_pdf(self.file_path)
+
+                    def _progress_cb(curr, tot):
+                        self.progress_updated.emit(curr, tot, f"Procesando página {curr} de {tot}...")
+
+                    raw_extracted = CatastroOficioExtractor.extract_from_pdf(self.file_path, progress_callback=_progress_cb)
                     if not raw_extracted:
                         self.finished.emit(
                             False, {},
@@ -74,7 +81,11 @@ class ViviendasFileAnalyzeWorker(QThread):
                         })
                 elif self.modo == "RPP":
                     from satc.src.services.rpp_resolution_extractor import RppResolutionExtractor
-                    raw_extracted = RppResolutionExtractor.extract_from_pdf(self.file_path)
+
+                    def _rpp_progress_cb(curr, tot):
+                        self.progress_updated.emit(curr, tot, f"Procesando página {curr} de {tot}...")
+
+                    raw_extracted = RppResolutionExtractor.extract_from_pdf(self.file_path, progress_callback=_rpp_progress_cb)
                     for r in raw_extracted:
                         records.append({
                             "interior": r["interior"],
@@ -94,10 +105,11 @@ class ViviendasFileAnalyzeWorker(QThread):
                     self.finished.emit(
                         False, {},
                         "El archivo seleccionado es un PDF.\n"
-                        "Por favor seleccione '2. Vincular Folios RPP' o '3. Vincular Cédula / Catastro'."
+                        "Por favor seleccione '2. Vincular Folios RPP' o '3. Vincular CC / Catastro'."
                     )
                     return
             else:
+                self.progress_updated.emit(5, 100, "Cargando libro de Excel...")
                 wb = openpyxl.load_workbook(self.file_path, data_only=True)
                 ws = wb.active
                 rows = list(ws.iter_rows(values_only=True))
@@ -158,7 +170,17 @@ class ViviendasFileAnalyzeWorker(QThread):
                     )
                     return
 
-                for row in rows[header_row_idx + 1:]:
+                data_rows = rows[header_row_idx + 1:]
+                total_data_rows = max(len(data_rows), 1)
+
+                for r_count, row in enumerate(data_rows):
+                    if r_count % 10 == 0 or r_count == total_data_rows - 1:
+                        self.progress_updated.emit(
+                            r_count + 1,
+                            total_data_rows,
+                            f"Analizando fila {r_count + 1} de {total_data_rows}..."
+                        )
+
                     if not any(row):
                         continue
 
@@ -320,9 +342,11 @@ class ViviendasFileAnalyzeWorker(QThread):
             # Normalizar existentes:
             # - Tupla conjunta completa: (edificio, interior, no_oficial)
             # - Tupla física: (edificio, interior)
+            # - Mapa de servicio: (interior, no_oficial) para unidades SERVICIO o sin edificio
             # - Mapa por folio electrónico RPP
             # - Conteo por interior y número oficial
             tupla_completa_map = {}
+            servicio_map = {}
             existentes_map = {}
             interior_map = {}
             interior_counts = {}
@@ -330,6 +354,7 @@ class ViviendasFileAnalyzeWorker(QThread):
             nof_counts = {}
             rpp_map = {}
             for v in v_existentes:
+                dest_v = str(v.get("destino") or "").strip().upper()
                 ed_raw = (v.get("edificio") or "").strip().upper()
                 ed_clean = "" if ed_raw in ("-", "N/A", "NONE", "") else re.sub(r'^(EDIFICIO|TORRE)\s*', '', ed_raw).strip()
                 int_clean = (v.get("interior") or "").strip().upper()
@@ -341,6 +366,9 @@ class ViviendasFileAnalyzeWorker(QThread):
                 if int_clean:
                     tupla_completa_map[(ed_clean, int_clean, nof_clean)] = v
                     tupla_completa_map[(ed_raw if ed_raw != "-" else "", int_clean, nof_clean)] = v
+                    if dest_v == "SERVICIO" or not ed_clean:
+                        servicio_map[(int_clean, nof_clean)] = v
+                        servicio_map[(int_clean, nof_raw)] = v
 
                 existentes_map[(ed_clean, int_clean)] = v
                 if ed_raw and ed_raw != "-":
@@ -383,15 +411,23 @@ class ViviendasFileAnalyzeWorker(QThread):
                 if raw_folio and raw_folio in rpp_map:
                     target_v = rpp_map.get(raw_folio)
 
-                # 2. VALIDACIÓN SECUNDARIA: Coincidencia conjunta por (Edificio, UPE/Interior, Número Oficial)
+                # 2. VALIDACIÓN PARA UNIDADES DE SERVICIO / SIN EDIFICIO: (Interior, Número Oficial)
+                if not target_v and int_clean and raw_nof and (not ed_clean or raw_ed in ("-", "N/A", "NONE", "")):
+                    target_v = servicio_map.get((int_clean, nof_clean)) or servicio_map.get((int_clean, raw_nof))
+
+                # 3. VALIDACIÓN SECUNDARIA: Coincidencia conjunta por (Edificio, UPE/Interior, Número Oficial)
                 if not target_v and int_clean and nof_clean:
                     target_v = tupla_completa_map.get((ed_clean, int_clean, nof_clean)) or tupla_completa_map.get((raw_ed, int_clean, nof_clean))
 
-                # 3. VALIDACIÓN TERCIARIA: Coincidencia física exacta por combinación de (Edificio, UPE/Interior)
-                if not target_v:
+                # 4. VALIDACIÓN FÍSICA DIRECTA: Coincidencia por combinación de (Edificio, UPE/Interior)
+                if not target_v and (ed_clean or raw_ed):
                     target_v = existentes_map.get((ed_clean, int_clean)) or existentes_map.get((raw_ed, int_clean))
 
-                # 4. Respaldo para áreas comunes sin edificio asignado con interior unívoco
+                # 5. Respaldo por (interior, número oficial) general
+                if not target_v and int_clean and raw_nof:
+                    target_v = servicio_map.get((int_clean, nof_clean)) or servicio_map.get((int_clean, raw_nof))
+
+                # 6. Respaldo para áreas comunes sin edificio asignado con interior unívoco
                 if not target_v and not ed_clean and not raw_ed and interior_counts.get(int_clean) == 1:
                     target_v = interior_map.get(int_clean)
 
@@ -485,6 +521,7 @@ class ViviendasFileAnalyzeWorker(QThread):
                     if v_id is not None and v_id not in matched_v_ids:
                         faltantes_bd.append(v)
 
+            elapsed_sec = round(time.time() - start_time, 2)
             result_data = {
                 "records": records,
                 "processed_records": processed_records,
@@ -495,7 +532,8 @@ class ViviendasFileAnalyzeWorker(QThread):
                 "tot_upes": tot_upes,
                 "duplicate_folios": duplicate_folios,
                 "duplicate_claves": duplicate_claves,
-                "file_duplicates": file_duplicates
+                "file_duplicates": file_duplicates,
+                "elapsed_time": elapsed_sec
             }
             self.finished.emit(True, result_data, "")
         except Exception as e:
@@ -569,6 +607,8 @@ class ViviendasImportWorker(QThread):
         self.modo = modo  # "INICIAL", "RPP", "CATASTRO"
 
     def run(self):
+        import time
+        start_time = time.time()
         try:
             if self.api_client.connect_via_api:
                 endpoint = "/api/admin/satc/viviendas/bulk-import"
@@ -591,12 +631,16 @@ class ViviendasImportWorker(QThread):
                     if self.modo == "RPP":
                         res = svc.vincular_folios_rpp_excel(
                             regimen_id=self.regimen_id,
-                            records=self.records
+                            records=self.records,
+                            usuario_id=self.usuario_id,
+                            sesion_id=self.sesion_id
                         )
                     elif self.modo == "CATASTRO":
                         res = svc.vincular_catastro_excel(
                             regimen_id=self.regimen_id,
-                            records=self.records
+                            records=self.records,
+                            usuario_id=self.usuario_id,
+                            sesion_id=self.sesion_id
                         )
                     else:
                         res = svc.importar_viviendas_excel(
@@ -606,6 +650,9 @@ class ViviendasImportWorker(QThread):
                             usuario_id=self.usuario_id,
                             sesion_id=self.sesion_id
                         )
+            elapsed_sec = round(time.time() - start_time, 2)
+            if isinstance(res, dict):
+                res["elapsed_time"] = elapsed_sec
             self.finished.emit(True, res, "")
         except Exception as e:
             self.finished.emit(False, {}, str(e))
@@ -743,7 +790,7 @@ class SatcCatalogsView(QWidget):
         self.cmb_v_modo.addItem("-- Selecciona Operación --", None)
         self.cmb_v_modo.addItem("1. Carga Inicial (Física)", "INICIAL")
         self.cmb_v_modo.addItem("2. Vincular Folios RPP", "RPP")
-        self.cmb_v_modo.addItem("3. Vincular Cédula / Catastro", "CATASTRO")
+        self.cmb_v_modo.addItem("3. Vincular CC / Catastro", "CATASTRO")
         self.cmb_v_modo.currentIndexChanged.connect(self._on_v_modo_changed)
         ctl_box.addWidget(self.cmb_v_modo)
 
@@ -842,6 +889,11 @@ class SatcCatalogsView(QWidget):
         self.kpi_duplicados_frame, self.dot_vkpi_duplicados, self.lbl_vkpi_duplicados = _make_clickable_kpi(
             Colors.ERROR, "Duplicados / Sin Coincidencia: 0", "RECHAZADOS", "Clic para filtrar registros sin coincidencia o duplicados"
         )
+        self.kpi_alertas_frame, self.dot_vkpi_alertas, self.lbl_vkpi_alertas = _make_clickable_kpi(
+            Colors.WARNING, "Con Advertencia: 0", "ALERTAS", "Clic para filtrar registros con inconsistencia o alerta en el documento"
+        )
+        self.kpi_alertas_frame.hide()
+
         self.kpi_faltantes_frame, self.dot_vkpi_faltantes, self.lbl_vkpi_faltantes = _make_clickable_kpi(
             Colors.WARNING, "Faltantes: 0", "FALTANTES", "Clic para filtrar registros de BD que no vinieron en el archivo"
         )
@@ -874,6 +926,9 @@ class SatcCatalogsView(QWidget):
         kpi_lay.addSpacing(12)
 
         kpi_lay.addWidget(self.kpi_duplicados_frame)
+        kpi_lay.addSpacing(12)
+
+        kpi_lay.addWidget(self.kpi_alertas_frame)
         kpi_lay.addSpacing(12)
 
         kpi_lay.addWidget(self.kpi_faltantes_frame)
@@ -1966,6 +2021,12 @@ class SatcCatalogsView(QWidget):
         self.lbl_vkpi_total_arch.setText("En Archivo: 0")
         self.lbl_vkpi_nuevos.setText("Nuevos / Vinculables: 0")
         self.lbl_vkpi_duplicados.setText("Duplicados / Sin Coincidencia: 0")
+        if hasattr(self, "kpi_alertas_frame"):
+            self.lbl_vkpi_alertas.setText("Con Advertencia: 0")
+            self.kpi_alertas_frame.hide()
+        if hasattr(self, "kpi_faltantes_frame"):
+            self.lbl_vkpi_faltantes.setText("Faltantes: 0")
+            self.kpi_faltantes_frame.hide()
         self.search_viviendas_input.blockSignals(True)
         self.search_viviendas_input.clear()
         self.search_viviendas_input.blockSignals(False)
@@ -2079,6 +2140,8 @@ class SatcCatalogsView(QWidget):
             target_status = "VINCULABLE" if modo in ("RPP", "CATASTRO") else "NUEVO"
         elif kpi_key == "RECHAZADOS":
             target_status = "NO ENCONTRADO" if modo in ("RPP", "CATASTRO") else "DUPLICADO"
+        elif kpi_key == "ALERTAS":
+            target_status = "ALERTAS"
         elif kpi_key == "FALTANTES":
             target_status = "FALTANTE EN ARCHIVO"
         elif kpi_key == "TOTAL":
@@ -2100,9 +2163,9 @@ class SatcCatalogsView(QWidget):
             if found_idx != -1:
                 self.cmb_v_filtro_estado.setCurrentIndex(found_idx)
             else:
-                self._apply_viviendas_filters()
+                self._apply_viviendas_filters(custom_status=target_status)
         else:
-            self._apply_viviendas_filters()
+            self._apply_viviendas_filters(custom_status=target_status)
 
         self._highlight_kpi_active(target_status)
 
@@ -2119,6 +2182,7 @@ class SatcCatalogsView(QWidget):
             "TOTAL": active_status == "TODOS",
             "VINCULABLES": active_status == vinculables_code,
             "RECHAZADOS": active_status == rechazados_code,
+            "ALERTAS": active_status == "ALERTAS",
             "FALTANTES": active_status == "FALTANTE EN ARCHIVO"
         }
 
@@ -2162,22 +2226,32 @@ class SatcCatalogsView(QWidget):
         """Filtra reactivamente las filas visibles en la tabla de viviendas en base al texto buscado y al estado."""
         self._apply_viviendas_filters()
 
-    def _apply_viviendas_filters(self):
+    def _apply_viviendas_filters(self, custom_status: Optional[str] = None):
         """Aplica simultáneamente el filtro de estado y el filtro de texto de búsqueda."""
         search_term = self.search_viviendas_input.text().strip().lower()
-        selected_status = self.cmb_v_filtro_estado.currentData() if hasattr(self, "cmb_v_filtro_estado") else "TODOS"
+        selected_status = custom_status if custom_status is not None else (
+            self.cmb_v_filtro_estado.currentData() if hasattr(self, "cmb_v_filtro_estado") else "TODOS"
+        )
 
         self.tbl_viviendas.setUpdatesEnabled(False)
         try:
             for row in range(self.tbl_viviendas.rowCount()):
                 item_st = self.tbl_viviendas.item(row, 0)
                 row_status = item_st.text().strip() if item_st else ""
+                item_desc = self.tbl_viviendas.item(row, 12)  # Columna Notas
+                desc_text = item_desc.text().strip() if item_desc else ""
 
-                # 1. Filtro por Estado
+                # 1. Filtro por Estado / Alerta
                 if selected_status and selected_status != "TODOS":
-                    if row_status != selected_status:
-                        self.tbl_viviendas.setRowHidden(row, True)
-                        continue
+                    if selected_status == "ALERTAS":
+                        # Mostrar exclusivamente filas que tengan advertencia de inconsistencia
+                        if "⚠️" not in desc_text and "ERROR EN TEXTO" not in desc_text:
+                            self.tbl_viviendas.setRowHidden(row, True)
+                            continue
+                    else:
+                        if row_status != selected_status:
+                            self.tbl_viviendas.setRowHidden(row, True)
+                            continue
 
                 # 2. Filtro por Texto Libre
                 if not search_term:
@@ -2229,6 +2303,9 @@ class SatcCatalogsView(QWidget):
         self.lbl_vkpi_total_arch.setText("En Archivo: 0")
         self.lbl_vkpi_nuevos.setText("Nuevos / Vinculables: 0")
         self.lbl_vkpi_duplicados.setText("Duplicados / Sin Coincidencia: 0")
+        if hasattr(self, "kpi_alertas_frame"):
+            self.lbl_vkpi_alertas.setText("Con Advertencia: 0")
+            self.kpi_alertas_frame.hide()
         if hasattr(self, "lbl_vkpi_faltantes"):
             self.lbl_vkpi_faltantes.setText("Faltantes: 0")
             self.kpi_faltantes_frame.hide()
@@ -2523,7 +2600,7 @@ class SatcCatalogsView(QWidget):
                     f"El Régimen seleccionado ya cuenta con la totalidad de sus viviendas cargadas "
                     f"({bd_count} de {tot_upes} UPEs autorizadas).\n\n"
                     "No es posible realizar Carga Inicial para este régimen. "
-                    "Por favor seleccione la operación '2. Vincular Folios RPP' o '3. Vincular Cédula / Catastro'."
+                    "Por favor seleccione la operación '2. Vincular Folios RPP' o '3. Vincular CC / Catastro'."
                 )
                 return
 
@@ -2539,7 +2616,7 @@ class SatcCatalogsView(QWidget):
             QMessageBox.warning(
                 self, "Modo de Operación Requerido",
                 "Los archivos PDF son válidos para '2. Vincular Folios RPP' (Constancia de Resolución)\n"
-                "o '3. Vincular Cédula / Catastro' (Oficio de Alta de Predio).\n\n"
+                "o '3. Vincular CC / Catastro' (Oficio de Alta de Predio).\n\n"
                 "Para '1. Carga Inicial' utilice la plantilla Excel."
             )
             return
@@ -2563,8 +2640,14 @@ class SatcCatalogsView(QWidget):
             regimen_id=reg_id,
             modo=modo
         )
+        self._v_analyze_worker.progress_updated.connect(self._on_v_file_progress_updated)
         self._v_analyze_worker.finished.connect(self._on_v_file_analyze_finished)
         self._v_analyze_worker.start()
+
+    def _on_v_file_progress_updated(self, current: int, total: int, msg: str):
+        """Actualiza el indicador numérico incremental dentro del load spinner."""
+        if self._v_loading_dialog:
+            self._v_loading_dialog.set_progress(current, total, msg)
 
     def _on_v_file_analyze_finished(self, success: bool, result_data: dict, error_msg: str):
         """Maneja el resultado del análisis asíncrono y actualiza la tabla y métricas de forma fluida."""
@@ -2585,6 +2668,7 @@ class SatcCatalogsView(QWidget):
         nuevos_cnt = result_data.get("nuevos_cnt", 0)
         duplicados_cnt = result_data.get("duplicados_cnt", 0)
         faltantes_cnt = len(faltantes_bd)
+        elapsed_time = result_data.get("elapsed_time", 0.0)
         modo = self.cmb_v_modo.currentData()
         reg_id = self.cmb_v_regimen.currentData()
         reg_label = self.cmb_v_regimen.currentText() if reg_id else ""
@@ -2646,6 +2730,14 @@ class SatcCatalogsView(QWidget):
             self.lbl_vkpi_duplicados.setText(f"Duplicados: {duplicados_cnt}")
             self.btn_v_ejecutar.setEnabled(nuevos_cnt > 0)
 
+        # Contabilizar registros con advertencia de inconsistencia en el documento
+        alertas_cnt = sum(1 for row_it in table_rows if "⚠️" in str(row_it.get("data", {}).get("descripcion") or "") or "ERROR EN TEXTO" in str(row_it.get("data", {}).get("descripcion") or ""))
+        if alertas_cnt > 0:
+            self.lbl_vkpi_alertas.setText(f"Con Advertencia: {alertas_cnt}")
+            self.kpi_alertas_frame.show()
+        else:
+            self.kpi_alertas_frame.hide()
+
         # Actualizar KPI de Faltantes y visibilidad
         if faltantes_cnt > 0:
             self.lbl_vkpi_faltantes.setText(f"Faltantes en Archivo: {faltantes_cnt}")
@@ -2672,6 +2764,27 @@ class SatcCatalogsView(QWidget):
 
         self.btn_v_exportar_datos.setEnabled(len(records) > 0)
         self.action_state_changed.emit()
+
+        # Mensaje de confirmación de análisis con tiempo de procesamiento y resumen de registros
+        tiempo_str = f"{int(elapsed_time // 60)} min {int(elapsed_time % 60)} seg" if elapsed_time >= 60 else f"{elapsed_time:.1f} seg"
+        resumen_txt = (
+            f"Archivo analizado exitosamente en {tiempo_str}.\n\n"
+            f"• Total en archivo: {len(records)} registros\n"
+        )
+        if modo in ("RPP", "CATASTRO"):
+            resumen_txt += (
+                f"• Vinculables con el régimen: {nuevos_cnt}\n"
+                f"• Sin coincidencia: {duplicados_cnt}\n"
+            )
+            if faltantes_cnt > 0:
+                resumen_txt += f"• Faltantes en archivo (en BD): {faltantes_cnt}\n"
+        else:
+            resumen_txt += (
+                f"• Nuevos para crear: {nuevos_cnt}\n"
+                f"• Duplicados omitidos: {duplicados_cnt}\n"
+            )
+
+        QMessageBox.information(self, "Análisis de Archivo Completado", resumen_txt)
 
     def _on_v_ejecutar_importacion(self):
         """Ejecuta la importación en un hilo background mediante ViviendasImportWorker mostrando indicador visual."""
@@ -2782,12 +2895,15 @@ class SatcCatalogsView(QWidget):
         self.btn_v_seleccionar.setEnabled(True)
         modo = self.cmb_v_modo.currentData()
         if success:
+            el_t = result.get("elapsed_time", 0.0) if isinstance(result, dict) else 0.0
+            t_txt = f" en {int(el_t // 60)} min {int(el_t % 60)} seg" if el_t >= 60 else f" en {el_t:.1f} seg" if el_t > 0 else ""
+
             if modo == "RPP":
                 act = result.get("actualizados", 0)
                 no_enc = result.get("no_encontrados", 0)
                 QMessageBox.information(
                     self, "Vinculación RPP Exitosa",
-                    f"Folios RPP vinculados exitosamente:\n\n"
+                    f"Folios RPP vinculados exitosamente{t_txt}:\n\n"
                     f"• Viviendas actualizadas a 'EN_INDIVIDUALIZACION': {act}\n"
                     f"• Registros no encontrados en el régimen: {no_enc}"
                 )
@@ -2796,7 +2912,7 @@ class SatcCatalogsView(QWidget):
                 no_enc = result.get("no_encontrados", 0)
                 QMessageBox.information(
                     self, "Vinculación Catastral Exitosa",
-                    f"Claves Catastrales y Padrones vinculados exitosamente:\n\n"
+                    f"Claves Catastrales y Padrones vinculados exitosamente{t_txt}:\n\n"
                     f"• Viviendas actualizadas a 'LISTA_PARA_VENTA': {act}\n"
                     f"• Registros no encontrados en el régimen: {no_enc}"
                 )
@@ -2805,7 +2921,7 @@ class SatcCatalogsView(QWidget):
                 dups = result.get("omitidos_duplicados", 0)
                 QMessageBox.information(
                     self, "Carga Inicial Exitosa",
-                    f"Proceso de importación inicial completado exitosamente:\n\n"
+                    f"Proceso de importación inicial completado exitosamente{t_txt}:\n\n"
                     f"• Viviendas creadas en 'PROYECTADA': {nuevos}\n"
                     f"• Omitidas por duplicidad: {dups}"
                 )

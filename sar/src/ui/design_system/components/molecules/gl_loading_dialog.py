@@ -6,16 +6,31 @@ from PySide6.QtGui import QPainter, QColor, QPen
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 
 class CircularSpinner(QWidget):
-    """Circular spinning loader using custom QPainter drawing."""
+    """Circular spinning loader using custom QPainter drawing with optional progress text."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.angle = 0
+        self.progress_text = ""
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.rotate)
         self.timer.start(50)  # Rotate every 50ms
-        self.setFixedSize(50, 50)
+        self.setFixedSize(64, 64)
         self.setStyleSheet("background: transparent;")
+
+    def set_progress(self, current: int, total: int):
+        """Permite mostrar el avance numérico incremental dentro del spinner."""
+        if total > 0:
+            pct = int((current / total) * 100)
+            self.progress_text = f"{pct}%"
+        else:
+            self.progress_text = str(current)
+        self.update()
+
+    def set_progress_text(self, text: str):
+        """Permite asignar texto directo al centro del spinner (ej: '5/9' o '50%')."""
+        self.progress_text = text
+        self.update()
 
     def rotate(self):
         self.angle = (self.angle + 30) % 360
@@ -25,24 +40,39 @@ class CircularSpinner(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # Center origin
-        painter.translate(self.width() / 2, self.height() / 2)
+        # Centro del widget
+        cx = self.width() / 2
+        cy = self.height() / 2
+        radius = 22
+
+        # 1. Dibujar pista de fondo (gris tenue)
+        pen_track = QPen()
+        pen_track.setWidth(4)
+        pen_track.setCapStyle(Qt.RoundCap)
+        pen_track.setColor(QColor("#E2E8F0"))
+        painter.setPen(pen_track)
+        painter.drawEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
+
+        # 2. Dibujar segmento giratorio animado (Azul acento)
+        painter.save()
+        painter.translate(cx, cy)
         painter.rotate(self.angle)
-        
-        # Pen setup
-        pen = QPen()
-        pen.setWidth(4)
-        pen.setCapStyle(Qt.RoundCap)
-        
-        # Faint gray track background
-        pen.setColor(QColor("#E2E8F0"))
-        painter.setPen(pen)
-        painter.drawArc(-18, -18, 36, 36, 0, 360 * 16)
-        
-        # Blue spinning segment
-        pen.setColor(QColor("#2563EB"))  # ACCENT color standard
-        painter.setPen(pen)
-        painter.drawArc(-18, -18, 36, 36, 0, 120 * 16)
+        pen_spinner = QPen()
+        pen_spinner.setWidth(4)
+        pen_spinner.setCapStyle(Qt.RoundCap)
+        pen_spinner.setColor(QColor("#2563EB"))  # ACCENT color standard
+        painter.setPen(pen_spinner)
+        painter.drawArc(-radius, -radius, radius * 2, radius * 2, 0, 120 * 16)
+        painter.restore()
+
+        # 3. Dibujar texto numérico incremental centrado si está activo
+        if self.progress_text:
+            painter.setPen(QColor("#1E293B"))
+            font = painter.font()
+            font.setPointSize(9)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(self.rect(), Qt.AlignCenter, self.progress_text)
 
 
 class GLLoadingDialog(QDialog):
@@ -55,7 +85,7 @@ class GLLoadingDialog(QDialog):
         
         # Main layout
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(20, 20, 20, 20)
+        self.main_layout.setContentsMargins(24, 20, 24, 20)
         self.main_layout.setSpacing(12)
         
         # Spinner widget
@@ -78,8 +108,14 @@ class GLLoadingDialog(QDialog):
             }
         """)
         
-        self.setFixedSize(260, 160)
+        self.setFixedSize(280, 175)
         
     def set_message(self, message: str):
         """Allows dynamically updating the message on the dialog."""
         self.label.setText(message)
+
+    def set_progress(self, current: int, total: int, extra_text: str = ""):
+        """Actualiza el porcentaje numérico en el centro del spinner y opcionalmente el texto."""
+        self.spinner.set_progress(current, total)
+        if extra_text:
+            self.label.setText(extra_text)

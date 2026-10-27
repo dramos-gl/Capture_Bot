@@ -711,7 +711,9 @@ def vincular_folios_rpp_satc(regimen_id: int, payload: ImportarViviendasSATCRequ
         svc = HousingLifeCycleService(db)
         res = svc.vincular_folios_rpp_excel(
             regimen_id=regimen_id,
-            records=payload.records
+            records=payload.records,
+            usuario_id=payload.usuario_id,
+            sesion_id=payload.sesion_id
         )
         return res
     except ValueError as ve:
@@ -729,7 +731,9 @@ def vincular_catastro_satc(regimen_id: int, payload: ImportarViviendasSATCReques
         svc = HousingLifeCycleService(db)
         res = svc.vincular_catastro_excel(
             regimen_id=regimen_id,
-            records=payload.records
+            records=payload.records,
+            usuario_id=payload.usuario_id,
+            sesion_id=payload.sesion_id
         )
         return res
     except ValueError as ve:

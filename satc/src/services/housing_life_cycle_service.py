@@ -11,7 +11,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 from satc.src.storage.satc_models import (
-    RegimenCondominio, Vivienda, TramiteVivienda, TipoTramite, EstadoVivienda, EstadoTramite
+    RegimenCondominio, Vivienda, ViviendaHistorialEstado, TramiteVivienda, TipoTramite, EstadoVivienda, EstadoTramite
 )
 from satc.src.storage.satc_repos import (
     RegimenCondominioRepository, ViviendaRepository, TramiteViviendaRepository,
@@ -551,12 +551,32 @@ class HousingLifeCycleService:
                 created_at=datetime.utcnow()
             )
             self.session.add(nueva_viv)
+            self.session.flush()
+
+            # Registrar bitácora de estado inicial PROYECTADA
+            hist_ini = ViviendaHistorialEstado(
+                vivienda_id=nueva_viv.vivienda_id,
+                estado_anterior_id=None,
+                estado_nuevo_id=estado_id,
+                usuario_id=usuario_id,
+                sesion_id=sesion_id,
+                origen_cambio="CARGA_INICIAL",
+                motivo="Creación inicial de vivienda/UPE en régimen de condominio",
+                metadata_adicional={
+                    "interior": interior_val,
+                    "edificio": edif_val,
+                    "numero_oficial": num_oficial_val
+                },
+                created_at=datetime.utcnow()
+            )
+            self.session.add(hist_ini)
+
             existentes_keys.add(k)
             nuevos_insertados += 1
 
         # Actualizar contador de UPEs generadas en el régimen
         if nuevos_insertados > 0:
-            regimen.upes_generadas = self.vivienda_repo.count_by_regimen(regimen_id) + nuevos_insertados
+            regimen.upes_generadas = self.vivienda_repo.count_by_regimen(regimen_id)
             regimen.updated_at = datetime.utcnow()
 
         self.session.commit()
@@ -574,16 +594,21 @@ class HousingLifeCycleService:
             "desarrollo_id": desarrollo_id
         }
 
-    def vincular_folios_rpp_excel(self, regimen_id: int, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def vincular_folios_rpp_excel(self, regimen_id: int, records: List[Dict[str, Any]], usuario_id: Optional[int] = None, sesion_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Enriquece las viviendas del régimen con sus Folios Electrónicos del RPP desde registros parseados.
-        Avanza el estado a 'EN_INDIVIDUALIZACION'.
+        Avanza el estado a 'EN_INDIVIDUALIZACION' y registra bitácora histórica.
         """
         regimen = self.regimen_repo.get_by_id(regimen_id)
         if not regimen:
             raise ValueError(f"Régimen con ID {regimen_id} no existe.")
 
-        res = self.vivienda_repo.bulk_update_folios_rpp(regimen_id, records)
+        res = self.vivienda_repo.bulk_update_folios_rpp(
+            regimen_id=regimen_id,
+            updates=records,
+            usuario_id=usuario_id,
+            sesion_id=sesion_id
+        )
         self.session.commit()
         logger.info(f"Folios RPP vinculados para régimen {regimen_id}: {res['actualizados']} actualizados, {res['no_encontrados']} no encontrados.")
         return {
@@ -593,24 +618,29 @@ class HousingLifeCycleService:
             "total_en_archivo": len(records)
         }
 
-    def vincular_folios_rpp_pdf(self, regimen_id: int, pdf_path: str) -> Dict[str, Any]:
+    def vincular_folios_rpp_pdf(self, regimen_id: int, pdf_path: str, usuario_id: Optional[int] = None, sesion_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Extrae y asocia los folios electrónicos del RPP directamente desde una Constancia de Resolución PDF.
         """
         from satc.src.services.rpp_resolution_extractor import RppResolutionExtractor
         records = RppResolutionExtractor.extract_from_pdf(pdf_path)
-        return self.vincular_folios_rpp_excel(regimen_id=regimen_id, records=records)
+        return self.vincular_folios_rpp_excel(regimen_id=regimen_id, records=records, usuario_id=usuario_id, sesion_id=sesion_id)
 
-    def vincular_catastro_excel(self, regimen_id: int, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def vincular_catastro_excel(self, regimen_id: int, records: List[Dict[str, Any]], usuario_id: Optional[int] = None, sesion_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Enriquece las viviendas del régimen con su Clave Catastral y Padrón municipal.
-        Avanza el estado a 'LISTA_PARA_VENTA'.
+        Avanza el estado a 'LISTA_PARA_VENTA' y registra bitácora histórica.
         """
         regimen = self.regimen_repo.get_by_id(regimen_id)
         if not regimen:
             raise ValueError(f"Régimen con ID {regimen_id} no existe.")
 
-        res = self.vivienda_repo.bulk_update_catastro(regimen_id, records)
+        res = self.vivienda_repo.bulk_update_catastro(
+            regimen_id=regimen_id,
+            updates=records,
+            usuario_id=usuario_id,
+            sesion_id=sesion_id
+        )
         self.session.commit()
         logger.info(f"Datos catastrales vinculados para régimen {regimen_id}: {res['actualizados']} actualizados, {res['no_encontrados']} no encontrados.")
         return {

@@ -4,8 +4,8 @@ Encapsula el acceso y manipulación de datos para las entidades de R2F-Cancún.
 """
 import re
 import logging
-from datetime import datetime
-from typing import List, Optional, Tuple
+from datetime import datetime, date
+from typing import List, Optional, Tuple, Any
 
 from sqlalchemy import select, update, and_, func
 from sqlalchemy.orm import Session, selectinload
@@ -440,7 +440,7 @@ class FacturaCancunRepository(BaseCancunRepository):
 
 from satc.src.storage.satc_models import (
     TipoTramite, EstadoVivienda, EstadoTramite, 
-    RegimenCondominio, Vivienda, TramiteVivienda, RequisitoDocumento,
+    RegimenCondominio, Vivienda, ViviendaHistorialEstado, TramiteVivienda, RequisitoDocumento,
     CampoCanonico, CampoEtiquetaAncla, CampoFormatoMunicipio
 )
 
@@ -569,6 +569,33 @@ class ViviendaRepository(BaseCancunRepository):
             raise ValueError(f"Estado de vivienda '{codigo}' no existe en el catálogo.")
         return result
 
+    def _parse_safe_date(self, val: Any) -> Optional[date]:
+        """Sanitiza y convierte de forma segura cualquier cadena u objeto a datetime.date."""
+        if not val:
+            return None
+        if hasattr(val, "strftime") and hasattr(val, "day"):
+            return val if isinstance(val, date) else val.date()
+        val_str = str(val).strip()
+        if not val_str or val_str.upper() in ("NONE", "NULL", "-", "N/A", ""):
+            return None
+        # Formato ISO: YYYY-MM-DD
+        m_iso = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})", val_str)
+        if m_iso:
+            y, m, d = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
+            try:
+                return date(y, m, d)
+            except ValueError:
+                return None
+        # Formato Latam: DD/MM/YYYY
+        m_lat = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/](\d{4})", val_str)
+        if m_lat:
+            d, m, y = int(m_lat.group(1)), int(m_lat.group(2)), int(m_lat.group(3))
+            try:
+                return date(y, m, d)
+            except ValueError:
+                return None
+        return None
+
     def create_upe(
         self,
         regimen_id: int,
@@ -656,11 +683,11 @@ class ViviendaRepository(BaseCancunRepository):
             viv.updated_at = datetime.utcnow()
             self.session.flush()
 
-    def bulk_update_folios_rpp(self, regimen_id: int, updates: List[Dict[str, Any]]) -> Dict[str, int]:
+    def bulk_update_folios_rpp(self, regimen_id: int, updates: List[Dict[str, Any]], usuario_id: Optional[int] = None, sesion_id: Optional[int] = None) -> Dict[str, int]:
         """
         Asocia masivamente folios electrónicos del RPP a viviendas de un régimen
         usando (edificio, interior) o interior como clave de enlace flexible.
-        Transiciona el estado de la vivienda a 'EN_INDIVIDUALIZACION'.
+        Transiciona el estado de la vivienda a 'EN_INDIVIDUALIZACION' y registra bitácora.
         """
         st_indiv_id = self._get_estado_vivienda_id("EN_INDIVIDUALIZACION")
         viviendas = self.list_by_regimen(regimen_id)
@@ -673,13 +700,20 @@ class ViviendaRepository(BaseCancunRepository):
         # Mapeo de respaldo por número oficial exclusivo (si es único en el régimen)
         nof_map = {}
         nof_counts = {}
+        # Mapeo específico para SERVICIO / Áreas Comunes: (interior, numero_oficial) sin edificio
+        servicio_map = {}
 
         for v in viviendas:
+            dest_v = str(v.destino or "").strip().upper()
             ed_norm = re.sub(r'^(EDIFICIO|TORRE)\s*', '', (v.edificio or "").strip().upper()).strip()
+            if ed_norm in ("-", "N/A", "NONE"):
+                ed_norm = ""
             int_norm = (v.interior or "").strip().upper()
             vivienda_map[(ed_norm, int_norm)] = v
             # También guardar con edificio completo original
-            vivienda_map[((v.edificio or "").strip().upper(), int_norm)] = v
+            raw_ed_v = (v.edificio or "").strip().upper()
+            if raw_ed_v not in ("-", "N/A", "NONE"):
+                vivienda_map[(raw_ed_v, int_norm)] = v
             interior_counts[int_norm] = interior_counts.get(int_norm, 0) + 1
             interior_map[int_norm] = v
 
@@ -695,6 +729,13 @@ class ViviendaRepository(BaseCancunRepository):
                         if d_val not in nof_map:
                             nof_map[d_val] = v
                         nof_counts[d_val] = nof_counts.get(d_val, 0) + 1
+                    # Si es SERVICIO o edificio vacío, indexar por (interior, nof)
+                    if dest_v == "SERVICIO" or not ed_norm:
+                        servicio_map[(int_norm, d_val)] = v
+                        servicio_map[(int_norm, nof_raw)] = v
+                else:
+                    if dest_v == "SERVICIO" or not ed_norm:
+                        servicio_map[(int_norm, nof_raw)] = v
 
         actualizados = 0
         no_encontrados = 0
@@ -702,39 +743,68 @@ class ViviendaRepository(BaseCancunRepository):
         for item in updates:
             raw_edif = (item.get("edificio") or "").strip().upper()
             ed_norm = re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_edif).strip()
+            if ed_norm in ("-", "N/A", "NONE"):
+                ed_norm = ""
             inter = str(item.get("interior") or "").strip().upper()
             folio = str(item.get("folio_electronico") or "").strip()
             raw_nof = str(item.get("numero_oficial") or "").strip().upper()
+            digits_nof = re.search(r'\b(\d+)\b', raw_nof)
+            d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else raw_nof
 
             if not inter or not folio:
                 continue
 
             target = None
-            # 1. Prioridad Primaria: Coincidencia por Número Oficial unívoco en el régimen (NO OFICIAL)
-            if raw_nof:
-                digits_nof = re.search(r'\b(\d+)\b', raw_nof)
-                d_clean = digits_nof.group(1).lstrip("0") or "0" if digits_nof else ""
+            # 1. Prioridad para registros de SERVICIO / sin edificio: validar mediante (interior, número oficial)
+            if inter and raw_nof and (not ed_norm or raw_edif in ("-", "N/A", "NONE", "")):
+                target = servicio_map.get((inter, d_clean)) or servicio_map.get((inter, raw_nof))
+
+            # 2. Prioridad Primaria: Coincidencia por Número Oficial unívoco en el régimen (NO OFICIAL)
+            if not target and raw_nof:
                 if nof_counts.get(raw_nof) == 1:
                     target = nof_map.get(raw_nof)
                 elif d_clean and nof_counts.get(d_clean) == 1:
                     target = nof_map.get(d_clean)
 
-            # 2. Prioridad Secundaria: Búsqueda física directa exacta por combinación (Edificio, Interior/UPE)
-            if not target:
+            # 3. Prioridad Secundaria: Búsqueda física directa exacta por combinación (Edificio, Interior/UPE)
+            if not target and (raw_edif or ed_norm):
                 target = vivienda_map.get((raw_edif, inter)) or vivienda_map.get((ed_norm, inter))
 
-            # 3. Respaldo exclusivo para áreas comunes sin edificio asignado si el interior es único
+            # 4. Respaldo por (interior, número oficial) general
+            if not target and inter and raw_nof:
+                target = servicio_map.get((inter, d_clean)) or servicio_map.get((inter, raw_nof))
+
+            # 5. Respaldo exclusivo para áreas comunes sin edificio asignado si el interior es único
             if not target and not raw_edif and not ed_norm and interior_counts.get(inter) == 1:
                 target = interior_map.get(inter)
 
             if target:
                 target.folio_electronico = folio
-                fecha_folio = item.get("fecha_alta_folio") or item.get("fecha")
+                fecha_folio = self._parse_safe_date(item.get("fecha_alta_folio") or item.get("fecha"))
                 if fecha_folio:
                     target.fecha_alta_folio = fecha_folio
                 # Solo avanza estado si estaba en PROYECTADA
                 if target.estado and target.estado.codigo == "PROYECTADA":
+                    est_ant_id = target.estado_vivienda_id
                     target.estado_vivienda_id = st_indiv_id
+                    # Registrar bitácora histórica
+                    hist = ViviendaHistorialEstado(
+                        vivienda_id=target.vivienda_id,
+                        estado_anterior_id=est_ant_id,
+                        estado_nuevo_id=st_indiv_id,
+                        usuario_id=usuario_id,
+                        sesion_id=sesion_id,
+                        origen_cambio="VINCULAR_RPP",
+                        motivo=f"Vinculación de Folio RPP: {folio}",
+                        metadata_adicional={
+                            "folio_electronico": folio,
+                            "interior": inter,
+                            "numero_oficial": raw_nof
+                        },
+                        created_at=datetime.utcnow()
+                    )
+                    self.session.add(hist)
+
                 target.updated_at = datetime.utcnow()
                 actualizados += 1
             else:
@@ -743,11 +813,11 @@ class ViviendaRepository(BaseCancunRepository):
         self.session.flush()
         return {"actualizados": actualizados, "no_encontrados": no_encontrados}
 
-    def bulk_update_catastro(self, regimen_id: int, updates: List[Dict[str, Any]]) -> Dict[str, int]:
+    def bulk_update_catastro(self, regimen_id: int, updates: List[Dict[str, Any]], usuario_id: Optional[int] = None, sesion_id: Optional[int] = None) -> Dict[str, int]:
         """
         Asocia masivamente Clave Catastral y Padrón municipal a viviendas de un régimen
         usando prioritariamente folio_electronico, o secundariamente (edificio, interior) o número oficial.
-        Transiciona el estado de la vivienda a 'LISTA_PARA_VENTA'.
+        Transiciona el estado de la vivienda a 'LISTA_PARA_VENTA' y registra bitácora.
         """
         st_venta_id = self._get_estado_vivienda_id("LISTA_PARA_VENTA")
         viviendas = self.list_by_regimen(regimen_id)
@@ -759,7 +829,9 @@ class ViviendaRepository(BaseCancunRepository):
         nof_counts = {}
 
         tupla_completa_map = {}
+        servicio_map = {}
         for v in viviendas:
+            dest_v = str(v.destino or "").strip().upper()
             raw_ed = (v.edificio or "").strip().upper()
             ed_clean = "" if raw_ed in ("-", "N/A", "NONE", "") else re.sub(r'^(EDIFICIO|TORRE)\s*', '', raw_ed).strip()
             inter = (v.interior or "").strip().upper()
@@ -770,6 +842,9 @@ class ViviendaRepository(BaseCancunRepository):
             if inter:
                 tupla_completa_map[(ed_clean, inter, nof_clean)] = v
                 tupla_completa_map[(raw_ed if raw_ed != "-" else "", inter, nof_clean)] = v
+                if dest_v == "SERVICIO" or not ed_clean:
+                    servicio_map[(inter, nof_clean)] = v
+                    servicio_map[(inter, nof_raw)] = v
             
             vivienda_by_interior[(raw_ed, inter)] = v
             vivienda_by_interior[(ed_clean, inter)] = v
@@ -811,18 +886,26 @@ class ViviendaRepository(BaseCancunRepository):
             if folio_rpp and folio_rpp in vivienda_by_rpp:
                 target = vivienda_by_rpp[folio_rpp]
 
-            # 2. Prioridad Secundaria: Coincidencia conjunta por (Edificio, UPE/Interior, Número Oficial)
+            # 2. Prioridad para unidades de SERVICIO / sin edificio: validar mediante (interior, número oficial)
+            if not target and inter and raw_nof and (not ed_clean or raw_ed in ("-", "N/A", "NONE", "")):
+                target = servicio_map.get((inter, nof_clean)) or servicio_map.get((inter, raw_nof))
+
+            # 3. Prioridad Secundaria: Coincidencia conjunta por (Edificio, UPE/Interior, Número Oficial)
             if not target and inter and nof_clean:
                 target = tupla_completa_map.get((ed_clean, inter, nof_clean)) or tupla_completa_map.get((raw_ed, inter, nof_clean))
 
-            # 3. Prioridad Terciaria: Coincidencia física exacta por (edificio, interior/UPE)
+            # 4. Prioridad Terciaria: Coincidencia física exacta por (edificio, interior/UPE)
             if not target:
                 if (raw_ed, inter) in vivienda_by_interior:
                     target = vivienda_by_interior[(raw_ed, inter)]
                 elif (ed_clean, inter) in vivienda_by_interior:
                     target = vivienda_by_interior[(ed_clean, inter)]
 
-            # 4. Respaldo para áreas comunes sin edificio asignado con interior unívoco
+            # 5. Respaldo por (interior, número oficial) general
+            if not target and inter and raw_nof:
+                target = servicio_map.get((inter, nof_clean)) or servicio_map.get((inter, raw_nof))
+
+            # 6. Respaldo para áreas comunes sin edificio asignado con interior unívoco
             if not target and not raw_ed and not ed_clean and interior_counts.get(inter) == 1:
                 target = interior_map.get(inter)
 
@@ -837,11 +920,31 @@ class ViviendaRepository(BaseCancunRepository):
                     target.clave_catastral = clave_cat
                 if padron:
                     target.padron = padron
-                fecha_cc = item.get("fecha_alta_cc") or item.get("fecha")
+                fecha_cc = self._parse_safe_date(item.get("fecha_alta_cc") or item.get("fecha"))
                 if fecha_cc:
                     target.fecha_alta_cc = fecha_cc
                 if target.estado.codigo in ["PROYECTADA", "EN_INDIVIDUALIZACION"]:
+                    est_ant_id = target.estado_vivienda_id
                     target.estado_vivienda_id = st_venta_id
+                    # Registrar bitácora histórica
+                    hist = ViviendaHistorialEstado(
+                        vivienda_id=target.vivienda_id,
+                        estado_anterior_id=est_ant_id,
+                        estado_nuevo_id=st_venta_id,
+                        usuario_id=usuario_id,
+                        sesion_id=sesion_id,
+                        origen_cambio="VINCULAR_CATASTRO",
+                        motivo=f"Vinculación Catastral (CC: {clave_cat or '-'}, Padrón: {padron or '-'})",
+                        metadata_adicional={
+                            "clave_catastral": clave_cat,
+                            "padron": padron,
+                            "interior": inter,
+                            "numero_oficial": raw_nof
+                        },
+                        created_at=datetime.utcnow()
+                    )
+                    self.session.add(hist)
+
                 target.updated_at = datetime.utcnow()
                 actualizados += 1
             else:
