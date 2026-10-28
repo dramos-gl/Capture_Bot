@@ -1455,7 +1455,7 @@ class ProduccionRepository(BaseRepository):
             raise ValueError(f"Orden con ID {orden_id} no encontrada.")
 
         tipo_ord = getattr(orden, "tipo_orden", "ESTANDAR")
-        if tipo_ord in ("PAGADA", "CANCELACION", "FOJAS", "TESTIMONIO"):
+        if tipo_ord != "ESTANDAR":
             raise ValueError(
                 f"La orden '{orden.folio}' es de tipo Anual ({tipo_ord}) y no puede ser cancelada en bloque.\n"
                 f"Las órdenes anuales son contenedores de ejercicio fiscal. Para descartar un trámite específico, cancele la solicitud individual en la bandeja de trabajo."
@@ -1550,7 +1550,7 @@ class ProduccionRepository(BaseRepository):
         folio, est_cod, tipo_ord = row[0], row[1], (row[2] or "ESTANDAR")
 
         # Bloqueo estricto: Las órdenes anuales no se pueden autorizar ni rechazar en bloque desde la cabecera
-        if accion in ("AUTORIZADA", "RECHAZADA") and tipo_ord in ("PAGADA", "CANCELACION", "FOJAS", "TESTIMONIO"):
+        if accion in ("AUTORIZADA", "RECHAZADA") and tipo_ord != "ESTANDAR":
             verbo = "autorizar" if accion == "AUTORIZADA" else "rechazar"
             return {
                 "ready": False,

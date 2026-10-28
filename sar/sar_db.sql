@@ -991,9 +991,12 @@ INSERT INTO sar_catalogo.concepto (concepto_id, codigo_portal, nombre, alias, es
 (3, '141-5 Expedición de certificados de información o datos que obren en el sistema de registro-CT-5.00-117.31-', '3. Certificados / CLG', 'CLG', FALSE, 'ESTANDAR'),
 (4, 'PORTAL-CNC-01', '4. Cancelación de avisos', 'CANCELACION', TRUE, 'CANCELACION'),
 (5, 'PORTAL-FOJAS-01', '5. Derechos de Fojas', 'FOJAS', FALSE, 'FOJAS'),
-(6, 'PORTAL-TESTIMONIO-01', '6. Expedición de Testimonios', 'TESTIMONIO', FALSE, 'TESTIMONIO')
+(6, 'PORTAL-TESTIMONIO-01', '6. Expedición de Testimonios', 'TESTIMONIO', FALSE, 'TESTIMONIO'),
+(7, '149-12 Por el análisis y calificación de actos relativos a anotaciones de actas aclaratorias consistentes en rectificación que realice la autoridad competente respecto de ubicación, medidas, colindancias, clave catastral, localidad, coordenadas y vialidad. -CT-5.00-117.31-', '7. Acta Aclaratoria', 'ACTA', FALSE, 'ACTA')
 ON CONFLICT (concepto_id) DO UPDATE SET 
+    codigo_portal = EXCLUDED.codigo_portal,
     nombre = EXCLUDED.nombre,
+    alias = EXCLUDED.alias,
     tipo_modulo = EXCLUDED.tipo_modulo,
     es_cancelacion = EXCLUDED.es_cancelacion;
 

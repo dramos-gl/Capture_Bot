@@ -458,16 +458,26 @@ class AdminWindow(QMainWindow):
         self.action_toolbar.act_refresh.setEnabled(True)
         self.action_toolbar.act_export.setEnabled(True)
 
-        # Verificar si la vista activa es el submódulo de Importación de Viviendas
+        # Verificar si la vista activa es el submódulo de Importación de Viviendas o Carga Masiva
         is_viviendas = False
         if hasattr(view, "tabs") and hasattr(view, "tab_import_viviendas"):
             is_viviendas = (view.tabs.currentWidget() == view.tab_import_viviendas)
+
+        from sar.src.ui.views.admin.bulk_load_view import BulkLoadView
+        is_carga_masiva = isinstance(view, BulkLoadView)
 
         if is_viviendas:
             self.action_toolbar.set_actions_mode("viviendas")
             # En modo viviendas, la habilitación de guardar y exportar depende de los registros cargados
             can_apply = getattr(view.btn_v_ejecutar, "isEnabled", lambda: False)()
             can_export = getattr(view.btn_v_exportar_datos, "isEnabled", lambda: False)()
+            self.action_toolbar.act_apply.setEnabled(can_apply)
+            self.action_toolbar.act_export.setEnabled(can_export)
+            return
+        elif is_carga_masiva:
+            self.action_toolbar.set_actions_mode("carga_masiva")
+            can_apply = bool(view.precarga_data and view.precarga_data.get("es_valido") and getattr(view, "can_edit", False))
+            can_export = bool(hasattr(view, "table_preview") and view.table_preview.rowCount() > 0)
             self.action_toolbar.act_apply.setEnabled(can_apply)
             self.action_toolbar.act_export.setEnabled(can_export)
             return
@@ -513,30 +523,41 @@ class AdminWindow(QMainWindow):
             crud._on_edit_button_clicked()
 
     def _on_toolbar_template(self):
-        """Triggers official excel template download on the active viviendas view."""
+        """Triggers official template download on the active import view."""
         view = self.stacked_widget.currentWidget()
         if hasattr(view, "_on_v_descargar_plantilla"):
             view._on_v_descargar_plantilla()
+        elif hasattr(view, "_on_generar_plantilla"):
+            view._on_generar_plantilla()
 
     def _on_toolbar_import_file(self):
-        """Triggers excel or pdf file selection and parsing on the active viviendas view."""
+        """Triggers file selection and parsing on the active import view."""
         view = self.stacked_widget.currentWidget()
         if hasattr(view, "_on_v_seleccionar_archivo"):
             view._on_v_seleccionar_archivo()
             self._update_toolbar_state(view)
+        elif hasattr(view, "_on_seleccionar_archivo"):
+            view._on_seleccionar_archivo()
+            self._update_toolbar_state(view)
 
     def _on_toolbar_clean(self):
-        """Cleans and resets filters and data on the active viviendas view."""
+        """Cleans and resets filters and data on the active import view."""
         view = self.stacked_widget.currentWidget()
         if hasattr(view, "_on_v_limpiar"):
             view._on_v_limpiar()
             self._update_toolbar_state(view)
+        elif hasattr(view, "_limpiar_precarga"):
+            view._limpiar_precarga()
+            self._update_toolbar_state(view)
 
     def _on_toolbar_apply(self):
-        """Applies parsed housing records to the database."""
+        """Applies parsed records to the database on the active import view."""
         view = self.stacked_widget.currentWidget()
         if hasattr(view, "_on_v_ejecutar_importacion"):
             view._on_v_ejecutar_importacion()
+            self._update_toolbar_state(view)
+        elif hasattr(view, "_on_ejecutar_carga"):
+            view._on_ejecutar_carga()
             self._update_toolbar_state(view)
 
     def _on_toolbar_refresh(self):
@@ -558,6 +579,9 @@ class AdminWindow(QMainWindow):
             if hasattr(view, "_on_v_exportar_datos"):
                 view._on_v_exportar_datos()
                 return
+        elif hasattr(view, "_on_exportar_datos"):
+            view._on_exportar_datos()
+            return
 
         crud = self._get_active_crud_panel(view)
         table = getattr(crud, "table", None) or getattr(view, "table", None) or getattr(view, "table_res", None) or getattr(view, "tbl_viviendas", None)

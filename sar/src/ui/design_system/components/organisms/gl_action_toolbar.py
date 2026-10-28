@@ -125,7 +125,7 @@ class GLActionToolbar(QToolBar):
     def set_actions_mode(self, mode: str = "default"):
         """Switches the toolbar action block between standard CRUD and specialized module workflows."""
         self._actions_mode = mode
-        if mode == "viviendas":
+        if mode in ("viviendas", "carga_masiva", "importacion"):
             # Ocultar botones estándar Nuevo y Editar
             self.act_new.setVisible(False)
             self.act_edit.setVisible(False)

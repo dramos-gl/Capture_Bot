@@ -264,6 +264,7 @@ class HousingLifeCycleService:
             if not tipo:
                 raise ValueError(f"Tipo de trámite con ID {tipo_id} no encontrado.")
             tipo.codigo = data.get("codigo", tipo.codigo).strip().upper()
+            tipo.alias = (data.get("alias") or "").strip() or None
             tipo.nombre = data.get("nombre", tipo.nombre).strip()
             tipo.aplica_a = data.get("aplica_a", tipo.aplica_a)
             tipo.etapa_disparador = data.get("etapa_disparador", tipo.etapa_disparador)
@@ -273,6 +274,7 @@ class HousingLifeCycleService:
         else:
             tipo = TipoTramite(
                 codigo=data["codigo"].strip().upper(),
+                alias=(data.get("alias") or "").strip() or None,
                 nombre=data["nombre"].strip(),
                 aplica_a=data.get("aplica_a", "AMBOS"),
                 etapa_disparador=data.get("etapa_disparador", "CONSTRUCCION"),

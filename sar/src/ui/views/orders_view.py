@@ -563,11 +563,7 @@ class OrdersView(QWidget):
         lbl_tipo_title = CustomLabel("Tipo de Orden", variant="body")
         lbl_tipo_title.setObjectName("formFieldLabel")
         self.combo_tipo_orden = CustomComboBox(control_size="sm")
-        self.combo_tipo_orden.addItem("Estándar (Subsidios)", "ESTANDAR")
-        self.combo_tipo_orden.addItem("Derechos Pagados (Anual)", "PAGADA")
-        self.combo_tipo_orden.addItem("Cancelación de Avisos (Anual)", "CANCELACION")
-        self.combo_tipo_orden.addItem("Derechos de Fojas (Anual)", "FOJAS")
-        self.combo_tipo_orden.addItem("Expedición de Testimonios (Anual)", "TESTIMONIO")
+        self._populate_tipo_orden_combo()
         self.combo_tipo_orden.currentIndexChanged.connect(self._on_tipo_orden_changed)
         tipo_layout.addWidget(lbl_tipo_title)
         tipo_layout.addWidget(self.combo_tipo_orden)
@@ -602,6 +598,47 @@ class OrdersView(QWidget):
         card_layout.addWidget(self.grid)
         
         layout.addWidget(self.card)
+
+    def _populate_tipo_orden_combo(self):
+        """Puebla el desplegable de tipos de órdenes de manera dinámica a partir de los conceptos registrados."""
+        current_data = self.combo_tipo_orden.currentData() if hasattr(self, "combo_tipo_orden") else None
+        self.combo_tipo_orden.blockSignals(True)
+        self.combo_tipo_orden.clear()
+        
+        self.combo_tipo_orden.addItem("Estándar (Subsidios)", "ESTANDAR")
+        self.combo_tipo_orden.addItem("Derechos Pagados (Anual)", "PAGADA")
+        
+        # Mapeo descriptivo para módulos conocidos; los futuros se formatean limpiamente por defecto
+        label_map = {
+            "CANCELACION": "Cancelación de Avisos (Anual)",
+            "FOJAS": "Derechos de Fojas (Anual)",
+            "TESTIMONIO": "Expedición de Testimonios (Anual)",
+            "ACTA": "Acta Aclaratoria (Anual)"
+        }
+        
+        # Consultar conceptos para descubrir dinámicamente cualquier tipo_modulo no estándar
+        try:
+            catalogo_data = self.ordenes_ui_service.get_catalogos()
+            conceptos = catalogo_data.get("conceptos", [])
+            modulos_agregados = set(["ESTANDAR", "PAGADA"])
+            for c in conceptos:
+                t_mod = (c.get("tipo_modulo") or "").strip().upper()
+                if t_mod and t_mod not in modulos_agregados:
+                    modulos_agregados.add(t_mod)
+                    label = label_map.get(t_mod, f"{c.get('nombre', t_mod).split('.', 1)[-1].strip()} (Anual)")
+                    self.combo_tipo_orden.addItem(label, t_mod)
+        except Exception:
+            # Fallback en caso de arranque offline o antes de conexión
+            self.combo_tipo_orden.addItem("Cancelación de Avisos (Anual)", "CANCELACION")
+            self.combo_tipo_orden.addItem("Derechos de Fojas (Anual)", "FOJAS")
+            self.combo_tipo_orden.addItem("Expedición de Testimonios (Anual)", "TESTIMONIO")
+            self.combo_tipo_orden.addItem("Acta Aclaratoria (Anual)", "ACTA")
+
+        if current_data:
+            idx = self.combo_tipo_orden.findData(current_data)
+            if idx >= 0:
+                self.combo_tipo_orden.setCurrentIndex(idx)
+        self.combo_tipo_orden.blockSignals(False)
         
     def _update_summary(self):
         data = self.grid.get_all_data()
@@ -639,22 +676,20 @@ class OrdersView(QWidget):
             "PAGADA": f"Derechos Pagados {current_year}",
             "CANCELACION": f"Cancelación de Avisos {current_year}",
             "FOJAS": f"Derechos de Fojas {current_year}",
-            "TESTIMONIO": f"Derechos de Testimonios {current_year}"
-        }
-        catalog_map = {
-            "PAGADA": "ESTANDAR",
-            "CANCELACION": "CANCELACION",
-            "FOJAS": "FOJAS",
-            "TESTIMONIO": "TESTIMONIO"
+            "TESTIMONIO": f"Derechos de Testimonios {current_year}",
+            "ACTA": f"Actas Aclaratorias {current_year}"
         }
 
-        folio_target = prefix_map.get(tipo)
+        folio_target = prefix_map.get(tipo, f"ORD-{tipo}-{current_year}")
         orden_existente = next((o for o in all_ordenes if o.get("folio") == folio_target), None)
         
         # Si la orden ya existe en BD, tomar su descripción real guardada; sino, usar la sugerida por defecto
-        desc_final = orden_existente.get("descripcion") if (orden_existente and orden_existente.get("descripcion")) else default_desc_map.get(tipo, "")
+        current_label = self.combo_tipo_orden.currentText().replace(" (Anual)", "")
+        fallback_desc = default_desc_map.get(tipo, f"{current_label} {current_year}")
+        desc_final = orden_existente.get("descripcion") if (orden_existente and orden_existente.get("descripcion")) else fallback_desc
         
-        self._load_catalogs(tipo_modulo=catalog_map.get(tipo, "ESTANDAR"))
+        tipo_modulo_target = "ESTANDAR" if tipo == "PAGADA" else tipo
+        self._load_catalogs(tipo_modulo=tipo_modulo_target)
         self.desc_input.setText(desc_final)
         self.desc_input.setReadOnly(True)
 
@@ -662,14 +697,7 @@ class OrdersView(QWidget):
         try:
             if tipo_modulo is None and hasattr(self, "combo_tipo_orden"):
                 current_tipo = self.combo_tipo_orden.currentData() or "ESTANDAR"
-                catalog_map = {
-                    "PAGADA": "ESTANDAR",
-                    "CANCELACION": "CANCELACION",
-                    "FOJAS": "FOJAS",
-                    "TESTIMONIO": "TESTIMONIO",
-                    "ESTANDAR": "ESTANDAR"
-                }
-                tipo_modulo = catalog_map.get(current_tipo, "ESTANDAR")
+                tipo_modulo = "ESTANDAR" if current_tipo == "PAGADA" else current_tipo
             elif tipo_modulo is None:
                 tipo_modulo = "ESTANDAR"
 
@@ -998,8 +1026,8 @@ class OrdersView(QWidget):
             folio = folio_item.text().strip() if folio_item else f"ID {oid}"
             estado = estado_item.text().strip().upper() if estado_item else ""
 
-            # Bloqueo inmediato para órdenes anuales
-            if any(folio.startswith(prefix) for prefix in ("ORD-PAGADA-", "ORD-CLX-AV-", "ORD-FOJAS-", "ORD-TESTIMONIO-")):
+            # Bloqueo inmediato para órdenes anuales (cualquier orden no estándar)
+            if folio.startswith("ORD-") and not folio.startswith("ORD-SUB-"):
                 QMessageBox.information(
                     self,
                     "Cancelación No Permitida",
@@ -1183,11 +1211,9 @@ class OrdersView(QWidget):
             self.combo_tipo_orden.setEnabled(False) # No permitir cambiar tipo de orden en edición
             self.combo_tipo_orden.blockSignals(False)
             
-            if tipo_orden in ("CANCELACION", "FOJAS", "TESTIMONIO"):
-                self._load_catalogs(tipo_modulo=tipo_orden)
-                self.desc_input.setReadOnly(True)
-            elif tipo_orden == "PAGADA":
-                self._load_catalogs(tipo_modulo="ESTANDAR")
+            if tipo_orden != "ESTANDAR":
+                tipo_target = "ESTANDAR" if tipo_orden == "PAGADA" else tipo_orden
+                self._load_catalogs(tipo_modulo=tipo_target)
                 self.desc_input.setReadOnly(True)
             else:
                 self._load_catalogs(tipo_modulo="ESTANDAR")

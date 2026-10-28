@@ -442,6 +442,7 @@ class TramitesControlView(QWidget):
                     {
                         "tipo_tramite_id": t.tipo_tramite_id,
                         "codigo": t.codigo,
+                        "alias": t.alias,
                         "nombre": t.nombre,
                         "dias_vigencia": t.dias_vigencia
                     }

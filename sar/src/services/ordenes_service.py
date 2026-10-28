@@ -66,24 +66,28 @@ class OrdenesService:
         lote_size = self.config_repo.get_lote_solicitud_size()
 
         tipo_ord_upper = tipo_orden.upper() if tipo_orden else "ESTANDAR"
-        if tipo_ord_upper in ("CANCELACION", "FOJAS", "TESTIMONIO", "PAGADA"):
+        if tipo_ord_upper != "ESTANDAR":
             current_year = datetime.utcnow().year
             estado_abierta_id = self._get_estado_id("orden_generacion", "ABIERTA")
             estado_cerrada_id = self._get_estado_id("orden_generacion", "CERRADA")
 
+            # Mapeo de prefijos específicos o convención automática ORD-{TIPO}-{YYYY}
             prefix_map = {
                 "CANCELACION": f"ORD-CLX-AV-{current_year}",
                 "FOJAS": f"ORD-FOJAS-{current_year}",
                 "TESTIMONIO": f"ORD-TESTIMONIO-{current_year}",
-                "PAGADA": f"ORD-PAGADA-{current_year}"
+                "PAGADA": f"ORD-PAGADA-{current_year}",
+                "ACTA": f"ORD-ACTA-{current_year}"
             }
             desc_map = {
                 "CANCELACION": f"Orden Anual de Cancelaciones {current_year}",
                 "FOJAS": f"Orden Anual de Fojas {current_year}",
                 "TESTIMONIO": f"Orden Anual de Testimonios {current_year}",
-                "PAGADA": f"Orden Anual de Derechos Pagados {current_year}"
+                "PAGADA": f"Orden Anual de Derechos Pagados {current_year}",
+                "ACTA": f"Orden Anual de Actas Aclaratorias {current_year}"
             }
-            folio_str = prefix_map[tipo_ord_upper]
+            folio_str = prefix_map.get(tipo_ord_upper, f"ORD-{tipo_ord_upper}-{current_year}")
+            desc_default = desc_map.get(tipo_ord_upper, f"Orden Anual de {tipo_ord_upper.capitalize()} {current_year}")
             
             # 1. Cierre automático idempotente de órdenes anuales de ejercicios fiscales anteriores
             from sqlalchemy import text
@@ -109,7 +113,7 @@ class OrdenesService:
             if not nueva_orden:
                 nueva_orden = OrdenGeneracion(
                     folio=folio_str,
-                    descripcion=descripcion or desc_map[tipo_ord_upper],
+                    descripcion=descripcion or desc_default,
                     municipio_id=municipio_id,
                     estado_id=estado_abierta_id,
                     usuario_id=usuario_id,

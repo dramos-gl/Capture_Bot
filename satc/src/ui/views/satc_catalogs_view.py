@@ -693,8 +693,8 @@ class SatcCatalogsView(QWidget):
         lay_tipos.setContentsMargins(0, 0, 0, 0)
         self.tbl_tipos = CrudTablePanel("Catálogo de Tipos de Trámite SATC")
         self.tbl_tipos.setup_table(
-            ["ID", "Código", "Nombre", "Aplica A", "Etapa Disparador", "Vigencia (Días)", "Obligatorio", "Estado"],
-            ["tipo_tramite_id", "codigo", "nombre", "aplica_a", "etapa_disparador", "dias_vigencia", "es_obligatorio", "activo"]
+            ["ID", "Código", "Alias", "Nombre", "Aplica A", "Etapa Disparador", "Vigencia (Días)", "Obligatorio", "Estado"],
+            ["tipo_tramite_id", "codigo", "alias", "nombre", "aplica_a", "etapa_disparador", "dias_vigencia", "es_obligatorio", "activo"]
         )
         self.tbl_tipos.add_requested.connect(self._on_new_tipo)
         self.tbl_tipos.edit_requested.connect(self._on_edit_tipo)
@@ -1062,14 +1062,19 @@ class SatcCatalogsView(QWidget):
         form.setSpacing(8)
         form.setContentsMargins(0, 0, 0, 0)
 
-        self.inp_t_codigo = CustomInput("Código único (ej. LICENCIA_CONSTRUCCION)", parent=card)
+        self.inp_t_codigo = CustomInput("Código único (ej. LIC_CONST)", parent=card)
         self.inp_t_codigo.setMaxLength(50)
         self.inp_t_codigo.textEdited.connect(lambda t: self.inp_t_codigo.setText(t.upper()))
         self.inp_t_codigo.text = self.inp_t_codigo.text
         self.inp_t_codigo.set_text = self.inp_t_codigo.setText
         self.inp_t_codigo.set_focus = self.inp_t_codigo.setFocus
 
-        self.inp_t_nombre = CustomInput("Nombre del trámite municipal", parent=card)
+        self.inp_t_alias = CustomInput("Alias corto (ej. Licencia Construcción)", parent=card)
+        self.inp_t_alias.setMaxLength(100)
+        self.inp_t_alias.text = self.inp_t_alias.text
+        self.inp_t_alias.set_text = self.inp_t_alias.setText
+
+        self.inp_t_nombre = CustomInput("Nombre oficial del trámite municipal", parent=card)
         self.inp_t_nombre.setMaxLength(200)
         self.inp_t_nombre.text = self.inp_t_nombre.text
         self.inp_t_nombre.set_text = self.inp_t_nombre.setText
@@ -1092,6 +1097,7 @@ class SatcCatalogsView(QWidget):
         self.chk_t_activo.setChecked(True)
 
         form.addRow("Código *:", self.inp_t_codigo)
+        form.addRow("Alias:", self.inp_t_alias)
         form.addRow("Nombre *:", self.inp_t_nombre)
         form.addRow("Aplica A *:", self.cmb_t_aplica)
         form.addRow("Etapa Disparador *:", self.cmb_t_etapa)
@@ -1114,6 +1120,7 @@ class SatcCatalogsView(QWidget):
         if not self.can_edit:
             dialog.btn_save.setVisible(False)
             self.inp_t_codigo.setReadOnly(True)
+            self.inp_t_alias.setReadOnly(True)
             self.inp_t_nombre.setReadOnly(True)
             self.inp_t_vigencia.setReadOnly(True)
 
@@ -1125,6 +1132,7 @@ class SatcCatalogsView(QWidget):
         self.current_tipo_id = None
         dialog = self._create_tipo_dialog("Nuevo Tipo de Trámite")
         self.inp_t_vigencia.set_text("0")
+        self.inp_t_codigo.setReadOnly(False)
         self.inp_t_codigo.set_focus()
         dialog.exec()
 
@@ -1132,20 +1140,22 @@ class SatcCatalogsView(QWidget):
         self.current_tipo_id = data.get("tipo_tramite_id")
         dialog = self._create_tipo_dialog(f"Editar Tipo de Trámite: {data.get('codigo')}")
         self.inp_t_codigo.set_text(data.get("codigo", "") or "")
+        self.inp_t_alias.set_text(data.get("alias", "") or "")
         self.inp_t_nombre.set_text(data.get("nombre", "") or "")
         self.cmb_t_aplica.set_current_text(data.get("aplica_a", "AMBOS"))
         self.cmb_t_etapa.set_current_text(data.get("etapa_disparador", "CONSTRUCCION"))
         self.inp_t_vigencia.set_text(str(data.get("dias_vigencia", 0) or 0))
         self.chk_t_obligatorio.setChecked(bool(data.get("es_obligatorio", True)))
         self.chk_t_activo.setChecked(bool(data.get("activo", True)))
-        self.inp_t_codigo.setReadOnly(True)  # Clave inmutable
-        self.inp_t_nombre.set_focus()
+        self.inp_t_codigo.setReadOnly(False)  # Permite simplificar/actualizar código
+        self.inp_t_codigo.set_focus()
         dialog.exec()
 
     def _save_tipo(self, dialog: CustomDialog):
         data = {
             "tipo_tramite_id": self.current_tipo_id,
             "codigo": self.inp_t_codigo.text().strip().upper(),
+            "alias": self.inp_t_alias.text().strip() or None,
             "nombre": self.inp_t_nombre.text().strip(),
             "aplica_a": self.cmb_t_aplica.currentText(),
             "etapa_disparador": self.cmb_t_etapa.currentText(),

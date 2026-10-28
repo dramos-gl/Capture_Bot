@@ -178,6 +178,7 @@ class TipoTramite(Base):
 
     tipo_tramite_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     codigo: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    alias: Mapped[Optional[str]] = mapped_column(String(100))
     nombre: Mapped[str] = mapped_column(String(200), nullable=False)
     aplica_a: Mapped[str] = mapped_column(String(30), default="AMBOS", nullable=False)
     etapa_disparador: Mapped[str] = mapped_column(String(30), nullable=False)

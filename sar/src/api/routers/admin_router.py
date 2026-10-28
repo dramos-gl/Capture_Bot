@@ -26,7 +26,7 @@ class AdminSaveRequest(BaseModel):
     data: Dict[str, Any]
 
 @router.get("/data/{entity}")
-def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: Session = Depends(get_db)):
+def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, limit: Optional[int] = None, db: Session = Depends(get_db)):
     try:
         user_repo = UsuarioRepository(db)
         cat_repo = CatalogoRepository(db)
@@ -162,12 +162,16 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: 
                 for l in items
             ]
         elif entity == "ordenes":
-            res = db.execute(select(
+            stmt = select(
                 OrdenGeneracion.orden_id,
                 OrdenGeneracion.folio,
                 OrdenGeneracion.descripcion,
+                OrdenGeneracion.tipo_orden,
                 OrdenGeneracion.fecha_creacion
-            ).order_by(OrdenGeneracion.orden_id.desc())).mappings().all()
+            ).order_by(OrdenGeneracion.orden_id.desc())
+            if limit and limit > 0:
+                stmt = stmt.limit(limit)
+            res = db.execute(stmt).mappings().all()
             return [dict(r) for r in res]
         elif entity == "satc_tipos_tramite":
             from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
@@ -177,6 +181,7 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, db: 
                 {
                     "tipo_tramite_id": t.tipo_tramite_id,
                     "codigo": t.codigo,
+                    "alias": t.alias,
                     "nombre": t.nombre,
                     "aplica_a": t.aplica_a,
                     "etapa_disparador": t.etapa_disparador,
@@ -764,6 +769,53 @@ def get_resumen_orden_migracion(orden_id: int, db: Session = Depends(get_db)):
         return service.get_resumen_orden_migracion(orden_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener resumen de migración para la orden {orden_id}: {str(e)}")
+
+@router.get("/ordenes/{orden_id}/solicitudes-carga")
+def get_solicitudes_orden_carga(orden_id: int, db: Session = Depends(get_db)):
+    """Retorna la lista de solicitudes de la orden para selección puntual de carga masiva."""
+    try:
+        service = AdminService(db)
+        return service.get_solicitudes_orden_carga_masiva(orden_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener solicitudes de la orden {orden_id}: {str(e)}")
+
+@router.post("/ordenes/{orden_id}/preview-carga")
+def preview_carga_masiva(
+    orden_id: int,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """Valida los registros de carga masiva sin persistir."""
+    try:
+        service = AdminService(db)
+        registros = payload.get("registros", [])
+        solicitud_id = payload.get("solicitud_id")
+        return service.preview_carga_masiva_referencias(orden_id, registros, solicitud_id=solicitud_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al validar carga masiva: {str(e)}")
+
+@router.post("/ordenes/{orden_id}/ejecutar-carga")
+def ejecutar_carga_masiva(
+    orden_id: int,
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """Ejecuta la inserción transaccional de referencias masivas."""
+    try:
+        service = AdminService(db)
+        registros = payload.get("registros", [])
+        usuario_id = payload.get("usuario_id", 1)
+        sesion_id = payload.get("sesion_id")
+        solicitud_id = payload.get("solicitud_id")
+        return service.ejecutar_carga_masiva_referencias(
+            orden_id=orden_id,
+            registros=registros,
+            usuario_id=usuario_id,
+            sesion_id=sesion_id,
+            solicitud_id=solicitud_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error al ejecutar carga masiva: {str(e)}")
 
 
 
