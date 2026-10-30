@@ -86,7 +86,41 @@ class ViviendasFileAnalyzeWorker(QThread):
                         self.progress_updated.emit(curr, tot, f"Procesando página {curr} de {tot}...")
 
                     raw_extracted = RppResolutionExtractor.extract_from_pdf(self.file_path, progress_callback=_rpp_progress_cb)
+
+                    # Auditoría de Consecutividad: Calcular la pendiente base (Folio - Número Oficial)
+                    deltas = []
                     for r in raw_extracted:
+                        try:
+                            nof_val = int(r.get("numero_oficial") or 0)
+                            fol_val = int(r.get("folio_electronico") or 0)
+                            if nof_val > 0 and fol_val > 0:
+                                deltas.append(fol_val - nof_val)
+                        except Exception:
+                            pass
+
+                    base_delta = None
+                    if deltas:
+                        import collections
+                        counter = collections.Counter(deltas)
+                        base_delta, _ = counter.most_common(1)[0]
+
+                    for r in raw_extracted:
+                        pag_num = r.get("pagina", 1)
+                        txt_comp = r.get("texto_completo") or f"Frac. #{r['numero_fraccion']}"
+                        desc_rpp = f"Constancia RPP Pág {pag_num} | {txt_comp}"
+                        # Alerta si el folio o número oficial se desvía del consecutivo matemáticamente esperado
+                        if base_delta is not None:
+                            try:
+                                nof_val = int(r.get("numero_oficial") or 0)
+                                fol_val = int(r.get("folio_electronico") or 0)
+                                if nof_val > 0 and fol_val > 0:
+                                    curr_delta = fol_val - nof_val
+                                    if curr_delta != base_delta:
+                                        folio_esperado = str(base_delta + nof_val)
+                                        desc_rpp = f"⚠️ FOLIO FUERA DE CONSECUTIVO (Esperado: {folio_esperado}) | {desc_rpp}"
+                            except Exception:
+                                pass
+
                         records.append({
                             "interior": r["interior"],
                             "edificio": r["edificio"],
@@ -99,7 +133,7 @@ class ViviendasFileAnalyzeWorker(QThread):
                             "clave_catastral": "",
                             "fecha_alta_cc": "",
                             "padron": "",
-                            "descripcion": f"Folio RPP extraído de Constancia (Frac. #{r['numero_fraccion']})"
+                            "descripcion": desc_rpp
                         })
                 else:
                     self.finished.emit(
@@ -411,27 +445,38 @@ class ViviendasFileAnalyzeWorker(QThread):
                 if raw_folio and raw_folio in rpp_map:
                     target_v = rpp_map.get(raw_folio)
 
-                # 2. VALIDACIÓN PARA UNIDADES DE SERVICIO / SIN EDIFICIO: (Interior, Número Oficial)
+                # 2. VALIDACIÓN POR NÚMERO OFICIAL UNÍVOCO EN EL RÉGIMEN (Prioridad Primaria en RPP/Catastro)
+                if not target_v and raw_nof:
+                    if nof_counts.get(raw_nof) == 1:
+                        target_v = nof_map.get(raw_nof)
+                    elif nof_clean and nof_counts.get(nof_clean) == 1:
+                        target_v = nof_map.get(nof_clean)
+
+                # 3. VALIDACIÓN PARA UNIDADES DE SERVICIO / SIN EDIFICIO: (Interior, Número Oficial)
                 if not target_v and int_clean and raw_nof and (not ed_clean or raw_ed in ("-", "N/A", "NONE", "")):
                     target_v = servicio_map.get((int_clean, nof_clean)) or servicio_map.get((int_clean, raw_nof))
 
-                # 3. VALIDACIÓN SECUNDARIA: Coincidencia conjunta por (Edificio, UPE/Interior, Número Oficial)
+                # 4. VALIDACIÓN SECUNDARIA: Coincidencia conjunta por (Edificio, UPE/Interior, Número Oficial)
                 if not target_v and int_clean and nof_clean:
                     target_v = tupla_completa_map.get((ed_clean, int_clean, nof_clean)) or tupla_completa_map.get((raw_ed, int_clean, nof_clean))
 
-                # 4. VALIDACIÓN FÍSICA DIRECTA: Coincidencia por combinación de (Edificio, UPE/Interior)
+                # 5. VALIDACIÓN FÍSICA DIRECTA: Coincidencia por combinación de (Edificio, UPE/Interior)
                 if not target_v and (ed_clean or raw_ed):
                     target_v = existentes_map.get((ed_clean, int_clean)) or existentes_map.get((raw_ed, int_clean))
 
-                # 5. Respaldo por (interior, número oficial) general
+                # 6. VALIDACIÓN CRUZADA: Coincidencia con campos transpuestos (Interior <-> Edificio)
+                if not target_v and (ed_clean or raw_ed) and int_clean:
+                    target_v = existentes_map.get((int_clean, ed_clean)) or existentes_map.get((int_clean, raw_ed))
+
+                # 7. Respaldo por (interior, número oficial) general
                 if not target_v and int_clean and raw_nof:
                     target_v = servicio_map.get((int_clean, nof_clean)) or servicio_map.get((int_clean, raw_nof))
 
-                # 6. Respaldo para áreas comunes sin edificio asignado con interior unívoco
+                # 8. Respaldo para áreas comunes sin edificio asignado con interior unívoco
                 if not target_v and not ed_clean and not raw_ed and interior_counts.get(int_clean) == 1:
                     target_v = interior_map.get(int_clean)
 
-                # 5. Inferencia Catastral: Si es CATASTRO y no hubo coincidencia, deducir por sufijo de Clave Catastral
+                # 9. Inferencia Catastral: Si es CATASTRO y no hubo coincidencia, deducir por sufijo de Clave Catastral
                 if not target_v and self.modo == "CATASTRO":
                     raw_cc = str(r.get("clave_catastral") or "").strip()
                     if raw_cc.startswith("60") and len(raw_cc) == 18:
@@ -2140,6 +2185,30 @@ class SatcCatalogsView(QWidget):
         self.btn_v_exportar_datos.setEnabled(len(viviendas) > 0)
         self.action_state_changed.emit()
 
+    def _render_viviendas_table_from_cache(self, viviendas: list):
+        """Puebla la tabla de viviendas a partir de la caché en memoria evitando consultas asíncronas y parpadeos."""
+        self.tbl_viviendas.setUpdatesEnabled(False)
+        try:
+            self.tbl_viviendas.setRowCount(len(viviendas))
+            for idx, v in enumerate(viviendas):
+                item_st = QTableWidgetItem("REGISTRADO")
+                item_st.setForeground(Qt.darkGreen)
+                self.tbl_viviendas.setItem(idx, 0, item_st)
+                self.tbl_viviendas.setItem(idx, 1, QTableWidgetItem(str(v.get("regimen_nombre") or "")))
+                self.tbl_viviendas.setItem(idx, 2, QTableWidgetItem(str(v.get("numero_oficial") or "")))
+                self.tbl_viviendas.setItem(idx, 3, QTableWidgetItem(str(v.get("interior") or "")))
+                self.tbl_viviendas.setItem(idx, 4, QTableWidgetItem(str(v.get("edificio") or "")))
+                self.tbl_viviendas.setItem(idx, 5, QTableWidgetItem(str(v.get("nivel") or "")))
+                self.tbl_viviendas.setItem(idx, 6, QTableWidgetItem(str(v.get("destino") or "HABITACIONAL")))
+                self.tbl_viviendas.setItem(idx, 7, QTableWidgetItem(str(v.get("espacio") or "VIVIENDA")))
+                self.tbl_viviendas.setItem(idx, 8, QTableWidgetItem(str(v.get("folio_electronico") or "")))
+                self.tbl_viviendas.setItem(idx, 9, QTableWidgetItem(str(v.get("clave_catastral") or "")))
+                self.tbl_viviendas.setItem(idx, 10, QTableWidgetItem(str(v.get("padron") or "")))
+                self.tbl_viviendas.setItem(idx, 11, QTableWidgetItem(str(v.get("calle") or "")))
+                self.tbl_viviendas.setItem(idx, 12, QTableWidgetItem(str(v.get("descripcion") or "")))
+        finally:
+            self.tbl_viviendas.setUpdatesEnabled(True)
+
     def _on_kpi_clicked(self, kpi_key: str):
         """Maneja el clic interactivo en una pastilla KPI para filtrar la tabla con efecto toggle."""
         modo = self.cmb_v_modo.currentData() if hasattr(self, "cmb_v_modo") else "INICIAL"
@@ -2481,10 +2550,24 @@ class SatcCatalogsView(QWidget):
                     self._on_v_modo_changed()
                 return
 
-        # Refrescar y restaurar la tabla con el padrón actual en BD para el régimen (limpiando residuos de previsualización)
+        # Restaurar la tabla y métricas de forma instantánea sin disparar consultas ni parpadeo visual
         reg_id = self.cmb_v_regimen.currentData()
         if reg_id:
-            self._on_v_regimen_changed()
+            cached_viviendas = getattr(self, "_v_db_viviendas", None)
+            if cached_viviendas:
+                # Restauración fluida desde la memoria (0 ms, sin parpadeo)
+                self._render_viviendas_table_from_cache(cached_viviendas)
+                if hasattr(self, "kpi_alertas_frame"):
+                    self.lbl_vkpi_alertas.setText("Con Advertencia: 0")
+                    self.kpi_alertas_frame.hide()
+                if hasattr(self, "kpi_faltantes_frame"):
+                    self.lbl_vkpi_faltantes.setText("Faltantes: 0")
+                    self.kpi_faltantes_frame.hide()
+                self._highlight_kpi_active("TODOS")
+                self.btn_v_exportar_datos.setEnabled(len(cached_viviendas) > 0)
+                self.action_state_changed.emit()
+            else:
+                self._on_v_regimen_changed()
 
     def _on_v_descargar_plantilla(self):
         """Genera una plantilla Excel (.xlsx) estandarizada según el modo de operación seleccionado."""

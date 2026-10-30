@@ -770,6 +770,10 @@ class ViviendaRepository(BaseCancunRepository):
             if not target and (raw_edif or ed_norm):
                 target = vivienda_map.get((raw_edif, inter)) or vivienda_map.get((ed_norm, inter))
 
+            # 3.1 Prioridad Secundaria Cruzada: Coincidencia con campos transpuestos (Interior <-> Edificio)
+            if not target and (raw_edif or ed_norm) and inter:
+                target = vivienda_map.get((inter, raw_edif)) or vivienda_map.get((inter, ed_norm))
+
             # 4. Respaldo por (interior, número oficial) general
             if not target and inter and raw_nof:
                 target = servicio_map.get((inter, d_clean)) or servicio_map.get((inter, raw_nof))

@@ -234,6 +234,9 @@ class AdminWindow(QMainWindow):
             "app_modulos": lambda: ModulesView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD", "ADM:MODULOS")),
             "acciones": lambda: ActionsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("SEGURIDAD", "ADM:ACCIONES")),
             "conceptos": lambda: CatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:CAT_NEGOCIO")),
+            "notarias": lambda: CatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:CAT_NEGOCIO")),
+            "colaboradores": lambda: CatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:CAT_NEGOCIO")),
+            "desarrollos": lambda: CatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:CAT_NEGOCIO")),
             "geografia": lambda: GeographyView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:GEOGRAFIA")),
             "rfcs": lambda: RfcsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:RFCS")),
             "estados": lambda: StatusView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("CATALOGOS", "ADM:ESTADOS")),
@@ -296,6 +299,9 @@ class AdminWindow(QMainWindow):
             "app_modulos": ("SEGURIDAD", "ADM:MODULOS"),
             "acciones": ("SEGURIDAD", "ADM:ACCIONES"),
             "conceptos": ("CATALOGOS", "ADM:CAT_NEGOCIO"),
+            "notarias": ("CATALOGOS", "ADM:CAT_NEGOCIO"),
+            "colaboradores": ("CATALOGOS", "ADM:CAT_NEGOCIO"),
+            "desarrollos": ("CATALOGOS", "ADM:CAT_NEGOCIO"),
             "geografia": ("CATALOGOS", "ADM:GEOGRAFIA"),
             "rfcs": ("CATALOGOS", "ADM:RFCS"),
             "estados": ("CATALOGOS", "ADM:ESTADOS"),
@@ -327,9 +333,20 @@ class AdminWindow(QMainWindow):
                 )
                 return
 
-        # Para los submódulos de satc que comparten la misma vista por pestañas:
+        # Manejo de pestañas para vistas compartidas (Catálogos de Negocio SAR y Catálogos SATC)
         target_tab_idx = None
         target_view_key = view_name
+
+        if view_name in ["conceptos", "notarias", "colaboradores", "desarrollos"]:
+            target_view_key = "conceptos"
+            catalog_tab_map = {
+                "conceptos": 0,
+                "notarias": 1,
+                "colaboradores": 2,
+                "desarrollos": 3
+            }
+            target_tab_idx = catalog_tab_map.get(view_name)
+
         if view_name == "satc_catalogos":
             view_name = "satc_tipos_tramite"
 
@@ -371,6 +388,9 @@ class AdminWindow(QMainWindow):
                 "app_modulos": "SEGURIDAD",
                 "acciones": "SEGURIDAD",
                 "conceptos": "CATALOGOS",
+                "notarias": "CATALOGOS",
+                "colaboradores": "CATALOGOS",
+                "desarrollos": "CATALOGOS",
                 "geografia": "CATALOGOS",
                 "rfcs": "CATALOGOS",
                 "estados": "CATALOGOS",

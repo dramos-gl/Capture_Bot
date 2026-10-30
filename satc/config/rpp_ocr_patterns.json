@@ -10,15 +10,15 @@
     "UPE"
   ],
   "numero_oficial_patterns": [
-    "N[ÚU\ufffd]?M[EEO]*R?O?\\s+OF[IÍ]?C[IÍ]?AL\\s*(\\d+)",
-    "N[ÚU\ufffd]?M[EEO]*R?O?\\s*(\\d+)\\s+OF[IÍ]?C[IÍ]?AL",
+    "N[ÚU\ufffd]?M[EEO]*R?O?\\s*OF[IÍ]?C[IÍ]?AL\\s*(\\d+)",
+    "N[ÚU\ufffd]?M[EEO]*R?O?\\s*(\\d+)\\s*OF[IÍ]?C[IÍ]?AL",
     "NO\\.?\\s*OF[IÍ]?C[IÍ]?AL\\s*(\\d+)",
     "NUM\\.?\\s*OF[IÍ]?C[IÍ]?AL\\s*(\\d+)"
   ],
   "edificio_patterns": [
-    "(EDIFICIO\\s+[A-Z0-9]+|\\bTORRE\\s+[A-Z0-9]+|\\bEDIF\\.?\\s+[A-Z0-9]+)"
+    "(EDIFICIO\\s*[A-Z0-9]+|\\bTORRE\\s*[A-Z0-9]+|\\bEDIF\\.?\\s*[A-Z0-9]+)"
   ],
   "nivel_patterns": [
-    "(PLANTA\\s+BAJA|NIVEL[\\s\\.]*\\d+|PISO[\\s\\.]*\\d+|PB)"
+    "(\\bPLANTA\\s+BAJA\\b|\\bNIVEL[\\s\\.]*\\d+|\\bPISO[\\s\\.]*\\d+|\\bPB\\b|\\bN[1-9]\\d*\\b)"
   ]
 }

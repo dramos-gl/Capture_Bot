@@ -70,12 +70,25 @@ class AdminMenuBar(QMenuBar):
         menu_catalogos = self.addMenu("&Catálogos SAR")
         menu_catalogos.setWindowFlag(Qt.FramelessWindowHint, True)
         
-        act_conceptos = self._add_action(menu_catalogos, "Catálogos de Negocio (Conceptos, Notarías, Desarrollos)", "tabla", color=Colors.ACCENT_EMERALD)
+        # Submenú desplegable para Catálogos de Negocio
+        menu_negocio = menu_catalogos.addMenu("Catálogos de Negocio")
+        menu_negocio.setIcon(Icons.get_icon("tabla", size=16, color=Colors.ACCENT_EMERALD))
+        menu_negocio.setWindowFlag(Qt.FramelessWindowHint, True)
+
+        act_conceptos = self._add_action(menu_negocio, "Conceptos de Pago", "documento_plantilla", color=Colors.ACCENT_EMERALD)
+        act_notarias = self._add_action(menu_negocio, "Notarías Públicas", "tabla", color=Colors.ACCENT_TEAL)
+        act_colaboradores = self._add_action(menu_negocio, "Colaboradores", "usuarios", color=Colors.ACCENT_BLUE)
+        act_desarrollos = self._add_action(menu_negocio, "Desarrollos Inmobiliarios", "satc_viviendas", color=Colors.ACCENT_CYAN)
+
+        menu_catalogos.addSeparator()
         act_geografia = self._add_action(menu_catalogos, "Geografía Operativa (Municipios y Delegaciones)", "idioma", color=Colors.ACCENT_TEAL)
         act_rfcs = self._add_action(menu_catalogos, "Contribuyentes Base (RFC)", "documento_plantilla", color=Colors.ACCENT_AMBER)
         act_estados = self._add_action(menu_catalogos, "Estados y Transiciones del Sistema", "validar", color=Colors.SUCCESS)
         
         act_conceptos.triggered.connect(lambda: self.view_requested.emit("conceptos"))
+        act_notarias.triggered.connect(lambda: self.view_requested.emit("notarias"))
+        act_colaboradores.triggered.connect(lambda: self.view_requested.emit("colaboradores"))
+        act_desarrollos.triggered.connect(lambda: self.view_requested.emit("desarrollos"))
         act_geografia.triggered.connect(lambda: self.view_requested.emit("geografia"))
         act_rfcs.triggered.connect(lambda: self.view_requested.emit("rfcs"))
         act_estados.triggered.connect(lambda: self.view_requested.emit("estados"))

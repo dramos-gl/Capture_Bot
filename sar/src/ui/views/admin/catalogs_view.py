@@ -2,8 +2,9 @@
 
 import re
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel, QTabWidget
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from sar.src.ui.design_system.tokens.colors import Colors
+from sar.src.ui.design_system.utils.icons import Icons
 from sar.src.ui.design_system.components.molecules.gl_card import CustomCard
 from sar.src.ui.design_system.components.atoms.gl_label import CustomLabel
 from sar.src.ui.design_system.components.atoms.gl_input import CustomInput
@@ -16,6 +17,8 @@ from sar.src.storage.repositories import CatalogoRepository
 from sar.src.services.admin_service import AdminService
 
 class CatalogsView(QWidget):
+    action_state_changed = Signal()
+
     def __init__(self, db_connector, current_user_id, current_sesion_id, can_edit, parent=None):
         super().__init__(parent)
         self.db_connector = db_connector
@@ -40,8 +43,8 @@ class CatalogsView(QWidget):
         
     def _build_ui(self):
         self.tabs = QTabWidget(self)
-        self.tabs.setObjectName("seamlessTabWidget")
-        self.tabs.tabBar().setVisible(False)
+        self.tabs.setObjectName("catalogosTabWidget")
+        self.tabs.currentChanged.connect(lambda idx: self.action_state_changed.emit())
         self.layout.addWidget(self.tabs)
         
         # 1. Conceptos Tab
@@ -55,7 +58,7 @@ class CatalogsView(QWidget):
         self.tbl_conceptos.btn_add.setVisible(self.can_edit)
         self.tbl_conceptos.btn_edit.setVisible(self.can_edit)
         lay_concepts.addWidget(self.tbl_conceptos)
-        self.tabs.addTab(self.tab_conceptos, "Conceptos")
+        self.tabs.addTab(self.tab_conceptos, Icons.get_icon("documento_plantilla", size=16, color=Colors.ACCENT_EMERALD), "Conceptos")
         
         # 2. Notarías Tab
         self.tab_notarias = QWidget()
@@ -68,7 +71,7 @@ class CatalogsView(QWidget):
         self.tbl_notarias.btn_add.setVisible(self.can_edit)
         self.tbl_notarias.btn_edit.setVisible(self.can_edit)
         lay_notarias.addWidget(self.tbl_notarias)
-        self.tabs.addTab(self.tab_notarias, "Notarías")
+        self.tabs.addTab(self.tab_notarias, Icons.get_icon("tabla", size=16, color=Colors.ACCENT_TEAL), "Notarías")
         
         # 3. Colaboradores Tab
         self.tab_colaboradores = QWidget()
@@ -81,7 +84,7 @@ class CatalogsView(QWidget):
         self.tbl_colaboradores.btn_add.setVisible(self.can_edit)
         self.tbl_colaboradores.btn_edit.setVisible(self.can_edit)
         lay_colaboradores.addWidget(self.tbl_colaboradores)
-        self.tabs.addTab(self.tab_colaboradores, "Colaboradores")
+        self.tabs.addTab(self.tab_colaboradores, Icons.get_icon("usuarios", size=16, color=Colors.ACCENT_BLUE), "Colaboradores")
         
         # 4. Desarrollos Tab (horizontal split layout)
         self.tab_desarrollos = QWidget()
@@ -109,7 +112,7 @@ class CatalogsView(QWidget):
         self.tbl_desarrollo_empresas.setEnabled(False)
         lay_desarrollos.addWidget(self.tbl_desarrollo_empresas, stretch=4)
         
-        self.tabs.addTab(self.tab_desarrollos, "Desarrollos")
+        self.tabs.addTab(self.tab_desarrollos, Icons.get_icon("satc_viviendas", size=16, color=Colors.ACCENT_CYAN), "Desarrollos")
 
     # --- CONCEPTOS ---
     def _create_concepto_dialog(self, title: str) -> CustomDialog:
