@@ -1925,7 +1925,7 @@ def registrar_resultado_folio(folio_id: int, request: CancunFolioResultadoReques
     """Registra el resultado del procesamiento de un folio de Cancún."""
     try:
         from satc.src.storage.satc_repos import FolioCancunRepository, ReciboCancunRepository
-        from satc.src.storage.cancunbot_models import FolioCancun
+        from satc.src.storage.satc_models import FolioCancun
 
         f_repo = FolioCancunRepository(db)
         r_repo = ReciboCancunRepository(db)
@@ -2007,7 +2007,7 @@ def importar_cancun_lote_pdf(request: CancunImportarPdfRequest, db: Session = De
     """Crea un nuevo Lote de Cancún a partir de folios extraídos de un archivo PDF omitiendo duplicados en BD."""
     try:
         from satc.src.storage.satc_repos import LoteFolioRepository, FolioCancunRepository
-        from satc.src.storage.cancunbot_models import FolioCancun
+        from satc.src.storage.satc_models import FolioCancun
         from sqlalchemy import select
 
         # Obtener folios ya existentes en la BD para evitar duplicados
@@ -2099,7 +2099,7 @@ def importar_cancun_lote_excel(request: CancunImportarExcelRequest, db: Session 
     """Crea un nuevo Lote de Cancún a partir de folios leídos de Excel omitiendo duplicados en BD."""
     try:
         from satc.src.storage.satc_repos import LoteFolioRepository, FolioCancunRepository
-        from satc.src.storage.cancunbot_models import FolioCancun
+        from satc.src.storage.satc_models import FolioCancun
         from sqlalchemy import select
 
         db_pases = set(db.scalars(select(FolioCancun.folio_pase_caja).where(FolioCancun.folio_pase_caja.isnot(None))).all())

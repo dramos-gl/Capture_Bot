@@ -11,7 +11,8 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 from satc.src.storage.satc_models import (
-    RegimenCondominio, Vivienda, ViviendaHistorialEstado, TramiteVivienda, TipoTramite, EstadoVivienda, EstadoTramite
+    RegimenCondominio, Vivienda, ViviendaHistorialEstado, TramiteVivienda, TipoTramite, EstadoVivienda, EstadoTramite,
+    CorteERP, ViviendaCorteLog
 )
 from satc.src.storage.satc_repos import (
     RegimenCondominioRepository, ViviendaRepository, TramiteViviendaRepository,
@@ -149,7 +150,7 @@ class HousingLifeCycleService:
         viviendas = self.vivienda_repo.list_by_regimen(regimen_id)
         upes_faltantes = regimen.total_upes - len(viviendas)
 
-        sin_catastro = [v.numero_upe for v in viviendas if not v.clave_catastral]
+        sin_catastro = [(v.numero_oficial or v.interior) for v in viviendas if not v.clave_catastral]
         
         return {
             "regimen": regimen.nombre_regimen,
@@ -163,7 +164,7 @@ class HousingLifeCycleService:
     def obtener_viviendas_activas_no_vendidas(self, regimen_id: int) -> List[Vivienda]:
         """
         Retorna únicamente las viviendas de un régimen que NO han sido vendidas ni escrituradas.
-        Filtro de exclusión inteligente: excluye viviendas con fecha_venta/fecha_escrituracion
+        Filtro de exclusión inteligente: excluye viviendas con fecha_escrituracion
         y estados terminales (ESCRITURADA, EN_GARANTIA, CONCLUIDA).
         """
         from satc.src.storage.satc_models import EstadoVivienda
@@ -179,7 +180,6 @@ class HousingLifeCycleService:
             .filter(
                 Vivienda.regimen_id == regimen_id,
                 Vivienda.activo.is_(True),
-                Vivienda.fecha_venta.is_(None),
                 Vivienda.fecha_escrituracion.is_(None),
                 ~Vivienda.estado_vivienda_id.in_(ids_excluidos) if ids_excluidos else True
             )
@@ -346,21 +346,91 @@ class HousingLifeCycleService:
 
     def save_regimen_condominio(self, data: Dict[str, Any]) -> RegimenCondominio:
         reg_id = data.get("regimen_id")
+        desarrollo_id = int(data["desarrollo_id"])
+        mz = data["mz"].strip()
+        lt = data["lt"].strip()
+        sm = (data.get("sm") or "").strip() or None
+
+        # Validación estricta de no duplicidad de macro-lote territorial
+        exclude_id = int(reg_id) if reg_id else None
+        duplicado = self.regimen_repo.find_duplicate(
+            desarrollo_id=desarrollo_id,
+            mz=mz,
+            lt=lt,
+            sm=sm,
+            exclude_regimen_id=exclude_id
+        )
+        if duplicado:
+            detalle_sm = f"S.M. {sm}, " if sm else ""
+            raise ValueError(
+                f"Ya existe un régimen registrado para este desarrollo con la misma ubicación "
+                f"({detalle_sm}Mz {mz}, Lt {lt}): '{duplicado.nombre_regimen}' (ID: {duplicado.regimen_id})."
+            )
+
         if reg_id:
             regimen = self.regimen_repo.get_by_id(int(reg_id))
             if not regimen:
                 raise ValueError(f"Régimen con ID {reg_id} no encontrado.")
-            regimen.desarrollo_id = int(data.get("desarrollo_id", regimen.desarrollo_id))
+
+            # RESTRICCIÓN DE INTEGRIDAD: Si el régimen ya tiene viviendas cargadas,
+            # no se permite alterar desarrollo_id, total_upes, ni la nomenclatura física (sm, mz, lt).
+            total_viviendas = self.vivienda_repo.count_by_regimen(int(reg_id))
+            if total_viviendas > 0:
+                if regimen.desarrollo_id != desarrollo_id:
+                    raise ValueError(
+                        f"No es posible cambiar el desarrollo del régimen porque ya tiene {total_viviendas} "
+                        f"viviendas cargadas en el padrón."
+                    )
+                nuevo_total_upes = int(data.get("total_upes", regimen.total_upes) or 1)
+                if nuevo_total_upes != regimen.total_upes:
+                    raise ValueError(
+                        f"No es posible modificar el total de UPEs autorizadas ({regimen.total_upes}) "
+                        f"porque el régimen ya tiene {total_viviendas} viviendas registradas."
+                    )
+                # Validar nomenclatura física
+                reg_sm_norm = (regimen.sm or "").strip().upper()
+                new_sm_norm = (sm or "").strip().upper()
+                if (reg_sm_norm != new_sm_norm or 
+                    regimen.mz.strip().upper() != mz.strip().upper() or 
+                    regimen.lt.strip().upper() != lt.strip().upper()):
+                    raise ValueError(
+                        f"No es posible modificar la ubicación física (S.M., Manzana o Lote) "
+                        f"porque el régimen ya cuenta con {total_viviendas} viviendas asociadas."
+                    )
+
+            regimen.desarrollo_id = desarrollo_id
             regimen.nombre_regimen = data.get("nombre_regimen", regimen.nombre_regimen).strip()
-            regimen.sm = data.get("sm", regimen.sm)
-            regimen.mz = data.get("mz", regimen.mz).strip()
-            regimen.lt = data.get("lt", regimen.lt).strip()
+            regimen.sm = sm
+            regimen.mz = mz
+            regimen.lt = lt
             regimen.total_upes = int(data.get("total_upes", regimen.total_upes) or 1)
             regimen.licencia_construccion_matriz = data.get("licencia_construccion_matriz", regimen.licencia_construccion_matriz)
             regimen.clave_catastral_matriz = data.get("clave_catastral_matriz", regimen.clave_catastral_matriz)
+            
+            # Metadatos Jurídicos de la Boleta de Inscripción (RPP)
+            regimen.numero_instrumento = data.get("numero_instrumento") or None
+            fecha_lib = data.get("fecha_liberacion")
+            if fecha_lib and isinstance(fecha_lib, str):
+                try:
+                    fecha_lib = datetime.strptime(fecha_lib.strip().split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                except Exception:
+                    fecha_lib = None
+            regimen.fecha_liberacion = fecha_lib
+            regimen.notaria = data.get("notaria") or None
+            regimen.notario = data.get("notario") or None
+            regimen.solicitante = data.get("solicitante") or None
+            regimen.observaciones = data.get("observaciones") or None
+
             regimen.activo = bool(data.get("activo", regimen.activo))
             regimen.updated_at = datetime.utcnow()
         else:
+            fecha_lib = data.get("fecha_liberacion")
+            if fecha_lib and isinstance(fecha_lib, str):
+                try:
+                    fecha_lib = datetime.strptime(fecha_lib.strip().split("T")[0].split(" ")[0], "%Y-%m-%d").date()
+                except Exception:
+                    fecha_lib = None
+
             regimen = RegimenCondominio(
                 desarrollo_id=int(data["desarrollo_id"]),
                 nombre_regimen=data["nombre_regimen"].strip(),
@@ -371,6 +441,12 @@ class HousingLifeCycleService:
                 upes_generadas=0,
                 licencia_construccion_matriz=data.get("licencia_construccion_matriz"),
                 clave_catastral_matriz=data.get("clave_catastral_matriz"),
+                numero_instrumento=data.get("numero_instrumento"),
+                fecha_liberacion=fecha_lib,
+                notaria=data.get("notaria"),
+                notario=data.get("notario"),
+                solicitante=data.get("solicitante"),
+                observaciones=data.get("observaciones"),
                 activo=bool(data.get("activo", True)),
                 created_at=datetime.utcnow()
             )
@@ -620,6 +696,276 @@ class HousingLifeCycleService:
             "total_en_archivo": len(records)
         }
 
+    # =========================================================================
+    # GESTIÓN Y AUDITORÍA DE DISPONIBILIDAD ERP (CORTES DE UBICACIONES)
+    # =========================================================================
+
+    @staticmethod
+    def _clasificar_estado_erp(status_lote: Optional[str], etapa: Optional[str]) -> str:
+        """
+        Clasifica la combinación de status lote y etapa del ERP en las condiciones canónicas de SATC:
+        'DISPONIBLE', 'EN_PROCESO_ESCRITURACION', 'TITULADA', 'BLOQUEADA_ADMINISTRATIVA'.
+        """
+        st = (status_lote or "").strip().upper()
+        et = (etapa or "").strip().upper()
+
+        # Si ya está escriturada/titulada
+        if st in ("U", "ESCRITURADO", "ESCRITURADA", "TITULADA", "TITULADO", "VENDIDO", "VENDIDA") or "18" in et or "ESCRITURADO" in et:
+            return "TITULADA"
+
+        # Si está en proceso notarial o expediente activo
+        # Claves ERP: R (Capturado), S (Recibido), T (Recurso), I (Inscrito)
+        # Etapas ERP: 7 (Captura), 27 (Recepción), 20 (Inscripción), 14 (En Notaría), 2 (Aviso Retención)
+        if st in ("R", "S", "T", "I", "INSCRITO", "APARTADO", "ASIGNADO") or any(
+            token in et for token in ("7", "27", "20", "14", "2", "NOTARIA", "RETENCION", "EXPEDIENTE", "INSCRIPCION")
+        ):
+            return "EN_PROCESO_ESCRITURACION"
+
+        # Si está bloqueada administrativamente o en renta
+        if st in ("N", "O", "E", "BLOQUEADO", "OCULTO", "RENTA"):
+            return "BLOQUEADA_ADMINISTRATIVA"
+
+        # Si está disponible o cancelada
+        if st in ("D", "C", "DISPONIBLE", "DISP", "CANCELADO", "CANCELADA", "LIBRE"):
+            return "DISPONIBLE"
+
+        return "DISPONIBLE"
+
+    @staticmethod
+    def _normalizar_token_ubicacion(val: Any) -> str:
+        """Limpia ceros a la izquierda y prefijos de texto para comparar identificadores de forma canónica."""
+        s = str(val or "").strip().upper()
+        for prefix in ("MZA", "MZ", "LOTE", "LT", "INT", "#", "-"):
+            s = s.replace(prefix, "")
+        s = s.strip()
+        # Si es un número con ceros a la izquierda (ej. '01'), despojar ceros sobrantes
+        if s.isdigit():
+            return str(int(s))
+        return s
+
+    def analizar_corte_erp(self, desarrollo_id: int, records: List[Dict[str, Any]], nombre_archivo: str = "") -> Dict[str, Any]:
+        """
+        Compara un corte de ubicaciones del ERP contra el padrón de SATC.
+        Detecta deltas (Nuevas, Continuas, Transición a Escrituración, Tituladas y Reincorporadas por Cancelación).
+        No altera la base de datos (Dry-Run / Previsualización).
+        """
+        viviendas_db = self.get_viviendas_by_desarrollo(desarrollo_id)
+        
+        # Mapear viviendas activas en base de datos por (mz normalizada, lt normalizado, interior normalizado)
+        db_map: Dict[str, Dict[str, Any]] = {}
+        for v in viviendas_db:
+            reg_mz = self._normalizar_token_ubicacion(v.get("regimen_mz"))
+            reg_lt = self._normalizar_token_ubicacion(v.get("regimen_lt"))
+            v_int = self._normalizar_token_ubicacion(v.get("interior"))
+            key = f"{reg_mz}_{reg_lt}_{v_int}"
+            db_map[key] = v
+
+        deltas = []
+        tot_disp = 0
+        tot_escr = 0
+        tot_tit = 0
+        tot_reinc = 0
+        tot_sin_cambio = 0
+
+        for r in records:
+            mz_raw = str(r.get("mz") or "").strip()
+            lt_raw = str(r.get("lote") or r.get("lt") or "").strip()
+            int_raw = str(r.get("interior") or "").strip()
+            status_lote = str(r.get("status_lote") or r.get("status lote") or r.get("status") or "").strip()
+            fecha_status = str(r.get("fecha_estatus_lote") or r.get("fecha estatus lote") or "").strip()
+            cliente = str(r.get("cliente") or "").strip()
+            nss = str(r.get("nns") or r.get("nss") or "").strip()
+            etapa = str(r.get("etapa") or "").strip()
+
+            mz_norm = self._normalizar_token_ubicacion(mz_raw)
+            lt_norm = self._normalizar_token_ubicacion(lt_raw)
+            int_norm = self._normalizar_token_ubicacion(int_raw)
+            key = f"{mz_norm}_{lt_norm}_{int_norm}"
+
+            condicion_nueva = self._clasificar_estado_erp(status_lote, etapa)
+            vivienda_match = db_map.get(key)
+
+            # Acumuladores globales por condición comercial en el corte
+            if condicion_nueva == "TITULADA":
+                tot_tit += 1
+            elif condicion_nueva == "EN_PROCESO_ESCRITURACION":
+                tot_escr += 1
+            elif condicion_nueva == "DISPONIBLE":
+                tot_disp += 1
+
+            if not vivienda_match:
+                # No existe aún en el padrón físico de SATC
+                delta_tipo = "NO_REGISTRADA_EN_SATC"
+                condicion_ant = "INEXISTENTE"
+                vivienda_id = None
+                tramites_vencidos = 0
+            else:
+                vivienda_id = vivienda_match.get("vivienda_id")
+                condicion_ant = vivienda_match.get("condicion_comercial") or "DISPONIBLE"
+
+                # Evaluar deltas
+                if condicion_nueva == "TITULADA":
+                    delta_tipo = "TITULADA" if condicion_ant != "TITULADA" else "SIN_CAMBIO"
+                elif condicion_nueva == "EN_PROCESO_ESCRITURACION":
+                    delta_tipo = "AVANCE_ESCRITURACION" if condicion_ant != "EN_PROCESO_ESCRITURACION" else "SIN_CAMBIO"
+                elif condicion_nueva == "DISPONIBLE":
+                    # ESCENARIO D: Estaba en escrituración o venta y ahora vuelve a estar disponible
+                    if condicion_ant in ("EN_PROCESO_ESCRITURACION", "TITULADA"):
+                        delta_tipo = "REINCORPORADA_CANCELACION"
+                        tot_reinc += 1
+                    else:
+                        delta_tipo = "SIN_CAMBIO"
+                else:
+                    delta_tipo = "SIN_CAMBIO"
+
+                if delta_tipo == "SIN_CAMBIO":
+                    tot_sin_cambio += 1
+
+                # Auditoría de trámites para viviendas disponibles o reincorporadas
+                tramites_vencidos = 0
+                if condicion_nueva == "DISPONIBLE" and vivienda_id:
+                    # Contar trámites cuya fecha_vencimiento sea previa a hoy
+                    hoy = datetime.utcnow().date()
+                    for t in self.tramite_repo.list_by_vivienda(vivienda_id):
+                        if t.fecha_vencimiento and t.fecha_vencimiento < hoy:
+                            tramites_vencidos += 1
+
+            deltas.append({
+                "vivienda_id": vivienda_id,
+                "regimen_nombre": vivienda_match.get("regimen_nombre") if vivienda_match else "N/A",
+                "mz": mz_raw,
+                "lote": lt_raw,
+                "interior": int_raw,
+                "exterior": str(r.get("exterior") or r.get("Exterior") or ""),
+                "nivel": str(r.get("nivel") or ""),
+                "status_erp_raw": status_lote,
+                "fecha_status_erp": fecha_status,
+                "etapa_erp_raw": etapa,
+                "cliente_raw": cliente,
+                "nss_raw": nss,
+                "condicion_anterior": condicion_ant,
+                "condicion_nueva": condicion_nueva,
+                "delta_tipo": delta_tipo,
+                "tramites_vencidos": tramites_vencidos,
+                "folio_rpp": vivienda_match.get("folio_electronico") if vivienda_match else "",
+                "clave_catastral": vivienda_match.get("clave_catastral") if vivienda_match else ""
+            })
+
+        return {
+            "desarrollo_id": desarrollo_id,
+            "nombre_archivo": nombre_archivo,
+            "total_registros": len(records),
+            "total_disponibles": tot_disp,
+            "total_en_escrituracion": tot_escr,
+            "total_tituladas": tot_tit,
+            "total_reincorporadas": tot_reinc,
+            "total_sin_cambio": tot_sin_cambio,
+            "deltas": deltas
+        }
+
+    def aplicar_corte_erp(
+        self,
+        desarrollo_id: int,
+        analisis_result: Dict[str, Any],
+        usuario_id: int,
+        nombre_archivo: str = "reporte_erp.xlsx"
+    ) -> Dict[str, Any]:
+        """
+        Persiste formalmente el corte del ERP en satc_auditoria.corte_erp,
+        actualiza la condición comercial de las viviendas e inserta la bitácora granular.
+        """
+        import hashlib
+        deltas = analisis_result.get("deltas", [])
+        hash_content = f"{desarrollo_id}_{nombre_archivo}_{datetime.utcnow().isoformat()}_{len(deltas)}"
+        hash_sha256 = hashlib.sha256(hash_content.encode("utf-8")).hexdigest()
+
+        # 1. Crear registro maestro de corte
+        corte = CorteERP(
+            desarrollo_id=desarrollo_id,
+            nombre_archivo=nombre_archivo,
+            hash_sha256=hash_sha256,
+            fecha_corte_declarada=datetime.utcnow(),
+            total_registros=analisis_result.get("total_registros", len(deltas)),
+            total_disponibles=analisis_result.get("total_disponibles", 0),
+            total_en_escrituracion=analisis_result.get("total_en_escrituracion", 0),
+            total_tituladas=analisis_result.get("total_tituladas", 0),
+            total_reincorporadas=analisis_result.get("total_reincorporadas", 0),
+            total_sin_cambio=analisis_result.get("total_sin_cambio", 0),
+            usuario_id=usuario_id,
+            created_at=datetime.utcnow()
+        )
+        self.session.add(corte)
+        self.session.flush()
+
+        actualizadas = 0
+        reincorporadas = 0
+
+        # 2. Actualizar viviendas y registrar bitácora granular
+        for d in deltas:
+            vid = d.get("vivienda_id")
+            if not vid:
+                continue
+
+            vivienda = self.vivienda_repo.get_by_id(vid)
+            if not vivienda:
+                continue
+
+            cond_nueva = d["condicion_nueva"]
+            delta_tipo = d["delta_tipo"]
+
+            # Parsear fecha estatus ERP
+            f_raw = d.get("fecha_status_erp")
+            f_dt = None
+            if f_raw:
+                try:
+                    f_dt = datetime.strptime(f_raw.split("T")[0].split(" ")[0], "%Y-%m-%d")
+                except Exception:
+                    f_dt = None
+
+            # Actualizar vivienda
+            vivienda.condicion_comercial = cond_nueva
+            vivienda.ultimo_corte_id = corte.corte_id
+            vivienda.fecha_estatus_erp = f_dt
+            vivienda.cliente_erp = d.get("cliente_raw") or None
+            vivienda.nss_cliente = d.get("nss_raw") or None
+            vivienda.etapa_erp = d.get("etapa_erp_raw") or None
+            vivienda.es_reincorporada = (delta_tipo == "REINCORPORADA_CANCELACION")
+            vivienda.updated_at = datetime.utcnow()
+
+            if delta_tipo == "REINCORPORADA_CANCELACION":
+                reincorporadas += 1
+            actualizadas += 1
+
+            # Log granular
+            log = ViviendaCorteLog(
+                corte_id=corte.corte_id,
+                vivienda_id=vid,
+                condicion_anterior=d.get("condicion_anterior"),
+                condicion_nueva=cond_nueva,
+                status_erp_raw=d.get("status_erp_raw"),
+                etapa_erp_raw=d.get("etapa_erp_raw"),
+                cliente_raw=d.get("cliente_raw"),
+                nss_raw=d.get("nss_raw"),
+                delta_tipo=delta_tipo,
+                observaciones=f"Corte #{corte.corte_id} - {delta_tipo}",
+                created_at=datetime.utcnow()
+            )
+            self.session.add(log)
+
+        self.session.commit()
+        logger.info(f"Corte ERP #{corte.corte_id} aplicado con éxito: {actualizadas} viviendas procesadas, {reincorporadas} reincorporadas.")
+
+        return {
+            "corte_id": corte.corte_id,
+            "desarrollo_id": desarrollo_id,
+            "actualizadas": actualizadas,
+            "reincorporadas": reincorporadas,
+            "total_disponibles": corte.total_disponibles,
+            "total_en_escrituracion": corte.total_en_escrituracion,
+            "total_tituladas": corte.total_tituladas
+        }
+
+
     def vincular_folios_rpp_pdf(self, regimen_id: int, pdf_path: str, usuario_id: Optional[int] = None, sesion_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Extrae y asocia los folios electrónicos del RPP directamente desde una Constancia de Resolución PDF.
@@ -651,6 +997,276 @@ class HousingLifeCycleService:
             "no_encontrados": res["no_encontrados"],
             "total_en_archivo": len(records)
         }
+
+    # =========================================================================
+    # GESTIÓN Y AUDITORÍA DE DISPONIBILIDAD ERP (CORTES DE UBICACIONES)
+    # =========================================================================
+
+    @staticmethod
+    def _clasificar_estado_erp(status_lote: Optional[str], etapa: Optional[str]) -> str:
+        """
+        Clasifica la combinación de status lote y etapa del ERP en las condiciones canónicas de SATC:
+        'DISPONIBLE', 'EN_PROCESO_ESCRITURACION', 'TITULADA', 'BLOQUEADA_ADMINISTRATIVA'.
+        """
+        st = (status_lote or "").strip().upper()
+        et = (etapa or "").strip().upper()
+
+        # Si ya está escriturada/titulada
+        if st in ("U", "ESCRITURADO", "ESCRITURADA", "TITULADA", "TITULADO", "VENDIDO", "VENDIDA") or "18" in et or "ESCRITURADO" in et:
+            return "TITULADA"
+
+        # Si está en proceso notarial o expediente activo
+        # Claves ERP: R (Capturado), S (Recibido), T (Recurso), I (Inscrito)
+        # Etapas ERP: 7 (Captura), 27 (Recepción), 20 (Inscripción), 14 (En Notaría), 2 (Aviso Retención)
+        if st in ("R", "S", "T", "I", "INSCRITO", "APARTADO", "ASIGNADO") or any(
+            token in et for token in ("7", "27", "20", "14", "2", "NOTARIA", "RETENCION", "EXPEDIENTE", "INSCRIPCION")
+        ):
+            return "EN_PROCESO_ESCRITURACION"
+
+        # Si está bloqueada administrativamente o en renta
+        if st in ("N", "O", "E", "BLOQUEADO", "OCULTO", "RENTA"):
+            return "BLOQUEADA_ADMINISTRATIVA"
+
+        # Si está disponible o cancelada
+        if st in ("D", "C", "DISPONIBLE", "DISP", "CANCELADO", "CANCELADA", "LIBRE"):
+            return "DISPONIBLE"
+
+        return "DISPONIBLE"
+
+    @staticmethod
+    def _normalizar_token_ubicacion(val: Any) -> str:
+        """Limpia ceros a la izquierda y prefijos de texto para comparar identificadores de forma canónica."""
+        s = str(val or "").strip().upper()
+        for prefix in ("MZA", "MZ", "LOTE", "LT", "INT", "#", "-"):
+            s = s.replace(prefix, "")
+        s = s.strip()
+        # Si es un número con ceros a la izquierda (ej. '01'), despojar ceros sobrantes
+        if s.isdigit():
+            return str(int(s))
+        return s
+
+    def analizar_corte_erp(self, desarrollo_id: int, records: List[Dict[str, Any]], nombre_archivo: str = "") -> Dict[str, Any]:
+        """
+        Compara un corte de ubicaciones del ERP contra el padrón de SATC.
+        Detecta deltas (Nuevas, Continuas, Transición a Escrituración, Tituladas y Reincorporadas por Cancelación).
+        No altera la base de datos (Dry-Run / Previsualización).
+        """
+        viviendas_db = self.get_viviendas_by_desarrollo(desarrollo_id)
+        
+        # Mapear viviendas activas en base de datos por (mz normalizada, lt normalizado, interior normalizado)
+        db_map: Dict[str, Dict[str, Any]] = {}
+        for v in viviendas_db:
+            reg_mz = self._normalizar_token_ubicacion(v.get("regimen_mz"))
+            reg_lt = self._normalizar_token_ubicacion(v.get("regimen_lt"))
+            v_int = self._normalizar_token_ubicacion(v.get("interior"))
+            key = f"{reg_mz}_{reg_lt}_{v_int}"
+            db_map[key] = v
+
+        deltas = []
+        tot_disp = 0
+        tot_escr = 0
+        tot_tit = 0
+        tot_reinc = 0
+        tot_sin_cambio = 0
+
+        for r in records:
+            mz_raw = str(r.get("mz") or "").strip()
+            lt_raw = str(r.get("lote") or r.get("lt") or "").strip()
+            int_raw = str(r.get("interior") or "").strip()
+            status_lote = str(r.get("status_lote") or r.get("status lote") or r.get("status") or "").strip()
+            fecha_status = str(r.get("fecha_estatus_lote") or r.get("fecha estatus lote") or "").strip()
+            cliente = str(r.get("cliente") or "").strip()
+            nss = str(r.get("nns") or r.get("nss") or "").strip()
+            etapa = str(r.get("etapa") or "").strip()
+
+            mz_norm = self._normalizar_token_ubicacion(mz_raw)
+            lt_norm = self._normalizar_token_ubicacion(lt_raw)
+            int_norm = self._normalizar_token_ubicacion(int_raw)
+            key = f"{mz_norm}_{lt_norm}_{int_norm}"
+
+            condicion_nueva = self._clasificar_estado_erp(status_lote, etapa)
+            vivienda_match = db_map.get(key)
+
+            # Acumuladores globales por condición comercial en el corte
+            if condicion_nueva == "TITULADA":
+                tot_tit += 1
+            elif condicion_nueva == "EN_PROCESO_ESCRITURACION":
+                tot_escr += 1
+            elif condicion_nueva == "DISPONIBLE":
+                tot_disp += 1
+
+            if not vivienda_match:
+                # No existe aún en el padrón físico de SATC
+                delta_tipo = "NO_REGISTRADA_EN_SATC"
+                condicion_ant = "INEXISTENTE"
+                vivienda_id = None
+                tramites_vencidos = 0
+            else:
+                vivienda_id = vivienda_match.get("vivienda_id")
+                condicion_ant = vivienda_match.get("condicion_comercial") or "DISPONIBLE"
+
+                # Evaluar deltas
+                if condicion_nueva == "TITULADA":
+                    delta_tipo = "TITULADA" if condicion_ant != "TITULADA" else "SIN_CAMBIO"
+                elif condicion_nueva == "EN_PROCESO_ESCRITURACION":
+                    delta_tipo = "AVANCE_ESCRITURACION" if condicion_ant != "EN_PROCESO_ESCRITURACION" else "SIN_CAMBIO"
+                elif condicion_nueva == "DISPONIBLE":
+                    # ESCENARIO D: Estaba en escrituración o venta y ahora vuelve a estar disponible
+                    if condicion_ant in ("EN_PROCESO_ESCRITURACION", "TITULADA"):
+                        delta_tipo = "REINCORPORADA_CANCELACION"
+                        tot_reinc += 1
+                    else:
+                        delta_tipo = "SIN_CAMBIO"
+                else:
+                    delta_tipo = "SIN_CAMBIO"
+
+                if delta_tipo == "SIN_CAMBIO":
+                    tot_sin_cambio += 1
+
+                # Auditoría de trámites para viviendas disponibles o reincorporadas
+                tramites_vencidos = 0
+                if condicion_nueva == "DISPONIBLE" and vivienda_id:
+                    # Contar trámites cuya fecha_vencimiento sea previa a hoy
+                    hoy = datetime.utcnow().date()
+                    for t in self.tramite_repo.list_by_vivienda(vivienda_id):
+                        if t.fecha_vencimiento and t.fecha_vencimiento < hoy:
+                            tramites_vencidos += 1
+
+            deltas.append({
+                "vivienda_id": vivienda_id,
+                "regimen_nombre": vivienda_match.get("regimen_nombre") if vivienda_match else "N/A",
+                "mz": mz_raw,
+                "lote": lt_raw,
+                "interior": int_raw,
+                "exterior": str(r.get("exterior") or r.get("Exterior") or ""),
+                "nivel": str(r.get("nivel") or ""),
+                "status_erp_raw": status_lote,
+                "fecha_status_erp": fecha_status,
+                "etapa_erp_raw": etapa,
+                "cliente_raw": cliente,
+                "nss_raw": nss,
+                "condicion_anterior": condicion_ant,
+                "condicion_nueva": condicion_nueva,
+                "delta_tipo": delta_tipo,
+                "tramites_vencidos": tramites_vencidos,
+                "folio_rpp": vivienda_match.get("folio_electronico") if vivienda_match else "",
+                "clave_catastral": vivienda_match.get("clave_catastral") if vivienda_match else ""
+            })
+
+        return {
+            "desarrollo_id": desarrollo_id,
+            "nombre_archivo": nombre_archivo,
+            "total_registros": len(records),
+            "total_disponibles": tot_disp,
+            "total_en_escrituracion": tot_escr,
+            "total_tituladas": tot_tit,
+            "total_reincorporadas": tot_reinc,
+            "total_sin_cambio": tot_sin_cambio,
+            "deltas": deltas
+        }
+
+    def aplicar_corte_erp(
+        self,
+        desarrollo_id: int,
+        analisis_result: Dict[str, Any],
+        usuario_id: int,
+        nombre_archivo: str = "reporte_erp.xlsx"
+    ) -> Dict[str, Any]:
+        """
+        Persiste formalmente el corte del ERP en satc_auditoria.corte_erp,
+        actualiza la condición comercial de las viviendas e inserta la bitácora granular.
+        """
+        import hashlib
+        deltas = analisis_result.get("deltas", [])
+        hash_content = f"{desarrollo_id}_{nombre_archivo}_{datetime.utcnow().isoformat()}_{len(deltas)}"
+        hash_sha256 = hashlib.sha256(hash_content.encode("utf-8")).hexdigest()
+
+        # 1. Crear registro maestro de corte
+        corte = CorteERP(
+            desarrollo_id=desarrollo_id,
+            nombre_archivo=nombre_archivo,
+            hash_sha256=hash_sha256,
+            fecha_corte_declarada=datetime.utcnow(),
+            total_registros=analisis_result.get("total_registros", len(deltas)),
+            total_disponibles=analisis_result.get("total_disponibles", 0),
+            total_en_escrituracion=analisis_result.get("total_en_escrituracion", 0),
+            total_tituladas=analisis_result.get("total_tituladas", 0),
+            total_reincorporadas=analisis_result.get("total_reincorporadas", 0),
+            total_sin_cambio=analisis_result.get("total_sin_cambio", 0),
+            usuario_id=usuario_id,
+            created_at=datetime.utcnow()
+        )
+        self.session.add(corte)
+        self.session.flush()
+
+        actualizadas = 0
+        reincorporadas = 0
+
+        # 2. Actualizar viviendas y registrar bitácora granular
+        for d in deltas:
+            vid = d.get("vivienda_id")
+            if not vid:
+                continue
+
+            vivienda = self.vivienda_repo.get_by_id(vid)
+            if not vivienda:
+                continue
+
+            cond_nueva = d["condicion_nueva"]
+            delta_tipo = d["delta_tipo"]
+
+            # Parsear fecha estatus ERP
+            f_raw = d.get("fecha_status_erp")
+            f_dt = None
+            if f_raw:
+                try:
+                    f_dt = datetime.strptime(f_raw.split("T")[0].split(" ")[0], "%Y-%m-%d")
+                except Exception:
+                    f_dt = None
+
+            # Actualizar vivienda
+            vivienda.condicion_comercial = cond_nueva
+            vivienda.ultimo_corte_id = corte.corte_id
+            vivienda.fecha_estatus_erp = f_dt
+            vivienda.cliente_erp = d.get("cliente_raw") or None
+            vivienda.nss_cliente = d.get("nss_raw") or None
+            vivienda.etapa_erp = d.get("etapa_erp_raw") or None
+            vivienda.es_reincorporada = (delta_tipo == "REINCORPORADA_CANCELACION")
+            vivienda.updated_at = datetime.utcnow()
+
+            if delta_tipo == "REINCORPORADA_CANCELACION":
+                reincorporadas += 1
+            actualizadas += 1
+
+            # Log granular
+            log = ViviendaCorteLog(
+                corte_id=corte.corte_id,
+                vivienda_id=vid,
+                condicion_anterior=d.get("condicion_anterior"),
+                condicion_nueva=cond_nueva,
+                status_erp_raw=d.get("status_erp_raw"),
+                etapa_erp_raw=d.get("etapa_erp_raw"),
+                cliente_raw=d.get("cliente_raw"),
+                nss_raw=d.get("nss_raw"),
+                delta_tipo=delta_tipo,
+                observaciones=f"Corte #{corte.corte_id} - {delta_tipo}",
+                created_at=datetime.utcnow()
+            )
+            self.session.add(log)
+
+        self.session.commit()
+        logger.info(f"Corte ERP #{corte.corte_id} aplicado con éxito: {actualizadas} viviendas procesadas, {reincorporadas} reincorporadas.")
+
+        return {
+            "corte_id": corte.corte_id,
+            "desarrollo_id": desarrollo_id,
+            "actualizadas": actualizadas,
+            "reincorporadas": reincorporadas,
+            "total_disponibles": corte.total_disponibles,
+            "total_en_escrituracion": corte.total_en_escrituracion,
+            "total_tituladas": corte.total_tituladas
+        }
+
 
 
 

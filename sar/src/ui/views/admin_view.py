@@ -253,7 +253,7 @@ class AdminWindow(QMainWindow):
         
         if SatcCatalogsView is not None:
             satc_factory = lambda: SatcCatalogsView(self.db_connector, self._get_current_user(), self._get_current_session(), self._can_edit("TRAMITES_VIVIENDA", "CATALOGOS_SATC"))
-            for key in ["satc_catalogos", "satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_formatos", "satc_viviendas"]:
+            for key in ["satc_catalogos", "satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_formatos", "satc_viviendas", "satc_corte_erp"]:
                 self.view_factories[key] = satc_factory
         
         # Vista de bienvenida no invasiva inicial
@@ -320,6 +320,7 @@ class AdminWindow(QMainWindow):
             "satc_regimenes": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
             "satc_formatos": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
             "satc_viviendas": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
+            "satc_corte_erp": ("TRAMITES_VIVIENDA", "CATALOGOS_SATC"),
         }
         
         if view_name in view_module_map:
@@ -350,7 +351,7 @@ class AdminWindow(QMainWindow):
         if view_name == "satc_catalogos":
             view_name = "satc_tipos_tramite"
 
-        if view_name in ["satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas", "satc_formatos"]:
+        if view_name in ["satc_tipos_tramite", "satc_estados_tramite", "satc_estados_vivienda", "satc_regimenes", "satc_viviendas", "satc_formatos", "satc_corte_erp"]:
             target_view_key = "satc_catalogos"
             tab_map = {
                 "satc_tipos_tramite": 0,
@@ -358,7 +359,8 @@ class AdminWindow(QMainWindow):
                 "satc_estados_vivienda": 2,
                 "satc_regimenes": 3,
                 "satc_viviendas": 4,
-                "satc_formatos": 5
+                "satc_formatos": 5,
+                "satc_corte_erp": 6
             }
             target_tab_idx = tab_map.get(view_name)
 
@@ -410,6 +412,7 @@ class AdminWindow(QMainWindow):
                 "satc_regimenes": "SATC",
                 "satc_viviendas": "SATC",
                 "satc_formatos": "SATC",
+                "satc_corte_erp": "SATC",
             }
             category = category_map.get(view_name, "SATC" if "satc" in view_name else "CATALOGOS")
             self.action_toolbar.set_module_context(category, view_name)

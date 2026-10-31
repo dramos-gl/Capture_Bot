@@ -43,7 +43,8 @@ class CatalogsView(QWidget):
         
     def _build_ui(self):
         self.tabs = QTabWidget(self)
-        self.tabs.setObjectName("catalogosTabWidget")
+        self.tabs.setObjectName("seamlessTabWidget")
+        self.tabs.tabBar().setVisible(False)
         self.tabs.currentChanged.connect(lambda idx: self.action_state_changed.emit())
         self.layout.addWidget(self.tabs)
         
@@ -109,6 +110,11 @@ class CatalogsView(QWidget):
         self.tbl_desarrollo_empresas.edit_requested.connect(self._on_edit_desarrollo_empresa)
         self.tbl_desarrollo_empresas.btn_add.setVisible(self.can_edit)
         self.tbl_desarrollo_empresas.btn_edit.setVisible(self.can_edit)
+        self.btn_asociar_empresa = self.tbl_desarrollo_empresas.set_header_button(
+            "+ Asociar Empresa", self._on_new_desarrollo_empresa, icon_name="guardar_nuevo", tooltip="Asociar una nueva empresa al desarrollo seleccionado"
+        )
+        self.btn_asociar_empresa.setVisible(self.can_edit)
+        self.btn_asociar_empresa.setEnabled(False)
         self.tbl_desarrollo_empresas.setEnabled(False)
         lay_desarrollos.addWidget(self.tbl_desarrollo_empresas, stretch=4)
         
@@ -468,6 +474,8 @@ class CatalogsView(QWidget):
     def _on_desarrollo_selected(self, data: dict):
         self.current_desarrollo_id = data.get("desarrollo_id")
         self.tbl_desarrollo_empresas.setEnabled(True)
+        if hasattr(self, "btn_asociar_empresa") and self.can_edit:
+            self.btn_asociar_empresa.setEnabled(True)
         self.tbl_desarrollo_empresas.lbl_title.setText(f"Empresas: {data.get('nombre')}")
         self.refresh_desarrollo_empresas()
 

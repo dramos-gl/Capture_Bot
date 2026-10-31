@@ -8,7 +8,7 @@ from openpyxl.utils import get_column_letter
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFormLayout, QFrame, QLabel, QTabWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QFileDialog,
-    QSizePolicy, QLineEdit
+    QSizePolicy, QLineEdit, QScrollArea
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QColor
@@ -703,6 +703,84 @@ class ViviendasImportWorker(QThread):
             self.finished.emit(False, {}, str(e))
 
 
+class CorteERPAnalyzeWorker(QThread):
+    """Worker thread para parsear y analizar un corte de ubicaciones del ERP en segundo plano."""
+    finished = Signal(bool, dict, str)
+    progress_updated = Signal(int, int, str)
+
+    def __init__(self, api_client, db_connector, file_path: str, desarrollo_id: int):
+        super().__init__()
+        self.api_client = api_client
+        self.db_connector = db_connector
+        self.file_path = file_path
+        self.desarrollo_id = desarrollo_id
+
+    def run(self):
+        try:
+            self.progress_updated.emit(10, 100, "Leyendo archivo de ubicaciones del ERP...")
+            from satc.src.services.erp_report_parser import parse_reporte_ubicaciones_erp
+            records = parse_reporte_ubicaciones_erp(self.file_path)
+            
+            if not records:
+                self.finished.emit(False, {}, "El archivo no contiene registros de ubicaciones válidos.")
+                return
+
+            self.progress_updated.emit(50, 100, f"Analizando {len(records)} ubicaciones y contrastando contra padrón...")
+            nom_arch = os.path.basename(self.file_path)
+
+            if self.api_client.connect_via_api:
+                payload = {
+                    "desarrollo_id": self.desarrollo_id,
+                    "records": records,
+                    "nombre_archivo": nom_arch
+                }
+                res = self.api_client.request("POST", "/api/admin/save/satc_corte_erp_analizar", data={"data": payload})
+            else:
+                with self.db_connector.get_session() as session:
+                    svc = HousingLifeCycleService(session)
+                    res = svc.analizar_corte_erp(self.desarrollo_id, records, nom_arch)
+
+            self.progress_updated.emit(100, 100, "Análisis de corte finalizado.")
+            self.finished.emit(True, res, "")
+        except Exception as e:
+            self.finished.emit(False, {}, str(e))
+
+
+class CorteERPAplyWorker(QThread):
+    """Worker thread para aplicar y persistir formalmente el corte del ERP en la base de datos."""
+    finished = Signal(bool, dict, str)
+
+    def __init__(self, api_client, db_connector, desarrollo_id: int, analisis_result: dict, usuario_id: int, nombre_archivo: str):
+        super().__init__()
+        self.api_client = api_client
+        self.db_connector = db_connector
+        self.desarrollo_id = desarrollo_id
+        self.analisis_result = analisis_result
+        self.usuario_id = usuario_id
+        self.nombre_archivo = nombre_archivo
+
+    def run(self):
+        try:
+            if self.api_client.connect_via_api:
+                payload = {
+                    "usuario_id": self.usuario_id,
+                    "data": {
+                        "desarrollo_id": self.desarrollo_id,
+                        "analisis": self.analisis_result,
+                        "nombre_archivo": self.nombre_archivo
+                    }
+                }
+                res = self.api_client.request("POST", "/api/admin/save/satc_corte_erp_aplicar", data=payload)
+            else:
+                with self.db_connector.get_session() as session:
+                    svc = HousingLifeCycleService(session)
+                    res = svc.aplicar_corte_erp(self.desarrollo_id, self.analisis_result, self.usuario_id, self.nombre_archivo)
+
+            self.finished.emit(True, res, "")
+        except Exception as e:
+            self.finished.emit(False, {}, str(e))
+
+
 class SatcCatalogsView(QWidget):
     """Sub-vista integrada para la administración de catálogos maestros de SATC."""
     action_state_changed = Signal()
@@ -792,13 +870,29 @@ class SatcCatalogsView(QWidget):
         lay_regimenes.setContentsMargins(0, 0, 0, 0)
         self.tbl_regimenes = CrudTablePanel("Regímenes mz")
         self.tbl_regimenes.setup_table(
-            ["ID", "Desarrollo", "Nombre Régimen", "SM", "MZ", "LT", "Total UPEs", "Generadas", "Licencia Matriz", "Clave Catastral", "Estado"],
-            ["regimen_id", "desarrollo_nombre", "nombre_regimen", "sm", "mz", "lt", "total_upes", "upes_generadas", "licencia_construccion_matriz", "clave_catastral_matriz", "activo"]
+            [
+                "ID", "Desarrollo", "Nombre Régimen", "SM", "MZ", "LT", 
+                "Total UPEs", "Generadas", "Licencia Matriz", "Clave Catastral",
+                "P.A. / Instrumento", "Fecha Liberación", "Notaría", "Notario", "Solicitante", "Observaciones", "Estado"
+            ],
+            [
+                "regimen_id", "desarrollo_nombre", "nombre_regimen", "sm", "mz", "lt", 
+                "total_upes", "upes_generadas", "licencia_construccion_matriz", "clave_catastral_matriz",
+                "numero_instrumento", "fecha_liberacion", "notaria", "notario", "solicitante", "observaciones", "activo"
+            ]
         )
         self.tbl_regimenes.add_requested.connect(self._on_new_regimen)
         self.tbl_regimenes.edit_requested.connect(self._on_edit_regimen)
         self.tbl_regimenes.btn_add.setVisible(self.can_edit)
         self.tbl_regimenes.btn_edit.setVisible(self.can_edit)
+
+        # Filtro de Régimen por Desarrollo junto al campo de búsqueda
+        self.cmb_filter_reg_desarrollo = CustomComboBox(parent=self.tbl_regimenes)
+        self.cmb_filter_reg_desarrollo.setMinimumWidth(220)
+        self.cmb_filter_reg_desarrollo.addItem("🏢 Todos los Desarrollos", None)
+        self.cmb_filter_reg_desarrollo.currentIndexChanged.connect(self._on_filter_regimen_by_desarrollo)
+        self.tbl_regimenes.header_custom_layout.addWidget(self.cmb_filter_reg_desarrollo)
+
         lay_regimenes.addWidget(self.tbl_regimenes)
         self.tabs.addTab(self.tab_regimenes, "Regímenes mz")
 
@@ -1074,9 +1168,161 @@ class SatcCatalogsView(QWidget):
         lay_formatos.addWidget(self.tbl_formatos)
         self.tabs.addTab(self.tab_formatos, "Reglas de Extracción")
 
+        # ---------------------------------------------------------
+        # Pestaña 7: Disponibilidad ERP y Auditoría de Trámites
+        # ---------------------------------------------------------
+        self.tab_corte_erp = QWidget()
+        lay_corte = QVBoxLayout(self.tab_corte_erp)
+        lay_corte.setContentsMargins(12, 12, 12, 12)
+        lay_corte.setSpacing(12)
+
+        # 1. Barra de controles de importación de corte
+        ctl_corte = QHBoxLayout()
+        ctl_corte.setSpacing(10)
+
+        ctl_corte.addWidget(CustomLabel("Desarrollo *:", variant="body"))
+        self.cmb_corte_desarrollo = CustomComboBox()
+        self.cmb_corte_desarrollo.setMinimumWidth(200)
+        self.cmb_corte_desarrollo.addItem("-- Selecciona un Desarrollo --", None)
+        for des in self.desarrollos_list:
+            self.cmb_corte_desarrollo.addItem(des.get("nombre", ""), des.get("desarrollo_id"))
+        ctl_corte.addWidget(self.cmb_corte_desarrollo)
+
+        self.btn_corte_seleccionar = CustomButton("Cargar Reporte ERP (.xls / .xlsx)", icon_name="abrir_archivo")
+        self.btn_corte_seleccionar.clicked.connect(self._on_corte_seleccionar_archivo)
+        ctl_corte.addWidget(self.btn_corte_seleccionar)
+
+        self.btn_corte_aplicar = CustomButton("Aplicar Corte al Padrón", icon_name="guardar")
+        self.btn_corte_aplicar.clicked.connect(self._on_corte_aplicar_cambios)
+        self.btn_corte_aplicar.setEnabled(False)
+        self.btn_corte_aplicar.setVisible(self.can_edit)
+        ctl_corte.addWidget(self.btn_corte_aplicar)
+
+        ctl_corte.addStretch()
+        lay_corte.addLayout(ctl_corte)
+
+        # 2. Panel de KPIs y Semáforos de Disponibilidad
+        self.kpi_corte_frame = QFrame()
+        self.kpi_corte_frame.setObjectName("kpiCorteFrame")
+        self.kpi_corte_frame.setStyleSheet(f"""
+            QFrame#kpiCorteFrame {{
+                background-color: {Colors.SURFACE_LIGHT};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 16px;
+            }}
+        """)
+        kpi_corte_lay = QHBoxLayout(self.kpi_corte_frame)
+        kpi_corte_lay.setContentsMargins(0, 0, 0, 0)
+        kpi_corte_lay.setSpacing(16)
+
+        def _make_corte_dot(color: str) -> QLabel:
+            dot = QLabel()
+            dot.setFixedSize(10, 10)
+            dot.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
+            return dot
+
+        # Total en Corte
+        kpi_corte_lay.addWidget(_make_corte_dot(Colors.ACCENT))
+        self.lbl_corte_total = CustomLabel("Total en Corte: 0", variant="body")
+        kpi_corte_lay.addWidget(self.lbl_corte_total)
+
+        # Disponibles
+        kpi_corte_lay.addWidget(_make_corte_dot(Colors.SUCCESS))
+        self.lbl_corte_disponibles = CustomLabel("🟢 Disponibles: 0", variant="body")
+        kpi_corte_lay.addWidget(self.lbl_corte_disponibles)
+
+        # En Proceso de Escrituración
+        kpi_corte_lay.addWidget(_make_corte_dot(Colors.WARNING))
+        self.lbl_corte_escrituracion = CustomLabel("🟡 En Escrituración: 0", variant="body")
+        kpi_corte_lay.addWidget(self.lbl_corte_escrituracion)
+
+        # Tituladas / Vendidas
+        kpi_corte_lay.addWidget(_make_corte_dot(Colors.ERROR))
+        self.lbl_corte_tituladas = CustomLabel("🔴 Tituladas: 0", variant="body")
+        kpi_corte_lay.addWidget(self.lbl_corte_tituladas)
+
+        # Reincorporadas por Cancelación (Alerta Destacada)
+        kpi_corte_lay.addWidget(_make_corte_dot(Colors.ACCENT_VIOLET))
+        self.lbl_corte_reincorporadas = CustomLabel("🔄 Reincorporadas (Cancelación): 0", variant="body")
+        self.lbl_corte_reincorporadas.setStyleSheet(f"font-weight: bold; color: {Colors.ACCENT_VIOLET};")
+        kpi_corte_lay.addWidget(self.lbl_corte_reincorporadas)
+
+        kpi_corte_lay.addStretch()
+        lay_corte.addWidget(self.kpi_corte_frame)
+
+        # 3. Tarjeta y Tabla de Conciliación de Ubicaciones
+        self.card_corte = CustomCard("Previsualización y Conciliación de Disponibilidad ERP", parent=self)
+        self.lbl_corte_archivo = CustomLabel("Archivo: Ninguno", variant="muted")
+        self.card_corte.add_header_widget(self.lbl_corte_archivo)
+
+        # Selector de filtro por delta
+        self.cmb_corte_filtro = CustomComboBox(parent=self)
+        self.cmb_corte_filtro.setMinimumWidth(210)
+        self.cmb_corte_filtro.addItem("Mostrar: Todos los Deltas", "TODOS")
+        self.cmb_corte_filtro.addItem("🟢 Solo Disponibles", "DISPONIBLE")
+        self.cmb_corte_filtro.addItem("🟡 Solo En Escrituración", "EN_PROCESO_ESCRITURACION")
+        self.cmb_corte_filtro.addItem("🔴 Solo Tituladas", "TITULADA")
+        self.cmb_corte_filtro.addItem("🔄 Reincorporadas por Cancelación", "REINCORPORADA_CANCELACION")
+        self.cmb_corte_filtro.currentIndexChanged.connect(self._on_corte_filtro_changed)
+        self.card_corte.add_header_widget(self.cmb_corte_filtro)
+
+        # Campo Buscar en tabla de corte
+        self.search_corte_input = CustomInput(control_size="md", parent=self)
+        self.search_corte_input.setPlaceholderText("Buscar en corte ERP...")
+        self.search_corte_input.setMinimumWidth(180)
+        self.search_corte_input.setMaximumWidth(260)
+        self.search_corte_input.setClearButtonEnabled(True)
+        self.search_corte_input.addAction(Icons.search(Colors.TEXT_LIGHT_MUTED), QLineEdit.LeadingPosition)
+        self.search_corte_input.textChanged.connect(self._on_search_corte_text_changed)
+        self.card_corte.add_header_widget(self.search_corte_input)
+
+        self.tbl_corte = QTableWidget()
+        self.tbl_corte.setColumnCount(12)
+        self.tbl_corte.setHorizontalHeaderLabels([
+            "Delta Detectado", "Régimen", "Mz", "Lote", "Ext.", "Int.", "Nivel", 
+            "Status Lote ERP", "Etapa ERP", "Cliente", "Condición Asignada", "Trámites Vencidos"
+        ])
+        self.tbl_corte.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.tbl_corte.horizontalHeader().setStretchLastSection(True)
+        self.tbl_corte.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.tbl_corte.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl_corte.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tbl_corte.setShowGrid(False)
+        self.tbl_corte.verticalHeader().setVisible(False)
+        self.tbl_corte.verticalHeader().setDefaultSectionSize(26)
+
+        corte_widths = [160, 140, 70, 70, 70, 70, 60, 130, 160, 180, 160, 130]
+        for c_idx, width in enumerate(corte_widths):
+            self.tbl_corte.setColumnWidth(c_idx, width)
+
+        self.card_corte.layout.addWidget(self.tbl_corte)
+        lay_corte.addWidget(self.card_corte)
+
+        self.tabs.addTab(self.tab_corte_erp, "Disponibilidad ERP")
+
         self._v_parsed_records = []
         self._v_worker = None
         self._v_load_worker = None
+        self._v_analyze_worker = None
+        self._corte_analyze_worker = None
+        self._corte_apply_worker = None
+        self._corte_analisis_cache = None
+        self._corte_all_deltas = []
+
+    def closeEvent(self, event):
+        """Asegura la detención limpia de todos los hilos secundarios al cerrar o desmontar la vista."""
+        for worker_attr in ["_v_worker", "_v_load_worker", "_v_analyze_worker", "_corte_analyze_worker", "_corte_apply_worker"]:
+            worker = getattr(self, worker_attr, None)
+            if worker and worker.isRunning():
+                try:
+                    worker.finished.disconnect()
+                except Exception:
+                    pass
+                worker.quit()
+                worker.wait(1000)
+                setattr(self, worker_attr, None)
+        super().closeEvent(event)
 
     # =========================================================================
     # 1. DIALOGOS & ACCIONES: TIPO DE TRÁMITE
@@ -1486,86 +1732,164 @@ class SatcCatalogsView(QWidget):
     # =========================================================================
     def _create_regimen_dialog(self, title: str) -> CustomDialog:
         dialog = CustomDialog(title, self)
-        dialog.setMinimumWidth(580)
+        dialog.setMinimumWidth(680)
 
-        card = QFrame(dialog)
-        card.setObjectName("card_regimen")
-        card.setStyleSheet(f"""
-            QFrame#card_regimen {{
+        # Contenedor con scroll para asegurar visualización perfecta en cualquier resolución
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(12)
+
+        # TARJETA 1: Macro-Lote de Régimen MZ
+        card_lote = QFrame(container)
+        card_lote.setObjectName("card_regimen_lote")
+        card_lote.setStyleSheet(f"""
+            QFrame#card_regimen_lote {{
                 background-color: {Colors.SLATE_50};
                 border: 1px solid {Colors.SLATE_200};
                 border-radius: 8px;
                 padding: 10px 14px;
             }}
         """)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
+        lay_lote = QVBoxLayout(card_lote)
+        lay_lote.setContentsMargins(0, 0, 0, 0)
+        lay_lote.setSpacing(8)
 
-        lbl = CustomLabel("🏢 MACRO-LOTE DE RÉGIMEN MZ", variant="subheader")
-        lbl.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
-        lay.addWidget(lbl)
+        lbl_lote = CustomLabel("🏢 DATOS GENERALES DEL RÉGIMEN Y MACRO-LOTE", variant="subheader")
+        lbl_lote.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_lote.addWidget(lbl_lote)
 
-        form = QFormLayout()
-        form.setSpacing(8)
-        form.setContentsMargins(0, 0, 0, 0)
+        form_lote = QFormLayout()
+        form_lote.setSpacing(8)
+        form_lote.setContentsMargins(0, 0, 0, 0)
 
-        self.cmb_r_desarrollo = CustomComboBox(parent=card)
+        self.cmb_r_desarrollo = CustomComboBox(parent=card_lote)
         self.cmb_r_desarrollo.addItem("-- Selecciona un Desarrollo --", None)
         for des in self.desarrollos_list:
             self.cmb_r_desarrollo.addItem(des.get("nombre", ""), des.get("desarrollo_id"))
 
-        self.inp_r_nombre = CustomInput("Nombre del régimen (ej. REGIMEN AURA NOVA PLAYA)", parent=card)
+        self.inp_r_nombre = CustomInput("Nombre del régimen (ej. REGIMEN AURA NOVA PLAYA)", parent=card_lote)
         self.inp_r_nombre.setMaxLength(200)
         self.inp_r_nombre.text = self.inp_r_nombre.text
         self.inp_r_nombre.set_text = self.inp_r_nombre.setText
         self.inp_r_nombre.set_focus = self.inp_r_nombre.setFocus
 
-        self.inp_r_sm = CustomInput("Super Manzana (ej. SM-115 / Opcional)", parent=card)
+        self.inp_r_sm = CustomInput("Super Manzana (ej. SM-115 / Opcional)", parent=card_lote)
         self.inp_r_sm.setMaxLength(50)
         self.inp_r_sm.text = self.inp_r_sm.text
         self.inp_r_sm.set_text = self.inp_r_sm.setText
 
-        self.inp_r_mz = CustomInput("Manzana (ej. MZ-01)", parent=card)
+        self.inp_r_mz = CustomInput("Manzana (ej. MZ-01)", parent=card_lote)
         self.inp_r_mz.setMaxLength(50)
         self.inp_r_mz.text = self.inp_r_mz.text
         self.inp_r_mz.set_text = self.inp_r_mz.setText
 
-        self.inp_r_lt = CustomInput("Lote matriz (ej. LT-01)", parent=card)
+        self.inp_r_lt = CustomInput("Lote matriz (ej. LT-01)", parent=card_lote)
         self.inp_r_lt.setMaxLength(50)
         self.inp_r_lt.text = self.inp_r_lt.text
         self.inp_r_lt.set_text = self.inp_r_lt.setText
 
-        self.inp_r_upes = CustomInput("Total de UPEs autorizadas (ej. 577)", parent=card)
+        self.inp_r_upes = CustomInput("Total de UPEs autorizadas (ej. 577)", parent=card_lote)
         self.inp_r_upes.setMaxLength(6)
         self.inp_r_upes.text = self.inp_r_upes.text
         self.inp_r_upes.set_text = self.inp_r_upes.setText
 
-        self.inp_r_licencia = CustomInput("Licencia de construcción matriz (Opcional)", parent=card)
+        self.inp_r_licencia = CustomInput("Licencia de construcción matriz (Opcional)", parent=card_lote)
         self.inp_r_licencia.setMaxLength(100)
         self.inp_r_licencia.text = self.inp_r_licencia.text
         self.inp_r_licencia.set_text = self.inp_r_licencia.setText
 
-        self.inp_r_clave = CustomInput("Clave catastral matriz (Opcional)", parent=card)
+        self.inp_r_clave = CustomInput("Clave catastral matriz (Opcional)", parent=card_lote)
         self.inp_r_clave.setMaxLength(100)
         self.inp_r_clave.text = self.inp_r_clave.text
         self.inp_r_clave.set_text = self.inp_r_clave.setText
 
-        self.chk_r_activo = CustomCheckBox("Activo", parent=card)
+        self.chk_r_activo = CustomCheckBox("Activo", parent=card_lote)
         self.chk_r_activo.setChecked(True)
 
-        form.addRow("Desarrollo *:", self.cmb_r_desarrollo)
-        form.addRow("Nombre Régimen *:", self.inp_r_nombre)
-        form.addRow("S.M.:", self.inp_r_sm)
-        form.addRow("Manzana *:", self.inp_r_mz)
-        form.addRow("Lote Matriz *:", self.inp_r_lt)
-        form.addRow("Total UPEs *:", self.inp_r_upes)
-        form.addRow("Licencia Matriz:", self.inp_r_licencia)
-        form.addRow("Clave Matriz:", self.inp_r_clave)
-        form.addRow("", self.chk_r_activo)
+        form_lote.addRow("Desarrollo *:", self.cmb_r_desarrollo)
+        form_lote.addRow("Nombre Régimen *:", self.inp_r_nombre)
+        form_lote.addRow("S.M.:", self.inp_r_sm)
+        form_lote.addRow("Manzana *:", self.inp_r_mz)
+        form_lote.addRow("Lote Matriz *:", self.inp_r_lt)
+        form_lote.addRow("Total UPEs *:", self.inp_r_upes)
+        form_lote.addRow("Licencia Matriz:", self.inp_r_licencia)
+        form_lote.addRow("Clave Matriz:", self.inp_r_clave)
+        form_lote.addRow("", self.chk_r_activo)
 
-        lay.addLayout(form)
-        dialog.add_widget(card)
+        lay_lote.addLayout(form_lote)
+        container_layout.addWidget(card_lote)
+
+        # TARJETA 2: Boleta de Inscripción (RPP) / Datos Notariales
+        card_rpp = QFrame(container)
+        card_rpp.setObjectName("card_regimen_rpp")
+        card_rpp.setStyleSheet(f"""
+            QFrame#card_regimen_rpp {{
+                background-color: {Colors.SLATE_50};
+                border: 1px solid {Colors.SLATE_200};
+                border-radius: 8px;
+                padding: 10px 14px;
+            }}
+        """)
+        lay_rpp = QVBoxLayout(card_rpp)
+        lay_rpp.setContentsMargins(0, 0, 0, 0)
+        lay_rpp.setSpacing(8)
+
+        lbl_rpp = CustomLabel("📜 BOLETA DE INSCRIPCIÓN / METADATOS RPP Y NOTARIALES", variant="subheader")
+        lbl_rpp.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {Colors.TEXT_LIGHT_PRIMARY}; margin-bottom: 2px;")
+        lay_rpp.addWidget(lbl_rpp)
+
+        form_rpp = QFormLayout()
+        form_rpp.setSpacing(8)
+        form_rpp.setContentsMargins(0, 0, 0, 0)
+
+        self.inp_r_pa = CustomInput("P.A. / Número de instrumento (ej. P.A. 65921)", parent=card_rpp)
+        self.inp_r_pa.setMaxLength(100)
+        self.inp_r_pa.text = self.inp_r_pa.text
+        self.inp_r_pa.set_text = self.inp_r_pa.setText
+
+        self.inp_r_fecha_lib = CustomInput("Fecha y hora de liberación (ej. YYYY-MM-DD o YYYY-MM-DD HH:MM)", parent=card_rpp)
+        self.inp_r_fecha_lib.setMaxLength(30)
+        self.inp_r_fecha_lib.text = self.inp_r_fecha_lib.text
+        self.inp_r_fecha_lib.set_text = self.inp_r_fecha_lib.setText
+
+        self.inp_r_notaria = CustomInput("Número o identificación de Notaría (ej. 68)", parent=card_rpp)
+        self.inp_r_notaria.setMaxLength(50)
+        self.inp_r_notaria.text = self.inp_r_notaria.text
+        self.inp_r_notaria.set_text = self.inp_r_notaria.setText
+
+        self.inp_r_notario = CustomInput("Nombre completo del Notario (ej. FRANCISCO JOSE TRACONIS VARGUEZ)", parent=card_rpp)
+        self.inp_r_notario.setMaxLength(200)
+        self.inp_r_notario.text = self.inp_r_notario.text
+        self.inp_r_notario.set_text = self.inp_r_notario.setText
+
+        self.inp_r_solicitante = CustomInput("Nombre del solicitante (ej. ANA LAURA MORALES PECH)", parent=card_rpp)
+        self.inp_r_solicitante.setMaxLength(200)
+        self.inp_r_solicitante.text = self.inp_r_solicitante.text
+        self.inp_r_solicitante.set_text = self.inp_r_solicitante.setText
+
+        self.inp_r_obs = CustomInput("No. de control interno / Observaciones (ej. 202603000000000161037)", parent=card_rpp)
+        self.inp_r_obs.setMaxLength(500)
+        self.inp_r_obs.text = self.inp_r_obs.text
+        self.inp_r_obs.set_text = self.inp_r_obs.setText
+
+        form_rpp.addRow("P.A. / Instrumento:", self.inp_r_pa)
+        form_rpp.addRow("Fecha Liberación:", self.inp_r_fecha_lib)
+        form_rpp.addRow("Notaría:", self.inp_r_notaria)
+        form_rpp.addRow("Notario:", self.inp_r_notario)
+        form_rpp.addRow("Solicitante:", self.inp_r_solicitante)
+        form_rpp.addRow("Observaciones:", self.inp_r_obs)
+
+        lay_rpp.addLayout(form_rpp)
+        container_layout.addWidget(card_rpp)
+
+        scroll.setWidget(container)
+        dialog.add_widget(scroll)
 
         def _val():
             d = self.cmb_r_desarrollo.currentData()
@@ -1588,6 +1912,12 @@ class SatcCatalogsView(QWidget):
             self.inp_r_mz.setReadOnly(True)
             self.inp_r_lt.setReadOnly(True)
             self.inp_r_upes.setReadOnly(True)
+            self.inp_r_pa.setReadOnly(True)
+            self.inp_r_fecha_lib.setReadOnly(True)
+            self.inp_r_notaria.setReadOnly(True)
+            self.inp_r_notario.setReadOnly(True)
+            self.inp_r_solicitante.setReadOnly(True)
+            self.inp_r_obs.setReadOnly(True)
 
         dialog.btn_save.clicked.disconnect()
         dialog.btn_save.clicked.connect(lambda: self._save_regimen(dialog))
@@ -1611,6 +1941,12 @@ class SatcCatalogsView(QWidget):
         self.inp_r_upes.set_text(str(data.get("total_upes", 1) or 1))
         self.inp_r_licencia.set_text(data.get("licencia_construccion_matriz", "") or "")
         self.inp_r_clave.set_text(data.get("clave_catastral_matriz", "") or "")
+        self.inp_r_pa.set_text(data.get("numero_instrumento", "") or "")
+        self.inp_r_fecha_lib.set_text(data.get("fecha_liberacion", "") or "")
+        self.inp_r_notaria.set_text(data.get("notaria", "") or "")
+        self.inp_r_notario.set_text(data.get("notario", "") or "")
+        self.inp_r_solicitante.set_text(data.get("solicitante", "") or "")
+        self.inp_r_obs.set_text(data.get("observaciones", "") or "")
         self.chk_r_activo.setChecked(bool(data.get("activo", True)))
 
         des_id = data.get("desarrollo_id")
@@ -1619,25 +1955,125 @@ class SatcCatalogsView(QWidget):
             if idx >= 0:
                 self.cmb_r_desarrollo.setCurrentIndex(idx)
 
+        # REGLA DE NEGOCIO: Si el régimen ya tiene viviendas cargadas en el padrón,
+        # restringir la modificación de desarrollo, total de UPEs y nomenclatura física (SM, MZ, LT).
+        total_viviendas = data.get("total_viviendas", 0) or data.get("upes_generadas", 0) or 0
+        if total_viviendas > 0:
+            self.cmb_r_desarrollo.setEnabled(False)
+            self.inp_r_upes.setReadOnly(True)
+            self.inp_r_sm.setReadOnly(True)
+            self.inp_r_mz.setReadOnly(True)
+            self.inp_r_lt.setReadOnly(True)
+            self.cmb_r_desarrollo.setToolTip(f"Bloqueado: El régimen cuenta con {total_viviendas} viviendas cargadas.")
+            self.inp_r_upes.setToolTip(f"Bloqueado: El régimen cuenta con {total_viviendas} viviendas cargadas.")
+            self.inp_r_sm.setToolTip(f"Bloqueado: El régimen cuenta con {total_viviendas} viviendas cargadas.")
+            self.inp_r_mz.setToolTip(f"Bloqueado: El régimen cuenta con {total_viviendas} viviendas cargadas.")
+            self.inp_r_lt.setToolTip(f"Bloqueado: El régimen cuenta con {total_viviendas} viviendas cargadas.")
+        else:
+            self.cmb_r_desarrollo.setEnabled(self.can_edit)
+            self.inp_r_upes.setReadOnly(not self.can_edit)
+            self.inp_r_sm.setReadOnly(not self.can_edit)
+            self.inp_r_mz.setReadOnly(not self.can_edit)
+            self.inp_r_lt.setReadOnly(not self.can_edit)
+
         self.inp_r_nombre.set_focus()
         dialog.exec()
 
     def _save_regimen(self, dialog: CustomDialog):
         des_id = self.cmb_r_desarrollo.currentData()
+        nombre = self.inp_r_nombre.text().strip()
+        mz = self.inp_r_mz.text().strip()
+        lt = self.inp_r_lt.text().strip()
+        upes_str = self.inp_r_upes.text().strip()
+
+        # 1. Blindaje y Validaciones estrictas de campos obligatorios
+        errores = []
         if not des_id:
-            QMessageBox.warning(self, "Validación", "Debe seleccionar un desarrollo.")
+            errores.append("- Debe seleccionar un Desarrollo inmobiliario.")
+        if not nombre:
+            errores.append("- El Nombre del régimen es obligatorio.")
+        if not mz:
+            errores.append("- El campo Manzana (MZ) es obligatorio.")
+        if not lt:
+            errores.append("- El campo Lote Matriz (LT) es obligatorio.")
+        if not upes_str or not upes_str.isdigit() or int(upes_str) < 1:
+            errores.append("- El Total de UPEs autorizadas debe ser un número entero mayor a cero.")
+
+        if errores:
+            QMessageBox.warning(
+                self,
+                "Validación de Formulario",
+                "Por favor corrija los siguientes errores antes de continuar:\n\n" + "\n".join(errores)
+            )
             return
 
+        # 2. Validación preventiva en memoria de registros duplicados (desarrollo + sm + mz + lt)
+        sm_norm = (self.inp_r_sm.text().strip() or "").upper()
+        mz_norm = mz.upper()
+        lt_norm = lt.upper()
+        cur_id = self.current_regimen_id
+
+        for reg in getattr(self, "regimenes_list", []):
+            if cur_id and reg.get("regimen_id") == cur_id:
+                continue
+            if reg.get("desarrollo_id") == int(des_id):
+                reg_sm = (reg.get("sm") or "").strip().upper()
+                reg_mz = (reg.get("mz") or "").strip().upper()
+                reg_lt = (reg.get("lt") or "").strip().upper()
+                if reg_sm == sm_norm and reg_mz == mz_norm and reg_lt == lt_norm:
+                    sm_det = f"S.M. {reg.get('sm')}, " if reg.get('sm') else ""
+                    QMessageBox.warning(
+                        self,
+                        "Registro Duplicado",
+                        f"No es posible guardar el régimen:\n\n"
+                        f"Ya existe un régimen registrado para este desarrollo con la misma ubicación "
+                        f"({sm_det}Mz {reg.get('mz')}, Lt {reg.get('lt')}):\n"
+                        f"• Régimen: {reg.get('nombre_regimen')}\n"
+                        f"• ID: {reg.get('regimen_id')}"
+                    )
+                    return
+
+        # 3. Confirmación explícita de alta o edición
+        tipo_accion = "actualizar" if self.current_regimen_id else "dar de alta"
+        resumen_msg = (
+            f"¿Está seguro de {tipo_accion} el siguiente régimen de condominio?\n\n"
+            f"• Desarrollo: {self.cmb_r_desarrollo.currentText()}\n"
+            f"• Régimen: {nombre}\n"
+            f"• Manzana / Lote: Mz {mz}, Lt {lt}\n"
+            f"• Total UPEs: {upes_str}\n"
+        )
+        if self.inp_r_pa.text().strip():
+            resumen_msg += f"• P.A. / Instrumento: {self.inp_r_pa.text().strip()}\n"
+        if self.inp_r_notaria.text().strip():
+            resumen_msg += f"• Notaría: {self.inp_r_notaria.text().strip()}\n"
+
+        confirm = QMessageBox.question(
+            dialog,
+            "Confirmación Requerida",
+            resumen_msg,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        # 3. Empaquetado de datos
         data = {
             "regimen_id": self.current_regimen_id,
             "desarrollo_id": int(des_id),
-            "nombre_regimen": self.inp_r_nombre.text().strip(),
+            "nombre_regimen": nombre,
             "sm": self.inp_r_sm.text().strip() or None,
-            "mz": self.inp_r_mz.text().strip(),
-            "lt": self.inp_r_lt.text().strip(),
-            "total_upes": int(self.inp_r_upes.text().strip() or 1),
+            "mz": mz,
+            "lt": lt,
+            "total_upes": int(upes_str),
             "licencia_construccion_matriz": self.inp_r_licencia.text().strip() or None,
             "clave_catastral_matriz": self.inp_r_clave.text().strip() or None,
+            "numero_instrumento": self.inp_r_pa.text().strip() or None,
+            "fecha_liberacion": self.inp_r_fecha_lib.text().strip() or None,
+            "notaria": self.inp_r_notaria.text().strip() or None,
+            "notario": self.inp_r_notario.text().strip() or None,
+            "solicitante": self.inp_r_solicitante.text().strip() or None,
+            "observaciones": self.inp_r_obs.text().strip() or None,
             "activo": self.chk_r_activo.isChecked()
         }
         try:
@@ -1654,6 +2090,13 @@ class SatcCatalogsView(QWidget):
             self.refresh_data()
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+
+    def _on_filter_regimen_by_desarrollo(self, index: int):
+        des_id = self.cmb_filter_reg_desarrollo.currentData()
+        if des_id is None:
+            self.tbl_regimenes.set_custom_filter(None)
+        else:
+            self.tbl_regimenes.set_custom_filter(lambda item: item.get("desarrollo_id") == des_id)
 
     # =========================================================================
     # 5. DIALOGOS & ACCIONES: REGLAS Y FORMATOS MUNICIPALES (Metadata-Driven)
@@ -1928,8 +2371,15 @@ class SatcCatalogsView(QWidget):
                             "lt": r.lt,
                             "total_upes": r.total_upes,
                             "upes_generadas": r.upes_generadas,
+                            "total_viviendas": satc_svc.vivienda_repo.count_by_regimen(r.regimen_id),
                             "licencia_construccion_matriz": r.licencia_construccion_matriz or "",
                             "clave_catastral_matriz": r.clave_catastral_matriz or "",
+                            "numero_instrumento": r.numero_instrumento or "",
+                            "fecha_liberacion": r.fecha_liberacion.isoformat() if r.fecha_liberacion else "",
+                            "notaria": r.notaria or "",
+                            "notario": r.notario or "",
+                            "solicitante": r.solicitante or "",
+                            "observaciones": r.observaciones or "",
                             "activo": r.activo
                         }
                         for r in reg_objs
@@ -1976,6 +2426,7 @@ class SatcCatalogsView(QWidget):
             self.tbl_tipos.populate(tipos)
             self.tbl_est_tramite.populate(est_tramite)
             self.tbl_est_vivienda.populate(est_vivienda)
+            self.regimenes_list = regimenes
             self.tbl_regimenes.populate(regimenes)
             if hasattr(self, "tbl_formatos"):
                 self.tbl_formatos.populate(formatos)
@@ -1997,6 +2448,42 @@ class SatcCatalogsView(QWidget):
                 self.cmb_v_desarrollo.setCurrentIndex(0)
             self.cmb_v_desarrollo.blockSignals(False)
             self._on_v_desarrollo_changed()
+
+            # Actualizar dropdown de filtro por desarrollo en pestaña de regímenes mz
+            if hasattr(self, "cmb_filter_reg_desarrollo"):
+                current_filter_des = self.cmb_filter_reg_desarrollo.currentData()
+                self.cmb_filter_reg_desarrollo.blockSignals(True)
+                self.cmb_filter_reg_desarrollo.clear()
+                self.cmb_filter_reg_desarrollo.addItem("🏢 Todos los Desarrollos", None)
+                for d in self.desarrollos_list:
+                    self.cmb_filter_reg_desarrollo.addItem(d.get("nombre", ""), d.get("desarrollo_id"))
+                if current_filter_des:
+                    idx_f = self.cmb_filter_reg_desarrollo.findData(current_filter_des)
+                    if idx_f >= 0:
+                        self.cmb_filter_reg_desarrollo.setCurrentIndex(idx_f)
+                    else:
+                        self.cmb_filter_reg_desarrollo.setCurrentIndex(0)
+                else:
+                    self.cmb_filter_reg_desarrollo.setCurrentIndex(0)
+                self.cmb_filter_reg_desarrollo.blockSignals(False)
+
+            # Actualizar dropdown de desarrollo en pestaña de Disponibilidad ERP
+            if hasattr(self, "cmb_corte_desarrollo"):
+                current_corte_des = self.cmb_corte_desarrollo.currentData()
+                self.cmb_corte_desarrollo.blockSignals(True)
+                self.cmb_corte_desarrollo.clear()
+                self.cmb_corte_desarrollo.addItem("-- Selecciona un Desarrollo --", None)
+                for d in self.desarrollos_list:
+                    self.cmb_corte_desarrollo.addItem(d.get("nombre", ""), d.get("desarrollo_id"))
+                if current_corte_des:
+                    idx_c = self.cmb_corte_desarrollo.findData(current_corte_des)
+                    if idx_c >= 0:
+                        self.cmb_corte_desarrollo.setCurrentIndex(idx_c)
+                    else:
+                        self.cmb_corte_desarrollo.setCurrentIndex(0)
+                else:
+                    self.cmb_corte_desarrollo.setCurrentIndex(0)
+                self.cmb_corte_desarrollo.blockSignals(False)
 
         except Exception as e:
             QMessageBox.critical(self, "Error al cargar catálogos SATC", str(e))
@@ -2058,7 +2545,7 @@ class SatcCatalogsView(QWidget):
             except Exception:
                 pass
             self._v_load_worker.quit()
-            self._v_load_worker.wait(50)
+            self._v_load_worker.wait(1000)
             self._v_load_worker = None
 
         if self._v_loading_dialog:
@@ -2749,6 +3236,9 @@ class SatcCatalogsView(QWidget):
             self._v_loading_dialog = None
 
         self.btn_v_seleccionar.setEnabled(True)
+        if self._v_analyze_worker:
+            self._v_analyze_worker.wait(100)
+            self._v_analyze_worker = None
 
         if not success:
             QMessageBox.critical(self, "Error al Analizar Archivo", error_msg)
@@ -2986,6 +3476,9 @@ class SatcCatalogsView(QWidget):
             self._v_loading_dialog = None
 
         self.btn_v_seleccionar.setEnabled(True)
+        if self._v_worker:
+            self._v_worker.wait(100)
+            self._v_worker = None
         modo = self.cmb_v_modo.currentData()
         if success:
             el_t = result.get("elapsed_time", 0.0) if isinstance(result, dict) else 0.0
@@ -3020,6 +3513,12 @@ class SatcCatalogsView(QWidget):
                 )
 
             self._v_parsed_records = []
+            # Limpiar selección de operación para evitar alertas redundantes post-guardado
+            self.cmb_v_modo.blockSignals(True)
+            self.cmb_v_modo.setCurrentIndex(0)
+            self.cmb_v_modo.blockSignals(False)
+            self._on_v_modo_changed()
+
             self.tbl_viviendas.setUpdatesEnabled(False)
             try:
                 self._on_v_regimen_changed()
@@ -3028,4 +3527,275 @@ class SatcCatalogsView(QWidget):
         else:
             QMessageBox.critical(self, "Error en la Operación", f"No se pudo completar la operación:\n{error_msg}")
             self.btn_v_ejecutar.setEnabled(True)
+
+    # =========================================================================
+    # 6. HANDLERS: DISPONIBILIDAD ERP Y CORTES DE UBICACIONES
+    # =========================================================================
+    def _on_corte_seleccionar_archivo(self):
+        des_id = self.cmb_corte_desarrollo.currentData()
+        if not des_id:
+            QMessageBox.warning(self, "Validación Requerida", "Por favor seleccione primero un Desarrollo Inmobiliario.")
+            return
+
+        filtro = "Reportes de Ubicaciones ERP (*.xls *.xlsx);;Libros de Excel (*.xlsx);;Archivos Excel 97-2003 (*.xls)"
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar Reporte de Ubicaciones del ERP", "", filtro
+        )
+        if not file_path:
+            return
+
+        self.btn_corte_seleccionar.setEnabled(False)
+        self.btn_corte_aplicar.setEnabled(False)
+        self.lbl_corte_archivo.setText(f"Archivo: {os.path.basename(file_path)}")
+
+        self._v_loading_dialog = GLLoadingDialog("Analizando reporte de ubicaciones del ERP...", self)
+        self._v_loading_dialog.show()
+
+        if self._corte_analyze_worker and self._corte_analyze_worker.isRunning():
+            self._corte_analyze_worker.quit()
+            self._corte_analyze_worker.wait(500)
+
+        self._corte_analyze_worker = CorteERPAnalyzeWorker(
+            api_client=self.api_client,
+            db_connector=self.db_connector,
+            file_path=file_path,
+            desarrollo_id=des_id
+        )
+        self._corte_analyze_worker.progress_updated.connect(self._on_corte_analyze_progress)
+        self._corte_analyze_worker.finished.connect(self._on_corte_analyze_finished)
+        self._corte_analyze_worker.start()
+
+    def _on_corte_analyze_progress(self, curr: int, tot: int, msg: str):
+        if self._v_loading_dialog:
+            self._v_loading_dialog.set_progress(curr, tot, msg)
+
+    def _on_corte_analyze_finished(self, success: bool, result_data: dict, error_msg: str):
+        if self._v_loading_dialog:
+            self._v_loading_dialog.close()
+            self._v_loading_dialog = None
+
+        self.btn_corte_seleccionar.setEnabled(True)
+        if self._corte_analyze_worker:
+            self._corte_analyze_worker.wait(100)
+            self._corte_analyze_worker = None
+
+        if not success:
+            QMessageBox.critical(self, "Error al Analizar Corte ERP", f"No se pudo procesar el archivo:\n{error_msg}")
+            return
+
+        self._corte_analisis_cache = result_data
+        self._corte_all_deltas = result_data.get("deltas", [])
+
+        # Actualizar KPIs
+        tot_reg = result_data.get("total_registros", 0)
+        tot_disp = result_data.get("total_disponibles", 0)
+        tot_escr = result_data.get("total_en_escrituracion", 0)
+        tot_tit = result_data.get("total_tituladas", 0)
+        tot_reinc = result_data.get("total_reincorporadas", 0)
+
+        self.lbl_corte_total.setText(f"Total en Corte: {tot_reg}")
+        self.lbl_corte_disponibles.setText(f"🟢 Disponibles: {tot_disp}")
+        self.lbl_corte_escrituracion.setText(f"🟡 En Escrituración: {tot_escr}")
+        self.lbl_corte_tituladas.setText(f"🔴 Tituladas: {tot_tit}")
+        self.lbl_corte_reincorporadas.setText(f"🔄 Reincorporadas (Cancelación): {tot_reinc}")
+
+        # Habilitar aplicar cambios
+        self.btn_corte_aplicar.setEnabled(self.can_edit and len(self._corte_all_deltas) > 0)
+
+        # Renderizar tabla
+        self._render_corte_table()
+
+    def _on_corte_filtro_changed(self):
+        self._render_corte_table()
+
+    def _on_search_corte_text_changed(self):
+        self._render_corte_table()
+
+    def _render_corte_table(self):
+        """Filtra y renderiza los deltas del corte con formato visual semántico."""
+        self.tbl_corte.setRowCount(0)
+        if not self._corte_all_deltas:
+            return
+
+        filtro = self.cmb_corte_filtro.currentData()
+        search_txt = self.search_corte_input.text().strip().lower()
+
+        filtered = []
+        for d in self._corte_all_deltas:
+            # Filtro por delta / condición
+            if filtro == "DISPONIBLE" and d.get("condicion_nueva") != "DISPONIBLE":
+                continue
+            if filtro == "EN_PROCESO_ESCRITURACION" and d.get("condicion_nueva") != "EN_PROCESO_ESCRITURACION":
+                continue
+            if filtro == "TITULADA" and d.get("condicion_nueva") != "TITULADA":
+                continue
+            if filtro == "REINCORPORADA_CANCELACION" and d.get("delta_tipo") != "REINCORPORADA_CANCELACION":
+                continue
+
+            # Búsqueda textual
+            if search_txt:
+                match_txt = any(
+                    search_txt in str(val).lower()
+                    for val in [
+                        d.get("regimen_nombre", ""),
+                        d.get("mz", ""),
+                        d.get("lote", ""),
+                        d.get("interior", ""),
+                        d.get("exterior", ""),
+                        d.get("cliente_raw", ""),
+                        d.get("status_erp_raw", ""),
+                        d.get("etapa_erp_raw", ""),
+                        d.get("condicion_nueva", "")
+                    ]
+                )
+                if not match_txt:
+                    continue
+
+            filtered.append(d)
+
+        self.tbl_corte.setUpdatesEnabled(False)
+        self.tbl_corte.setRowCount(len(filtered))
+
+        for row_idx, d in enumerate(filtered):
+            delta = d.get("delta_tipo", "")
+            cond_nueva = d.get("condicion_nueva", "")
+            tram_venc = d.get("tramites_vencidos", 0)
+
+            # Etiqueta amigable de delta
+            if delta == "REINCORPORADA_CANCELACION":
+                delta_txt = "🔄 REINCORPORADA"
+            elif delta == "AVANCE_ESCRITURACION":
+                delta_txt = "🟡 PASE A ESCRITURACIÓN"
+            elif delta == "TITULADA":
+                delta_txt = "🔴 VENTA CONCLUIDA"
+            elif delta == "NO_REGISTRADA_EN_SATC":
+                delta_txt = "⚪ NO REGISTRADA EN BD"
+            else:
+                delta_txt = "SIN CAMBIO"
+
+            # Color de fondo de fila según delta
+            if delta == "REINCORPORADA_CANCELACION":
+                bg_color = QColor(243, 232, 255) # Púrpura suave
+            elif delta == "AVANCE_ESCRITURACION":
+                bg_color = QColor(254, 249, 195) # Amarillo suave
+            elif delta == "TITULADA":
+                bg_color = QColor(254, 226, 226) # Rojo suave
+            else:
+                bg_color = QColor(255, 255, 255) if row_idx % 2 == 0 else QColor(248, 250, 252)
+
+            tram_txt = f"⚠️ {tram_venc} Vencido(s)" if tram_venc > 0 else "Al Día"
+            tram_color = Colors.ERROR if tram_venc > 0 else Colors.SUCCESS
+
+            cols = [
+                delta_txt,
+                d.get("regimen_nombre", "N/A"),
+                d.get("mz", ""),
+                d.get("lote", ""),
+                d.get("exterior", ""),
+                d.get("interior", ""),
+                d.get("nivel", ""),
+                d.get("status_erp_raw", ""),
+                d.get("etapa_erp_raw", ""),
+                d.get("cliente_raw", ""),
+                cond_nueva,
+                tram_txt
+            ]
+
+            for c_idx, val in enumerate(cols):
+                it = QTableWidgetItem(str(val))
+                it.setBackground(bg_color)
+                if c_idx == 0:
+                    it.setFont(it.font())
+                    if delta == "REINCORPORADA_CANCELACION":
+                        it.setForeground(QColor(Colors.ACCENT_VIOLET))
+                elif c_idx == 11:
+                    it.setForeground(QColor(tram_color))
+                self.tbl_corte.setItem(row_idx, c_idx, it)
+
+        self.tbl_corte.setUpdatesEnabled(True)
+
+    def _on_corte_aplicar_cambios(self):
+        if not self._corte_analisis_cache:
+            return
+
+        des_id = self.cmb_corte_desarrollo.currentData()
+        des_nom = self.cmb_corte_desarrollo.currentText()
+        tot = self._corte_analisis_cache.get("total_registros", 0)
+        reinc = self._corte_analisis_cache.get("total_reincorporadas", 0)
+        nom_arch = self._corte_analisis_cache.get("nombre_archivo", "corte_erp.xlsx")
+
+        resumen = (
+            f"¿Está seguro de aplicar el siguiente corte del ERP a la base de datos?\n\n"
+            f"• Desarrollo: {des_nom}\n"
+            f"• Archivo: {nom_arch}\n"
+            f"• Total ubicaciones analizadas: {tot}\n"
+            f"• Reincorporadas por cancelación: {reinc}\n\n"
+            f"Esta acción actualizará la condición comercial de las viviendas y creará "
+            f"una bitácora histórica inmutable del corte."
+        )
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirmar Aplicación de Corte ERP",
+            resumen,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        self.btn_corte_aplicar.setEnabled(False)
+        self.btn_corte_seleccionar.setEnabled(False)
+
+        self._v_loading_dialog = GLLoadingDialog("Persistiendo corte ERP y actualizando padrón...", self)
+        self._v_loading_dialog.show()
+
+        if self._corte_apply_worker and self._corte_apply_worker.isRunning():
+            self._corte_apply_worker.quit()
+            self._corte_apply_worker.wait(500)
+
+        self._corte_apply_worker = CorteERPAplyWorker(
+            api_client=self.api_client,
+            db_connector=self.db_connector,
+            desarrollo_id=des_id,
+            analisis_result=self._corte_analisis_cache,
+            usuario_id=self.current_user_id or 1,
+            nombre_archivo=nom_arch
+        )
+        self._corte_apply_worker.finished.connect(self._on_corte_apply_finished)
+        self._corte_apply_worker.start()
+
+    def _on_corte_apply_finished(self, success: bool, result_data: dict, error_msg: str):
+        if self._v_loading_dialog:
+            self._v_loading_dialog.close()
+            self._v_loading_dialog = None
+
+        self.btn_corte_seleccionar.setEnabled(True)
+        if self._corte_apply_worker:
+            self._corte_apply_worker.wait(100)
+            self._corte_apply_worker = None
+
+        if success:
+            c_id = result_data.get("corte_id")
+            act = result_data.get("actualizadas", 0)
+            reinc = result_data.get("reincorporadas", 0)
+            QMessageBox.information(
+                self,
+                "Corte ERP Aplicado con Éxito",
+                f"El corte #{c_id} ha sido aplicado satisfactoriamente:\n\n"
+                f"• Viviendas actualizadas: {act}\n"
+                f"• Reincorporadas por cancelación: {reinc}\n"
+                f"• Bitácora histórica registrada."
+            )
+            # Limpiar estado y refrescar
+            self._corte_analisis_cache = None
+            self._corte_all_deltas = []
+            self.tbl_corte.setRowCount(0)
+            self.lbl_corte_archivo.setText("Archivo: Ninguno")
+            self.btn_corte_aplicar.setEnabled(False)
+            self.refresh_data()
+        else:
+            QMessageBox.critical(self, "Error al Aplicar Corte", f"No se pudo guardar el corte:\n{error_msg}")
+            self.btn_corte_aplicar.setEnabled(True)
+
 

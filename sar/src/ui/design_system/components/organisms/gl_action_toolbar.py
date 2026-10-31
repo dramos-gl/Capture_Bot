@@ -217,6 +217,7 @@ class GLActionToolbar(QToolBar):
                 ("Regímenes\nmz", "satc_regimenes", "Regímenes en Condominio (SM, MZ, LT)", "#8B5CF6", "satc_regimenes"),
                 ("Reglas de\nExtracción", "satc_formatos", "Reglas y Formatos de Extracción Municipal (OCR)", "#14B8A6", "satc_formatos"),
                 ("Importación de\nViviendas", "satc_viviendas", "Padrón Maestro e Importación de Viviendas", "#06B6D4", "satc_viviendas"),
+                ("Disponibilidad\nERP", "satc_corte_erp", "Validación de Disponibilidad y Seguimiento ERP", "#8B5CF6", "satc_corte_erp"),
             ]
         elif category == "SEGURIDAD":
             return [
@@ -228,7 +229,10 @@ class GLActionToolbar(QToolBar):
             ]
         elif category == "CATALOGOS":
             return [
-                ("Catálogos\nNegocio", "tabla", "Conceptos, Notarías y Desarrollos", "#10B981", "conceptos"),
+                ("Conceptos de\nPago", "documento_plantilla", "Conceptos de Pago SAR", "#10B981", "conceptos"),
+                ("Notarías\nPúblicas", "tabla", "Notarías Públicas", "#14B8A6", "notarias"),
+                ("Colaboradores\nSAR", "usuarios", "Colaboradores Registrados", "#3B82F6", "colaboradores"),
+                ("Desarrollos\nInmobiliarios", "satc_viviendas", "Desarrollos Inmobiliarios", "#06B6D4", "desarrollos"),
                 ("Geografía\nOperativa", "idioma", "Municipios y Delegaciones", "#2DD4BF", "geografia"),
                 ("Padrón\nRFC", "documento_plantilla", "Contribuyentes Base", "#F59E0B", "rfcs"),
                 ("Estados\nSistema", "validar", "Estados y Transiciones SAR", "#16A34A", "estados"),

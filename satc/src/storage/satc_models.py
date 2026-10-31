@@ -232,6 +232,15 @@ class RegimenCondominio(Base):
     upes_generadas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     licencia_construccion_matriz: Mapped[Optional[str]] = mapped_column(String(100))
     clave_catastral_matriz: Mapped[Optional[str]] = mapped_column(String(100))
+    
+    # Metadatos Jurídicos de la Boleta de Inscripción (RPP)
+    numero_instrumento: Mapped[Optional[str]] = mapped_column(String(100))
+    fecha_liberacion: Mapped[Optional[date]] = mapped_column(Date)
+    notaria: Mapped[Optional[str]] = mapped_column(String(50))
+    notario: Mapped[Optional[str]] = mapped_column(String(200))
+    solicitante: Mapped[Optional[str]] = mapped_column(String(200))
+    observaciones: Mapped[Optional[str]] = mapped_column(Text)
+
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
@@ -274,6 +283,15 @@ class Vivienda(Base):
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Disponibilidad Comercial (Cortes ERP)
+    condicion_comercial: Mapped[str] = mapped_column(String(50), default="DISPONIBLE", nullable=False)
+    ultimo_corte_id: Mapped[Optional[int]] = mapped_column(ForeignKey("satc_auditoria.corte_erp.corte_id", ondelete="SET NULL"))
+    fecha_estatus_erp: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    cliente_erp: Mapped[Optional[str]] = mapped_column(String(200))
+    nss_cliente: Mapped[Optional[str]] = mapped_column(String(50))
+    etapa_erp: Mapped[Optional[str]] = mapped_column(String(100))
+    es_reincorporada: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Relaciones Soberanas
     regimen: Mapped["RegimenCondominio"] = relationship(back_populates="viviendas")
@@ -496,5 +514,62 @@ class CampoFormatoMunicipio(Base):
     # Relaciones
     campo: Mapped[CampoCanonico] = relationship(back_populates="formatos")
     municipio = relationship("Municipio", foreign_keys=[municipio_id])
+
+
+# =============================================================================
+# MODELOS DE AUDITORÍA Y CORTES DE DISPONIBILIDAD ERP
+# =============================================================================
+
+class CorteERP(Base):
+    """Mapea cada corte periódico de disponibilidad importado desde el ERP corporativo."""
+    __tablename__ = "corte_erp"
+    __table_args__ = {"schema": "satc_auditoria"}
+
+    corte_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    desarrollo_id: Mapped[int] = mapped_column(ForeignKey("sar_catalogo.desarrollo.desarrollo_id", ondelete="RESTRICT"), nullable=False)
+    nombre_archivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    hash_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    fecha_corte_declarada: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    
+    total_registros: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_disponibles: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_en_escrituracion: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_tituladas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_reincorporadas: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_sin_cambio: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("sar_seguridad.usuario.usuario_id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    desarrollo = relationship("Desarrollo", foreign_keys=[desarrollo_id])
+    usuario = relationship("Usuario", foreign_keys=[usuario_id])
+    logs: Mapped[List["ViviendaCorteLog"]] = relationship(back_populates="corte", cascade="all, delete-orphan")
+
+
+class ViviendaCorteLog(Base):
+    """Mapea la bitácora granular de cambios comerciales por vivienda en cada corte del ERP."""
+    __tablename__ = "vivienda_corte_log"
+    __table_args__ = {"schema": "satc_auditoria"}
+
+    log_id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    corte_id: Mapped[int] = mapped_column(ForeignKey("satc_auditoria.corte_erp.corte_id", ondelete="CASCADE"), nullable=False)
+    vivienda_id: Mapped[int] = mapped_column(ForeignKey("satc_catalogo.vivienda.vivienda_id", ondelete="CASCADE"), nullable=False)
+    
+    condicion_anterior: Mapped[Optional[str]] = mapped_column(String(50))
+    condicion_nueva: Mapped[str] = mapped_column(String(50), nullable=False)
+    status_erp_raw: Mapped[Optional[str]] = mapped_column(String(50))
+    etapa_erp_raw: Mapped[Optional[str]] = mapped_column(String(100))
+    cliente_raw: Mapped[Optional[str]] = mapped_column(String(200))
+    nss_raw: Mapped[Optional[str]] = mapped_column(String(50))
+    
+    delta_tipo: Mapped[str] = mapped_column(String(50), nullable=False)
+    observaciones: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    # Relaciones
+    corte: Mapped[CorteERP] = relationship(back_populates="logs")
+    vivienda: Mapped[Vivienda] = relationship()
+
 
 

@@ -239,8 +239,15 @@ def get_admin_entity_data(entity: str, desarrollo_id: Optional[int] = None, limi
                     "lt": r.lt,
                     "total_upes": r.total_upes,
                     "upes_generadas": r.upes_generadas,
+                    "total_viviendas": satc_svc.vivienda_repo.count_by_regimen(r.regimen_id),
                     "licencia_construccion_matriz": r.licencia_construccion_matriz or "",
                     "clave_catastral_matriz": r.clave_catastral_matriz or "",
+                    "numero_instrumento": r.numero_instrumento or "",
+                    "fecha_liberacion": r.fecha_liberacion.isoformat() if r.fecha_liberacion else "",
+                    "notaria": r.notaria or "",
+                    "notario": r.notario or "",
+                    "solicitante": r.solicitante or "",
+                    "observaciones": r.observaciones or "",
                     "activo": r.activo
                 }
                 for r in items
@@ -417,6 +424,22 @@ def save_admin_entity(entity: str, request: AdminSaveRequest, db: Session = Depe
             db.commit()
             MetadataExtractionService.clear_cache()
             return {"detail": "Regla de formato municipal guardada con éxito", "id": res.formato_id}
+        elif entity == "satc_corte_erp_analizar":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            des_id = int(request.data.get("desarrollo_id"))
+            records = request.data.get("records", [])
+            nom_arch = request.data.get("nombre_archivo", "")
+            res = satc_svc.analizar_corte_erp(des_id, records, nom_arch)
+            return res
+        elif entity == "satc_corte_erp_aplicar":
+            from satc.src.services.housing_life_cycle_service import HousingLifeCycleService
+            satc_svc = HousingLifeCycleService(db)
+            des_id = int(request.data.get("desarrollo_id"))
+            analisis = request.data.get("analisis", {})
+            nom_arch = request.data.get("nombre_archivo", "corte_erp.xlsx")
+            res = satc_svc.aplicar_corte_erp(des_id, analisis, request.usuario_id, nom_arch)
+            return res
         else:
             raise HTTPException(status_code=400, detail=f"Entidad desconocida para guardar: {entity}")
     except Exception as e:

@@ -42,6 +42,11 @@ class GeographyView(QWidget):
         self.tbl_dels.setup_table(["ID", "Código Portal", "Nombre", "Alias", "Estado"], ["delegacion_id", "codigo_portal", "nombre", "alias", "activo"])
         self.tbl_dels.add_requested.connect(self._on_new_del)
         self.tbl_dels.edit_requested.connect(self._on_edit_del)
+        self.btn_nueva_delegacion = self.tbl_dels.set_header_button(
+            "+ Nueva Delegación", self._on_new_del, icon_name="guardar_nuevo", tooltip="Crear una nueva delegación para el municipio seleccionado"
+        )
+        self.btn_nueva_delegacion.setVisible(self.can_edit)
+        self.btn_nueva_delegacion.setEnabled(False)
         self.layout.addWidget(self.tbl_dels)
         self.tbl_dels.setEnabled(False)
         
@@ -105,6 +110,8 @@ class GeographyView(QWidget):
     def _on_mun_selected(self, data: dict):
         self.current_mun_id = data.get("municipio_id")
         self.tbl_dels.setEnabled(True)
+        if hasattr(self, "btn_nueva_delegacion") and self.can_edit:
+            self.btn_nueva_delegacion.setEnabled(True)
         self.tbl_dels.lbl_title.setText(f"Delegaciones de {data.get('nombre')}")
         self.refresh_delegaciones()
         

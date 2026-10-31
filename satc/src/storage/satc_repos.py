@@ -507,6 +507,30 @@ class RegimenCondominioRepository(BaseCancunRepository):
         )
         return list(self.session.execute(stmt).scalars().all())
 
+    def find_duplicate(
+        self,
+        desarrollo_id: int,
+        mz: str,
+        lt: str,
+        sm: Optional[str] = None,
+        exclude_regimen_id: Optional[int] = None
+    ) -> Optional[RegimenCondominio]:
+        """Busca si ya existe un régimen en el mismo desarrollo con la misma SM, MZ y LT."""
+        norm_sm = (sm or "").strip().upper()
+        norm_mz = mz.strip().upper()
+        norm_lt = lt.strip().upper()
+
+        stmt = select(RegimenCondominio).where(
+            RegimenCondominio.desarrollo_id == desarrollo_id,
+            func.upper(func.trim(func.coalesce(RegimenCondominio.sm, ""))) == norm_sm,
+            func.upper(func.trim(RegimenCondominio.mz)) == norm_mz,
+            func.upper(func.trim(RegimenCondominio.lt)) == norm_lt
+        )
+        if exclude_regimen_id:
+            stmt = stmt.where(RegimenCondominio.regimen_id != exclude_regimen_id)
+
+        return self.session.execute(stmt).scalars().first()
+
     def create(
         self,
         desarrollo_id: int,

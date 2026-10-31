@@ -70,9 +70,23 @@ El ciclo de vida de cada vivienda (o UPE) está ligado a tres grandes hitos de n
 
 ### 3.1.1 Individualización RPP (Constancia de Resolución)
 * **Disparador:** Emisión del documento oficial del Registro Público de la Propiedad (RPP) por individualización del Régimen en Condominio (ej. *Constancia de Resolución*).
-* **Extracción Automatizada (`RppResolutionExtractor`):** Procesamiento de la sección *FOLIOS GENERADOS*, extrayendo el número de fracción, interior, nivel, edificio, número oficial y los 20 dígitos del folio electrónico real con reporte de avance por página vía callback.
-* **Regla de Vinculación para Unidades de Servicio (`destino = SERVICIO`):** En las áreas comunes o unidades de servicio donde el campo `edificio` es `null` o `'-'`, el enlace no exige torre/edificio y se concilia de manera unívoca y prioritaria mediante la tupla **`(interior, numero_oficial)`**.
-* **Transición de Estado:** Al asignar el folio electrónico, la vivienda transiciona de `PROYECTADA` a `EN_INDIVIDUALIZACION`.
+* **Extracción Automatizada y Blindaje Textual (`RppResolutionExtractor`):** 
+  * Procesamiento determinista de la sección *FOLIOS GENERADOS*, extrayendo el número de fracción, interior, nivel, edificio, número oficial y los 20 dígitos del folio electrónico real con reporte de avance por página vía callback.
+  * **Soporte de Formatos Multilínea y Condensados:** Tolerancia algorítmica tanto para formatos clásicos multilínea como para formatos modernos en una sola línea (ej. `UPE 101 PB NUMERO OFICIAL 1 EDIFICIO A`).
+  * **Normalización de Nivel a Estándar BD:** Conversión defensiva de nomenclatura registral a valores nativos de catálogo (`PB`/`PLANTA BAJA` $\rightarrow$ `PB`; `N1`, `N2`, `N3` o `NIVEL 1`, `PISO 2` $\rightarrow$ `1`, `2`, `3`) desacoplando limpiamente el código privativo del interior (`101 PB` $\rightarrow$ `101`).
+  * **Tolerancia a Erratas Mecanográficas:** Admisión de números pegados a etiquetas en OCR/PDF mediante expresiones regulares con `\s*` (ej. `NUMERO OFICIAL1`, `EDIFICIO1`).
+  * **Trazabilidad Notarial Homologada:** Cada registro extraído preserva su número de página documental y la transcripción oficial limpia en la columna notas (`Constancia RPP Pág <N> | <Texto Oficial Completo>`).
+* **Auditoría Matemática de Consecutividad de Folios:**
+  * Detección automática de la serie monótona del RPP mediante el cálculo de la pendiente base $\Delta_{\text{base}} = \text{Folio} - \text{Número Oficial}$.
+  * Alerta preventiva visual (`⚠️ FOLIO FUERA DE CONSECUTIVO`) y activación del KPI dinámico `Con Advertencia: N` ante cualquier salto, brinco o alteración tipográfica en el documento sin bloquear la operación.
+* **Cascada de Vinculación y Tolerancia a Cruces:**
+  1. *Prioridad 1 (Soberana):* Coincidencia unívoca por Número Oficial en el régimen (`nof_map`).
+  2. *Prioridad 2:* Coincidencia física directa por combinación `(Edificio, Interior)`.
+  3. *Prioridad 3:* Coincidencia cruzada transpuesta `(Interior <-> Edificio)` para corregir inversiones de captura.
+  4. *Prioridad 4 (Servicios/Áreas Comunes):* Conciliación mediante la tupla `(interior, numero_oficial)` sin exigir edificio.
+  5. *Prioridad 5:* Respaldo para áreas comunes singulares sin edificio con interior único en el régimen.
+* **Transición de Estado:** Al asignar el folio electrónico, la vivienda transiciona de `PROYECTADA` a `EN_INDIVIDUALIZACION` y registra su asiento inmutable en `vivienda_historial_estado`.
+* **Optimización de Renderizado UX (Zero-Flicker):** El cambio entre operaciones (`1. Carga Inicial`, `2. Vincular Folios RPP`, `3. Vincular CC / Catastro`) implementa restauración instantánea desde caché en memoria (`_render_viviendas_table_from_cache`) con actualización atómica de tabla (`setUpdatesEnabled`), erradicando parpadeos y llamadas redundantes a la base de datos.
 
 ### 3.1.2 Individualización Catastral (Oficio de Alta de Predio de Catastro)
 * **Disparador:** Emisión del oficio municipal de alta de predios y asignación de claves catastrales por régimen de condominio.
